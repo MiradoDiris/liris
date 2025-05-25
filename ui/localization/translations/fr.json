@@ -4,7 +4,7 @@
   "select_language": "Sélectionner la langue",
   "welcome": "Bienvenue",
   "brainstorming_tab": "Brainstorming",
-  "annotation": "Annotation",
+  "annotation_tab": "Annotation",
   "datasets_tab": "Datasets",
   "history_tab": "Historique",
   "file": "Fichier",
@@ -108,7 +108,7 @@
     "evaluation_by": "Évaluation par {evaluator}",
     "no_evaluation": "Aucune évaluation disponible pour cette solution."
   },
-    "annotation_tab": {
+    "annotation": {
     "title": "Annotation automatique par IA",
     "configuration": "Configuration",
     "data_to_annotate": "Données à annoter",

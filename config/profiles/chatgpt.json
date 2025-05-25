@@ -1,60 +1,141 @@
 {
-    "name": "ChatGPT",
-    "interface": {
-        "prompt_field": {
-            "type": "textarea",
-            "placeholder": "Message ChatGPT...",
-            "detection": {
-                "method": "findContour",
-                "color_range": {
-                    "lower": [240, 240, 240],
-                    "upper": [255, 255, 255]
-                }
-            }
-        },
-        "submit_button": {
-            "type": "button",
-            "detection": {
-                "method": "findContour",
-                "color_range": {
-                    "lower": [0, 100, 0],
-                    "upper": [100, 255, 100]
-                }
-            }
-        },
-        "response_area": {
-            "type": "div",
-            "detection": {
-                "method": "findContour",
-                "color_range": {
-                    "lower": [245, 245, 245],
-                    "upper": [255, 255, 255]
-                }
-            }
-        },
-        "new_chat_button": {
-            "type": "button",
-            "detection": {
-                "method": "findContour",
-                "color_range": {
-                    "lower": [230, 230, 230],
-                    "upper": [255, 255, 255]
-                }
-            }
+  "name": "ChatGPT",
+  "interface": {
+    "prompt_field": {
+      "type": "textarea",
+      "placeholder": "Message ChatGPT...",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            240,
+            240,
+            240
+          ],
+          "upper": [
+            255,
+            255,
+            255
+          ]
         }
+      }
     },
-    "limits": {
-        "tokens_per_prompt": 4000,
-        "prompts_per_day": 50,
-        "reset_time": "00:00:00",
-        "cooldown_period": 60
+    "submit_button": {
+      "type": "button",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            0,
+            100,
+            0
+          ],
+          "upper": [
+            100,
+            255,
+            100
+          ]
+        }
+      }
     },
-    "error_detection": {
-        "patterns": [
-            "rate limit exceeded",
-            "please try again later",
-            "network error",
-            "something went wrong"
-        ]
+    "response_area": {
+      "type": "div",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            245,
+            245,
+            245
+          ],
+          "upper": [
+            255,
+            255,
+            255
+          ]
+        }
+      }
+    },
+    "new_chat_button": {
+      "type": "button",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            230,
+            230,
+            230
+          ],
+          "upper": [
+            255,
+            255,
+            255
+          ]
+        }
+      }
     }
+  },
+  "limits": {
+    "tokens_per_prompt": 4000,
+    "prompts_per_day": 50,
+    "reset_time": "00:00:00",
+    "cooldown_period": 60
+  },
+  "error_detection": {
+    "patterns": [
+      "rate limit exceeded",
+      "please try again later",
+      "network error",
+      "something went wrong"
+    ]
+  },
+  "browser": {
+    "type": "Firefox",
+    "path": "C:/Program Files/Mozilla Firefox/firefox.exe",
+    "url": "https://chatgpt.com/",
+    "fullscreen": false
+  },
+  "interface_positions": {
+    "prompt_field": {
+      "x": 360,
+      "y": 87,
+      "width": 1200,
+      "height": 837,
+      "center_x": 960,
+      "center_y": 505
+    },
+    "submit_button": {
+      "x": 1251,
+      "y": 1035,
+      "width": 30,
+      "height": 30,
+      "center_x": 1266,
+      "center_y": 1050
+    },
+    "response_area": {
+      "x": 360,
+      "y": 124,
+      "width": 1200,
+      "height": 800,
+      "center_x": 960,
+      "center_y": 524
+    },
+    "new_chat_button": {
+      "x": 360,
+      "y": 87,
+      "width": 1200,
+      "height": 837,
+      "center_x": 960,
+      "center_y": 505
+    }
+  },
+  "extraction_config": {
+    "response_area": {
+      "method": "html",
+      "sample_html": "<p data-start=\"0\" data-end=\"121\" data-is-last-node=\"\" data-is-only-node=\"\">Test bien reçu, Daniel. Tout fonctionne ! Souhaites-tu que je vérifie ou que je t’aide sur quelque chose en particulier ?</p>",
+      "sample_text": "Test bien reçu, Daniel. Tout fonctionne ! Souhaites-tu que je vérifie ou que je t’aide sur quelque chose en particulier ?",
+      "configured_at": 1748166422.3108664,
+      "wait_time": 3.0
+    }
+  }
 }

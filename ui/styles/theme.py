@@ -14,7 +14,7 @@ class Theme:
     # Couleurs
     PRIMARY_COLOR = "#A23B2D"  # Rouge brique
     SECONDARY_COLOR = "#D35A4A"  # Rouge brique clair
-    BACKGROUND_COLOR = "#F9F6F6"  # Beige très clair
+    BACKGROUND_COLOR = "#FFFFFF"  # Blanc très clair
     LIGHT_BACKGROUND = "#FFFFFF"  # Blanc pour la fenêtre principale
     TEXT_COLOR = "#333333"  # Gris foncé
     ACCENT_COLOR = "#E8E0DF"  # Gris clair pour les accents

@@ -19,6 +19,7 @@ from ui.widgets.annotation_form import AnnotationForm
 from ui.widgets.dataset_table import DatasetTable
 from ui.widgets.prompt_list import PromptList
 from ui.widgets.language_selector import LanguageSelector
+from ui.widgets.platform_config_widget import PlatformConfigWidget
 from ui.styles.theme import Theme
 from ui.localization.translator import translator, tr
 
@@ -758,38 +759,81 @@ class MainWindow(QMainWindow):
         self.update_status("Données actualisées")
 
     def _on_show_platforms(self):
-        """Affiche les plateformes d'IA disponibles"""
+        """Ouvre la fenêtre de configuration des plateformes"""
         if not self.conductor:
             QMessageBox.warning(
                 self,
-                "Plateformes IA",
+                "Configuration des plateformes",
                 "Le système n'est pas encore initialisé."
             )
             return
 
-        # Récupérer les plateformes
-        platforms = self.conductor.get_available_platforms()
+        try:
+            # Créer et afficher le widget de configuration
+            self.platform_config_dialog = QtWidgets.QDialog(self)
+            self.platform_config_dialog.setWindowTitle("Configuration des Plateformes d'IA")
+            self.platform_config_dialog.setMinimumSize(1200, 800)
+            self.platform_config_dialog.setModal(True)
 
-        if not platforms:
-            QMessageBox.information(
-                self,
-                "Plateformes IA",
-                "Aucune plateforme d'IA n'est actuellement disponible."
+            # Layout pour la boîte de dialogue
+            dialog_layout = QtWidgets.QVBoxLayout(self.platform_config_dialog)
+            dialog_layout.setContentsMargins(0, 0, 0, 0)
+
+            # Créer le widget de configuration avec les bonnes dépendances
+            platform_config_widget = PlatformConfigWidget(
+                self.config_provider,
+                self.conductor,
+                parent=self.platform_config_dialog
             )
-            return
 
-        # Construire le message
-        message = "Plateformes d'IA disponibles:\n\n"
+            # Ajouter au layout
+            dialog_layout.addWidget(platform_config_widget)
 
-        for platform in platforms:
-            message += f"• {platform}\n"
+            # Connecter les signaux
+            platform_config_widget.platform_added.connect(self._on_platform_config_changed)
+            platform_config_widget.platform_updated.connect(self._on_platform_config_changed)
+            platform_config_widget.platform_deleted.connect(self._on_platform_config_changed)
 
-        # Afficher le message
-        QMessageBox.information(
-            self,
-            "Plateformes IA",
-            message
-        )
+            # Afficher la boîte de dialogue
+            self.platform_config_dialog.exec_()
+
+        except Exception as e:
+            logger.error(f"Erreur lors de l'ouverture de la configuration des plateformes: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Impossible d'ouvrir la configuration des plateformes:\n\n{str(e)}"
+            )
+
+    # 3. AJOUTER cette nouvelle méthode après _on_show_platforms() :
+
+    def _on_platform_config_changed(self, platform_name):
+        """
+        Gère les changements de configuration des plateformes
+
+        Args:
+            platform_name (str): Nom de la plateforme modifiée
+        """
+        try:
+            # Actualiser les plateformes disponibles
+            if self.conductor:
+                platforms = self.conductor.get_available_platforms()
+
+                # Mettre à jour l'étiquette
+                if platforms:
+                    self.platform_label.setText(tr("messages.platforms_available", count=len(platforms)))
+                else:
+                    self.platform_label.setText(tr("messages.no_platforms"))
+
+                # Mettre à jour les widgets qui utilisent les plateformes
+                self.brainstorming_panel.set_platforms(platforms)
+                self.annotation_form.set_platforms(platforms)
+
+            logger.info(f"Configuration des plateformes mise à jour: {platform_name}")
+            self.update_status(f"Plateforme {platform_name} mise à jour")
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la mise à jour des plateformes: {str(e)}")
 
     def _on_test_ai(self):
         """Teste la connexion avec les IA"""
