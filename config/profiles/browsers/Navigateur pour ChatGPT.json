@@ -1,0 +1,6 @@
+{
+  "name": "Navigateur pour ChatGPT",
+  "type": "Firefox",
+  "path": "C:/Program Files/Mozilla Firefox/firefox.exe",
+  "fullscreen": false
+}
