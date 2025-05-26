@@ -69,10 +69,10 @@ class PlatformConfigStyle:
         """Style pour les textes d'explication"""
         return f"""
             font-size: 12px;
-            color: {PlatformConfigStyle.PRIMARY_COLOR};
+            color: #black;
             padding: 8px;
-            background-color: #F8E6E3;
-            border-left: 3px solid {PlatformConfigStyle.PRIMARY_COLOR};
+            background-color: #B3D9FF;
+            border-left: 3px solid #66CCFF;
             border-radius: 4px;
             margin-bottom: 10px;
         """
@@ -210,7 +210,8 @@ class PlatformConfigStyle:
                 border-bottom: 1px solid white;
             }}
             QTabBar::tab:hover {{
-                background-color: #E3F2FD;
+                background-color: #757575;
+                color: white;
             }}
         """
 

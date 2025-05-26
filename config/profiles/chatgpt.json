@@ -132,10 +132,20 @@
   "extraction_config": {
     "response_area": {
       "method": "html",
-      "sample_html": "<p data-start=\"0\" data-end=\"121\" data-is-last-node=\"\" data-is-only-node=\"\">Test bien reçu, Daniel. Tout fonctionne ! Souhaites-tu que je vérifie ou que je t’aide sur quelque chose en particulier ?</p>",
-      "sample_text": "Test bien reçu, Daniel. Tout fonctionne ! Souhaites-tu que je vérifie ou que je t’aide sur quelque chose en particulier ?",
-      "configured_at": 1748166422.3108664,
-      "wait_time": 3.0
+      "complete_html": "<p data-start=\"701\" data-end=\"780\">Ou tu choisis une architecture CPU-friendly (ONNX, quantized DistilBERT, etc.).</p>",
+      "sample_html": "<p data-start=\"701\" data-end=\"780\">Ou tu choisis une architecture CPU-friendly (ONNX, quantized DistilBERT, etc.).</p>",
+      "sample_text": "Ou tu choisis une architecture CPU-friendly (ONNX, quantized DistilBERT, etc.).",
+      "full_extracted_text": "Ou tu choisis une architecture CPU-friendly (ONNX, quantized DistilBERT, etc.).",
+      "configured_at": 1748250387.8430614,
+      "wait_time": 3.0,
+      "extraction_patterns": {
+        "main_tags": [
+          "p"
+        ],
+        "css_classes": [],
+        "ids": [],
+        "structure_hash": 8871644757732594732
+      }
     }
   }
 }

@@ -67,6 +67,35 @@ class Database:
         try:
             cursor = self.conn.cursor()
 
+            # Table des plateformes et leurs configurations (NOUVELLE)
+            cursor.execute('''
+                           CREATE TABLE IF NOT EXISTS platforms
+                           (
+                               id
+                               INTEGER
+                               PRIMARY
+                               KEY
+                               AUTOINCREMENT,
+                               name
+                               TEXT
+                               NOT
+                               NULL
+                               UNIQUE,
+                               profile_data
+                               TEXT
+                               NOT
+                               NULL,
+                               created_at
+                               TEXT
+                               NOT
+                               NULL,
+                               updated_at
+                               TEXT
+                               NOT
+                               NULL
+                           )
+                           ''')
+
             # Table des sessions d'IA
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS ai_sessions
@@ -296,6 +325,283 @@ class Database:
         except Exception as e:
             logger.error(f"Erreur lors de la fermeture de la connexion: {str(e)}")
             return False
+
+    # =====================================================
+    # NOUVELLES MÉTHODES POUR GESTION DES PLATEFORMES
+    # =====================================================
+
+    def save_platform(self, platform_name, profile_data):
+        """
+        Sauvegarde un profil de plateforme en base de données
+
+        Args:
+            platform_name (str): Nom de la plateforme
+            profile_data (dict): Données du profil à sauvegarder
+
+        Returns:
+            bool: True si sauvegarde réussie, False sinon
+        """
+        try:
+            logger.debug(f"Sauvegarde plateforme {platform_name} en base de données")
+
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+
+            # Convertir le profil en JSON
+            profile_json = json.dumps(profile_data, ensure_ascii=False, indent=2)
+
+            # Vérifier si la plateforme existe déjà
+            cursor.execute('SELECT id FROM platforms WHERE name = ?', (platform_name,))
+            existing = cursor.fetchone()
+
+            if existing:
+                # Mettre à jour
+                cursor.execute('''
+                               UPDATE platforms
+                               SET profile_data = ?,
+                                   updated_at   = ?
+                               WHERE name = ?
+                               ''', (profile_json, now, platform_name))
+                logger.info(f"Profil {platform_name} mis à jour en base de données")
+            else:
+                # Créer nouveau
+                cursor.execute('''
+                               INSERT INTO platforms (name, profile_data, created_at, updated_at)
+                               VALUES (?, ?, ?, ?)
+                               ''', (platform_name, profile_json, now, now))
+                logger.info(f"Nouveau profil {platform_name} créé en base de données")
+
+            self.conn.commit()
+
+            # Vérification de la sauvegarde
+            saved_profile = self.get_platform(platform_name)
+            if saved_profile:
+                logger.debug(f"Vérification sauvegarde {platform_name}: OK")
+                return True
+            else:
+                logger.error(f"Échec vérification sauvegarde {platform_name}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde plateforme {platform_name}: {str(e)}")
+            return False
+
+    def get_platform(self, platform_name):
+        """
+        Récupère un profil de plateforme depuis la base de données
+
+        Args:
+            platform_name (str): Nom de la plateforme
+
+        Returns:
+            dict: Profil de la plateforme ou None si non trouvé
+        """
+        try:
+            logger.debug(f"Récupération plateforme {platform_name} depuis la base de données")
+
+            cursor = self.conn.cursor()
+
+            cursor.execute('SELECT profile_data FROM platforms WHERE name = ?', (platform_name,))
+            result = cursor.fetchone()
+
+            if result:
+                # Décoder le JSON
+                profile_data = json.loads(result['profile_data'])
+                logger.debug(
+                    f"Profil {platform_name} récupéré depuis la base (taille: {len(str(profile_data))} caractères)")
+
+                # Validation des patterns d'extraction
+                self._validate_extraction_patterns(platform_name, profile_data)
+
+                return profile_data
+            else:
+                logger.debug(f"Profil {platform_name} non trouvé en base de données")
+                return None
+
+        except Exception as e:
+            logger.error(f"Erreur récupération plateforme {platform_name}: {str(e)}")
+            return None
+
+    def _validate_extraction_patterns(self, platform_name, profile_data):
+        """
+        Valide et optimise les patterns d'extraction selon la plateforme
+
+        Args:
+            platform_name (str): Nom de la plateforme
+            profile_data (dict): Données du profil
+        """
+        try:
+            extraction_config = profile_data.get('extraction_config', {})
+            response_area = extraction_config.get('response_area', {})
+
+            if not response_area:
+                return
+
+            # Analyser les patterns selon la plateforme
+            html_sample = response_area.get('complete_html', '')
+
+            if platform_name.lower() == 'chatgpt' and html_sample:
+                # ChatGPT utilise data-start et data-end
+                import re
+                data_patterns = re.findall(r'data-start="(\d+)" data-end="(\d+)"', html_sample)
+                if data_patterns:
+                    logger.debug(f"ChatGPT: {len(data_patterns)} segments data-start/data-end détectés")
+                    response_area['platform_patterns'] = {
+                        'type': 'data_attributes',
+                        'start_attr': 'data-start',
+                        'end_attr': 'data-end',
+                        'segments_count': len(data_patterns)
+                    }
+
+            elif platform_name.lower() == 'claude' and html_sample:
+                # Claude utilise des classes CSS spécifiques
+                import re
+                css_classes = re.findall(r'class="([^"]*whitespace-normal[^"]*)"', html_sample)
+                if css_classes:
+                    logger.debug(f"Claude: {len(css_classes)} éléments whitespace-normal détectés")
+                    response_area['platform_patterns'] = {
+                        'type': 'css_classes',
+                        'main_class': 'whitespace-normal',
+                        'break_words': 'break-words' in html_sample,
+                        'classes_count': len(css_classes)
+                    }
+
+            elif html_sample:
+                # Autres plateformes - analyse générique
+                import re
+
+                # Détecter les patterns communs
+                patterns = {
+                    'divs': len(re.findall(r'<div[^>]*>', html_sample)),
+                    'paragraphs': len(re.findall(r'<p[^>]*>', html_sample)),
+                    'spans': len(re.findall(r'<span[^>]*>', html_sample)),
+                    'has_ids': bool(re.search(r'id="[^"]*"', html_sample)),
+                    'has_data_attrs': bool(re.search(r'data-[^=]*="[^"]*"', html_sample)),
+                    'has_classes': bool(re.search(r'class="[^"]*"', html_sample))
+                }
+
+                logger.debug(f"{platform_name}: Patterns génériques détectés: {patterns}")
+                response_area['platform_patterns'] = {
+                    'type': 'generic',
+                    **patterns
+                }
+
+        except Exception as e:
+            logger.error(f"Erreur validation patterns pour {platform_name}: {str(e)}")
+
+    def get_platform_extraction_config(self, platform_name):
+        """
+        Récupère spécifiquement la configuration d'extraction d'une plateforme
+
+        Args:
+            platform_name (str): Nom de la plateforme
+
+        Returns:
+            dict: Configuration d'extraction ou None
+        """
+        try:
+            profile = self.get_platform(platform_name)
+            if profile:
+                extraction_config = profile.get('extraction_config', {})
+                response_area = extraction_config.get('response_area', {})
+
+                if response_area:
+                    logger.debug(f"Configuration d'extraction trouvée pour {platform_name}")
+                    return response_area
+
+            logger.debug(f"Pas de configuration d'extraction pour {platform_name}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Erreur récupération config extraction {platform_name}: {str(e)}")
+            return None
+
+    def update_platform_extraction(self, platform_name, extraction_config):
+        """
+        Met à jour uniquement la configuration d'extraction d'une plateforme
+
+        Args:
+            platform_name (str): Nom de la plateforme
+            extraction_config (dict): Nouvelle configuration d'extraction
+
+        Returns:
+            bool: True si mise à jour réussie
+        """
+        try:
+            # Récupérer le profil existant
+            profile = self.get_platform(platform_name)
+            if not profile:
+                logger.error(f"Profil {platform_name} non trouvé pour mise à jour extraction")
+                return False
+
+            # Mettre à jour seulement la section extraction
+            if 'extraction_config' not in profile:
+                profile['extraction_config'] = {}
+
+            profile['extraction_config']['response_area'] = extraction_config
+
+            # Sauvegarder le profil complet
+            success = self.save_platform(platform_name, profile)
+
+            if success:
+                logger.info(f"Configuration d'extraction mise à jour pour {platform_name}")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Erreur mise à jour extraction {platform_name}: {str(e)}")
+            return False
+
+    def list_platforms(self):
+        """
+        Liste toutes les plateformes enregistrées
+
+        Returns:
+            list: Liste des noms de plateformes
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('SELECT name, updated_at FROM platforms ORDER BY updated_at DESC')
+            results = cursor.fetchall()
+
+            platforms = [{'name': row['name'], 'updated_at': row['updated_at']} for row in results]
+            logger.debug(f"{len(platforms)} plateformes trouvées en base")
+
+            return platforms
+
+        except Exception as e:
+            logger.error(f"Erreur listage plateformes: {str(e)}")
+            return []
+
+    def delete_platform(self, platform_name):
+        """
+        Supprime une plateforme de la base de données
+
+        Args:
+            platform_name (str): Nom de la plateforme
+
+        Returns:
+            bool: True si suppression réussie
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('DELETE FROM platforms WHERE name = ?', (platform_name,))
+
+            if cursor.rowcount > 0:
+                self.conn.commit()
+                logger.info(f"Plateforme {platform_name} supprimée de la base")
+                return True
+            else:
+                logger.warning(f"Plateforme {platform_name} non trouvée pour suppression")
+                return False
+
+        except Exception as e:
+            logger.error(f"Erreur suppression plateforme {platform_name}: {str(e)}")
+            return False
+
+    # =====================================================
+    # MÉTHODES EXISTANTES (SESSIONS, PROMPTS, ETC.)
+    # =====================================================
 
     def create_session(self, platform_name):
         """
@@ -559,10 +865,10 @@ class Database:
             cursor = self.conn.cursor()
 
             cursor.execute('''
-                UPDATE brainstorming_sessions
-                SET status = ?
-                WHERE id = ?
-            ''', (status, session_id))
+                           UPDATE brainstorming_sessions
+                           SET status = ?
+                           WHERE id = ?
+                           ''', (status, session_id))
 
             self.conn.commit()
 
