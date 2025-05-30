@@ -1,53 +1,72 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+core/orchestration/conductor.py - VERSION FINALE CORRIGÉE
+
+CORRECTIONS :
+- Ajout du browser_type au state_automation
+- Fix de la détection du navigateur depuis le profil
+"""
+
 import threading
 import time
 import queue
 import os
 import json
 import pyautogui
+import pyperclip
 from datetime import datetime
 from utils.logger import logger
 from utils.exceptions import OrchestrationError, SchedulingError
-from core.vision.detector import InterfaceDetector
+from core.orchestration.state_automation import StateBasedAutomation
+
+try:
+    import pygetwindow as gw
+
+    HAS_PYGETWINDOW = True
+except ImportError:
+    HAS_PYGETWINDOW = False
 
 
 class AIConductor:
-    """
-    Chef d'orchestre pour coordonner les interactions avec les IA
-    """
+    """Chef d'orchestre FINAL - Gestion browser_type correcte"""
 
     def __init__(self, config_provider, scheduler, database=None):
-        """
-        Initialise le chef d'orchestre
-
-        Args:
-            config_provider: Fournisseur de configuration
-            scheduler: Planificateur d'IA
-            database (Database, optional): Connexion à la base de données
-        """
+        """Initialise le chef d'orchestre"""
         self.config_provider = config_provider
         self.scheduler = scheduler
         self.database = database
 
-        # Initialiser le détecteur d'interface
-        self.detector = InterfaceDetector()
+        # Initialiser les contrôleurs
+        from core.interaction.mouse import MouseController
+        from core.interaction.keyboard import KeyboardController
 
-        # Registre des tâches en cours
+        self.mouse_controller = MouseController()
+        self.keyboard_controller = KeyboardController()
+
+        # Initialiser l'automatisation basée sur l'état
+        self.state_automation = StateBasedAutomation(
+            None, self.mouse_controller, self.keyboard_controller, self
+        )
+
+        # Registre des tâches et threading
         self.active_tasks = {}
         self.task_counter = 0
-
-        # File d'attente des tâches
         self.task_queue = queue.Queue()
-
-        # Verrous pour l'accès concurrent
         self.lock = threading.RLock()
-
-        # Flag d'arrêt
         self._shutdown = False
-
-        # Worker thread
         self.worker_thread = None
 
-        logger.info("Chef d'orchestre initialisé")
+        # Configuration
+        self.console_timeout = 2
+        self.extraction_retries = 2
+        self.validation_timeout = 2
+
+        # FLAG ANTI-DUPLICATION
+        self.browser_already_active = False
+
+        logger.info("Chef d'orchestre FINAL initialisé")
 
     def initialize(self):
         """Initialise le système"""
@@ -57,686 +76,952 @@ class AIConductor:
             self.worker_thread.daemon = True
             self.worker_thread.start()
 
-            logger.info("Système d'orchestration initialisé")
+            logger.info("Système initialisé")
             return True
         except Exception as e:
-            logger.error(f"Erreur lors de l'initialisation: {str(e)}")
-            raise OrchestrationError(f"Échec de l'initialisation: {str(e)}")
+            logger.error(f"Erreur initialisation: {str(e)}")
+            raise OrchestrationError(f"Échec initialisation: {str(e)}")
+
+    # ==============================
+    # TEST PRINCIPAL FINAL
+    # ==============================
+
+    def test_platform_connection_ultra_robust(self, platform_name, test_message="Bonjour ! Test.",
+                                              timeout=30, wait_for_response=12, skip_browser=True):
+        """Test FINAL avec gestion browser_type"""
+        start_time = time.time()
+        test_id = f"test_{platform_name}_{int(start_time)}"
+
+        logger.info(f"🚀 Test FINAL démarré pour {platform_name} [ID: {test_id}] skip_browser={skip_browser}")
+
+        try:
+            # ÉTAPE 1: Validation de la configuration
+            logger.info("📋 Étape 1: Validation configuration")
+            config_result = self._validate_platform_configuration(platform_name)
+            if not config_result['valid']:
+                return {
+                    'success': False,
+                    'error': 'configuration_invalid',
+                    'message': config_result['message'],
+                    'test_id': test_id,
+                    'duration': time.time() - start_time
+                }
+
+            profile = config_result['profile']
+            browser_config = profile.get('browser', {})
+
+            # DÉTECTER LE TYPE DE NAVIGATEUR
+            browser_type = self._detect_browser_type_from_profile(profile)
+            logger.info(f"🌐 Type de navigateur détecté: {browser_type}")
+
+            # CONFIGURER LE STATE_AUTOMATION
+            if hasattr(self.state_automation, 'browser_type'):
+                self.state_automation.browser_type = browser_type
+                logger.info(f"✅ State_automation configuré avec browser_type: {browser_type}")
+
+            # ÉTAPE 2: Gestion navigateur
+            if not skip_browser:
+                logger.info("🌐 Étape 2: Activation navigateur")
+                browser_result = self._activate_browser_robust(
+                    browser_type,
+                    browser_config.get('path', ''),
+                    browser_config.get('url'),
+                    fullscreen=True
+                )
+                if not browser_result['success']:
+                    return {
+                        'success': False,
+                        'error': 'browser_activation_failed',
+                        'message': browser_result['message'],
+                        'test_id': test_id,
+                        'duration': time.time() - start_time
+                    }
+                self.browser_already_active = True
+            else:
+                logger.info("🔄 Étape 2: Skip navigateur - Gestion URL")
+                self._handle_browser_skip(browser_config)
+
+            # ÉTAPE 3: StateAutomation fait TOUT
+            logger.info("💬 Étape 3: StateAutomation fait TOUT (prompt + attente + extraction)")
+            automation_params = {
+                'test_text': test_message,
+                'skip_browser_activation': True
+            }
+
+            automation_result = self._execute_state_automation_corrected(profile, automation_params, timeout,
+                                                                         browser_type)
+            if not automation_result['success']:
+                return {
+                    'success': False,
+                    'error': 'automation_failed',
+                    'message': automation_result['message'],
+                    'test_id': test_id,
+                    'duration': time.time() - start_time
+                }
+
+            # SUCCÈS COMPLET
+            total_duration = time.time() - start_time
+            response_text = automation_result.get('response', '')
+
+            logger.info(f"✅ Test FINAL réussi en {total_duration:.1f}s")
+            logger.info(f"🎉 RÉPONSE RÉCUPÉRÉE: {len(response_text)} caractères")
+            logger.info(f"📝 APERÇU RÉPONSE: {response_text[:200]}..." if len(
+                response_text) > 200 else f"📝 RÉPONSE COMPLÈTE: {response_text}")
+
+            return {
+                'success': True,
+                'message': f"Test réussi en {total_duration:.1f}s",
+                'response': response_text,
+                'test_id': test_id,
+                'duration': total_duration,
+                'metadata': {
+                    'automation_duration': automation_result.get('duration', 0),
+                    'response_length': len(response_text),
+                    'extraction_method': 'state_automation_internal',
+                    'browser_skipped': skip_browser,
+                    'browser_type': browser_type
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Erreur test FINAL {test_id}: {str(e)}")
+            return {
+                'success': False,
+                'error': 'unexpected_error',
+                'message': str(e),
+                'test_id': test_id,
+                'duration': time.time() - start_time
+            }
+
+    def _detect_browser_type_from_profile(self, profile):
+        """Détecte le type de navigateur depuis le profil"""
+        try:
+            browser_config = profile.get('browser', {})
+            browser_path = browser_config.get('path', '').lower()
+            browser_type = browser_config.get('type', '').lower()
+            browser_url = browser_config.get('url', '').lower()
+
+            # Priorité au type explicite
+            if browser_type:
+                if 'firefox' in browser_type:
+                    return 'firefox'
+                elif 'chrome' in browser_type:
+                    return 'chrome'
+                elif 'edge' in browser_type:
+                    return 'edge'
+
+            # Détection par le chemin
+            if browser_path:
+                if 'firefox' in browser_path or 'mozilla' in browser_path:
+                    return 'firefox'
+                elif 'chrome' in browser_path:
+                    return 'chrome'
+                elif 'edge' in browser_path:
+                    return 'edge'
+                elif 'safari' in browser_path:
+                    return 'safari'
+                elif 'opera' in browser_path:
+                    return 'opera'
+                elif 'brave' in browser_path:
+                    return 'brave'
+
+            # Détection par l'URL
+            if browser_url:
+                if 'firefox' in browser_url:
+                    return 'firefox'
+                elif 'chrome' in browser_url:
+                    return 'chrome'
+
+            return 'chrome'  # Par défaut
+
+        except Exception as e:
+            logger.error(f"Erreur détection browser_type: {e}")
+            return 'chrome'
+
+    def _execute_state_automation_corrected(self, profile, automation_params, timeout, browser_type='chrome'):
+        """StateAutomation CORRIGÉ avec browser_type"""
+        try:
+            automation_result = None
+            automation_start = time.time()
+
+            # FONCTION CORRIGÉE avec 4 paramètres
+            def on_automation_completed(success, message, duration, response):
+                nonlocal automation_result
+                automation_result = {
+                    'success': success,
+                    'message': message,
+                    'duration': duration,
+                    'response': response
+                }
+
+                logger.info(f"🔍 DEBUG on_automation_completed:")
+                logger.info(f"  - Success: {success}")
+                logger.info(f"  - Message: {message}")
+                logger.info(f"  - Duration: {duration:.1f}s")
+                logger.info(f"  - Response length: {len(response)} caractères")
+                logger.info(f"  - Response preview: {response[:150]}..." if len(
+                    response) > 150 else f"  - Full response: {response}")
+
+            # Connecter le signal
+            self.state_automation.automation_completed.connect(on_automation_completed)
+
+            browser_config = profile.get('browser', {})
+            if automation_params is None:
+                automation_params = {}
+
+            logger.info(f"🚀 Démarrage StateAutomation avec browser_type: {browser_type}")
+
+            # Démarrer l'automatisation
+            self.state_automation.start_test_automation(
+                profile, 0, browser_type,  # Utiliser le browser_type détecté
+                browser_config.get('url'), automation_params
+            )
+
+            # Attendre avec timeout
+            automation_timeout = min(25, timeout - 5)
+            logger.info(f"⏰ Attente résultat StateAutomation (max {automation_timeout}s)")
+
+            while automation_result is None and (time.time() - automation_start) < automation_timeout:
+                time.sleep(0.1)
+
+            # Déconnecter le signal
+            try:
+                self.state_automation.automation_completed.disconnect(on_automation_completed)
+            except:
+                pass
+
+            if automation_result is None:
+                logger.error("❌ TIMEOUT StateAutomation - Pas de résultat reçu")
+                return {
+                    'success': False,
+                    'message': f"Timeout automatisation ({automation_timeout}s)",
+                    'duration': time.time() - automation_start,
+                    'response': ''
+                }
+
+            logger.info(f"✅ StateAutomation terminé - Résultat reçu")
+            return automation_result
+
+        except Exception as e:
+            logger.error(f"❌ Erreur _execute_state_automation_corrected: {str(e)}")
+            return {
+                'success': False,
+                'message': f"Erreur automatisation: {str(e)}",
+                'duration': time.time() - automation_start if 'automation_start' in locals() else 0,
+                'response': ''
+            }
+
+    def _handle_browser_skip(self, browser_config):
+        """Gestion navigateur en mode skip"""
+        browser_found = False
+        platform_url = browser_config.get('url', '')
+
+        # Vérifier si un navigateur est ouvert
+        if HAS_PYGETWINDOW:
+            try:
+                all_windows = gw.getAllWindows()
+                browser_windows = [w for w in all_windows if
+                                   any(keyword in w.title.lower() for keyword in
+                                       ['chrome', 'firefox', 'edge', 'mozilla'])]
+                if browser_windows:
+                    logger.info(f"✅ {len(browser_windows)} fenêtre(s) navigateur trouvée(s)")
+                    browser_found = True
+                    self.browser_already_active = True
+
+                    # Optimiser la fenêtre
+                    try:
+                        window = browser_windows[-1]
+                        window.activate()
+                        if not window.isMaximized:
+                            window.maximize()
+                    except Exception as e:
+                        logger.debug(f"Erreur optimisation: {e}")
+            except Exception as e:
+                logger.warning(f"Erreur vérification fenêtres: {e}")
+
+        # Ouvrir l'URL si nécessaire
+        if browser_found and platform_url:
+            logger.info(f"🌐 Ouverture nouvel onglet vers {platform_url}")
+            try:
+                browser_type = browser_config.get('type', 'Chrome')
+                if browser_type.lower() == "firefox":
+                    cmd = f'start firefox "{platform_url}"'
+                elif browser_type.lower() == "chrome":
+                    cmd = f'start chrome "{platform_url}"'
+                elif browser_type.lower() == "edge":
+                    cmd = f'start msedge "{platform_url}"'
+                else:
+                    cmd = f'start "{platform_url}"'
+
+                os.system(cmd)
+                time.sleep(2)
+                logger.info("✅ URL de la plateforme ouverte dans nouvel onglet")
+            except Exception as e:
+                logger.error(f"❌ Erreur ouverture URL: {e}")
+
+    # ==============================
+    # MÉTHODES DE DEBUG
+    # ==============================
+
+    def _wait_for_ai_generation_mutation_observer(self, platform_name, max_wait_time):
+        """Méthode MutationObserver pour StateAutomation"""
+        logger.info(f"🔍 MutationObserver pour StateAutomation - {platform_name} (max {max_wait_time}s)")
+
+        try:
+            return self._wait_for_ai_generation_simple(platform_name, max_wait_time)
+        except Exception as e:
+            logger.error(f"Erreur MutationObserver: {e}")
+            return {'detected': False, 'duration': max_wait_time, 'error': str(e)}
+
+    def _wait_for_ai_generation_simple(self, platform_name, max_wait_time):
+        """Surveillance IA"""
+        logger.info(f"🔍 Surveillance génération IA pour {platform_name} (max {max_wait_time}s)")
+
+        try:
+            # Ouvrir console JavaScript
+            if not self._open_console_javascript():
+                logger.warning("Console JavaScript non disponible, délai fixe")
+                time.sleep(max_wait_time)
+                return {'detected': False, 'duration': max_wait_time, 'method': 'fallback_timeout'}
+
+            # Récupérer la config personnalisée
+            profile = self._get_platform_profile(platform_name)
+            detection_config = profile.get('detection_config', {}) if profile else {}
+
+            if detection_config:
+                logger.info(f"✅ Utilisation config personnalisée pour {platform_name}")
+                js_code = self._get_custom_detection_js(detection_config)
+            else:
+                logger.info(f"⚠️ Pas de config personnalisée, fallback générique pour {platform_name}")
+                if 'chatgpt' in platform_name.lower():
+                    js_code = self._get_chatgpt_detection_js()
+                else:
+                    js_code = self._get_generic_detection_js()
+
+            # Injecter le JavaScript
+            pyperclip.copy(js_code)
+            self.keyboard_controller.hotkey('ctrl', 'v')
+            self.keyboard_controller.press_key('enter')
+
+            start_time = time.time()
+            last_log_time = 0
+
+            logger.info(f"JavaScript de détection injecté pour {platform_name}")
+
+            # Surveillance
+            while time.time() - start_time < max_wait_time:
+                # Récupérer les logs console
+                self.keyboard_controller.hotkey('ctrl', 'a')
+                self.keyboard_controller.hotkey('ctrl', 'c')
+                result = pyperclip.paste()
+
+                # Chercher le marqueur de fin
+                for line in result.split('\n'):
+                    if 'LIRIS_GENERATION_COMPLETE:' in line:
+                        try:
+                            status = line.split('LIRIS_GENERATION_COMPLETE:')[1].strip().lower()
+                            if status == 'true':
+                                elapsed = time.time() - start_time
+                                self._close_console_javascript()
+                                logger.info(f"✅ Génération détectée en {elapsed:.1f}s")
+                                return {
+                                    'detected': True,
+                                    'duration': elapsed,
+                                    'method': 'javascript_detection'
+                                }
+                        except (IndexError, ValueError):
+                            continue
+
+                # Log périodique
+                elapsed = time.time() - start_time
+                if elapsed - last_log_time >= 5.0:
+                    remaining = max_wait_time - elapsed
+                    logger.info(f"🔍 Surveillance... {remaining:.0f}s restantes")
+                    last_log_time = elapsed
+
+                time.sleep(0.5)
+
+            self._close_console_javascript()
+            elapsed = time.time() - start_time
+            logger.warning(f"⏰ Timeout surveillance ({elapsed:.1f}s)")
+
+            return {
+                'detected': False,
+                'duration': elapsed,
+                'method': 'timeout'
+            }
+
+        except Exception as e:
+            logger.error(f"Erreur surveillance: {str(e)}")
+            return {
+                'detected': False,
+                'duration': time.time() - start_time if 'start_time' in locals() else 0,
+                'method': 'error',
+                'error': str(e)
+            }
+
+    # ==============================
+    # JAVASCRIPT DETECTION/EXTRACTION
+    # ==============================
+
+    def _get_custom_detection_js(self, detection_config):
+        """JavaScript de détection personnalisé"""
+        primary_selector = detection_config.get('primary_selector', '')
+        detection_method = detection_config.get('detection_method', 'css_selector_presence')
+        platform_type = detection_config.get('platform_type', 'Generic')
+
+        logger.info(f"🎯 Utilisation sélecteur personnalisé: {primary_selector} (méthode: {detection_method})")
+
+        if detection_method == 'chatgpt_data_stability':
+            return f'''
+            (function() {{
+                console.log("🎯 Détection ChatGPT personnalisée data-start/data-end");
+
+                let lastDataState = '';
+                let stableCount = 0;
+                let checkInterval;
+
+                function checkDataStability() {{
+                    try {{
+                        let elements = document.querySelectorAll('{primary_selector}');
+                        let currentState = '';
+
+                        elements.forEach(el => {{
+                            let start = el.getAttribute('data-start') || '';
+                            let end = el.getAttribute('data-end') || '';
+                            currentState += start + ':' + end + ';';
+                        }});
+
+                        console.log("📊 État data personnalisé:", currentState.length, "caractères");
+
+                        if (currentState === lastDataState && currentState.length > 0) {{
+                            stableCount++;
+                            console.log("🔒 Stabilité:", stableCount, "/3");
+
+                            if (stableCount >= 3) {{
+                                console.log("LIRIS_GENERATION_COMPLETE:true");
+                                clearInterval(checkInterval);
+                                return true;
+                            }}
+                        }} else {{
+                            lastDataState = currentState;
+                            stableCount = 0;
+                        }}
+
+                        return false;
+                    }} catch(e) {{
+                        console.log("❌ Erreur détection personnalisée:", e.message);
+                        return false;
+                    }}
+                }}
+
+                checkInterval = setInterval(checkDataStability, 500);
+
+                setTimeout(() => {{
+                    clearInterval(checkInterval);
+                    console.log("LIRIS_GENERATION_COMPLETE:timeout");
+                }}, 30000);
+
+                return "Détection ChatGPT personnalisée initialisée";
+            }})();
+            '''
+        else:
+            # Autres méthodes...
+            return self._get_generic_detection_js()
+
+    def _get_chatgpt_detection_js(self):
+        """JavaScript de détection pour ChatGPT"""
+        return '''
+        (function() {
+            console.log("🎯 Détection ChatGPT data-start/data-end démarrée");
+
+            let lastDataState = '';
+            let stableCount = 0;
+            let checkInterval;
+
+            function checkDataStability() {
+                try {
+                    let elements = document.querySelectorAll('[data-start][data-end]');
+                    let currentState = '';
+
+                    elements.forEach(el => {
+                        let start = el.getAttribute('data-start') || '';
+                        let end = el.getAttribute('data-end') || '';
+                        currentState += start + ':' + end + ';';
+                    });
+
+                    console.log("📊 État data:", currentState.length, "caractères");
+
+                    if (currentState === lastDataState && currentState.length > 0) {
+                        stableCount++;
+                        console.log("🔒 Stabilité:", stableCount, "/3");
+
+                        if (stableCount >= 3) {
+                            console.log("LIRIS_GENERATION_COMPLETE:true");
+                            clearInterval(checkInterval);
+                            return true;
+                        }
+                    } else {
+                        lastDataState = currentState;
+                        stableCount = 0;
+                    }
+
+                    return false;
+                } catch(e) {
+                    console.log("❌ Erreur détection:", e.message);
+                    return false;
+                }
+            }
+
+            checkInterval = setInterval(checkDataStability, 500);
+
+            setTimeout(() => {
+                clearInterval(checkInterval);
+                console.log("LIRIS_GENERATION_COMPLETE:timeout");
+            }, 30000);
+
+            return "Détection ChatGPT initialisée";
+        })();
+        '''
+
+    def _get_generic_detection_js(self):
+        """JavaScript de détection générique"""
+        return '''
+        (function() {
+            console.log("🔍 Détection générique démarrée");
+
+            let lastText = '';
+            let stableCount = 0;
+            let checkInterval;
+
+            function checkTextStability() {
+                try {
+                    let elements = document.querySelectorAll('p, div, span');
+                    let longestText = '';
+
+                    for (let el of elements) {
+                        let text = (el.textContent || '').trim();
+                        if (text.length > longestText.length) {
+                            longestText = text;
+                        }
+                    }
+
+                    if (longestText === lastText && longestText.length > 50) {
+                        stableCount++;
+                        console.log("🔒 Stabilité texte:", stableCount, "/5");
+
+                        if (stableCount >= 5) {
+                            console.log("LIRIS_GENERATION_COMPLETE:true");
+                            clearInterval(checkInterval);
+                            return true;
+                        }
+                    } else {
+                        lastText = longestText;
+                        stableCount = 0;
+                    }
+
+                    return false;
+                } catch(e) {
+                    console.log("❌ Erreur détection:", e.message);
+                    return false;
+                }
+            }
+
+            checkInterval = setInterval(checkTextStability, 1000);
+
+            setTimeout(() => {
+                clearInterval(checkInterval);
+                console.log("LIRIS_GENERATION_COMPLETE:timeout");
+            }, 30000);
+
+            return "Détection générique initialisée";
+        })();
+        '''
+
+    # ==============================
+    # CONSOLE JAVASCRIPT
+    # ==============================
+
+    def _detect_browser_type(self):
+        """Détecte le type de navigateur actif"""
+        try:
+            # D'abord essayer d'utiliser le browser_type du state_automation
+            if hasattr(self.state_automation, 'browser_type'):
+                browser_type = self.state_automation.browser_type
+                if browser_type and browser_type != 'unknown':
+                    logger.info(f"Utilisation browser_type du state_automation: {browser_type}")
+                    return browser_type
+
+            # Fallback sur détection de fenêtre
+            if HAS_PYGETWINDOW:
+                all_windows = gw.getAllWindows()
+                for window in all_windows:
+                    title = window.title.lower()
+                    if 'firefox' in title or 'mozilla' in title:
+                        return 'firefox'
+                    elif 'chrome' in title or 'chromium' in title:
+                        return 'chrome'
+                    elif 'edge' in title:
+                        return 'edge'
+
+            return 'chrome'  # Par défaut
+        except Exception as e:
+            logger.debug(f"Erreur détection navigateur: {e}")
+            return 'chrome'
+
+    def _open_console_javascript(self):
+        """Ouverture console JavaScript"""
+        try:
+            logger.info("🔧 Ouverture console JavaScript...")
+
+            # Activer la fenêtre navigateur
+            self._activate_browser_window()
+
+            # Détecter le type de navigateur
+            browser_type = self._detect_browser_type()
+            logger.info(f"Navigateur détecté: {browser_type}")
+
+            # Utiliser le module console_shortcuts
+            try:
+                from config.console_shortcuts import open_console_for_browser
+                success = open_console_for_browser(browser_type, self.keyboard_controller, force_focus=False)
+                if success:
+                    logger.info("✅ Console JavaScript ouverte via console_shortcuts")
+                    return True
+            except ImportError:
+                logger.warning("Module console_shortcuts non disponible, utilisation méthode legacy")
+
+            # Méthode legacy
+            success = False
+            if browser_type == 'firefox':
+                logger.info("Tentative Firefox: Ctrl+Shift+K")
+                self.keyboard_controller.hotkey('ctrl', 'shift', 'k')
+                time.sleep(1.2)
+                success = True
+            elif browser_type in ['chrome', 'edge']:
+                logger.info(f"Tentative {browser_type}: Ctrl+Shift+J")
+                self.keyboard_controller.hotkey('ctrl', 'shift', 'j')
+                time.sleep(1.2)
+                success = True
+            else:
+                logger.info("Fallback F12")
+                self.keyboard_controller.press_key('f12')
+                time.sleep(1.0)
+                success = True
+
+            if success:
+                # Nettoyer la console
+                pyperclip.copy("console.clear();")
+                self.keyboard_controller.hotkey('ctrl', 'v')
+                self.keyboard_controller.press_key('enter')
+                time.sleep(0.3)
+
+                logger.info("✅ Console JavaScript ouverte")
+                return True
+            else:
+                logger.warning("⚠️ Impossible d'ouvrir console JavaScript")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Erreur ouverture console JavaScript: {e}")
+            return False
+
+    def _close_console_javascript(self):
+        """Fermeture console JavaScript"""
+        try:
+            # Utiliser le module console_shortcuts
+            try:
+                from config.console_shortcuts import close_console_for_browser
+                browser_type = self._detect_browser_type()
+                close_console_for_browser(browser_type, self.keyboard_controller)
+                logger.debug("Console JavaScript fermée via console_shortcuts")
+            except ImportError:
+                # Fallback
+                self.keyboard_controller.press_key('f12')
+                time.sleep(0.3)
+                logger.debug("Console JavaScript fermée")
+        except Exception as e:
+            logger.debug(f"Erreur fermeture console: {e}")
+
+    def _activate_browser_window(self):
+        """Active la fenêtre du navigateur"""
+        try:
+            if HAS_PYGETWINDOW:
+                all_windows = gw.getAllWindows()
+                browser_windows = [w for w in all_windows if
+                                   any(keyword in w.title.lower() for keyword in
+                                       ['chrome', 'firefox', 'edge', 'mozilla', 'safari'])]
+
+                if browser_windows:
+                    window = browser_windows[-1]
+                    window.activate()
+                    time.sleep(0.3)
+                    logger.debug(f"Fenêtre activée: {window.title}")
+                    return True
+
+            # Fallback: clic au centre de l'écran
+            screen_width, screen_height = pyautogui.size()
+            pyautogui.click(screen_width // 2, screen_height // 2)
+            time.sleep(0.2)
+            return True
+
+        except Exception as e:
+            logger.debug(f"Erreur activation fenêtre: {e}")
+            return False
+
+    # ==============================
+    # UTILITAIRES
+    # ==============================
+
+    def _validate_platform_configuration(self, platform_name):
+        """Validation configuration"""
+        try:
+            profile = self._get_platform_profile(platform_name)
+            if not profile:
+                return {
+                    'valid': False,
+                    'message': f"Profil {platform_name} introuvable",
+                    'profile': None
+                }
+
+            missing_elements = []
+            browser_config = profile.get('browser', {})
+            if not browser_config.get('url'):
+                missing_elements.append('URL navigateur')
+
+            interface_positions = profile.get('interface_positions', {})
+            if not interface_positions.get('prompt_field'):
+                missing_elements.append('Position champ prompt')
+
+            if missing_elements:
+                return {
+                    'valid': False,
+                    'message': f"Éléments manquants: {', '.join(missing_elements)}",
+                    'profile': profile
+                }
+
+            return {
+                'valid': True,
+                'message': "Configuration complète",
+                'profile': profile
+            }
+
+        except Exception as e:
+            return {
+                'valid': False,
+                'message': f"Erreur validation: {str(e)}",
+                'profile': None
+            }
+
+    def _activate_browser_robust(self, browser_type, browser_path='', url='', fullscreen=False):
+        """Activation navigateur"""
+        try:
+            if not url:
+                url = "about:blank"
+
+            # Commande selon le navigateur
+            if browser_type.lower() == "firefox":
+                cmd = f'start firefox "{url}"'
+            elif browser_type.lower() == "chrome":
+                cmd = f'start chrome "{url}"'
+            elif browser_type.lower() == "edge":
+                cmd = f'start msedge "{url}"'
+            else:
+                cmd = f'start "{browser_path}" "{url}"' if browser_path else f'start "{url}"'
+
+            logger.info(f"🌐 Ouverture: {cmd}")
+            start_time = time.time()
+
+            os.system(cmd)
+            time.sleep(3)
+
+            if fullscreen:
+                time.sleep(1)
+                self._maximize_window_robust()
+
+            elapsed = time.time() - start_time
+            self.browser_already_active = True
+            logger.info(f"✅ Navigateur activé en {elapsed:.1f}s")
+
+            return {
+                'success': True,
+                'message': f"Navigateur activé en {elapsed:.1f}s",
+                'duration': elapsed
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Erreur activation navigateur: {str(e)}")
+            return {
+                'success': False,
+                'message': f"Erreur activation: {str(e)}",
+                'duration': 0
+            }
+
+    def _maximize_window_robust(self):
+        """Maximisation fenêtre"""
+        try:
+            if HAS_PYGETWINDOW:
+                all_windows = gw.getAllWindows()
+                browser_windows = [w for w in all_windows
+                                   if any(keyword in w.title.lower()
+                                          for keyword in ['chrome', 'firefox', 'edge', 'mozilla'])]
+
+                if browser_windows:
+                    window = browser_windows[0]
+                    if not window.isMaximized:
+                        window.maximize()
+                        time.sleep(0.5)
+                    else:
+                        window.activate()
+                    return True
+
+            # Fallback clavier
+            pyautogui.hotkey('alt', 'space')
+            time.sleep(0.2)
+            pyautogui.press('x')
+            time.sleep(0.5)
+            return True
+
+        except Exception as e:
+            logger.warning(f"Erreur maximisation: {e}")
+            return False
+
+    def _get_platform_profile(self, platform_name):
+        """Récupération profil"""
+        # D'ABORD essayer les profils en mémoire (mis à jour par le widget)
+        profiles = self.config_provider.get_profiles()
+        memory_profile = profiles.get(platform_name)
+
+        if memory_profile and memory_profile.get('detection_config'):
+            logger.info(f"✅ Profil en mémoire trouvé pour {platform_name} avec config détection")
+            return memory_profile
+
+        # ENSUITE fallback vers la base de données
+        if self.database and hasattr(self.database, 'get_platform'):
+            db_profile = self.database.get_platform(platform_name)
+            if db_profile:
+                logger.info(f"✅ Profil base de données trouvé pour {platform_name}")
+                return db_profile
+
+        # Retourner le profil en mémoire même sans detection_config
+        if memory_profile:
+            logger.info(f"⚠️ Profil en mémoire sans config détection pour {platform_name}")
+            return memory_profile
+
+        logger.warning(f"❌ Aucun profil trouvé pour {platform_name}")
+        return None
 
     def get_available_platforms(self):
-        """
-        Récupère les plateformes d'IA disponibles
-
-        Returns:
-            list: Noms des plateformes disponibles
-        """
+        """Récupération plateformes"""
         try:
+            if self.database and hasattr(self.database, 'list_platforms'):
+                db_platforms = self.database.list_platforms()
+                if db_platforms:
+                    return [p['name'] for p in db_platforms]
+
             profiles = self.config_provider.get_profiles()
             available = []
-
             for platform_name in profiles.keys():
                 can_use, _ = self.scheduler.can_use_platform(platform_name)
                 if can_use:
                     available.append(platform_name)
 
-            logger.debug(f"Plateformes disponibles: {available}")
             return available
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération des plateformes: {str(e)}")
+            logger.error(f"Erreur récupération plateformes: {e}")
             return []
 
-    def detect_platform_elements(self, platform_name, browser_type='Chrome', browser_path='', url='', fullscreen=False):
-        """
-        Détecte les éléments d'interface d'une plateforme IA dans un navigateur
-
-        Args:
-            platform_name (str): Nom de la plateforme
-            browser_type (str): Type de navigateur (Chrome, Firefox, etc.)
-            browser_path (str): Chemin vers l'exécutable du navigateur
-            url (str): URL à ouvrir
-            fullscreen (bool): Mettre en plein écran
-
-        Returns:
-            dict: Résultat de la détection
-        """
+    def shutdown(self):
+        """Arrêt"""
         try:
-            logger.info(f"Détection des éléments pour {platform_name} avec {browser_type}")
+            self._shutdown = True
 
-            # Récupérer le profil de la plateforme
-            profile = self._get_platform_profile(platform_name)
-            if not profile:
-                return {
-                    'success': False,
-                    'error': 'platform_not_found',
-                    'message': f"La plateforme {platform_name} n'existe pas"
-                }
+            if hasattr(self.state_automation, 'stop_automation'):
+                self.state_automation.stop_automation()
 
-            # Lancer ou activer le navigateur
-            if not self._activate_browser(browser_type, browser_path, url, fullscreen):
-                return {
-                    'success': False,
-                    'error': 'browser_activation_failed',
-                    'message': "Impossible d'activer le navigateur"
-                }
+            if self.worker_thread and self.worker_thread.is_alive():
+                self.worker_thread.join(timeout=2)
 
-            # Attendre que la page se charge
-            time.sleep(3)
-
-            # Capturer l'écran via le détecteur
-            screenshot = self.detector.capture_screen()
-
-            # Détecter les éléments d'interface via le détecteur
-            interface_config = profile.get('interface', {})
-            positions = self.detector.detect_interface_elements(screenshot, interface_config)
-
-            # Valider que tous les éléments requis ont été détectés
-            is_valid, missing_elements = self.detector.validate_detection(positions)
-
-            if not is_valid:
-                # Si des éléments requis sont manquants, retourner une erreur avec les positions partielles
-                return {
-                    'success': False,
-                    'error': 'elements_not_detected',
-                    'message': f"Les éléments suivants n'ont pas été détectés: {', '.join(missing_elements)}",
-                    'positions': positions  # Renvoyer quand même les positions partielles
-                }
-
-            # Sauvegarder les positions détectées
-            self._save_positions(platform_name, positions)
-
-            return {
-                'success': True,
-                'message': "Les éléments d'interface ont été détectés avec succès",
-                'positions': positions
-            }
-
+            self.browser_already_active = False
+            logger.info("Chef d'orchestre arrêté")
         except Exception as e:
-            logger.error(f"Erreur lors de la détection des éléments: {str(e)}")
-            return {
-                'success': False,
-                'error': 'detection_error',
-                'message': str(e)
-            }
+            logger.error(f"Erreur arrêt: {str(e)}")
 
-    def test_platform_connection(self, platform_name, force_detection=False, browser_type='Chrome',
-                                 browser_path='', url='', fullscreen=False, timeout=30):
-        """
-        Teste la connexion à une plateforme IA en utilisant un navigateur réel
-
-        Args:
-            platform_name (str): Nom de la plateforme
-            force_detection (bool): Force la détection même si des positions sont déjà sauvegardées
-            browser_type (str): Type de navigateur
-            browser_path (str): Chemin vers l'exécutable du navigateur
-            url (str): URL à ouvrir
-            fullscreen (bool): Mettre en plein écran
-            timeout (int): Délai d'attente maximum
-
-        Returns:
-            dict: Résultat du test
-        """
-        try:
-            logger.info(f"Test de connexion pour {platform_name} avec {browser_type}")
-
-            # Récupérer le profil de la plateforme
-            profile = self._get_platform_profile(platform_name)
-            if not profile:
-                return {
-                    'success': False,
-                    'error': 'platform_not_found',
-                    'message': f"La plateforme {platform_name} n'existe pas"
-                }
-
-            # Si la détection n'est pas forcée, vérifier si on a déjà les positions
-            positions = None
-            if not force_detection:
-                positions = self._get_saved_positions(platform_name)
-
-            # Si pas de positions ou force_detection est True, détecter les éléments
-            if not positions:
-                detection_result = self.detect_platform_elements(
-                    platform_name,
-                    browser_type=browser_type,
-                    browser_path=browser_path,
-                    url=url,
-                    fullscreen=fullscreen
-                )
-
-                if not detection_result['success']:
-                    return detection_result
-
-                positions = detection_result['positions']
-
-            # Si on est ici, on a les positions, tester l'interaction
-            return self._test_interaction(platform_name, positions, profile, timeout)
-
-        except Exception as e:
-            logger.error(f"Erreur lors du test de connexion: {str(e)}")
-            return {
-                'success': False,
-                'error': 'test_error',
-                'message': str(e)
-            }
-
-    def _get_platform_profile(self, platform_name):
-        """
-        Récupère le profil complet d'une plateforme
-
-        Args:
-            platform_name (str): Nom de la plateforme
-
-        Returns:
-            dict: Profil de la plateforme ou None si non trouvée
-        """
-        # Essayer d'abord avec la base de données si disponible
-        if self.database and hasattr(self.database, 'get_platform'):
-            profile = self.database.get_platform(platform_name)
-            if profile:
-                return profile
-
-        # Sinon utiliser le ConfigProvider
-        profiles = self.config_provider.get_profiles()
-        return profiles.get(platform_name)
-
-    def _get_saved_positions(self, platform_name):
-        """
-        Récupère les positions sauvegardées pour une plateforme
-
-        Args:
-            platform_name (str): Nom de la plateforme
-
-        Returns:
-            dict: Positions sauvegardées ou None si non trouvées
-        """
-        # Récupérer depuis la base de données si disponible
-        if self.database and hasattr(self.database, 'get_platform_positions'):
-            return self.database.get_platform_positions(platform_name)
-
-        # Sinon récupérer depuis le profil
-        profile = self._get_platform_profile(platform_name)
-        if profile:
-            return profile.get('interface_positions')
-
-        return None
-
-    def _save_positions(self, platform_name, positions):
-        """
-        Sauvegarde les positions détectées pour une plateforme
-
-        Args:
-            platform_name (str): Nom de la plateforme
-            positions (dict): Positions des éléments d'interface
-
-        Returns:
-            bool: True si la sauvegarde est réussie
-        """
-        # Sauvegarder dans la base de données si disponible
-        if self.database and hasattr(self.database, 'save_platform_positions'):
-            return self.database.save_platform_positions(platform_name, positions)
-
-        # Sinon, ajouter au profil et sauvegarder
-        profile = self._get_platform_profile(platform_name)
-        if profile:
-            profile['interface_positions'] = positions
-
-            # Sauvegarder dans la base de données si disponible
-            if self.database and hasattr(self.database, 'save_platform'):
-                return self.database.save_platform(platform_name, profile)
-
-            # Sinon, sauvegarder dans un fichier
-            try:
-                profiles_dir = getattr(self.config_provider, 'profiles_dir', 'config/profiles')
-                filepath = os.path.join(profiles_dir, f"{platform_name}.json")
-
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    json.dump(profile, f, indent=2, ensure_ascii=False)
-
-                return True
-            except Exception as e:
-                logger.error(f"Erreur lors de la sauvegarde du profil: {str(e)}")
-                return False
-
-        return False
-
-    def _activate_browser(self, browser_type, browser_path, url, fullscreen=False):
-        """
-        Active le navigateur pour la plateforme spécifiée
-        """
-        logger.info(f"Activation du navigateur {browser_type} pour {url}")
+    def emergency_stop(self):
+        """Arrêt d'urgence"""
+        logger.warning("🚨 ARRÊT D'URGENCE")
 
         try:
-            # Méthode simple: utiliser os.system pour ouvrir le navigateur
-            if browser_type == "Chrome":
-                cmd = f"start chrome \"{url}\""
-            elif browser_type == "Firefox":
-                cmd = f"start firefox \"{url}\""
-            elif browser_type == "Edge":
-                cmd = f"start msedge \"{url}\""
-            else:
-                if browser_path:
-                    cmd = f"start \"{browser_path}\" \"{url}\""
-                else:
-                    cmd = f"start {url}"
+            self._shutdown = True
+            self.browser_already_active = False
 
-            # Exécuter la commande
-            os.system(cmd)
+            # Arrêter StateAutomation
+            if hasattr(self.state_automation, 'stop_automation'):
+                self.state_automation.stop_automation()
 
-            # Attendre que le navigateur s'ouvre
-            time.sleep(3)
+            if hasattr(self.state_automation, 'force_stop'):
+                self.state_automation.force_stop = True
 
-            # CORRECTION: Méthode plus sûre pour maximiser la fenêtre
+            # Fermer console
             try:
-                import pygetwindow as gw
-
-                # Trouver la fenêtre du navigateur
-                windows = gw.getWindowsWithTitle(browser_type)
-                if not windows:
-                    # Essayer avec des titres partiels
-                    all_windows = gw.getAllWindows()
-                    for window in all_windows:
-                        if any(keyword in window.title.lower() for keyword in ['chrome', 'firefox', 'edge', 'mozilla']):
-                            windows = [window]
-                            break
-
-                if windows:
-                    browser_window = windows[0]
-
-                    # Vérifier l'état actuel et maximiser proprement
-                    if not browser_window.isMaximized:
-                        browser_window.maximize()
-                        time.sleep(1)
-                    else:
-                        # Si déjà maximisée, s'assurer qu'elle est active
-                        browser_window.activate()
-                        time.sleep(0.5)
-                else:
-                    # Fallback: utiliser Alt+Space puis X pour maximiser
-                    pyautogui.hotkey('alt', 'space')
-                    time.sleep(0.2)
-                    pyautogui.press('x')  # Maximiser dans le menu
-                    time.sleep(1)
-
-            except ImportError:
-                # Si pygetwindow n'est pas installé, utiliser la méthode fallback
-                print("DEBUG: pygetwindow non disponible, utilisation de la méthode alternative")
-
-                # Alternative plus sûre: Alt+Space puis X
-                pyautogui.hotkey('alt', 'space')
-                time.sleep(0.2)
-                pyautogui.press('x')  # Maximiser
-                time.sleep(1)
-
-            except Exception as e:
-                print(f"DEBUG: Erreur lors de la maximisation: {str(e)}")
-                # En dernier recours, ne pas maximiser plutôt que de casser
+                self.keyboard_controller.press_key('f12')
+            except:
                 pass
 
-            return True
+            logger.warning("🚨 Arrêt d'urgence terminé")
 
         except Exception as e:
-            logger.error(f"Erreur lors de l'activation du navigateur: {str(e)}")
-            return False
+            logger.error(f"Erreur arrêt d'urgence: {e}")
 
-    def _test_interaction(self, platform_name, positions, profile, timeout):
-        """
-        Teste l'interaction avec la plateforme en utilisant les positions détectées
-
-        Args:
-            platform_name (str): Nom de la plateforme
-            positions (dict): Positions des éléments d'interface
-            profile (dict): Profil de la plateforme
-            timeout (int): Délai d'attente maximum
-
-        Returns:
-            dict: Résultat du test
-        """
-        logger.info(f"Test d'interaction pour {platform_name}")
-
-        try:
-            # Vérifier si on doit démarrer un nouveau chat
-            if 'new_chat_button' in positions:
-                # Cliquer sur le bouton "Nouveau chat"
-                new_chat = positions['new_chat_button']
-                pyautogui.click(new_chat['center_x'], new_chat['center_y'])
+    def _worker_loop(self):
+        """Worker thread"""
+        while not self._shutdown:
+            try:
                 time.sleep(1)
-
-            # Cliquer dans le champ de prompt
-            prompt_field = positions['prompt_field']
-            pyautogui.click(prompt_field['center_x'], prompt_field['center_y'])
-            time.sleep(0.5)
-
-            # Taper le message de test
-            test_prompt = f"Ceci est un test de connexion. Veuillez répondre avec 'OK'. [Timestamp: {datetime.now().strftime('%H:%M:%S')}]"
-            pyautogui.write(test_prompt)
-            time.sleep(0.5)
-
-            # Cliquer sur le bouton d'envoi
-            submit_button = positions['submit_button']
-            pyautogui.click(submit_button['center_x'], submit_button['center_y'])
-
-            # Attendre et vérifier la réponse
-            start_time = time.time()
-            response_detected = False
-
-            # Attendre que la réponse apparaisse
-            while time.time() - start_time < timeout:
-                # Attendre un peu
-                time.sleep(2)
-
-                # Vérifier si la réponse est visible (implémentation simplifiée)
-                # Une vérification plus robuste utiliserait la détection d'images ou OCR
-                response_detected = True
+            except Exception as e:
+                logger.error(f"Erreur worker: {e}")
                 break
 
-            if response_detected:
-                # Enregistrer le test réussi en base de données
-                if self.database:
-                    try:
-                        session_id = self.database.create_session(platform_name)
-                        prompt_id = self.database.record_prompt(session_id, test_prompt, len(test_prompt.split()),
-                                                                "connection_test")
-                        self.database.record_response(prompt_id, "Test de connexion réussi", "success")
-                    except Exception as e:
-                        logger.error(f"Erreur lors de l'enregistrement du test: {str(e)}")
-
-                return {
-                    'success': True,
-                    'positions': positions,
-                    'message': f"Test de connexion réussi pour {platform_name}",
-                    'response_time': time.time() - start_time
-                }
-            else:
-                return {
-                    'success': False,
-                    'error': 'no_response',
-                    'message': f"Aucune réponse détectée dans le délai imparti",
-                    'positions': positions
-                }
-
-        except Exception as e:
-            logger.error(f"Erreur lors du test d'interaction: {str(e)}")
-            return {
-                'success': False,
-                'error': 'interaction_error',
-                'message': str(e),
-                'positions': positions
-            }
-
+    # Méthodes de compatibilité
     def send_prompt(self, platform, prompt, mode="standard", priority=0, sync=False, timeout=None):
-        """
-        Envoie un prompt à une plateforme d'IA
-
-        Args:
-            platform (str): Nom de la plateforme
-            prompt (str): Texte du prompt
-            mode (str): Mode d'opération (standard, brainstorm, analyze)
-            priority (int): Priorité de la tâche
-            sync (bool): Mode synchrone
-            timeout (float, optional): Délai maximum d'attente en mode synchrone
-
-        Returns:
-            int/dict: ID de tâche (async) ou résultat (sync)
-        """
+        """Envoi prompt"""
         try:
-            # Vérifier la disponibilité
             can_use, reason = self.scheduler.can_use_platform(platform)
             if not can_use:
                 raise SchedulingError(reason)
 
-            # Récupérer les positions sauvegardées
-            positions = self._get_saved_positions(platform)
-            if not positions:
-                raise OrchestrationError(f"Positions d'interface non disponibles pour {platform}")
-
-            # Créer la tâche
-            with self.lock:
-                self.task_counter += 1
-                task_id = self.task_counter
-
-            task = {
-                'id': task_id,
-                'platform': platform,
-                'prompt': prompt,
-                'mode': mode,
-                'priority': priority,
-                'status': 'pending',
-                'created_at': datetime.now().isoformat(),
-                'timeout': timeout,
-                'positions': positions
-            }
-
-            # Enregistrer la tâche
-            with self.lock:
-                self.active_tasks[task_id] = task
-
-            # Mettre la tâche dans la file
-            self.task_queue.put((priority, task_id))
-
-            # Mode synchrone : attendre le résultat
             if sync:
-                # Envoyer le prompt directement
-                result = self._send_prompt_interactive(platform, prompt, positions, timeout)
+                result = self.test_platform_connection_ultra_robust(
+                    platform, prompt, timeout or 30, 12
+                )
 
-                # Mettre à jour la tâche
-                task['status'] = 'completed'
-                task['result'] = result
-                task['end_time'] = datetime.now().isoformat()
-
-                return {
-                    'id': task_id,
-                    'status': 'completed',
-                    'result': result
-                }
-
-            logger.info(f"Tâche {task_id} créée pour {platform}")
-            return task_id
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'envoi du prompt: {str(e)}")
-            raise OrchestrationError(f"Échec de l'envoi: {str(e)}")
-
-    def _send_prompt_interactive(self, platform, prompt, positions, timeout=None):
-        """
-        Envoie un prompt à une plateforme d'IA en utilisant les interactions clavier/souris
-
-        Args:
-            platform (str): Nom de la plateforme
-            prompt (str): Texte du prompt
-            positions (dict): Positions des éléments d'interface
-            timeout (float, optional): Délai maximum d'attente
-
-        Returns:
-            dict: Résultat de l'envoi
-        """
-        try:
-            # Cliquer dans le champ de prompt
-            prompt_field = positions['prompt_field']
-            pyautogui.click(prompt_field['center_x'], prompt_field['center_y'])
-            time.sleep(0.5)
-
-            # Taper le message
-            pyautogui.write(prompt)
-            time.sleep(0.5)
-
-            # Cliquer sur le bouton d'envoi
-            submit_button = positions['submit_button']
-            pyautogui.click(submit_button['center_x'], submit_button['center_y'])
-
-            # Attendre et capturer la réponse
-            start_time = time.time()
-            max_wait = timeout if timeout else 30
-
-            # Attendre que la réponse apparaisse
-            time.sleep(2)  # Attente initiale
-
-            # Dans une implémentation réelle, on utiliserait OCR pour lire la réponse
-            # Pour cette version simplifiée, on simule une réponse
-            response = f"Ceci est une réponse simulée. OK. [Timestamp: {datetime.now().strftime('%H:%M:%S')}]"
-
-            return {
-                'response': response,
-                'token_count': len(prompt.split()) * 1.5,
-                'duration': time.time() - start_time
-            }
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'envoi interactif: {str(e)}")
-            raise OrchestrationError(f"Échec de l'envoi interactif: {str(e)}")
-
-    def compare_responses(self, prompt, platforms=None, mode="standard", timeout=60):
-        """
-        Compare les réponses de plusieurs plateformes
-
-        Args:
-            prompt (str): Prompt à envoyer
-            platforms (list, optional): Liste des plateformes
-            mode (str): Mode d'opération
-            timeout (float): Délai maximum
-
-        Returns:
-            dict: Résultats par plateforme
-        """
-        try:
-            if platforms is None:
-                platforms = self.get_available_platforms()
-
-            results = {}
-            threads = []
-
-            def get_response(platform):
-                try:
-                    # Récupérer les positions
-                    positions = self._get_saved_positions(platform)
-                    if not positions:
-                        results[platform] = {
-                            'status': 'failed',
-                            'error': 'Positions non disponibles'
-                        }
-                        return
-
-                    # Envoyer le prompt
-                    start_time = datetime.now()
-                    result = self._send_prompt_interactive(platform, prompt, positions, timeout)
-
-                    duration = (datetime.now() - start_time).total_seconds()
-
-                    results[platform] = {
+                if result['success']:
+                    return {
+                        'id': self.task_counter + 1,
                         'status': 'completed',
-                        'duration': duration,
-                        'token_count': result.get('token_count', 0),
-                        'result': result
+                        'result': {
+                            'response': result.get('response', ''),
+                            'duration': result.get('duration', 0),
+                            'metadata': result.get('metadata', {})
+                        }
                     }
-                except Exception as e:
-                    results[platform] = {
-                        'status': 'failed',
-                        'error': str(e)
-                    }
+                else:
+                    raise OrchestrationError(result['message'])
 
-            # Créer un thread par plateforme
-            for platform in platforms:
-                thread = threading.Thread(target=get_response, args=(platform,))
-                threads.append(thread)
-                thread.start()
-
-            # Attendre tous les threads
-            for thread in threads:
-                thread.join(timeout=timeout)
-
-            return results
+            raise NotImplementedError("Mode asynchrone à implémenter")
 
         except Exception as e:
-            logger.error(f"Erreur lors de la comparaison: {str(e)}")
-            raise OrchestrationError(f"Échec de la comparaison: {str(e)}")
+            logger.error(f"Erreur envoi prompt: {str(e)}")
+            raise OrchestrationError(f"Échec envoi: {str(e)}")
 
-    def wait_for_task(self, task_id, timeout=None):
-        """
-        Attend qu'une tâche soit terminée
+    def detect_platform_elements(self, platform_name, browser_type='Chrome', browser_path='', url='', fullscreen=False):
+        """Détection éléments - Placeholder"""
+        return {
+            'success': False,
+            'error': 'not_implemented',
+            'message': "Détection éléments non implémentée dans cette version"
+        }
 
-        Args:
-            task_id (int): ID de la tâche
-            timeout (float, optional): Délai maximum d'attente
-
-        Returns:
-            dict: Résultat de la tâche ou None si timeout
-        """
-        start_time = time.time()
-
-        while True:
-            with self.lock:
-                task = self.active_tasks.get(task_id)
-
-                if not task:
-                    return None
-
-                if task['status'] in ['completed', 'failed']:
-                    return task
-
-            # Vérifier le timeout
-            if timeout is not None and time.time() - start_time > timeout:
-                return None
-
-            # Attendre un peu
-            time.sleep(0.1)
-
-    def shutdown(self):
-        """Arrêt propre du chef d'orchestre"""
-        try:
-            self._shutdown = True
-
-            # Attendre la fin des tâches en cours
-            if self.worker_thread and self.worker_thread.is_alive():
-                self.worker_thread.join(timeout=5)
-
-            logger.info("Chef d'orchestre arrêté")
-        except Exception as e:
-            logger.error(f"Erreur lors de l'arrêt: {str(e)}")
-
-    def _worker_loop(self):
-        """Boucle du worker pour traiter les tâches"""
-        while not self._shutdown:
-            try:
-                # Récupérer la tâche la plus prioritaire
-                priority, task_id = self.task_queue.get(timeout=1)
-
-                with self.lock:
-                    task = self.active_tasks.get(task_id)
-
-                    if not task:
-                        continue
-
-                # Traiter la tâche
-                logger.debug(f"Traitement de la tâche {task_id}")
-
-                try:
-                    # Récupérer les informations nécessaires
-                    platform = task['platform']
-                    prompt = task['prompt']
-                    positions = task.get('positions') or self._get_saved_positions(platform)
-
-                    if not positions:
-                        raise OrchestrationError(f"Positions non disponibles pour {platform}")
-
-                    # Envoyer le prompt
-                    result = self._send_prompt_interactive(platform, prompt, positions, task.get('timeout'))
-
-                    # Mettre à jour la tâche
-                    with self.lock:
-                        task['status'] = 'completed'
-                        task['end_time'] = datetime.now().isoformat()
-                        task['result'] = result
-
-                    # Enregistrer l'utilisation
-                    self.scheduler.register_usage(platform)
-
-                except Exception as e:
-                    logger.error(f"Erreur lors du traitement de la tâche {task_id}: {str(e)}")
-
-                    with self.lock:
-                        task['status'] = 'failed'
-                        task['error'] = str(e)
-                        task['end_time'] = datetime.now().isoformat()
-
-            except queue.Empty:
-                continue
-            except Exception as e:
-                logger.error(f"Erreur dans le worker: {str(e)}")
+    def test_platform_connection(self, platform_name, **kwargs):
+        """Redirection vers version corrigée"""
+        return self.test_platform_connection_ultra_robust(platform_name, **kwargs)

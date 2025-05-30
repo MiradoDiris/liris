@@ -18,6 +18,7 @@ from ui.styles.platform_config_style import PlatformConfigStyle
 from ui.widgets.tabs.browser_config_widget import BrowserConfigWidget
 from ui.widgets.tabs.prompt_field_widget import PromptFieldWidget
 from ui.widgets.tabs.response_area_widget import ResponseAreaWidget
+from ui.widgets.tabs.final_test_widget import FinalTestWidget
 
 
 class PlatformConfigWidget(QtWidgets.QWidget):
@@ -137,6 +138,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             "2. Configurez le navigateur dans l'onglet correspondant<br>"
             "3. Configurez le champ de prompt<br>"
             "4. Configurez la zone de réponse<br>"
+            "5. Lancez le test final pour valider le tout<br>"
             "<br>Terminez en testant la connexion."
         )
         help_steps.setStyleSheet("padding: 12px; background-color: #E8F4F8; border-radius: 4px;")
@@ -293,6 +295,11 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.response_area_widget.response_received.connect(self._on_response_received)
         self.tabs.addTab(self.response_area_widget, "Zone de réponse")
 
+        # Onglet 5: Test final
+        self.final_test_widget = FinalTestWidget(self.config_provider, self.conductor)
+        self.final_test_widget.test_completed.connect(self._on_final_test_completed)
+        self.tabs.addTab(self.final_test_widget, "Test final")
+
         # Pour la compatibilité avec le code existant
         self.main_tabs = self.tabs
         self.interface_tabs = self.tabs
@@ -336,6 +343,11 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         print(f"DEBUG: Réponse reçue de '{platform_name}': {len(response_text)} caractères")
         # Implémenter ici la logique de traitement de la réponse si nécessaire
 
+    def _on_final_test_completed(self, platform_name, success, message):
+        """Gère l'événement de test final terminé"""
+        print(f"DEBUG: Test final terminé pour '{platform_name}': {success} - {message}")
+        self.platform_tested.emit(platform_name, success, f"Test final: {message}")
+
     def _update_tab_status(self):
         """Met à jour les indicateurs visuels d'état des onglets"""
         if not self.current_platform:
@@ -356,12 +368,17 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             0: True,  # Config générale toujours configurée
             1: 'browser' in profile and profile['browser'].get('url'),  # Navigateur configuré?
             2: 'prompt_field' in interface_positions,  # Champ prompt configuré?
-            3: 'response_area' in interface_positions  # Zone réponse configurée?
+            3: 'response_area' in interface_positions,  # Zone réponse configurée?
+            4: all([  # Test final disponible si tout est configuré
+                'browser' in profile and profile['browser'].get('url'),
+                'prompt_field' in interface_positions,
+                'response_area' in interface_positions
+            ])
         }
 
         # Mettre à jour les titres des onglets en fonction de l'état
         base_titles = ["Configuration Générale", "Gestion des navigateurs",
-                       "Champ de prompt", "Zone de réponse"]
+                       "Champ de prompt", "Zone de réponse", "Test final"]
 
         for i, title in enumerate(base_titles):
             configured = config_states.get(i, False)
@@ -440,6 +457,14 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             # Mettre à jour le widget de la zone de réponse avec les profils
             if hasattr(self, 'response_area_widget'):
                 self.response_area_widget.set_profiles(self.profiles)
+
+            # Mettre à jour le widget de test final avec les profils
+            if hasattr(self, 'final_test_widget'):
+                self.final_test_widget.set_profiles(self.profiles)
+
+            # Mettre à jour le widget de test final avec les profils
+            if hasattr(self, 'final_test_widget'):
+                self.final_test_widget.set_profiles(self.profiles)
 
         except Exception as e:
             logger.error(f"Erreur lors du chargement direct des profils: {str(e)}")
@@ -864,6 +889,10 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             if hasattr(self, 'response_area_widget'):
                 self.response_area_widget.select_platform(platform_name)
 
+            # Sélectionner cette plateforme dans le widget de test final
+            if hasattr(self, 'final_test_widget'):
+                self.final_test_widget.select_platform(platform_name)
+
             # Mise à jour des indicateurs d'état des onglets
             self._update_tab_status()
 
@@ -1199,6 +1228,10 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             if hasattr(self, 'response_area_widget'):
                 self.response_area_widget.set_profiles(self.profiles)
 
+            # Mettre à jour le widget de test final
+            if hasattr(self, 'final_test_widget'):
+                self.final_test_widget.set_profiles(self.profiles)
+
             # Actualiser la liste
             self._load_platforms()
 
@@ -1463,6 +1496,10 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         # Actualiser le widget de la zone de réponse
         if hasattr(self, 'response_area_widget'):
             self.response_area_widget.refresh()
+
+        # Actualiser le widget de test final
+        if hasattr(self, 'final_test_widget'):
+            self.final_test_widget.refresh()
 
         # S'assurer que les widgets restent activés
         self._force_enable_all_widgets()
