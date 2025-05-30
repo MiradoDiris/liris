@@ -67,7 +67,7 @@ class Database:
         try:
             cursor = self.conn.cursor()
 
-            # Table des plateformes et leurs configurations (NOUVELLE)
+            # Table des plateformes et leurs configurations
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS platforms
                            (
@@ -93,6 +93,58 @@ class Database:
                                TEXT
                                NOT
                                NULL
+                           )
+                           ''')
+
+            # Table de configuration du clavier (simplifiée)
+            cursor.execute('''
+                           CREATE TABLE IF NOT EXISTS keyboard_config
+                           (
+                               id
+                               INTEGER
+                               PRIMARY
+                               KEY
+                               AUTOINCREMENT,
+                               layout_type
+                               TEXT
+                               NOT
+                               NULL,
+                               key_delay
+                               INTEGER
+                               DEFAULT
+                               50,
+                               accent_delay
+                               INTEGER
+                               DEFAULT
+                               100,
+                               accent_method
+                               TEXT
+                               NOT
+                               NULL,
+                               block_alt_tab
+                               BOOLEAN
+                               DEFAULT
+                               1,
+                               focus_lock
+                               BOOLEAN
+                               DEFAULT
+                               1,
+                               protection_timeout
+                               INTEGER
+                               DEFAULT
+                               30,
+                               created_at
+                               TEXT
+                               NOT
+                               NULL,
+                               updated_at
+                               TEXT
+                               NOT
+                               NULL,
+                               is_active
+                               BOOLEAN
+                               DEFAULT
+                               1
                            )
                            ''')
 
@@ -327,7 +379,7 @@ class Database:
             return False
 
     # =====================================================
-    # NOUVELLES MÉTHODES POUR GESTION DES PLATEFORMES
+    # MÉTHODES POUR GESTION DES PLATEFORMES
     # =====================================================
 
     def save_platform(self, platform_name, profile_data):
@@ -410,9 +462,6 @@ class Database:
                 logger.debug(
                     f"Profil {platform_name} récupéré depuis la base (taille: {len(str(profile_data))} caractères)")
 
-                # Validation des patterns d'extraction
-                self._validate_extraction_patterns(platform_name, profile_data)
-
                 return profile_data
             else:
                 logger.debug(f"Profil {platform_name} non trouvé en base de données")
@@ -422,156 +471,63 @@ class Database:
             logger.error(f"Erreur récupération plateforme {platform_name}: {str(e)}")
             return None
 
-    def _validate_extraction_patterns(self, platform_name, profile_data):
+    def get_all_platforms(self):
         """
-        Valide et optimise les patterns d'extraction selon la plateforme
-
-        Args:
-            platform_name (str): Nom de la plateforme
-            profile_data (dict): Données du profil
-        """
-        try:
-            extraction_config = profile_data.get('extraction_config', {})
-            response_area = extraction_config.get('response_area', {})
-
-            if not response_area:
-                return
-
-            # Analyser les patterns selon la plateforme
-            html_sample = response_area.get('complete_html', '')
-
-            if platform_name.lower() == 'chatgpt' and html_sample:
-                # ChatGPT utilise data-start et data-end
-                import re
-                data_patterns = re.findall(r'data-start="(\d+)" data-end="(\d+)"', html_sample)
-                if data_patterns:
-                    logger.debug(f"ChatGPT: {len(data_patterns)} segments data-start/data-end détectés")
-                    response_area['platform_patterns'] = {
-                        'type': 'data_attributes',
-                        'start_attr': 'data-start',
-                        'end_attr': 'data-end',
-                        'segments_count': len(data_patterns)
-                    }
-
-            elif platform_name.lower() == 'claude' and html_sample:
-                # Claude utilise des classes CSS spécifiques
-                import re
-                css_classes = re.findall(r'class="([^"]*whitespace-normal[^"]*)"', html_sample)
-                if css_classes:
-                    logger.debug(f"Claude: {len(css_classes)} éléments whitespace-normal détectés")
-                    response_area['platform_patterns'] = {
-                        'type': 'css_classes',
-                        'main_class': 'whitespace-normal',
-                        'break_words': 'break-words' in html_sample,
-                        'classes_count': len(css_classes)
-                    }
-
-            elif html_sample:
-                # Autres plateformes - analyse générique
-                import re
-
-                # Détecter les patterns communs
-                patterns = {
-                    'divs': len(re.findall(r'<div[^>]*>', html_sample)),
-                    'paragraphs': len(re.findall(r'<p[^>]*>', html_sample)),
-                    'spans': len(re.findall(r'<span[^>]*>', html_sample)),
-                    'has_ids': bool(re.search(r'id="[^"]*"', html_sample)),
-                    'has_data_attrs': bool(re.search(r'data-[^=]*="[^"]*"', html_sample)),
-                    'has_classes': bool(re.search(r'class="[^"]*"', html_sample))
-                }
-
-                logger.debug(f"{platform_name}: Patterns génériques détectés: {patterns}")
-                response_area['platform_patterns'] = {
-                    'type': 'generic',
-                    **patterns
-                }
-
-        except Exception as e:
-            logger.error(f"Erreur validation patterns pour {platform_name}: {str(e)}")
-
-    def get_platform_extraction_config(self, platform_name):
-        """
-        Récupère spécifiquement la configuration d'extraction d'une plateforme
-
-        Args:
-            platform_name (str): Nom de la plateforme
+        Récupère tous les profils de plateformes
 
         Returns:
-            dict: Configuration d'extraction ou None
-        """
-        try:
-            profile = self.get_platform(platform_name)
-            if profile:
-                extraction_config = profile.get('extraction_config', {})
-                response_area = extraction_config.get('response_area', {})
-
-                if response_area:
-                    logger.debug(f"Configuration d'extraction trouvée pour {platform_name}")
-                    return response_area
-
-            logger.debug(f"Pas de configuration d'extraction pour {platform_name}")
-            return None
-
-        except Exception as e:
-            logger.error(f"Erreur récupération config extraction {platform_name}: {str(e)}")
-            return None
-
-    def update_platform_extraction(self, platform_name, extraction_config):
-        """
-        Met à jour uniquement la configuration d'extraction d'une plateforme
-
-        Args:
-            platform_name (str): Nom de la plateforme
-            extraction_config (dict): Nouvelle configuration d'extraction
-
-        Returns:
-            bool: True si mise à jour réussie
-        """
-        try:
-            # Récupérer le profil existant
-            profile = self.get_platform(platform_name)
-            if not profile:
-                logger.error(f"Profil {platform_name} non trouvé pour mise à jour extraction")
-                return False
-
-            # Mettre à jour seulement la section extraction
-            if 'extraction_config' not in profile:
-                profile['extraction_config'] = {}
-
-            profile['extraction_config']['response_area'] = extraction_config
-
-            # Sauvegarder le profil complet
-            success = self.save_platform(platform_name, profile)
-
-            if success:
-                logger.info(f"Configuration d'extraction mise à jour pour {platform_name}")
-
-            return success
-
-        except Exception as e:
-            logger.error(f"Erreur mise à jour extraction {platform_name}: {str(e)}")
-            return False
-
-    def list_platforms(self):
-        """
-        Liste toutes les plateformes enregistrées
-
-        Returns:
-            list: Liste des noms de plateformes
+            dict: Dictionnaire des profils {nom: profil}
         """
         try:
             cursor = self.conn.cursor()
-            cursor.execute('SELECT name, updated_at FROM platforms ORDER BY updated_at DESC')
+            cursor.execute('SELECT name, profile_data FROM platforms')
             results = cursor.fetchall()
 
-            platforms = [{'name': row['name'], 'updated_at': row['updated_at']} for row in results]
-            logger.debug(f"{len(platforms)} plateformes trouvées en base")
+            platforms = {}
+            for row in results:
+                try:
+                    platforms[row['name']] = json.loads(row['profile_data'])
+                except Exception as e:
+                    logger.error(f"Erreur décodage profil {row['name']}: {str(e)}")
 
+            logger.debug(f"{len(platforms)} profils de plateformes récupérés")
             return platforms
 
         except Exception as e:
-            logger.error(f"Erreur listage plateformes: {str(e)}")
-            return []
+            logger.error(f"Erreur récupération tous les profils: {str(e)}")
+            return {}
+
+    def platform_exists(self, platform_name):
+        """
+        Vérifie si une plateforme existe
+
+        Args:
+            platform_name (str): Nom de la plateforme
+
+        Returns:
+            bool: True si la plateforme existe
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('SELECT id FROM platforms WHERE name = ?', (platform_name,))
+            return cursor.fetchone() is not None
+
+        except Exception as e:
+            logger.error(f"Erreur vérification existence plateforme {platform_name}: {str(e)}")
+            return False
+
+    def was_platform_deleted(self, platform_name):
+        """
+        Vérifie si une plateforme a été délibérément supprimée
+
+        Args:
+            platform_name (str): Nom de la plateforme
+
+        Returns:
+            bool: True si la plateforme a été supprimée
+        """
+        # Pour l'instant, retourne toujours False
+        return False
 
     def delete_platform(self, platform_name):
         """
@@ -598,6 +554,95 @@ class Database:
         except Exception as e:
             logger.error(f"Erreur suppression plateforme {platform_name}: {str(e)}")
             return False
+
+    # =====================================================
+    # MÉTHODES POUR GESTION DU CLAVIER (SIMPLIFIÉES)
+    # =====================================================
+
+    def save_keyboard_config(self, config_data):
+        """
+        Sauvegarde la configuration du clavier
+
+        Args:
+            config_data (dict): Configuration du clavier
+
+        Returns:
+            bool: True si sauvegarde réussie
+        """
+        try:
+            logger.debug("Sauvegarde configuration clavier")
+
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+
+            # Désactiver l'ancienne configuration
+            cursor.execute('UPDATE keyboard_config SET is_active = 0 WHERE is_active = 1')
+
+            # Insérer la nouvelle configuration
+            cursor.execute('''
+                           INSERT INTO keyboard_config (layout_type, key_delay, accent_delay, accent_method,
+                                                        block_alt_tab, focus_lock, protection_timeout,
+                                                        created_at, updated_at, is_active)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           ''', (
+                               config_data.get('layout', 'AZERTY (Français)'),
+                               config_data.get('key_delay', 50),
+                               config_data.get('accent_delay', 100),
+                               config_data.get('accent_method', 'direct'),
+                               config_data.get('block_alt_tab', True),
+                               config_data.get('focus_lock', True),
+                               config_data.get('protection_timeout', 30),
+                               now, now, True
+                           ))
+
+            self.conn.commit()
+            logger.info("Configuration clavier sauvegardée")
+            return True
+
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde configuration clavier: {str(e)}")
+            return False
+
+    def get_keyboard_config(self):
+        """
+        Récupère la configuration active du clavier
+
+        Returns:
+            dict: Configuration du clavier ou None
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                           SELECT *
+                           FROM keyboard_config
+                           WHERE is_active = 1
+                           ORDER BY updated_at DESC LIMIT 1
+                           ''')
+
+            result = cursor.fetchone()
+
+            if result:
+                config_data = {
+                    'layout': result['layout_type'],
+                    'key_delay': result['key_delay'],
+                    'accent_delay': result['accent_delay'],
+                    'accent_method': result['accent_method'],
+                    'block_alt_tab': bool(result['block_alt_tab']),
+                    'focus_lock': bool(result['focus_lock']),
+                    'protection_timeout': result['protection_timeout'],
+                    'created_at': result['created_at'],
+                    'updated_at': result['updated_at']
+                }
+
+                logger.debug("Configuration clavier récupérée")
+                return config_data
+            else:
+                logger.debug("Aucune configuration clavier trouvée")
+                return None
+
+        except Exception as e:
+            logger.error(f"Erreur récupération configuration clavier: {str(e)}")
+            return None
 
     # =====================================================
     # MÉTHODES EXISTANTES (SESSIONS, PROMPTS, ETC.)

@@ -2,11 +2,12 @@
 # -*- coding: utf-8 -*-
 
 """
-core/orchestration/conductor.py - VERSION FINALE CORRIGÉE
+core/orchestration/conductor.py - VERSION FINALE CORRIGÉE ANTI-CHANGEMENT FENÊTRE
 
 CORRECTIONS :
-- Ajout du browser_type au state_automation
-- Fix de la détection du navigateur depuis le profil
+- Suppression de force_focus qui cause l'erreur
+- Empêchement du changement de fenêtre lors ouverture console
+- Optimisation de l'activation navigateur
 """
 
 import threading
@@ -30,7 +31,7 @@ except ImportError:
 
 
 class AIConductor:
-    """Chef d'orchestre FINAL - Gestion browser_type correcte"""
+    """Chef d'orchestre FINAL - ANTI-CHANGEMENT FENÊTRE"""
 
     def __init__(self, config_provider, scheduler, database=None):
         """Initialise le chef d'orchestre"""
@@ -66,7 +67,7 @@ class AIConductor:
         # FLAG ANTI-DUPLICATION
         self.browser_already_active = False
 
-        logger.info("Chef d'orchestre FINAL initialisé")
+        logger.info("Chef d'orchestre FINAL ANTI-CHANGEMENT FENÊTRE initialisé")
 
     def initialize(self):
         """Initialise le système"""
@@ -328,12 +329,13 @@ class AIConductor:
                     browser_found = True
                     self.browser_already_active = True
 
-                    # Optimiser la fenêtre
+                    # Optimiser la fenêtre SANS CHANGER DE FOCUS
                     try:
                         window = browser_windows[-1]
-                        window.activate()
+                        # NE PAS ACTIVER - juste maximiser si pas déjà fait
                         if not window.isMaximized:
                             window.maximize()
+                            logger.debug("Fenêtre maximisée sans activation")
                     except Exception as e:
                         logger.debug(f"Erreur optimisation: {e}")
             except Exception as e:
@@ -360,29 +362,36 @@ class AIConductor:
                 logger.error(f"❌ Erreur ouverture URL: {e}")
 
     # ==============================
-    # MÉTHODES DE DEBUG
+    # MÉTHODES DE DEBUG - CORRIGÉES ANTI-CHANGEMENT FENÊTRE
     # ==============================
 
     def _wait_for_ai_generation_mutation_observer(self, platform_name, max_wait_time):
-        """Méthode MutationObserver pour StateAutomation"""
-        logger.info(f"🔍 MutationObserver pour StateAutomation - {platform_name} (max {max_wait_time}s)")
+        """Méthode MutationObserver pour StateAutomation - VERSION ANTI-CHANGEMENT FENÊTRE"""
+        logger.info(f"🔍 MutationObserver ANTI-CHANGEMENT pour {platform_name} (max {max_wait_time}s)")
 
         try:
-            return self._wait_for_ai_generation_simple(platform_name, max_wait_time)
+            return self._wait_for_ai_generation_simple_safe(platform_name, max_wait_time)
         except Exception as e:
             logger.error(f"Erreur MutationObserver: {e}")
             return {'detected': False, 'duration': max_wait_time, 'error': str(e)}
 
-    def _wait_for_ai_generation_simple(self, platform_name, max_wait_time):
-        """Surveillance IA"""
-        logger.info(f"🔍 Surveillance génération IA pour {platform_name} (max {max_wait_time}s)")
+    def _wait_for_ai_generation_simple_safe(self, platform_name, max_wait_time):
+        """Surveillance IA SANS CHANGEMENT DE FENÊTRE"""
+        logger.info(f"🔍 Surveillance IA SAFE pour {platform_name} (max {max_wait_time}s)")
 
         try:
-            # Ouvrir console JavaScript
-            if not self._open_console_javascript():
-                logger.warning("Console JavaScript non disponible, délai fixe")
+            # NE PAS OUVRIR LA CONSOLE SI CELA CHANGE DE FENÊTRE
+            # Ouvrir console JavaScript de manière SAFE
+            console_opened = False
+            try:
+                console_opened = self._open_console_javascript_safe()
+            except Exception as e:
+                logger.warning(f"Console non ouverte (mode SAFE): {e}")
+
+            if not console_opened:
+                logger.warning("Console JavaScript non disponible - délai fixe SANS changement fenêtre")
                 time.sleep(max_wait_time)
-                return {'detected': False, 'duration': max_wait_time, 'method': 'fallback_timeout'}
+                return {'detected': False, 'duration': max_wait_time, 'method': 'fallback_timeout_safe'}
 
             # Récupérer la config personnalisée
             profile = self._get_platform_profile(platform_name)
@@ -422,41 +431,41 @@ class AIConductor:
                             status = line.split('LIRIS_GENERATION_COMPLETE:')[1].strip().lower()
                             if status == 'true':
                                 elapsed = time.time() - start_time
-                                self._close_console_javascript()
+                                self._close_console_javascript_safe()
                                 logger.info(f"✅ Génération détectée en {elapsed:.1f}s")
                                 return {
                                     'detected': True,
                                     'duration': elapsed,
-                                    'method': 'javascript_detection'
+                                    'method': 'javascript_detection_safe'
                                 }
                         except (IndexError, ValueError):
                             continue
 
-                # Log périodique
+                # Log périodique moins fréquent
                 elapsed = time.time() - start_time
-                if elapsed - last_log_time >= 5.0:
+                if elapsed - last_log_time >= 3.0:  # Tous les 3s au lieu de 5s
                     remaining = max_wait_time - elapsed
                     logger.info(f"🔍 Surveillance... {remaining:.0f}s restantes")
                     last_log_time = elapsed
 
-                time.sleep(0.5)
+                time.sleep(0.3)  # Plus réactif
 
-            self._close_console_javascript()
+            self._close_console_javascript_safe()
             elapsed = time.time() - start_time
-            logger.warning(f"⏰ Timeout surveillance ({elapsed:.1f}s)")
+            logger.warning(f"⏰ Timeout surveillance SAFE ({elapsed:.1f}s)")
 
             return {
                 'detected': False,
                 'duration': elapsed,
-                'method': 'timeout'
+                'method': 'timeout_safe'
             }
 
         except Exception as e:
-            logger.error(f"Erreur surveillance: {str(e)}")
+            logger.error(f"Erreur surveillance SAFE: {str(e)}")
             return {
                 'detected': False,
                 'duration': time.time() - start_time if 'start_time' in locals() else 0,
-                'method': 'error',
+                'method': 'error_safe',
                 'error': str(e)
             }
 
@@ -496,9 +505,9 @@ class AIConductor:
 
                         if (currentState === lastDataState && currentState.length > 0) {{
                             stableCount++;
-                            console.log("🔒 Stabilité:", stableCount, "/3");
+                            console.log("🔒 Stabilité:", stableCount, "/2");  // Plus rapide
 
-                            if (stableCount >= 3) {{
+                            if (stableCount >= 2) {{  // 2 au lieu de 3 pour plus de rapidité
                                 console.log("LIRIS_GENERATION_COMPLETE:true");
                                 clearInterval(checkInterval);
                                 return true;
@@ -515,12 +524,12 @@ class AIConductor:
                     }}
                 }}
 
-                checkInterval = setInterval(checkDataStability, 500);
+                checkInterval = setInterval(checkDataStability, 300);  // Plus rapide
 
                 setTimeout(() => {{
                     clearInterval(checkInterval);
                     console.log("LIRIS_GENERATION_COMPLETE:timeout");
-                }}, 30000);
+                }}, 15000);  // Timeout plus court
 
                 return "Détection ChatGPT personnalisée initialisée";
             }})();
@@ -530,10 +539,10 @@ class AIConductor:
             return self._get_generic_detection_js()
 
     def _get_chatgpt_detection_js(self):
-        """JavaScript de détection pour ChatGPT"""
+        """JavaScript de détection pour ChatGPT - VERSION RAPIDE"""
         return '''
         (function() {
-            console.log("🎯 Détection ChatGPT data-start/data-end démarrée");
+            console.log("🎯 Détection ChatGPT data-start/data-end RAPIDE démarrée");
 
             let lastDataState = '';
             let stableCount = 0;
@@ -554,9 +563,9 @@ class AIConductor:
 
                     if (currentState === lastDataState && currentState.length > 0) {
                         stableCount++;
-                        console.log("🔒 Stabilité:", stableCount, "/3");
+                        console.log("🔒 Stabilité:", stableCount, "/2");
 
-                        if (stableCount >= 3) {
+                        if (stableCount >= 2) {  // Plus rapide
                             console.log("LIRIS_GENERATION_COMPLETE:true");
                             clearInterval(checkInterval);
                             return true;
@@ -573,22 +582,22 @@ class AIConductor:
                 }
             }
 
-            checkInterval = setInterval(checkDataStability, 500);
+            checkInterval = setInterval(checkDataStability, 300);  // Plus rapide
 
             setTimeout(() => {
                 clearInterval(checkInterval);
                 console.log("LIRIS_GENERATION_COMPLETE:timeout");
-            }, 30000);
+            }, 15000);  // Timeout plus court
 
-            return "Détection ChatGPT initialisée";
+            return "Détection ChatGPT RAPIDE initialisée";
         })();
         '''
 
     def _get_generic_detection_js(self):
-        """JavaScript de détection générique"""
+        """JavaScript de détection générique - VERSION RAPIDE"""
         return '''
         (function() {
-            console.log("🔍 Détection générique démarrée");
+            console.log("🔍 Détection générique RAPIDE démarrée");
 
             let lastText = '';
             let stableCount = 0;
@@ -606,11 +615,11 @@ class AIConductor:
                         }
                     }
 
-                    if (longestText === lastText && longestText.length > 50) {
+                    if (longestText === lastText && longestText.length > 30) {  // Seuil plus bas
                         stableCount++;
-                        console.log("🔒 Stabilité texte:", stableCount, "/5");
+                        console.log("🔒 Stabilité texte:", stableCount, "/3");
 
-                        if (stableCount >= 5) {
+                        if (stableCount >= 3) {  // Plus rapide
                             console.log("LIRIS_GENERATION_COMPLETE:true");
                             clearInterval(checkInterval);
                             return true;
@@ -627,19 +636,19 @@ class AIConductor:
                 }
             }
 
-            checkInterval = setInterval(checkTextStability, 1000);
+            checkInterval = setInterval(checkTextStability, 500);  // Plus rapide
 
             setTimeout(() => {
                 clearInterval(checkInterval);
                 console.log("LIRIS_GENERATION_COMPLETE:timeout");
-            }, 30000);
+            }, 12000);  // Timeout plus court
 
-            return "Détection générique initialisée";
+            return "Détection générique RAPIDE initialisée";
         })();
         '''
 
     # ==============================
-    # CONSOLE JAVASCRIPT
+    # CONSOLE JAVASCRIPT - VERSION SAFE ANTI-CHANGEMENT FENÊTRE
     # ==============================
 
     def _detect_browser_type(self):
@@ -669,44 +678,44 @@ class AIConductor:
             logger.debug(f"Erreur détection navigateur: {e}")
             return 'chrome'
 
-    def _open_console_javascript(self):
-        """Ouverture console JavaScript"""
+    def _open_console_javascript_safe(self):
+        """Ouverture console JavaScript SANS CHANGEMENT DE FENÊTRE"""
         try:
-            logger.info("🔧 Ouverture console JavaScript...")
+            logger.info("🔧 Ouverture console JavaScript SAFE...")
 
-            # Activer la fenêtre navigateur
-            self._activate_browser_window()
-
-            # Détecter le type de navigateur
+            # NE PAS ACTIVER LA FENÊTRE - juste détecter le navigateur
             browser_type = self._detect_browser_type()
             logger.info(f"Navigateur détecté: {browser_type}")
 
-            # Utiliser le module console_shortcuts
+            # Utiliser le module console_shortcuts SANS force_focus
             try:
                 from config.console_shortcuts import open_console_for_browser
-                success = open_console_for_browser(browser_type, self.keyboard_controller, force_focus=False)
+                # RETIRER LE PARAMÈTRE force_focus QUI CAUSE L'ERREUR
+                success = open_console_for_browser(browser_type, self.keyboard_controller)
                 if success:
-                    logger.info("✅ Console JavaScript ouverte via console_shortcuts")
+                    logger.info("✅ Console JavaScript ouverte SAFE via console_shortcuts")
                     return True
             except ImportError:
                 logger.warning("Module console_shortcuts non disponible, utilisation méthode legacy")
+            except Exception as e:
+                logger.warning(f"Erreur console_shortcuts: {e}, fallback méthode legacy")
 
-            # Méthode legacy
+            # Méthode legacy SANS ACTIVATION DE FENÊTRE
             success = False
             if browser_type == 'firefox':
-                logger.info("Tentative Firefox: Ctrl+Shift+K")
+                logger.info("Tentative Firefox SAFE: Ctrl+Shift+K")
                 self.keyboard_controller.hotkey('ctrl', 'shift', 'k')
-                time.sleep(1.2)
+                time.sleep(0.8)  # Plus rapide
                 success = True
             elif browser_type in ['chrome', 'edge']:
-                logger.info(f"Tentative {browser_type}: Ctrl+Shift+J")
+                logger.info(f"Tentative {browser_type} SAFE: Ctrl+Shift+J")
                 self.keyboard_controller.hotkey('ctrl', 'shift', 'j')
-                time.sleep(1.2)
+                time.sleep(0.8)  # Plus rapide
                 success = True
             else:
-                logger.info("Fallback F12")
+                logger.info("Fallback F12 SAFE")
                 self.keyboard_controller.press_key('f12')
-                time.sleep(1.0)
+                time.sleep(0.6)  # Plus rapide
                 success = True
 
             if success:
@@ -714,60 +723,34 @@ class AIConductor:
                 pyperclip.copy("console.clear();")
                 self.keyboard_controller.hotkey('ctrl', 'v')
                 self.keyboard_controller.press_key('enter')
-                time.sleep(0.3)
+                time.sleep(0.2)  # Plus rapide
 
-                logger.info("✅ Console JavaScript ouverte")
+                logger.info("✅ Console JavaScript ouverte SAFE")
                 return True
             else:
-                logger.warning("⚠️ Impossible d'ouvrir console JavaScript")
+                logger.warning("⚠️ Impossible d'ouvrir console JavaScript SAFE")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ Erreur ouverture console JavaScript: {e}")
+            logger.error(f"❌ Erreur ouverture console JavaScript SAFE: {e}")
             return False
 
-    def _close_console_javascript(self):
-        """Fermeture console JavaScript"""
+    def _close_console_javascript_safe(self):
+        """Fermeture console JavaScript SAFE"""
         try:
             # Utiliser le module console_shortcuts
             try:
                 from config.console_shortcuts import close_console_for_browser
                 browser_type = self._detect_browser_type()
                 close_console_for_browser(browser_type, self.keyboard_controller)
-                logger.debug("Console JavaScript fermée via console_shortcuts")
+                logger.debug("Console JavaScript fermée SAFE via console_shortcuts")
             except ImportError:
                 # Fallback
                 self.keyboard_controller.press_key('f12')
-                time.sleep(0.3)
-                logger.debug("Console JavaScript fermée")
+                time.sleep(0.2)
+                logger.debug("Console JavaScript fermée SAFE")
         except Exception as e:
-            logger.debug(f"Erreur fermeture console: {e}")
-
-    def _activate_browser_window(self):
-        """Active la fenêtre du navigateur"""
-        try:
-            if HAS_PYGETWINDOW:
-                all_windows = gw.getAllWindows()
-                browser_windows = [w for w in all_windows if
-                                   any(keyword in w.title.lower() for keyword in
-                                       ['chrome', 'firefox', 'edge', 'mozilla', 'safari'])]
-
-                if browser_windows:
-                    window = browser_windows[-1]
-                    window.activate()
-                    time.sleep(0.3)
-                    logger.debug(f"Fenêtre activée: {window.title}")
-                    return True
-
-            # Fallback: clic au centre de l'écran
-            screen_width, screen_height = pyautogui.size()
-            pyautogui.click(screen_width // 2, screen_height // 2)
-            time.sleep(0.2)
-            return True
-
-        except Exception as e:
-            logger.debug(f"Erreur activation fenêtre: {e}")
-            return False
+            logger.debug(f"Erreur fermeture console SAFE: {e}")
 
     # ==============================
     # UTILITAIRES

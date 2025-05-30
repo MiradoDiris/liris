@@ -5,10 +5,10 @@
 core/orchestration/state_automation.py - VERSION CORRIGÉE
 
 Corrections principales:
-- PAS d'Alt+Tab qui change de fenêtre !
-- Focus par clic dans la fenêtre du navigateur
-- Intégration des raccourcis console par navigateur
-- Simplification de la logique d'exécution
+- Simple clic au lieu de double clic
+- Optimisation temps d'attente
+- Focus par clic sans changement de fenêtre
+- Gestion correcte console sans force_focus
 """
 
 import time
@@ -18,7 +18,6 @@ from enum import Enum
 from PyQt5.QtCore import QObject, pyqtSignal
 from utils.logger import logger
 from utils.exceptions import OrchestrationError
-from config.console_shortcuts import console_shortcuts, open_console_for_browser, close_console_for_browser
 
 try:
     import pygetwindow as gw
@@ -29,7 +28,7 @@ except ImportError:
 
 
 class StateBasedAutomation(QObject):
-    """Automatisation simplifiée avec gestion correcte de la console"""
+    """Automatisation optimisée avec clic simple et temps rapides"""
 
     # Signaux pour communication externe
     step_completed = pyqtSignal(str, str)
@@ -55,10 +54,10 @@ class StateBasedAutomation(QObject):
         self.extracted_response = ""
         self.browser_type = "chrome"  # Par défaut
 
-        logger.info("StateBasedAutomation CORRIGÉ initialisé")
+        logger.info("StateBasedAutomation OPTIMISÉ initialisé")
 
     def start_test_automation(self, platform_profile, num_tabs, browser_type, url, automation_params=None):
-        """Démarre l'automatisation avec gestion correcte du navigateur"""
+        """Démarre l'automatisation optimisée"""
         if self.is_running:
             logger.warning("Automatisation déjà en cours")
             return
@@ -84,15 +83,15 @@ class StateBasedAutomation(QObject):
             self._handle_automation_failure(f"Erreur séquence: {str(e)}")
 
     def _execute_automation_sequence(self):
-        """Exécute toute la séquence d'automatisation"""
-        logger.info("📋 Début séquence automatisation")
+        """Exécute toute la séquence d'automatisation OPTIMISÉE"""
+        logger.info("📋 Début séquence automatisation OPTIMISÉE")
 
         try:
-            # ÉTAPE 1: Focus navigateur PAR CLIC (pas Alt+Tab!)
+            # ÉTAPE 1: Focus navigateur PAR CLIC
             if not self._ensure_browser_focus():
                 return
 
-            # ÉTAPE 2: Cliquer champ
+            # ÉTAPE 2: Cliquer champ (SIMPLE CLIC)
             if not self._handle_field_click_step():
                 return
 
@@ -108,7 +107,7 @@ class StateBasedAutomation(QObject):
             if not self._handle_form_submit_step():
                 return
 
-            # ÉTAPE 6: Attendre réponse IA
+            # ÉTAPE 6: Attendre réponse IA (OPTIMISÉ)
             if not self._handle_response_wait_step():
                 return
 
@@ -123,25 +122,24 @@ class StateBasedAutomation(QObject):
             self._handle_automation_failure(f"Erreur dans séquence: {str(e)}")
 
     def _ensure_browser_focus(self):
-        """ÉTAPE 1: S'assurer que le navigateur a le focus PAR CLIC"""
+        """ÉTAPE 1: S'assurer que le navigateur a le focus PAR CLIC SIMPLE"""
         if self.force_stop:
             return False
 
-        logger.info("🌐 ÉTAPE 1: Focus navigateur par clic")
+        logger.info("🌐 ÉTAPE 1: Focus navigateur par clic simple")
         self.step_completed.emit("browser_focusing", "Focus navigateur")
 
         try:
             # Si skip demandé, on suppose que le conductor a déjà géré
             if self.skip_browser_activation:
                 logger.info("🔄 Skip focus - Conductor a déjà géré")
-                time.sleep(0.5)
+                time.sleep(0.3)  # Plus rapide
                 return True
 
-            # MÉTHODE CORRECTE: Cliquer dans la fenêtre du navigateur
-            # On clique au centre de l'écran ou sur une zone neutre
-            logger.info("🖱️ Clic pour focus navigateur")
+            # MÉTHODE OPTIMISÉE: Clic simple au centre
+            logger.info("🖱️ Clic simple pour focus navigateur")
 
-            # Obtenir la taille de l'écran si possible
+            # Position par défaut optimisée
             try:
                 import tkinter as tk
                 root = tk.Tk()
@@ -149,64 +147,30 @@ class StateBasedAutomation(QObject):
                 screen_height = root.winfo_screenheight()
                 root.destroy()
 
-                # Cliquer au centre-haut de l'écran (zone généralement safe)
+                # Zone centre sécurisée
                 click_x = screen_width // 2
-                click_y = 100  # En haut mais pas trop (éviter la barre de titre)
-
+                click_y = 200  # Plus bas pour éviter les onglets
             except:
-                # Fallback: position par défaut
                 click_x = 960
-                click_y = 100
+                click_y = 200
 
-            # Clic pour focus
+            # UN SEUL CLIC
             self.mouse_controller.click(click_x, click_y)
-            time.sleep(0.3)
+            time.sleep(0.2)  # Plus rapide
 
-            logger.info(f"✅ Clic de focus effectué à ({click_x}, {click_y})")
-
-            # Si on a pygetwindow, vérifier qu'on a bien une fenêtre navigateur
-            if HAS_PYGETWINDOW:
-                try:
-                    browser_keywords = {
-                        'chrome': ['chrome', 'chromium'],
-                        'firefox': ['firefox', 'mozilla'],
-                        'edge': ['edge', 'microsoft edge'],
-                        'safari': ['safari'],
-                        'opera': ['opera'],
-                        'brave': ['brave']
-                    }
-
-                    keywords = browser_keywords.get(self.browser_type.lower(), ['chrome', 'firefox', 'edge'])
-
-                    all_windows = gw.getAllWindows()
-                    browser_found = False
-
-                    for window in all_windows:
-                        window_title = window.title.lower()
-                        if any(keyword in window_title for keyword in keywords):
-                            browser_found = True
-                            logger.info(f"✅ Fenêtre navigateur confirmée: {window.title}")
-                            break
-
-                    if not browser_found:
-                        logger.warning("⚠️ Aucune fenêtre navigateur détectée, mais on continue")
-
-                except Exception as e:
-                    logger.debug(f"Vérification fenêtre: {e}")
-
+            logger.info(f"✅ Clic simple effectué à ({click_x}, {click_y})")
             return True
 
         except Exception as e:
             logger.error(f"Erreur focus navigateur: {e}")
-            # Continuer quand même
             return True
 
     def _handle_field_click_step(self):
-        """ÉTAPE 2: Clic champ prompt"""
+        """ÉTAPE 2: Clic champ prompt (SIMPLE CLIC)"""
         if self.force_stop:
             return False
 
-        logger.info("🎯 ÉTAPE 2: Clic champ prompt")
+        logger.info("🎯 ÉTAPE 2: Clic SIMPLE champ prompt")
         self.step_completed.emit("field_clicking", "Clic sur champ")
 
         try:
@@ -220,13 +184,11 @@ class StateBasedAutomation(QObject):
             x, y = prompt_pos['center_x'], prompt_pos['center_y']
             logger.info(f"🎯 Position cible: ({x}, {y})")
 
-            # Double clic pour s'assurer du focus
+            # UN SEUL CLIC au lieu de double clic
             self.mouse_controller.click(x, y)
-            time.sleep(0.2)
-            self.mouse_controller.click(x, y)
-            time.sleep(0.3)
+            time.sleep(0.2)  # Plus rapide
 
-            logger.info("✅ Double clic effectué")
+            logger.info("✅ Clic simple effectué")
             return True
 
         except Exception as e:
@@ -234,37 +196,21 @@ class StateBasedAutomation(QObject):
             return False
 
     def _handle_field_clear_step(self):
-        """ÉTAPE 3: Effacer champ"""
+        """ÉTAPE 3: Effacer champ OPTIMISÉ"""
         if self.force_stop:
             return False
 
-        logger.info("🧹 ÉTAPE 3: Effacement champ")
+        logger.info("🧹 ÉTAPE 3: Effacement champ OPTIMISÉ")
         self.step_completed.emit("field_clearing", "Effacement champ")
 
         try:
-            # Méthode 1: Triple clic pour tout sélectionner
-            positions = self.platform_profile.get('interface_positions', {})
-            prompt_pos = positions.get('prompt_field')
+            # Méthode rapide: Ctrl+A puis Delete
+            self.keyboard_controller.hotkey('ctrl', 'a')
+            time.sleep(0.1)
+            self.keyboard_controller.press_key('delete')
+            time.sleep(0.1)
 
-            if prompt_pos:
-                x, y = prompt_pos['center_x'], prompt_pos['center_y']
-                # Triple clic
-                for _ in range(3):
-                    self.mouse_controller.click(x, y)
-                    time.sleep(0.1)
-                time.sleep(0.2)
-                # Supprimer
-                self.keyboard_controller.press_key('delete')
-                time.sleep(0.2)
-                logger.info("✅ Effacement par triple clic")
-            else:
-                # Méthode 2: Ctrl+A puis Delete
-                self.keyboard_controller.hotkey('ctrl', 'a')
-                time.sleep(0.1)
-                self.keyboard_controller.press_key('delete')
-                time.sleep(0.2)
-                logger.info("✅ Effacement par Ctrl+A")
-
+            logger.info("✅ Effacement rapide par Ctrl+A")
             return True
 
         except Exception as e:
@@ -272,11 +218,11 @@ class StateBasedAutomation(QObject):
             return False
 
     def _handle_text_input_step(self):
-        """ÉTAPE 4: Saisie texte"""
+        """ÉTAPE 4: Saisie texte OPTIMISÉE"""
         if self.force_stop:
             return False
 
-        logger.info("📝 ÉTAPE 4: Saisie texte")
+        logger.info("📝 ÉTAPE 4: Saisie texte OPTIMISÉE")
         self.step_completed.emit("text_typing", "Saisie texte")
 
         try:
@@ -286,58 +232,47 @@ class StateBasedAutomation(QObject):
 
             logger.info(f"📝 Saisie: '{self.test_text}' ({len(self.test_text)} caractères)")
 
-            # MÉTHODE 1: Presse-papiers (plus fiable)
+            # Méthode presse-papiers optimisée
             try:
                 # Sauvegarder presse-papiers
                 original_clipboard = pyperclip.paste()
 
-                # Copier notre texte
+                # Copier et coller
                 pyperclip.copy(self.test_text)
-                time.sleep(0.1)
-
-                # Coller
+                time.sleep(0.05)  # Plus rapide
                 self.keyboard_controller.hotkey('ctrl', 'v')
-                time.sleep(0.5)
+                time.sleep(0.3)  # Plus rapide
 
                 # Restaurer presse-papiers
                 pyperclip.copy(original_clipboard)
 
-                logger.info("✅ Saisie par presse-papiers réussie")
+                logger.info("✅ Saisie rapide par presse-papiers")
                 return True
 
             except Exception as e:
-                logger.warning(f"Erreur presse-papiers: {e}, essai saisie directe...")
-
-            # MÉTHODE 2: Saisie directe
-            try:
+                logger.warning(f"Erreur presse-papiers: {e}, fallback saisie directe")
                 self.keyboard_controller.type_text(self.test_text)
-                time.sleep(0.8)
-                logger.info("✅ Saisie directe réussie")
+                time.sleep(0.5)
                 return True
-
-            except Exception as e:
-                logger.error(f"Erreur saisie directe: {e}")
-                self._handle_automation_failure("Échec toutes méthodes de saisie")
-                return False
 
         except Exception as e:
             self._handle_automation_failure(f"Erreur saisie texte: {str(e)}")
             return False
 
     def _handle_form_submit_step(self):
-        """ÉTAPE 5: Soumission formulaire"""
+        """ÉTAPE 5: Soumission formulaire RAPIDE"""
         if self.force_stop:
             return False
 
-        logger.info("📤 ÉTAPE 5: Soumission")
+        logger.info("📤 ÉTAPE 5: Soumission RAPIDE")
         self.step_completed.emit("form_submitting", "Soumission")
 
         try:
             # Soumission avec Entrée
             self.keyboard_controller.press_key('enter')
-            time.sleep(1)
+            time.sleep(0.5)  # Plus rapide
 
-            logger.info("✅ Formulaire soumis")
+            logger.info("✅ Formulaire soumis rapidement")
             return True
 
         except Exception as e:
@@ -345,34 +280,34 @@ class StateBasedAutomation(QObject):
             return False
 
     def _handle_response_wait_step(self):
-        """ÉTAPE 6: Attendre réponse IA"""
+        """ÉTAPE 6: Attendre réponse IA OPTIMISÉE"""
         if self.force_stop:
             return False
 
-        logger.info("🔍 ÉTAPE 6: Attente réponse IA")
+        logger.info("🔍 ÉTAPE 6: Attente réponse IA OPTIMISÉE")
         self.step_completed.emit("response_waiting", "Attente réponse")
 
         try:
             platform_name = self.platform_profile.get('name', '')
 
-            # Calcul intelligent du temps d'attente
-            wait_time = self._calculate_intelligent_wait_time()
-            logger.info(f"⏱️ Temps d'attente calculé: {wait_time}s")
+            # Calcul temps d'attente OPTIMISÉ
+            wait_time = self._calculate_optimized_wait_time()
+            logger.info(f"⏱️ Temps d'attente OPTIMISÉ: {wait_time}s")
 
-            # Utiliser le MutationObserver du conductor si disponible
+            # Utiliser le MutationObserver SAFE du conductor
             if hasattr(self.conductor, '_wait_for_ai_generation_mutation_observer'):
-                logger.info(f"🔍 Utilisation MutationObserver du Conductor (max {wait_time}s)")
+                logger.info(f"🔍 Utilisation MutationObserver SAFE du Conductor (max {wait_time}s)")
                 result = self.conductor._wait_for_ai_generation_mutation_observer(platform_name, wait_time)
 
                 if result.get('detected'):
-                    logger.info(f"✅ Réponse IA détectée en {result.get('duration', 0):.1f}s")
+                    logger.info(f"✅ Réponse IA détectée RAPIDEMENT en {result.get('duration', 0):.1f}s")
                     return True
                 else:
-                    logger.warning(f"⏰ Timeout MutationObserver après {wait_time}s - tentative extraction")
+                    logger.info(f"⏰ Timeout MutationObserver après {wait_time}s - extraction immédiate")
                     return True
             else:
-                # Fallback délai calculé
-                logger.warning(f"MutationObserver indisponible - délai fixe {wait_time}s")
+                # Fallback délai COURT
+                logger.info(f"Fallback délai COURT {wait_time}s")
                 time.sleep(wait_time)
                 return True
 
@@ -380,43 +315,43 @@ class StateBasedAutomation(QObject):
             logger.warning(f"Erreur attente réponse: {str(e)} - continuation")
             return True
 
-    def _calculate_intelligent_wait_time(self):
-        """Calcule un temps d'attente intelligent basé sur la longueur du prompt"""
+    def _calculate_optimized_wait_time(self):
+        """Calcule un temps d'attente OPTIMISÉ et plus court"""
         try:
             if not self.test_text:
-                return 8
+                return 5  # Plus court
 
-            # Analyse du prompt
+            # Analyse RAPIDE du prompt
             char_count = len(self.test_text)
             word_count = len(self.test_text.split())
 
-            # Formule : 0.1s par caractère + 0.3s par mot + base 3s
-            base_time = 3
-            char_factor = char_count * 0.1
-            word_factor = word_count * 0.3
+            # Formule OPTIMISÉE : plus rapide
+            base_time = 2  # Base réduite
+            char_factor = char_count * 0.05  # Facteur réduit
+            word_factor = word_count * 0.15  # Facteur réduit
 
             calculated_time = base_time + char_factor + word_factor
 
-            # Limites
-            min_time = 5
-            max_time = 25
+            # Limites RÉDUITES
+            min_time = 3  # Minimum réduit
+            max_time = 12  # Maximum réduit
             final_time = max(min_time, min(calculated_time, max_time))
 
             logger.info(
-                f"📊 Calcul attente: {char_count} chars × 0.1s + {word_count} mots × 0.3s + 3s base = {final_time:.1f}s")
+                f"📊 Calcul OPTIMISÉ: {char_count} chars × 0.05s + {word_count} mots × 0.15s + 2s base = {final_time:.1f}s")
 
             return int(final_time)
 
         except Exception as e:
             logger.warning(f"Erreur calcul temps attente: {e}")
-            return 10
+            return 6  # Défaut plus court
 
     def _handle_response_extract_step(self):
-        """ÉTAPE 7: Extraction réponse avec console correcte"""
+        """ÉTAPE 7: Extraction réponse OPTIMISÉE"""
         if self.force_stop:
             return False
 
-        logger.info("📄 ÉTAPE 7: Extraction réponse")
+        logger.info("📄 ÉTAPE 7: Extraction réponse OPTIMISÉE")
         self.step_completed.emit("response_extracting", "Extraction")
 
         try:
@@ -442,13 +377,13 @@ class StateBasedAutomation(QObject):
                 'p:last-child'
             ])
 
-            logger.info(f"🎯 EXTRACTION avec sélecteurs: {selectors[:3]}...")
+            logger.info(f"🎯 EXTRACTION OPTIMISÉE avec sélecteurs: {selectors[:3]}...")
 
-            # JavaScript d'extraction
+            # JavaScript d'extraction OPTIMISÉ
             js_code = f'''
             (function() {{
                 let selectors = {json.dumps(selectors[:5])};
-                console.log("🔧 StateAutomation extraction avec sélecteurs:", selectors);
+                console.log("🔧 StateAutomation extraction OPTIMISÉE:", selectors);
 
                 for (let selector of selectors) {{
                     try {{
@@ -460,13 +395,12 @@ class StateBasedAutomation(QObject):
                             let text = (element.textContent || element.innerText || '').trim();
 
                             console.log("📝 Texte trouvé:", text.length, "caractères");
-                            console.log("📝 Aperçu:", text.substring(0, 100));
 
                             if (text.length > 10 && 
                                 !text.toLowerCase().includes('send a message') &&
                                 !text.toLowerCase().includes('écrivez votre message')) {{
 
-                                console.log("✅ EXTRACTION StateAutomation RÉUSSIE avec:", selector);
+                                console.log("✅ EXTRACTION OPTIMISÉE RÉUSSIE avec:", selector);
                                 copy(text);
                                 return true;
                             }}
@@ -477,24 +411,24 @@ class StateBasedAutomation(QObject):
                     }}
                 }}
 
-                console.log("❌ ÉCHEC extraction StateAutomation");
+                console.log("❌ ÉCHEC extraction optimisée");
                 copy("EXTRACTION_FAILED");
                 return false;
             }})();
             '''
 
-            if self._execute_js_with_proper_console(js_code):
+            if self._execute_js_optimized(js_code):
                 result = pyperclip.paste().strip()
 
                 if result != "EXTRACTION_FAILED" and len(result) > 10:
                     self.extracted_response = result
-                    logger.info(f"✅ Réponse extraite: {len(result)} caractères")
-                    logger.info(f"📝 Aperçu: {result[:200]}..." if len(result) > 200 else f"📝 Texte: {result}")
+                    logger.info(f"✅ Réponse extraite RAPIDEMENT: {len(result)} caractères")
+                    logger.info(f"📝 Aperçu: {result[:150]}..." if len(result) > 150 else f"📝 Texte: {result}")
                     return True
 
-            # Si échec, essayer extraction basique
-            logger.warning("Échec extraction spécialisée, tentative basique...")
-            if self._extract_basic_response():
+            # Fallback extraction basique RAPIDE
+            logger.info("Échec extraction spécialisée, tentative basique RAPIDE...")
+            if self._extract_basic_response_fast():
                 return True
 
             self._handle_automation_failure("Aucune réponse extraite")
@@ -504,13 +438,13 @@ class StateBasedAutomation(QObject):
             self._handle_automation_failure(f"Erreur extraction: {str(e)}")
             return False
 
-    def _execute_js_with_proper_console(self, js_code):
-        """Exécution JavaScript avec ouverture correcte de la console"""
+    def _execute_js_optimized(self, js_code):
+        """Exécution JavaScript OPTIMISÉE sans changement de fenêtre"""
         try:
-            # S'assurer du focus sur le navigateur d'abord
-            logger.info("🖱️ Clic pour s'assurer du focus avant console")
+            # Focus minimal sans changement de fenêtre
+            logger.info("🖱️ Focus minimal avant console")
 
-            # Cliquer au centre de la fenêtre
+            # Clic centre simple
             try:
                 import tkinter as tk
                 root = tk.Tk()
@@ -524,18 +458,30 @@ class StateBasedAutomation(QObject):
                 click_y = 540
 
             self.mouse_controller.click(click_x, click_y)
-            time.sleep(0.3)
+            time.sleep(0.2)  # Plus rapide
 
-            # Ouvrir console avec le bon raccourci selon le navigateur
-            logger.info(f"📋 Ouverture console pour {self.browser_type}")
-            success = open_console_for_browser(self.browser_type, self.keyboard_controller, force_focus=False)
+            # Ouvrir console RAPIDE selon navigateur
+            logger.info(f"📋 Ouverture console RAPIDE pour {self.browser_type}")
+
+            try:
+                from config.console_shortcuts import open_console_for_browser
+                # SANS force_focus pour éviter l'erreur
+                success = open_console_for_browser(self.browser_type, self.keyboard_controller)
+            except Exception as e:
+                logger.info(f"Fallback raccourci direct: {e}")
+                # Fallback direct
+                if self.browser_type == 'firefox':
+                    self.keyboard_controller.hotkey('ctrl', 'shift', 'k')
+                else:
+                    self.keyboard_controller.hotkey('ctrl', 'shift', 'j')
+                time.sleep(0.5)
+                success = True
 
             if not success:
-                logger.warning("Échec ouverture console spécifique, utilisation F12")
                 self.keyboard_controller.press_key('f12')
-                time.sleep(0.5)
+                time.sleep(0.4)
 
-            # Nettoyer et exécuter
+            # Nettoyer et exécuter RAPIDE
             pyperclip.copy("console.clear();")
             self.keyboard_controller.hotkey('ctrl', 'v')
             self.keyboard_controller.press_key('enter')
@@ -544,70 +490,70 @@ class StateBasedAutomation(QObject):
             pyperclip.copy(js_code)
             self.keyboard_controller.hotkey('ctrl', 'v')
             self.keyboard_controller.press_key('enter')
-            time.sleep(0.5)
+            time.sleep(0.3)  # Plus rapide
 
-            # Fermer console
-            close_console_for_browser(self.browser_type, self.keyboard_controller)
-            time.sleep(0.2)
+            # Fermer console RAPIDE
+            try:
+                from config.console_shortcuts import close_console_for_browser
+                close_console_for_browser(self.browser_type, self.keyboard_controller)
+            except:
+                self.keyboard_controller.press_key('f12')
 
+            time.sleep(0.1)
             return True
 
         except Exception as e:
-            logger.error(f"Erreur JS: {e}")
+            logger.error(f"Erreur JS optimisé: {e}")
             try:
-                # Essayer de fermer la console en cas d'erreur
                 self.keyboard_controller.press_key('f12')
             except:
                 pass
             return False
 
-    def _extract_basic_response(self):
-        """Extraction basique de secours"""
+    def _extract_basic_response_fast(self):
+        """Extraction basique RAPIDE de secours"""
         try:
             js_code = '''
             (function() {
-                console.log("🔧 Extraction basique...");
+                console.log("🔧 Extraction basique RAPIDE...");
                 let elements = document.querySelectorAll('p, div, span');
                 let longestText = '';
 
                 for (let el of elements) {
                     let text = (el.textContent || '').trim();
-                    if (text.length > longestText.length && text.length > 20) {
+                    if (text.length > longestText.length && text.length > 15) {  // Seuil plus bas
                         longestText = text;
                     }
                 }
 
-                console.log("📊 Plus long texte trouvé:", longestText.length, "caractères");
-
-                if (longestText.length > 20) {
-                    console.log("✅ Extraction basique réussie");
+                if (longestText.length > 15) {  // Seuil plus bas
+                    console.log("✅ Extraction basique RAPIDE réussie");
                     copy(longestText);
                     return true;
                 }
 
-                console.log("❌ Extraction basique échouée");
                 copy("NO_CONTENT");
                 return false;
             })();
             '''
 
-            if self._execute_js_with_proper_console(js_code):
+            if self._execute_js_optimized(js_code):
                 result = pyperclip.paste().strip()
-                if result != "NO_CONTENT" and len(result) > 20:
+                if result != "NO_CONTENT" and len(result) > 15:
                     self.extracted_response = result
-                    logger.info(f"✅ Extraction basique réussie: {len(result)} caractères")
+                    logger.info(f"✅ Extraction basique RAPIDE réussie: {len(result)} caractères")
                     return True
 
             return False
 
         except Exception as e:
-            logger.debug(f"Erreur extraction basique: {e}")
+            logger.debug(f"Erreur extraction basique rapide: {e}")
             return False
 
     def _handle_automation_success(self):
         """Gestion succès final"""
         duration = time.time() - self.start_time
-        logger.info(f"🎉 AUTOMATISATION RÉUSSIE en {duration:.1f}s")
+        logger.info(f"🎉 AUTOMATISATION OPTIMISÉE RÉUSSIE en {duration:.1f}s")
 
         self.is_running = False
         self.automation_completed.emit(True, f"Test réussi en {duration:.1f}s", duration, self.extracted_response)
@@ -621,17 +567,21 @@ class StateBasedAutomation(QObject):
         self.automation_failed.emit("automation_error", error_message)
 
     def stop_automation(self):
-        """Arrêt"""
-        logger.info("🛑 ARRÊT AUTOMATISATION")
+        """Arrêt RAPIDE"""
+        logger.info("🛑 ARRÊT AUTOMATISATION RAPIDE")
 
         self.force_stop = True
         self.is_running = False
 
-        # Nettoyer - fermer console si ouverte
+        # Nettoyer console RAPIDE
         try:
+            from config.console_shortcuts import close_console_for_browser
             close_console_for_browser(self.browser_type, self.keyboard_controller)
         except:
-            pass
+            try:
+                self.keyboard_controller.press_key('f12')
+            except:
+                pass
 
         # Réinitialiser
         if hasattr(self.conductor, 'browser_already_active'):

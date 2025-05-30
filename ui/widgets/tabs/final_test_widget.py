@@ -2,13 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-ui/widgets/tabs/final_test_widget.py - VERSION CORRIGÉE
+ui/widgets/tabs/final_test_widget.py - VERSION CORRIGÉE FINALE
 
 CORRECTIONS PRINCIPALES :
 - Détection du navigateur depuis la configuration
 - Passage du type de navigateur au state_automation
-- Import correct du module time pour EmergencyStopOverlay
-- Simplification de la logique
+- Gestion optionnelle de la configuration clavier (pour éviter les crashes)
+- Focus navigateur amélioré pour éviter les changements de fenêtre
+- Interface préservée et fonctionnelle
+- Bouton stop opérationnel
 """
 
 import time
@@ -27,17 +29,22 @@ from ui.widgets.emergency_stop_overlay import EmergencyStopOverlay
 
 
 class FinalTestWidget(QtWidgets.QWidget):
-    """Widget test final - VERSION CORRIGÉE avec détection navigateur"""
+    """Widget test final - VERSION CORRIGÉE avec détection navigateur et focus amélioré"""
 
     # Signaux
     test_completed = pyqtSignal(str, bool, str)  # Plateforme, succès, message
     response_received = pyqtSignal(str, str)  # Plateforme, réponse
     detection_config_saved = pyqtSignal(str, dict)  # Plateforme, config
 
-    def __init__(self, config_provider, conductor, parent=None):
+    def __init__(self, config_provider, conductor, keyboard_config_widget=None, parent=None):
         super().__init__(parent)
         self.config_provider = config_provider
         self.conductor = conductor
+
+        # Configuration clavier optionnelle (pour éviter les crashes)
+        self.keyboard_config_widget = keyboard_config_widget
+        self.keyboard_config = {}
+
         self.current_platform = None
         self.profiles = {}
         self.current_profile = None
@@ -58,6 +65,16 @@ class FinalTestWidget(QtWidgets.QWidget):
 
         # Connecter le signal d'arrêt d'urgence
         self.emergency_overlay.emergency_stop_requested.connect(self._on_emergency_stop_from_overlay)
+
+        # Connecter la configuration clavier si disponible
+        if self.keyboard_config_widget:
+            try:
+                self.keyboard_config_widget.keyboard_configured.connect(self._update_keyboard_config)
+                # Initialiser la configuration clavier
+                self._update_keyboard_config(self.keyboard_config_widget._get_current_config())
+            except Exception as e:
+                logger.warning(f"Impossible de connecter la configuration clavier: {e}")
+                self.keyboard_config_widget = None
 
         self._init_ui()
 
@@ -90,6 +107,13 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.browser_status = QtWidgets.QLabel("Navigateur: Non détecté")
         self.browser_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
         platform_layout.addWidget(self.browser_status)
+
+        # Affichage de l'état de la protection Alt+Tab (si config clavier disponible)
+        if self.keyboard_config_widget:
+            self.alt_tab_status = QtWidgets.QLabel("Protection Alt+Tab: Non configurée")
+            self.alt_tab_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
+            platform_layout.addWidget(self.alt_tab_status)
+            self._update_alt_tab_status()
 
         left_layout.addWidget(platform_group)
 
@@ -309,6 +333,40 @@ class FinalTestWidget(QtWidgets.QWidget):
 
         main_layout.addWidget(left_widget)
         main_layout.addWidget(right_widget, 1)
+
+    # ==============================
+    # GESTION CONFIGURATION CLAVIER (OPTIONNELLE)
+    # ==============================
+
+    def _update_keyboard_config(self, config):
+        """Met à jour la configuration clavier et l'applique (si disponible)"""
+        if not config:
+            return
+
+        self.keyboard_config = config
+        logger.info(f"Configuration clavier mise à jour: {json.dumps(config, indent=2)}")
+
+        # Appliquer au state_automation
+        if hasattr(self.conductor, 'state_automation') and self.conductor.state_automation:
+            if hasattr(self.conductor.state_automation, 'keyboard_controller'):
+                self.conductor.state_automation.keyboard_controller.update_config(config)
+                logger.info("Configuration clavier appliquée à state_automation.keyboard_controller")
+
+        # Mettre à jour l'affichage si le widget est disponible
+        if hasattr(self, 'alt_tab_status'):
+            self._update_alt_tab_status()
+
+    def _update_alt_tab_status(self):
+        """Met à jour l'affichage de l'état de la protection Alt+Tab"""
+        if not hasattr(self, 'alt_tab_status'):
+            return
+
+        if self.keyboard_config.get('block_alt_tab', False):
+            self.alt_tab_status.setText("Protection Alt+Tab: Activée")
+            self.alt_tab_status.setStyleSheet("color: #28a745; font-size: 10px; margin-top: 5px; font-weight: bold;")
+        else:
+            self.alt_tab_status.setText("Protection Alt+Tab: Désactivée")
+            self.alt_tab_status.setStyleSheet("color: #dc3545; font-size: 10px; margin-top: 5px; font-weight: bold;")
 
     # ==============================
     # DÉTECTION DU NAVIGATEUR
@@ -617,11 +675,11 @@ class FinalTestWidget(QtWidgets.QWidget):
             return 'Générique'
 
     # ==============================
-    # TEST FINAL AVEC NAVIGATEUR
+    # TEST FINAL AVEC NAVIGATEUR ET FOCUS AMÉLIORÉ
     # ==============================
 
     def _start_final_test(self):
-        """Test final avec détection du navigateur"""
+        """Test final avec détection du navigateur et gestion du focus améliorée"""
         # Vérifications de base
         if not self.current_platform:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Sélectionnez d'abord une plateforme")
@@ -633,6 +691,16 @@ class FinalTestWidget(QtWidgets.QWidget):
 
         if self.test_running:
             return
+
+        # Vérifier la protection Alt+Tab si disponible
+        if self.keyboard_config_widget and not self.keyboard_config.get('block_alt_tab', False):
+            reply = QtWidgets.QMessageBox.warning(
+                self, "Avertissement",
+                "La protection Alt+Tab est désactivée. Activez-la dans la configuration clavier pour éviter les changements de fenêtre.\n\nContinuer quand même ?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+            )
+            if reply == QtWidgets.QMessageBox.No:
+                return
 
         # Récupérer la config à utiliser
         detection_config = self.temp_detection_config or self.current_profile.get('detection_config', {})
@@ -652,7 +720,7 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.test_running = True
         self._update_test_button_state()
 
-        # Interface
+        # Interface - Montrer le bouton stop
         self.start_final_test_btn.setVisible(False)
         self.stop_test_btn.setVisible(True)
 
@@ -669,6 +737,9 @@ class FinalTestWidget(QtWidgets.QWidget):
         logger.info(f"Début test pour {self.current_platform} avec navigateur {self.detected_browser_type}")
 
         try:
+            # S'assurer du focus sur le navigateur AVANT le test
+            self._ensure_browser_focus_advanced()
+
             # Appel au conductor avec le type de navigateur
             if hasattr(self.conductor, 'test_platform_connection_ultra_robust'):
                 test_message = self.final_test_prompt.text() or "Test de configuration"
@@ -680,6 +751,9 @@ class FinalTestWidget(QtWidgets.QWidget):
                     wait_for_response=12,
                     skip_browser=True
                 )
+
+                # Re-vérifier le focus après l'envoi du prompt (point critique)
+                self._ensure_browser_focus_advanced()
 
                 if result['success']:
                     response = result.get('response', '')
@@ -716,6 +790,84 @@ class FinalTestWidget(QtWidgets.QWidget):
             self._handle_test_error(str(e))
         finally:
             self._reset_test_buttons()
+
+    def _ensure_browser_focus_advanced(self):
+        """S'assure que le focus est sur le navigateur avec méthode avancée"""
+        try:
+            import pyautogui
+            import tkinter as tk
+
+            logger.info("🎯 Focus navigateur avancé - méthode anti-changement de fenêtre")
+
+            # Obtenir la taille de l'écran
+            try:
+                root = tk.Tk()
+                screen_width = root.winfo_screenwidth()
+                screen_height = root.winfo_screenheight()
+                root.destroy()
+            except:
+                screen_width = 1920
+                screen_height = 1080
+
+            # MÉTHODE 1: Clic dans une zone neutre du navigateur
+            # Zone centre-haute pour éviter les éléments interactifs
+            safe_x = screen_width // 2
+            safe_y = 150  # Assez bas pour éviter les onglets, assez haut pour éviter le contenu
+
+            logger.info(f"🖱️ Clic de focus sécurisé à ({safe_x}, {safe_y})")
+            pyautogui.click(safe_x, safe_y)
+            time.sleep(0.5)
+
+            # MÉTHODE 2: Double clic pour s'assurer du focus
+            pyautogui.click(safe_x, safe_y)
+            time.sleep(0.3)
+
+            # MÉTHODE 3: Utiliser pygetwindow si disponible pour forcer l'activation
+            try:
+                import pygetwindow as gw
+                all_windows = gw.getAllWindows()
+
+                # Chercher une fenêtre de navigateur correspondant au type détecté
+                browser_keywords = {
+                    'chrome': ['chrome', 'chromium'],
+                    'firefox': ['firefox', 'mozilla'],
+                    'edge': ['edge', 'microsoft edge'],
+                    'safari': ['safari'],
+                    'opera': ['opera'],
+                    'brave': ['brave']
+                }
+
+                keywords = browser_keywords.get(self.detected_browser_type.lower(), ['chrome', 'firefox', 'edge'])
+
+                for window in all_windows:
+                    window_title = window.title.lower()
+                    if any(keyword in window_title for keyword in keywords):
+                        try:
+                            window.activate()
+                            if not window.isMaximized:
+                                window.maximize()
+                            logger.info(f"✅ Fenêtre {self.detected_browser_type} activée: {window.title}")
+                            time.sleep(0.3)
+                            break
+                        except Exception as e:
+                            logger.debug(f"Erreur activation fenêtre: {e}")
+                            continue
+
+            except ImportError:
+                logger.debug("pygetwindow non disponible")
+            except Exception as e:
+                logger.debug(f"Erreur pygetwindow: {e}")
+
+            logger.info("✅ Focus navigateur avancé terminé")
+
+        except Exception as e:
+            logger.error(f"Erreur focus navigateur avancé: {e}")
+            # Fallback simple
+            try:
+                pyautogui.click(960, 300)
+                time.sleep(0.3)
+            except:
+                pass
 
     def _stop_test(self):
         """Arrêt du test"""
@@ -880,6 +1032,11 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.platform_status.setText("Sélectionnez une plateforme...")
         self.browser_status.setText("Navigateur: Non détecté")
         self.browser_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
+
+        if hasattr(self, 'alt_tab_status'):
+            self.alt_tab_status.setText("Protection Alt+Tab: Non configurée")
+            self.alt_tab_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
+
         self.detection_phase_status.setText("⏳ Collez le HTML de l'indicateur de fin")
         self.test_phase_status.setText("⏳ Sélectionnez une plateforme avec configuration")
         self.validation_status.setText("⏳ Effectuez d'abord le test")
@@ -933,3 +1090,8 @@ class FinalTestWidget(QtWidgets.QWidget):
     def refresh(self):
         """Rafraîchissement"""
         self.set_profiles(self.profiles)
+        if self.keyboard_config_widget:
+            try:
+                self._update_keyboard_config(self.keyboard_config_widget._get_current_config())
+            except Exception as e:
+                logger.warning(f"Erreur refresh config clavier: {e}")

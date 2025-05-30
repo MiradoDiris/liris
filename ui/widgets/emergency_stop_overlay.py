@@ -43,13 +43,22 @@ class EmergencyStopOverlay(QtWidgets.QWidget):
 
     def _setup_overlay_window(self):
         """Configure la fenêtre overlay avec taille augmentée pour le nouveau padding"""
-        # Flags pour overlay absolu
+        # Flags pour overlay absolu - IMPORTANT : un seul appel !
         self.setWindowFlags(
-            Qt.WindowStaysOnTopHint |  # Toujours au-dessus
-            Qt.FramelessWindowHint |  # Pas de barre de titre
-            Qt.Tool |  # Ne prend pas le focus
-            Qt.WindowDoesNotAcceptFocus  # N'accepte jamais le focus
+            Qt.WindowStaysOnTopHint |
+            Qt.FramelessWindowHint |
+            Qt.Tool
         )
+
+        # Attributs de fenêtre
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)  # Ajouter ceci
+
+        # Taille
+        self.setFixedSize(180, 110)
+
+        # S'assurer que la fenêtre ne vole pas le focus
+        self.setFocusPolicy(Qt.NoFocus)
 
         # Fond semi-transparent
         self.setAttribute(Qt.WA_TranslucentBackground)

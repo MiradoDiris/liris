@@ -15,6 +15,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from utils.logger import logger
 from utils.exceptions import ConfigurationError
 from ui.styles.platform_config_style import PlatformConfigStyle
+from ui.widgets.tabs.keyboard_config_widget import KeyboardConfigWidget
 from ui.widgets.tabs.browser_config_widget import BrowserConfigWidget
 from ui.widgets.tabs.prompt_field_widget import PromptFieldWidget
 from ui.widgets.tabs.response_area_widget import ResponseAreaWidget
@@ -134,11 +135,12 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
         help_steps = QtWidgets.QLabel(
             "Pour configurer correctement une plateforme d'IA, suivez cet ordre:<br>"
-            "1. Complétez les informations générales (nom, limites)<br>"
-            "2. Configurez le navigateur dans l'onglet correspondant<br>"
-            "3. Configurez le champ de prompt<br>"
-            "4. Configurez la zone de réponse<br>"
-            "5. Lancez le test final pour valider le tout<br>"
+            "1. Configurez d'abord le clavier (disposition, accents)<br>"
+            "2. Complétez les informations générales (nom, limites)<br>"
+            "3. Configurez le navigateur dans l'onglet correspondant<br>"
+            "4. Configurez le champ de prompt<br>"
+            "5. Configurez la zone de réponse<br>"
+            "6. Lancez le test final pour valider le tout<br>"
             "<br>Terminez en testant la connexion."
         )
         help_steps.setStyleSheet("padding: 12px; background-color: #E8F4F8; border-radius: 4px;")
@@ -269,33 +271,39 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
         # === CRÉATION DES ONGLETS ===
 
-        # Onglet 1: Configuration générale
+        # Onglet 1: Configuration du clavier (NOUVEAU - ÉTAPE 1)
+        self.keyboard_widget = KeyboardConfigWidget(self.config_provider, self.conductor)
+        self.keyboard_widget.keyboard_layout_changed.connect(self._on_keyboard_layout_changed)
+        self.keyboard_widget.keyboard_configured.connect(self._on_keyboard_configured)
+        self.tabs.addTab(self.keyboard_widget, "Configuration clavier")
+
+        # Onglet 2: Configuration générale
         general_tab = QtWidgets.QWidget()
         general_tab.setLayout(QtWidgets.QVBoxLayout())
         general_tab.layout().addWidget(content_widget)
         self.tabs.addTab(general_tab, "Configuration Générale")
 
-        # Onglet 2: Navigateur
+        # Onglet 3: Navigateur
         self.browser_widget = BrowserConfigWidget(self.config_provider, self.conductor)
         self.browser_widget.browser_saved.connect(self._on_browser_config_saved)
         self.browser_widget.browser_used.connect(self._on_browser_used)
         self.browser_widget.elements_detected.connect(self._on_elements_detected)
         self.tabs.addTab(self.browser_widget, "Gestion des navigateurs")
 
-        # Onglet 3: Champ de prompt
+        # Onglet 4: Champ de prompt
         self.prompt_field_widget = PromptFieldWidget(self.config_provider, self.conductor)
         self.prompt_field_widget.prompt_field_configured.connect(self._on_prompt_field_configured)
         self.prompt_field_widget.prompt_field_detected.connect(self._on_prompt_field_detected)
         self.tabs.addTab(self.prompt_field_widget, "Champ de prompt")
 
-        # Onglet 4: Zone de réponse
+        # Onglet 5: Zone de réponse
         self.response_area_widget = ResponseAreaWidget(self.config_provider, self.conductor)
         self.response_area_widget.response_area_configured.connect(self._on_response_area_configured)
         self.response_area_widget.response_area_detected.connect(self._on_response_area_detected)
         self.response_area_widget.response_received.connect(self._on_response_received)
         self.tabs.addTab(self.response_area_widget, "Zone de réponse")
 
-        # Onglet 5: Test final
+        # Onglet 6: Test final
         self.final_test_widget = FinalTestWidget(self.config_provider, self.conductor)
         self.final_test_widget.test_completed.connect(self._on_final_test_completed)
         self.tabs.addTab(self.final_test_widget, "Test final")
@@ -312,6 +320,17 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.tabs.raise_()
         self.platform_list.raise_()
         self.details_group.raise_()
+
+    def _on_keyboard_layout_changed(self, layout_name):
+        """Gère l'événement de changement de disposition clavier"""
+        print(f"DEBUG: Disposition clavier changée vers: {layout_name}")
+        # L'événement est global, pas spécifique à une plateforme
+        self._update_tab_status()
+
+    def _on_keyboard_configured(self, config):
+        """Gère l'événement de configuration du clavier"""
+        print(f"DEBUG: Configuration du clavier mise à jour: {config}")
+        self._update_tab_status()
 
     def _on_prompt_field_configured(self, platform_name, config):
         """Gère l'événement de configuration du champ de prompt"""
@@ -365,11 +384,13 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
         # Vérifier l'état de configuration de chaque onglet
         config_states = {
-            0: True,  # Config générale toujours configurée
-            1: 'browser' in profile and profile['browser'].get('url'),  # Navigateur configuré?
-            2: 'prompt_field' in interface_positions,  # Champ prompt configuré?
-            3: 'response_area' in interface_positions,  # Zone réponse configurée?
-            4: all([  # Test final disponible si tout est configuré
+            0: hasattr(self, 'keyboard_widget') and self.keyboard_widget.is_configured(),  # Clavier configuré?
+            1: True,  # Config générale toujours configurée
+            2: 'browser' in profile and profile['browser'].get('url'),  # Navigateur configuré?
+            3: 'prompt_field' in interface_positions,  # Champ prompt configuré?
+            4: 'response_area' in interface_positions,  # Zone réponse configurée?
+            5: all([  # Test final disponible si tout est configuré
+                hasattr(self, 'keyboard_widget') and self.keyboard_widget.is_configured(),
                 'browser' in profile and profile['browser'].get('url'),
                 'prompt_field' in interface_positions,
                 'response_area' in interface_positions
@@ -377,7 +398,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         }
 
         # Mettre à jour les titres des onglets en fonction de l'état
-        base_titles = ["Configuration Générale", "Gestion des navigateurs",
+        base_titles = ["Configuration clavier", "Configuration Générale", "Gestion des navigateurs",
                        "Champ de prompt", "Zone de réponse", "Test final"]
 
         for i, title in enumerate(base_titles):
@@ -457,10 +478,6 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             # Mettre à jour le widget de la zone de réponse avec les profils
             if hasattr(self, 'response_area_widget'):
                 self.response_area_widget.set_profiles(self.profiles)
-
-            # Mettre à jour le widget de test final avec les profils
-            if hasattr(self, 'final_test_widget'):
-                self.final_test_widget.set_profiles(self.profiles)
 
             # Mettre à jour le widget de test final avec les profils
             if hasattr(self, 'final_test_widget'):
@@ -933,7 +950,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.is_new_platform = True
         self.workflow_help.setVisible(True)
 
-        # Sélectionner le premier onglet (Informations générales)
+        # Sélectionner le premier onglet (Configuration clavier)
         self.tabs.setCurrentIndex(0)
 
         # Mettre à jour les indicateurs visuels
@@ -1091,16 +1108,16 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             self.is_new_platform = False
             self.workflow_help.setVisible(False)
 
-            # Si c'était une nouvelle plateforme, suggérer de configurer le navigateur
+            # Si c'était une nouvelle plateforme, suggérer de configurer le clavier d'abord
             if was_new:
                 QtWidgets.QMessageBox.information(
                     self,
                     "Enregistrement réussi",
                     f"La plateforme {name} a été créée. Vous devriez maintenant configurer "
-                    f"le navigateur dans l'onglet 'Gestion des navigateurs'."
+                    f"le clavier dans l'onglet 'Configuration clavier'."
                 )
-                # Passer automatiquement à l'onglet navigateur
-                self.tabs.setCurrentIndex(1)
+                # Passer automatiquement à l'onglet clavier
+                self.tabs.setCurrentIndex(0)
             else:
                 QtWidgets.QMessageBox.information(
                     self,
@@ -1301,7 +1318,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                     "Veuillez configurer l'URL du navigateur dans l'onglet Navigateur avant de tester la connexion."
                 )
                 # Passer automatiquement à l'onglet navigateur
-                self.tabs.setCurrentIndex(1)
+                self.tabs.setCurrentIndex(2)
                 return
 
             # Afficher un dialogue de progression
