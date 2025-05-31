@@ -2,13 +2,16 @@
 # -*- coding: utf-8 -*-
 
 """
-core/orchestration/state_automation.py - VERSION CORRIGÉE
+core/orchestration/state_automation.py - VERSION CORRIGÉE EXTRACTION
 
 Corrections principales:
 - Simple clic au lieu de double clic
 - Optimisation temps d'attente
 - Focus par clic sans changement de fenêtre
 - Gestion correcte console sans force_focus
+- 🎯 CORRECTION MAJEURE: Utilisation de extraction_config.response_area pour l'extraction
+- 🔧 CORRECTION FIREFOX: Ctrl+Entrée et récupération résultat console
+- 🎉 CORRECTION COPY: Utilisation copy() directe au lieu de text;
 """
 
 import time
@@ -347,7 +350,7 @@ class StateBasedAutomation(QObject):
             return 6  # Défaut plus court
 
     def _handle_response_extract_step(self):
-        """ÉTAPE 7: Extraction réponse OPTIMISÉE"""
+        """ÉTAPE 7: Extraction réponse OPTIMISÉE - VERSION CORRIGÉE COPY"""
         if self.force_stop:
             return False
 
@@ -357,73 +360,108 @@ class StateBasedAutomation(QObject):
         try:
             platform_name = self.platform_profile.get('name', '')
 
-            # Récupérer config d'extraction depuis le profil
+            # 🎯 CORRECTION MAJEURE: Récupérer config d'EXTRACTION (pas détection)
+            extraction_config = self._get_extraction_config_from_profile()
             detection_config = self.platform_profile.get('detection_config', {})
 
-            # Sélecteurs à tester
+            # Sélecteurs à tester POUR L'EXTRACTION
             selectors = []
-            if detection_config.get('primary_selector'):
-                selectors.append(detection_config['primary_selector'])
-            if detection_config.get('fallback_selectors'):
-                selectors.extend(detection_config['fallback_selectors'])
 
-            # Sélecteurs génériques fallback
-            selectors.extend([
-                '[data-message-author-role="assistant"]:last-child',
-                '.message:last-child',
-                '.ai-response:last-child',
-                '[role="assistant"]:last-child',
-                '.markdown:last-child',
-                'p:last-child'
-            ])
+            # PRIORITÉ 1: Config extraction depuis response_area
+            if extraction_config:
+                # 🎯 CORRECTION : Forcer les bons sélecteurs pour ChatGPT
+                if 'chatgpt' in platform_name.lower():
+                    logger.info("🔧 CORRECTION : Application sélecteurs ChatGPT optimisés")
+                    selectors.extend([
+                        'article[data-testid*="conversation-turn"] .markdown.prose',  # 🎯 PARFAIT
+                        'article[data-testid*="conversation-turn"] .markdown',
+                        '[data-message-author-role="assistant"] .markdown.prose',
+                        'article[data-testid*="conversation-turn"]:last-child .prose'
+                    ])
+                else:
+                    # Autres plateformes : utiliser config normale
+                    if extraction_config.get('primary_selector'):
+                        selectors.append(extraction_config['primary_selector'])
+                        logger.info(f"🎯 Sélecteur extraction principal: {extraction_config['primary_selector']}")
+
+                    if extraction_config.get('fallback_selectors'):
+                        selectors.extend(extraction_config['fallback_selectors'])
+                        logger.info(f"🎯 Sélecteurs extraction fallback: {extraction_config['fallback_selectors']}")
+
+            # PRIORITÉ 2: Fallback depuis detection_config (ancienne méthode)
+            elif detection_config:
+                logger.warning("⚠️ Pas de config extraction - utilisation detection_config en fallback")
+                if detection_config.get('primary_selector'):
+                    selectors.append(detection_config['primary_selector'])
+                if detection_config.get('fallback_selectors'):
+                    selectors.extend(detection_config['fallback_selectors'])
+
+            # PRIORITÉ 3: Sélecteurs génériques basés sur la plateforme
+            if 'chatgpt' in platform_name.lower():
+                # 🎯 UTILISER LES SÉLECTEURS QUI FONCTIONNENT (testés manuellement)
+                selectors.extend([
+                    'article[data-testid*="conversation-turn"] .markdown.prose',  # 🎯 PARFAIT - testé
+                    'article[data-testid*="conversation-turn"]:last-of-type',  # 🎯 TESTÉ - marche
+                    'article[data-testid="conversation-turn-2"]',  # 🎯 TESTÉ - marche
+                    'article[data-scroll-anchor="true"]',  # 🎯 TESTÉ - marche
+                    'article[data-testid*="conversation-turn"]',  # 🎯 TESTÉ - marche
+                    '[data-message-author-role="assistant"] .markdown.prose',
+                    '[data-start][data-end]'  # Fallback final
+                ])
+            else:
+                # Sélecteurs génériques pour autres plateformes
+                selectors.extend([
+                    '[data-message-author-role="assistant"]:last-child',
+                    '.message:last-child',
+                    '.ai-response:last-child',
+                    '[role="assistant"]:last-child',
+                    '.markdown:last-child',
+                    'p:last-child'
+                ])
 
             logger.info(f"🎯 EXTRACTION OPTIMISÉE avec sélecteurs: {selectors[:3]}...")
 
-            # JavaScript d'extraction OPTIMISÉ
+            # 🎉 JavaScript d'extraction COPY DIRECTE - VERSION CORRIGÉE
             js_code = f'''
-            (function() {{
-                let selectors = {json.dumps(selectors[:5])};
-                console.log("🔧 StateAutomation extraction OPTIMISÉE:", selectors);
+                        // 🎯 EXTRACTION COPY DIRECTE - MÉTHODE QUI MARCHE
+                        let selectors = {json.dumps(selectors[:5])};
 
-                for (let selector of selectors) {{
-                    try {{
-                        let elements = document.querySelectorAll(selector);
-                        console.log("🔍 Sélecteur", selector, "->", elements.length, "éléments");
+                        console.log("🔧 Extraction ChatGPT avec copy() directe...");
 
-                        if (elements.length > 0) {{
-                            let element = elements[elements.length - 1];
-                            let text = (element.textContent || element.innerText || '').trim();
+                        for (let selector of selectors) {{
+                            try {{
+                                let elements = document.querySelectorAll(selector);
+                                if (elements.length > 0) {{
+                                    let text = (elements[elements.length - 1].textContent || '').trim();
+                                    if (text.length > 15 && 
+                                        !text.includes('console.log') && 
+                                        !text.includes('function()') &&
+                                        !text.includes('🎯') &&
+                                        !text.includes('Échec')) {{
+                                        console.log("✅ Texte trouvé avec:", selector);
+                                        console.log("📏 Longueur:", text.length, "caractères");
 
-                            console.log("📝 Texte trouvé:", text.length, "caractères");
-
-                            if (text.length > 10 && 
-                                !text.toLowerCase().includes('send a message') &&
-                                !text.toLowerCase().includes('écrivez votre message')) {{
-
-                                console.log("✅ EXTRACTION OPTIMISÉE RÉUSSIE avec:", selector);
-                                copy(text);
-                                return true;
+                                        // 🎉 COPY DIRECTE dans presse-papiers
+                                        copy(text);
+                                        console.log("✅ LIRIS_COPY_SUCCESS");
+                                        break; // Sortir dès qu'on a trouvé
+                                    }}
+                                }}
+                            }} catch(e) {{ 
+                                console.log("❌ Erreur avec sélecteur:", selector, e.message);
+                                continue; 
                             }}
                         }}
-                    }} catch(e) {{
-                        console.log("⚠️ Erreur sélecteur", selector, ":", e.message);
-                        continue;
-                    }}
-                }}
 
-                console.log("❌ ÉCHEC extraction optimisée");
-                copy("EXTRACTION_FAILED");
-                return false;
-            }})();
-            '''
+                        console.log("🔧 Extraction terminée");
+                        '''
 
             if self._execute_js_optimized(js_code):
-                result = pyperclip.paste().strip()
-
-                if result != "EXTRACTION_FAILED" and len(result) > 10:
-                    self.extracted_response = result
-                    logger.info(f"✅ Réponse extraite RAPIDEMENT: {len(result)} caractères")
-                    logger.info(f"📝 Aperçu: {result[:150]}..." if len(result) > 150 else f"📝 Texte: {result}")
+                # Vérifier que l'extraction copy() a fonctionné
+                if self.extracted_response and len(self.extracted_response) > 15:
+                    logger.info(f"✅ Réponse extraite via COPY: {len(self.extracted_response)} caractères")
+                    logger.info(f"📝 Aperçu: {self.extracted_response[:150]}..." if len(
+                        self.extracted_response) > 150 else f"📝 Texte: {self.extracted_response}")
                     return True
 
             # Fallback extraction basique RAPIDE
@@ -438,8 +476,37 @@ class StateBasedAutomation(QObject):
             self._handle_automation_failure(f"Erreur extraction: {str(e)}")
             return False
 
+    def _get_extraction_config_from_profile(self):
+        """🎯 NOUVELLE MÉTHODE: Récupère la config d'extraction depuis response_area"""
+        try:
+            # Chemin: platform_profile['extraction_config']['response_area']['platform_config']
+            extraction_config = self.platform_profile.get('extraction_config', {})
+            if not extraction_config:
+                logger.debug("Pas de extraction_config dans le profil")
+                return None
+
+            response_area = extraction_config.get('response_area', {})
+            if not response_area:
+                logger.debug("Pas de response_area dans extraction_config")
+                return None
+
+            platform_config = response_area.get('platform_config', {})
+            if not platform_config:
+                logger.debug("Pas de platform_config dans response_area")
+                return None
+
+            logger.info("✅ Configuration extraction trouvée depuis response_area")
+            logger.info(f"   Sélecteur principal: {platform_config.get('primary_selector', 'N/A')}")
+            logger.info(f"   Méthode: {platform_config.get('extraction_method', 'N/A')}")
+
+            return platform_config
+
+        except Exception as e:
+            logger.error(f"Erreur récupération config extraction: {e}")
+            return None
+
     def _execute_js_optimized(self, js_code):
-        """Exécution JavaScript OPTIMISÉE sans changement de fenêtre"""
+        """Exécution JavaScript OPTIMISÉE avec copy() directe"""
         try:
             # Focus minimal sans changement de fenêtre
             logger.info("🖱️ Focus minimal avant console")
@@ -484,15 +551,59 @@ class StateBasedAutomation(QObject):
             # Nettoyer et exécuter RAPIDE
             pyperclip.copy("console.clear();")
             self.keyboard_controller.hotkey('ctrl', 'v')
-            self.keyboard_controller.press_key('enter')
+
+            # 🎯 CORRECTION : Ctrl+Entrée pour Firefox
+            if self.browser_type == 'firefox':
+                self.keyboard_controller.hotkey('ctrl', 'enter')
+            else:
+                self.keyboard_controller.press_key('enter')
             time.sleep(0.1)
 
             pyperclip.copy(js_code)
             self.keyboard_controller.hotkey('ctrl', 'v')
-            self.keyboard_controller.press_key('enter')
-            time.sleep(0.3)  # Plus rapide
 
-            # Fermer console RAPIDE
+            # 🎯 CORRECTION : Ctrl+Entrée pour Firefox
+            if self.browser_type == 'firefox':
+                self.keyboard_controller.hotkey('ctrl', 'enter')
+            else:
+                self.keyboard_controller.press_key('enter')
+            time.sleep(0.5)  # Attendre exécution et copy()
+
+            # 🎯 NOUVELLE MÉTHODE : RÉCUPÉRATION DIRECTE via copy()
+            logger.info("🎯 Récupération directe via copy() - pas de parsing console")
+
+            # Attendre que le copy() JavaScript soit effectué
+            time.sleep(0.3)
+
+            # Récupérer directement depuis le presse-papiers
+            result = pyperclip.paste().strip()
+
+            # Vérifier que c'est valide
+            if result and len(result) > 15:
+                # Vérification anti-JavaScript
+                if not any(keyword in result.lower() for keyword in
+                           ['function()', 'console.log', 'document.query', 'let ', 'const ', '🎯', 'console.clear']):
+                    logger.info(f"✅ Extraction copy() réussie: {len(result)} caractères")
+                    logger.info(f"📝 Aperçu: {result[:100]}..." if len(result) > 100 else f"📝 Texte: {result}")
+
+                    # 🎉 STOCKER DANS extracted_response
+                    self.extracted_response = result
+
+                    # Fermer console RAPIDE
+                    try:
+                        from config.console_shortcuts import close_console_for_browser
+                        close_console_for_browser(self.browser_type, self.keyboard_controller)
+                    except:
+                        self.keyboard_controller.press_key('f12')
+
+                    time.sleep(0.1)
+                    return True
+                else:
+                    logger.warning(f"⚠️ Contenu suspect détecté dans copy(): {result[:50]}...")
+            else:
+                logger.warning(f"⚠️ Copy() vide ou trop court: {len(result)} caractères")
+
+            # Fermer console même en cas d'échec
             try:
                 from config.console_shortcuts import close_console_for_browser
                 close_console_for_browser(self.browser_type, self.keyboard_controller)
@@ -500,7 +611,7 @@ class StateBasedAutomation(QObject):
                 self.keyboard_controller.press_key('f12')
 
             time.sleep(0.1)
-            return True
+            return False
 
         except Exception as e:
             logger.error(f"Erreur JS optimisé: {e}")
@@ -511,37 +622,51 @@ class StateBasedAutomation(QObject):
             return False
 
     def _extract_basic_response_fast(self):
-        """Extraction basique RAPIDE de secours"""
+        """Extraction basique RAPIDE de secours avec COPY"""
         try:
+            # 🎉 JavaScript COPY pour fallback
             js_code = '''
-            (function() {
-                console.log("🔧 Extraction basique RAPIDE...");
-                let elements = document.querySelectorAll('p, div, span');
-                let longestText = '';
+            // 🎯 MÉTHODE COPY DIRECTE pour ChatGPT - FALLBACK
+            let chatgptSelectors = [
+                'article[data-testid*="conversation-turn"] .markdown.prose',
+                'article[data-testid*="conversation-turn"]:last-of-type', 
+                'article[data-scroll-anchor="true"]',
+                'article[data-testid*="conversation-turn"]'
+            ];
 
-                for (let el of elements) {
-                    let text = (el.textContent || '').trim();
-                    if (text.length > longestText.length && text.length > 15) {  // Seuil plus bas
-                        longestText = text;
+            console.log("🔧 Extraction ChatGPT fallback avec copy()...");
+
+            for (let selector of chatgptSelectors) {
+                try {
+                    let elements = document.querySelectorAll(selector);
+                    if (elements.length > 0) {
+                        let text = (elements[elements.length - 1].textContent || '').trim();
+                        if (text.length > 15 && 
+                            !text.includes('function()') && 
+                            !text.includes('console.log') &&
+                            !text.includes('🎯')) {
+                            console.log("✅ Fallback trouvé avec:", selector);
+                            console.log("📏 Longueur:", text.length, "caractères");
+
+                            // 🎉 COPY DIRECTE dans presse-papiers
+                            copy(text);
+                            console.log("✅ LIRIS_FALLBACK_COPY_SUCCESS");
+                            break; // Sortir dès qu'on a trouvé
+                        }
                     }
+                } catch(e) { 
+                    console.log("❌ Erreur fallback:", selector, e.message);
+                    continue; 
                 }
+            }
 
-                if (longestText.length > 15) {  // Seuil plus bas
-                    console.log("✅ Extraction basique RAPIDE réussie");
-                    copy(longestText);
-                    return true;
-                }
-
-                copy("NO_CONTENT");
-                return false;
-            })();
+            console.log("🔧 Extraction fallback terminée");
             '''
 
             if self._execute_js_optimized(js_code):
-                result = pyperclip.paste().strip()
-                if result != "NO_CONTENT" and len(result) > 15:
-                    self.extracted_response = result
-                    logger.info(f"✅ Extraction basique RAPIDE réussie: {len(result)} caractères")
+                # Vérifier que le copy() fallback a fonctionné
+                if self.extracted_response and len(self.extracted_response) > 15:
+                    logger.info(f"✅ Extraction fallback COPY réussie: {len(self.extracted_response)} caractères")
                     return True
 
             return False

@@ -15,6 +15,7 @@ import time
 import queue
 import os
 import json
+import random
 import pyautogui
 import pyperclip
 from datetime import datetime
@@ -30,8 +31,19 @@ except ImportError:
     HAS_PYGETWINDOW = False
 
 
+def random_sleep(base_time, min_variance=0.05, max_variance=0.20):
+    """Sleep avec variation aléatoire de +/- 5-20%"""
+    variance = random.uniform(min_variance, max_variance)
+    if random.choice([True, False]):
+        actual_time = base_time * (1 + variance)
+    else:
+        actual_time = base_time * (1 - variance)
+    time.sleep(max(0.1, actual_time))  # Minimum 0.1s
+    return actual_time
+
+
 class AIConductor:
-    """Chef d'orchestre FINAL - ANTI-CHANGEMENT FENÊTRE"""
+    """Chef d'orchestre FINAL - ANTI-CHANGEMENT FENÊTRE avec timing aléatoire"""
 
     def __init__(self, config_provider, scheduler, database=None):
         """Initialise le chef d'orchestre"""
@@ -313,7 +325,7 @@ class AIConductor:
             }
 
     def _handle_browser_skip(self, browser_config):
-        """Gestion navigateur en mode skip"""
+        """Gestion navigateur en mode skip avec timing aléatoire"""
         browser_found = False
         platform_url = browser_config.get('url', '')
 
@@ -356,7 +368,8 @@ class AIConductor:
                     cmd = f'start "{platform_url}"'
 
                 os.system(cmd)
-                time.sleep(2)
+                # CORRECTION: Réduire l'attente après ouverture d'onglet
+                random_sleep(1.5, 0.10, 0.20)  # Plus court avec variation
                 logger.info("✅ URL de la plateforme ouverte dans nouvel onglet")
             except Exception as e:
                 logger.error(f"❌ Erreur ouverture URL: {e}")
@@ -376,7 +389,7 @@ class AIConductor:
             return {'detected': False, 'duration': max_wait_time, 'error': str(e)}
 
     def _wait_for_ai_generation_simple_safe(self, platform_name, max_wait_time):
-        """Surveillance IA SANS CHANGEMENT DE FENÊTRE"""
+        """Surveillance IA SANS CHANGEMENT DE FENÊTRE avec timing aléatoire"""
         logger.info(f"🔍 Surveillance IA SAFE pour {platform_name} (max {max_wait_time}s)")
 
         try:
@@ -390,7 +403,7 @@ class AIConductor:
 
             if not console_opened:
                 logger.warning("Console JavaScript non disponible - délai fixe SANS changement fenêtre")
-                time.sleep(max_wait_time)
+                random_sleep(max_wait_time)
                 return {'detected': False, 'duration': max_wait_time, 'method': 'fallback_timeout_safe'}
 
             # Récupérer la config personnalisée
@@ -417,7 +430,7 @@ class AIConductor:
 
             logger.info(f"JavaScript de détection injecté pour {platform_name}")
 
-            # Surveillance
+            # Surveillance avec timing aléatoire
             while time.time() - start_time < max_wait_time:
                 # Récupérer les logs console
                 self.keyboard_controller.hotkey('ctrl', 'a')
@@ -448,7 +461,7 @@ class AIConductor:
                     logger.info(f"🔍 Surveillance... {remaining:.0f}s restantes")
                     last_log_time = elapsed
 
-                time.sleep(0.3)  # Plus réactif
+                random_sleep(0.3, 0.05, 0.15)  # Timing aléatoire pour surveillance
 
             self._close_console_javascript_safe()
             elapsed = time.time() - start_time
@@ -679,7 +692,7 @@ class AIConductor:
             return 'chrome'
 
     def _open_console_javascript_safe(self):
-        """Ouverture console JavaScript SANS CHANGEMENT DE FENÊTRE"""
+        """Ouverture console JavaScript SANS CHANGEMENT DE FENÊTRE avec timing aléatoire"""
         try:
             logger.info("🔧 Ouverture console JavaScript SAFE...")
 
@@ -694,6 +707,7 @@ class AIConductor:
                 success = open_console_for_browser(browser_type, self.keyboard_controller)
                 if success:
                     logger.info("✅ Console JavaScript ouverte SAFE via console_shortcuts")
+                    random_sleep(0.8, 0.05, 0.15)  # Timing aléatoire
                     return True
             except ImportError:
                 logger.warning("Module console_shortcuts non disponible, utilisation méthode legacy")
@@ -705,25 +719,25 @@ class AIConductor:
             if browser_type == 'firefox':
                 logger.info("Tentative Firefox SAFE: Ctrl+Shift+K")
                 self.keyboard_controller.hotkey('ctrl', 'shift', 'k')
-                time.sleep(0.8)  # Plus rapide
+                random_sleep(0.8, 0.05, 0.15)  # Timing aléatoire
                 success = True
             elif browser_type in ['chrome', 'edge']:
                 logger.info(f"Tentative {browser_type} SAFE: Ctrl+Shift+J")
                 self.keyboard_controller.hotkey('ctrl', 'shift', 'j')
-                time.sleep(0.8)  # Plus rapide
+                random_sleep(0.8, 0.05, 0.15)  # Timing aléatoire
                 success = True
             else:
                 logger.info("Fallback F12 SAFE")
                 self.keyboard_controller.press_key('f12')
-                time.sleep(0.6)  # Plus rapide
+                random_sleep(0.6, 0.05, 0.15)  # Timing aléatoire
                 success = True
 
             if success:
-                # Nettoyer la console
+                # Nettoyer la console avec timing aléatoire
                 pyperclip.copy("console.clear();")
                 self.keyboard_controller.hotkey('ctrl', 'v')
                 self.keyboard_controller.press_key('enter')
-                time.sleep(0.2)  # Plus rapide
+                random_sleep(0.2, 0.05, 0.15)  # Timing aléatoire
 
                 logger.info("✅ Console JavaScript ouverte SAFE")
                 return True
@@ -736,7 +750,7 @@ class AIConductor:
             return False
 
     def _close_console_javascript_safe(self):
-        """Fermeture console JavaScript SAFE"""
+        """Fermeture console JavaScript SAFE avec timing aléatoire"""
         try:
             # Utiliser le module console_shortcuts
             try:
@@ -747,7 +761,7 @@ class AIConductor:
             except ImportError:
                 # Fallback
                 self.keyboard_controller.press_key('f12')
-                time.sleep(0.2)
+                random_sleep(0.2, 0.05, 0.15)  # Timing aléatoire
                 logger.debug("Console JavaScript fermée SAFE")
         except Exception as e:
             logger.debug(f"Erreur fermeture console SAFE: {e}")

@@ -2,15 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-ui/widgets/tabs/final_test_widget.py - VERSION CORRIGÉE FINALE
+ui/widgets/tabs/final_test_widget.py - VERSION SYNCHRONISATION CORRIGÉE
 
 CORRECTIONS PRINCIPALES :
-- Détection du navigateur depuis la configuration
-- Passage du type de navigateur au state_automation
-- Gestion optionnelle de la configuration clavier (pour éviter les crashes)
-- Focus navigateur amélioré pour éviter les changements de fenêtre
-- Interface préservée et fonctionnelle
-- Bouton stop opérationnel
+- Synchronisation avec Response Area Widget
+- Chargement depuis extraction_config.response_area
+- Création automatique de detection_config
+- Rechargement forcé depuis base de données
+- Focus navigateur amélioré
 """
 
 import time
@@ -29,7 +28,7 @@ from ui.widgets.emergency_stop_overlay import EmergencyStopOverlay
 
 
 class FinalTestWidget(QtWidgets.QWidget):
-    """Widget test final - VERSION CORRIGÉE avec détection navigateur et focus amélioré"""
+    """Widget test final - VERSION SYNCHRONISATION CORRIGÉE"""
 
     # Signaux
     test_completed = pyqtSignal(str, bool, str)  # Plateforme, succès, message
@@ -41,7 +40,7 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.config_provider = config_provider
         self.conductor = conductor
 
-        # Configuration clavier optionnelle (pour éviter les crashes)
+        # Configuration clavier optionnelle
         self.keyboard_config_widget = keyboard_config_widget
         self.keyboard_config = {}
 
@@ -49,13 +48,13 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.profiles = {}
         self.current_profile = None
 
-        # États SIMPLIFIÉS
+        # États
         self.test_running = False
         self.temp_detection_config = {}
         self.temp_test_result = ""
 
         # Type de navigateur détecté
-        self.detected_browser_type = "chrome"  # Par défaut
+        self.detected_browser_type = "chrome"
 
         # Bouton overlay STOP
         self.emergency_overlay = EmergencyStopOverlay(
@@ -63,14 +62,13 @@ class FinalTestWidget(QtWidgets.QWidget):
             state_automation=getattr(conductor, 'state_automation', None)
         )
 
-        # Connecter le signal d'arrêt d'urgence
+        # Connecter signaux
         self.emergency_overlay.emergency_stop_requested.connect(self._on_emergency_stop_from_overlay)
 
-        # Connecter la configuration clavier si disponible
+        # Connecter configuration clavier si disponible
         if self.keyboard_config_widget:
             try:
                 self.keyboard_config_widget.keyboard_configured.connect(self._update_keyboard_config)
-                # Initialiser la configuration clavier
                 self._update_keyboard_config(self.keyboard_config_widget._get_current_config())
             except Exception as e:
                 logger.warning(f"Impossible de connecter la configuration clavier: {e}")
@@ -79,7 +77,7 @@ class FinalTestWidget(QtWidgets.QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        """Interface simplifiée"""
+        """Interface utilisateur"""
         main_layout = QtWidgets.QHBoxLayout(self)
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -108,7 +106,12 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.browser_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
         platform_layout.addWidget(self.browser_status)
 
-        # Affichage de l'état de la protection Alt+Tab (si config clavier disponible)
+        # Affichage synchronisation
+        self.sync_status = QtWidgets.QLabel("Synchronisation: En attente")
+        self.sync_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
+        platform_layout.addWidget(self.sync_status)
+
+        # Affichage protection Alt+Tab si disponible
         if self.keyboard_config_widget:
             self.alt_tab_status = QtWidgets.QLabel("Protection Alt+Tab: Non configurée")
             self.alt_tab_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
@@ -122,13 +125,30 @@ class FinalTestWidget(QtWidgets.QWidget):
         config_status_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         config_status_layout = QtWidgets.QVBoxLayout(config_status_group)
 
-        self.detection_phase_status = QtWidgets.QLabel("⏳ Collez le HTML de l'indicateur de fin")
+        self.detection_phase_status = QtWidgets.QLabel("⏳ Chargement depuis Response Area...")
         self.detection_phase_status.setWordWrap(True)
         config_status_layout.addWidget(self.detection_phase_status)
 
+        # Bouton de rechargement forcé
+        self.force_reload_btn = QtWidgets.QPushButton("🔄 Recharger Config")
+        self.force_reload_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6f42c1;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 10px;
+            }
+            QPushButton:hover { background-color: #5a2e9c; }
+        """)
+        self.force_reload_btn.clicked.connect(self._force_reload_from_database)
+        config_status_layout.addWidget(self.force_reload_btn)
+
         left_layout.addWidget(config_status_group)
 
-        # === 3. Test Final SIMPLIFIÉ ===
+        # === 3. Test Final ===
         test_actions_group = QtWidgets.QGroupBox("🚀 Test Final")
         test_actions_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         test_actions_layout = QtWidgets.QVBoxLayout(test_actions_group)
@@ -179,7 +199,7 @@ class FinalTestWidget(QtWidgets.QWidget):
         test_actions_layout.addWidget(self.stop_test_btn)
 
         # Statut test
-        self.test_phase_status = QtWidgets.QLabel("⏳ Sélectionnez une plateforme avec configuration")
+        self.test_phase_status = QtWidgets.QLabel("⏳ Sélectionnez une plateforme configurée")
         self.test_phase_status.setWordWrap(True)
         test_actions_layout.addWidget(self.test_phase_status)
 
@@ -239,72 +259,60 @@ class FinalTestWidget(QtWidgets.QWidget):
 
         # Instructions
         header = QtWidgets.QLabel(
-            "<b>🎯 Configuration Détection Fin IA</b><br>"
-            "<b style='color: #007bff;'>Le Conductor gère automatiquement : navigateur + automation + extraction</b><br>"
-            "<b style='color: #28a745;'>✅ WORKFLOW SIMPLIFIÉ : Générer sélecteurs → Tester immédiatement</b>"
+            "<b>🎯 Test Final avec Synchronisation Automatique</b><br>"
+            "<b style='color: #007bff;'>⚡ Auto-sync avec Response Area Widget</b><br>"
+            "<b style='color: #28a745;'>✅ Détection + Extraction unifiées</b>"
         )
         header.setWordWrap(True)
         header.setStyleSheet(PlatformConfigStyle.get_explanation_style())
         right_layout.addWidget(header)
 
-        # Configuration détection via HTML
-        detection_config_group = QtWidgets.QGroupBox("🔍 Configuration Détection")
-        detection_config_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
-        detection_config_layout = QtWidgets.QVBoxLayout(detection_config_group)
+        # Configuration synchronisée
+        sync_config_group = QtWidgets.QGroupBox("🔄 Configuration Synchronisée")
+        sync_config_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
+        sync_config_layout = QtWidgets.QVBoxLayout(sync_config_group)
 
-        detection_instructions = QtWidgets.QLabel(
-            "<b>Instructions :</b><br>"
-            "1. 💬 Envoyez un message sur votre plateforme IA<br>"
-            "2. ⏳ Attendez la fin complète de la réponse<br>"
-            "3. 🔧 F12 → Clic droit sur l'indicateur de fin → Inspecter<br>"
-            "4. 📋 Clic droit → Copy → Copy outerHTML<br>"
-            "5. 📥 Collez ci-dessous → Test immédiatement disponible !"
+        sync_instructions = QtWidgets.QLabel(
+            "<b>🔄 SYNCHRONISATION AUTOMATIQUE :</b><br>"
+            "• Récupère automatiquement depuis Response Area Widget<br>"
+            "• Crée les sélecteurs de détection appropriés<br>"
+            "• Utilise les sélecteurs d'extraction configurés<br>"
+            "• Pas besoin de configuration manuelle !<br>"
+            "<b style='color: #dc3545;'>⚠️ Si pas synchronisé : cliquez 'Recharger Config'</b>"
         )
-        detection_instructions.setWordWrap(True)
-        detection_instructions.setStyleSheet("color: #2196F3; font-size: 10px; margin-bottom: 10px;")
-        detection_config_layout.addWidget(detection_instructions)
+        sync_instructions.setWordWrap(True)
+        sync_instructions.setStyleSheet("color: #2196F3; font-size: 10px; margin-bottom: 10px;")
+        sync_config_layout.addWidget(sync_instructions)
 
-        self.detection_html_input = QtWidgets.QTextEdit()
-        self.detection_html_input.setPlaceholderText(
-            "Collez ici le HTML de l'indicateur de fin (génération automatique des sélecteurs)...")
-        self.detection_html_input.setMaximumHeight(100)
-        self.detection_html_input.textChanged.connect(self._on_detection_html_changed)
-        detection_config_layout.addWidget(self.detection_html_input)
+        # Affichage config détection
+        detection_label = QtWidgets.QLabel("🎯 Configuration Détection :")
+        detection_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        sync_config_layout.addWidget(detection_label)
 
-        detection_selectors_label = QtWidgets.QLabel("🎯 Sélecteurs de détection générés :")
-        detection_selectors_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
-        detection_config_layout.addWidget(detection_selectors_label)
-
-        self.detection_selectors_display = QtWidgets.QTextEdit()
-        self.detection_selectors_display.setMaximumHeight(80)
-        self.detection_selectors_display.setReadOnly(True)
-        self.detection_selectors_display.setStyleSheet(
+        self.detection_config_display = QtWidgets.QTextEdit()
+        self.detection_config_display.setMaximumHeight(100)
+        self.detection_config_display.setReadOnly(True)
+        self.detection_config_display.setStyleSheet(
             "background-color: #f8f8f8; border: 1px solid #ddd; font-family: 'Consolas', monospace; font-size: 10px;"
         )
-        self.detection_selectors_display.setPlaceholderText("Les sélecteurs de détection apparaîtront ici...")
-        detection_config_layout.addWidget(self.detection_selectors_display)
+        self.detection_config_display.setPlaceholderText("Configuration détection automatique apparaîtra ici...")
+        sync_config_layout.addWidget(self.detection_config_display)
 
-        # Bouton sauvegarde (optionnel)
-        self.save_selectors_btn = QtWidgets.QPushButton("💾 Sauvegarder Sélecteurs")
-        self.save_selectors_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #17a2b8;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 10px 20px;
-                font-weight: bold;
-                font-size: 12px;
-                margin-top: 8px;
-            }
-            QPushButton:hover { background-color: #138496; }
-            QPushButton:disabled { background-color: #6c757d; }
-        """)
-        self.save_selectors_btn.clicked.connect(self._save_selectors_to_database)
-        self.save_selectors_btn.setEnabled(False)
-        detection_config_layout.addWidget(self.save_selectors_btn)
+        # Affichage config extraction
+        extraction_label = QtWidgets.QLabel("📄 Configuration Extraction :")
+        extraction_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        sync_config_layout.addWidget(extraction_label)
 
-        right_layout.addWidget(detection_config_group)
+        self.extraction_config_display = QtWidgets.QTextEdit()
+        self.extraction_config_display.setMaximumHeight(80)
+        self.extraction_config_display.setReadOnly(True)
+        self.extraction_config_display.setStyleSheet(
+            "background-color: #f0f8ff; border: 1px solid #007bff; font-family: 'Consolas', monospace; font-size: 10px;"
+        )
+        self.extraction_config_display.setPlaceholderText("Configuration extraction synchronisée apparaîtra ici...")
+        sync_config_layout.addWidget(self.extraction_config_display)
+
+        right_layout.addWidget(sync_config_group)
 
         # Réponse extraite
         response_group = QtWidgets.QGroupBox("🤖 Réponse IA Extraite")
@@ -335,11 +343,11 @@ class FinalTestWidget(QtWidgets.QWidget):
         main_layout.addWidget(right_widget, 1)
 
     # ==============================
-    # GESTION CONFIGURATION CLAVIER (OPTIONNELLE)
+    # CONFIGURATION CLAVIER
     # ==============================
 
     def _update_keyboard_config(self, config):
-        """Met à jour la configuration clavier et l'applique (si disponible)"""
+        """Met à jour la configuration clavier"""
         if not config:
             return
 
@@ -352,12 +360,12 @@ class FinalTestWidget(QtWidgets.QWidget):
                 self.conductor.state_automation.keyboard_controller.update_config(config)
                 logger.info("Configuration clavier appliquée à state_automation.keyboard_controller")
 
-        # Mettre à jour l'affichage si le widget est disponible
+        # Mettre à jour affichage
         if hasattr(self, 'alt_tab_status'):
             self._update_alt_tab_status()
 
     def _update_alt_tab_status(self):
-        """Met à jour l'affichage de l'état de la protection Alt+Tab"""
+        """Met à jour l'affichage Alt+Tab"""
         if not hasattr(self, 'alt_tab_status'):
             return
 
@@ -369,16 +377,15 @@ class FinalTestWidget(QtWidgets.QWidget):
             self.alt_tab_status.setStyleSheet("color: #dc3545; font-size: 10px; margin-top: 5px; font-weight: bold;")
 
     # ==============================
-    # DÉTECTION DU NAVIGATEUR
+    # DÉTECTION NAVIGATEUR
     # ==============================
 
     def _detect_browser_type(self):
-        """Détecte le type de navigateur depuis la configuration"""
+        """Détecte le type de navigateur"""
         try:
             if not self.current_platform or not self.current_profile:
                 return "chrome"
 
-            # Vérifier la config navigateur
             browser_config = self.current_profile.get('browser', {})
             browser_path = browser_config.get('path', '').lower()
             browser_url = browser_config.get('url', '').lower()
@@ -398,14 +405,14 @@ class FinalTestWidget(QtWidgets.QWidget):
                 elif 'brave' in browser_path:
                     return "brave"
 
-            # Détection par l'URL (moins fiable mais utile)
+            # Détection par l'URL
             if browser_url:
                 if 'chrome' in browser_url:
                     return "chrome"
                 elif 'firefox' in browser_url:
                     return "firefox"
 
-            # Détection par le nom de la plateforme
+            # Détection par nom plateforme
             platform_lower = self.current_platform.lower()
             if 'firefox' in platform_lower:
                 return "firefox"
@@ -421,14 +428,267 @@ class FinalTestWidget(QtWidgets.QWidget):
             return "chrome"
 
     def _update_browser_status(self):
-        """Met à jour l'affichage du navigateur détecté"""
+        """Met à jour l'affichage navigateur"""
         self.detected_browser_type = self._detect_browser_type()
         self.browser_status.setText(f"Navigateur détecté: {self.detected_browser_type.capitalize()}")
         self.browser_status.setStyleSheet("color: #007bff; font-size: 10px; margin-top: 5px; font-weight: bold;")
         logger.info(f"🌐 Navigateur détecté: {self.detected_browser_type}")
 
     # ==============================
-    # LOGIQUE PRINCIPALE
+    # LOGIQUE PRINCIPALE SYNCHRONISÉE
+    # ==============================
+
+    def _on_platform_changed(self, platform_name):
+        """Gestion changement plateforme avec synchronisation"""
+        if platform_name and platform_name != "-- Sélectionner --":
+            self.current_platform = platform_name
+            self.current_profile = self.profiles.get(platform_name, {})
+            self._update_platform_status()
+            self._update_browser_status()
+            self._load_and_sync_configuration()
+        else:
+            self.current_platform = None
+            self.current_profile = None
+            self._reset_interface()
+
+        self._update_test_button_state()
+
+    def _load_and_sync_configuration(self):
+        """🔄 FONCTION PRINCIPALE DE SYNCHRONISATION"""
+        if not self.current_platform or not self.current_profile:
+            return
+
+        try:
+            logger.info(f"🔄 Synchronisation configuration pour {self.current_platform}")
+
+            # ÉTAPE 1: Recharger depuis base de données
+            fresh_profile = self._get_fresh_profile_from_database()
+            if fresh_profile:
+                self.current_profile = fresh_profile
+                logger.info("✅ Profil rechargé depuis base de données")
+
+            # ÉTAPE 2: Chercher configuration d'extraction depuis Response Area
+            extraction_config = self._get_extraction_config_from_response_area()
+
+            # ÉTAPE 3: Chercher configuration de détection existante
+            detection_config = self.current_profile.get('detection_config', {})
+
+            # ÉTAPE 4: Logique de synchronisation
+            if extraction_config and not detection_config:
+                # Cas 1: Extraction configurée mais pas détection → Créer détection automatiquement
+                logger.info("📋 Création automatique config détection depuis extraction")
+                detection_config = self._create_detection_from_extraction(extraction_config)
+                if detection_config:
+                    self.current_profile['detection_config'] = detection_config
+                    self._save_profile_to_database()
+                    self.sync_status.setText("✅ Sync: Détection créée automatiquement")
+                    self.sync_status.setStyleSheet(
+                        "color: #28a745; font-size: 10px; margin-top: 5px; font-weight: bold;")
+
+            elif extraction_config and detection_config:
+                # Cas 2: Les deux configurées → Vérifier cohérence
+                logger.info("🔍 Vérification cohérence configs existantes")
+                self.sync_status.setText("✅ Sync: Configurations cohérentes")
+                self.sync_status.setStyleSheet("color: #28a745; font-size: 10px; margin-top: 5px; font-weight: bold;")
+
+            elif detection_config and not extraction_config:
+                # Cas 3: Seulement détection → Ancienne config, demander reconfiguration
+                logger.warning("⚠️ Seulement config détection - extraction manquante")
+                self.sync_status.setText("⚠️ Sync: Reconfiguration recommandée")
+                self.sync_status.setStyleSheet("color: #FF9800; font-size: 10px; margin-top: 5px; font-weight: bold;")
+
+            else:
+                # Cas 4: Aucune configuration
+                logger.info("❌ Aucune configuration trouvée")
+                self.sync_status.setText("❌ Sync: Aucune configuration")
+                self.sync_status.setStyleSheet("color: #dc3545; font-size: 10px; margin-top: 5px; font-weight: bold;")
+
+            # ÉTAPE 5: Afficher les configurations
+            self._display_synchronized_configurations(detection_config, extraction_config)
+
+            # ÉTAPE 6: Sauvegarder config temporaire pour utilisation
+            if detection_config:
+                self.temp_detection_config = detection_config
+
+            logger.info("✅ Synchronisation terminée")
+
+        except Exception as e:
+            logger.error(f"Erreur synchronisation: {e}")
+            self.sync_status.setText("❌ Sync: Erreur")
+            self.sync_status.setStyleSheet("color: #dc3545; font-size: 10px; margin-top: 5px; font-weight: bold;")
+
+    def _get_fresh_profile_from_database(self):
+        """Récupère le profil frais depuis la base de données"""
+        try:
+            if hasattr(self.conductor, 'database') and self.conductor.database:
+                if hasattr(self.conductor.database, 'get_platform'):
+                    return self.conductor.database.get_platform(self.current_platform)
+            return None
+        except Exception as e:
+            logger.error(f"Erreur récupération DB: {e}")
+            return None
+
+    def _get_extraction_config_from_response_area(self):
+        """Récupère la config d'extraction depuis Response Area Widget"""
+        try:
+            extraction_config = self.current_profile.get('extraction_config', {})
+            response_area = extraction_config.get('response_area', {})
+
+            if response_area and response_area.get('platform_config'):
+                logger.info("✅ Configuration extraction trouvée depuis Response Area")
+                return response_area
+
+            return None
+        except Exception as e:
+            logger.error(f"Erreur récupération extraction config: {e}")
+            return None
+
+    def _create_detection_from_extraction(self, extraction_config):
+        """Crée automatiquement une config détection depuis l'extraction"""
+        try:
+            platform_config = extraction_config.get('platform_config', {})
+            platform_type = extraction_config.get('platform_type', 'Unknown')
+
+            if platform_type == 'ChatGPT':
+                # Pour ChatGPT: utiliser data-start/data-end pour détection
+                detection_config = {
+                    'platform_type': 'ChatGPT',
+                    'primary_selector': '[data-start][data-end]',
+                    'fallback_selectors': [
+                        '[data-message-author-role="assistant"]:last-child [data-start]',
+                        'article[data-testid*="conversation-turn"]:last-child [data-start]'
+                    ],
+                    'detection_method': 'chatgpt_data_stability',
+                    'configured_at': time.time(),
+                    'auto_generated_from': 'extraction_config',
+                    'extraction_selector': platform_config.get('primary_selector', ''),
+                    'description': 'Configuration détection auto-générée depuis extraction'
+                }
+
+            elif platform_type == 'Claude':
+                detection_config = {
+                    'platform_type': 'Claude',
+                    'primary_selector': '[data-is-streaming="false"]',
+                    'fallback_selectors': ['[data-is-streaming]', '.prose:last-child'],
+                    'detection_method': 'attribute_monitoring',
+                    'configured_at': time.time(),
+                    'auto_generated_from': 'extraction_config',
+                    'extraction_selector': platform_config.get('primary_selector', ''),
+                    'description': 'Configuration détection auto-générée depuis extraction'
+                }
+
+            else:
+                # Générique
+                primary_selector = platform_config.get('primary_selector', 'div')
+                detection_config = {
+                    'platform_type': platform_type,
+                    'primary_selector': primary_selector,
+                    'fallback_selectors': ['p:last-child', 'div:last-child'],
+                    'detection_method': 'element_stability',
+                    'configured_at': time.time(),
+                    'auto_generated_from': 'extraction_config',
+                    'extraction_selector': primary_selector,
+                    'description': f'Configuration détection auto-générée pour {platform_type}'
+                }
+
+            logger.info(f"🔄 Config détection créée pour {platform_type}")
+            logger.info(f"   Sélecteur détection: {detection_config['primary_selector']}")
+            logger.info(f"   Sélecteur extraction: {detection_config.get('extraction_selector', 'N/A')}")
+
+            return detection_config
+
+        except Exception as e:
+            logger.error(f"Erreur création config détection: {e}")
+            return None
+
+    def _display_synchronized_configurations(self, detection_config, extraction_config):
+        """Affiche les configurations synchronisées"""
+        try:
+            # Affichage configuration détection
+            if detection_config:
+                detection_text = f"Sélecteur principal: {detection_config.get('primary_selector', 'Non défini')}\n"
+                fallback_selectors = detection_config.get('fallback_selectors', [])
+                if fallback_selectors:
+                    detection_text += f"Sélecteurs fallback: {', '.join(fallback_selectors[:2])}\n"
+                detection_text += f"Méthode: {detection_config.get('detection_method', 'css_selector')}\n"
+                detection_text += f"Type plateforme: {detection_config.get('platform_type', 'Générique')}"
+
+                self.detection_config_display.setPlainText(detection_text)
+
+                # Statut config détection
+                self.detection_phase_status.setText("✅ Configuration détection synchronisée")
+                self.detection_phase_status.setStyleSheet("color: #28a745; font-weight: bold;")
+            else:
+                self.detection_config_display.setPlainText("Aucune configuration de détection")
+                self.detection_phase_status.setText("❌ Configuration détection manquante")
+                self.detection_phase_status.setStyleSheet("color: #dc3545; font-weight: bold;")
+
+            # Affichage configuration extraction
+            if extraction_config:
+                platform_config = extraction_config.get('platform_config', {})
+                extraction_text = f"Sélecteur principal: {platform_config.get('primary_selector', 'Non défini')}\n"
+                fallback_selectors = platform_config.get('fallback_selectors', [])
+                if fallback_selectors:
+                    extraction_text += f"Sélecteurs fallback: {', '.join(fallback_selectors[:2])}\n"
+                extraction_text += f"Méthode: {platform_config.get('extraction_method', 'css_selector')}\n"
+                extraction_text += f"Type plateforme: {extraction_config.get('platform_type', 'Générique')}"
+
+                self.extraction_config_display.setPlainText(extraction_text)
+            else:
+                self.extraction_config_display.setPlainText("Aucune configuration d'extraction")
+
+        except Exception as e:
+            logger.error(f"Erreur affichage configs: {e}")
+
+    def _save_profile_to_database(self):
+        """Sauvegarde le profil en base de données"""
+        try:
+            if hasattr(self.conductor, 'database') and self.conductor.database:
+                if hasattr(self.conductor.database, 'save_platform'):
+                    return self.conductor.database.save_platform(self.current_platform, self.current_profile)
+            return True
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde profil: {e}")
+            return False
+
+    def _force_reload_from_database(self):
+        """Force le rechargement depuis la base de données"""
+        if not self.current_platform:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Aucune plateforme sélectionnée")
+            return
+
+        try:
+            logger.info(f"🔄 Rechargement forcé depuis DB pour {self.current_platform}")
+
+            # Recharger depuis la base de données
+            fresh_profile = self._get_fresh_profile_from_database()
+            if fresh_profile:
+                self.current_profile = fresh_profile
+
+                # Mettre à jour config_provider
+                if hasattr(self.config_provider, 'profiles'):
+                    self.config_provider.profiles[self.current_platform] = fresh_profile
+
+                # Relancer la synchronisation
+                self._load_and_sync_configuration()
+
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Rechargement réussi",
+                    f"✅ Configuration rechargée depuis la base de données pour {self.current_platform}"
+                )
+            else:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Rechargement échoué",
+                    f"❌ Impossible de recharger {self.current_platform} depuis la base de données"
+                )
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur rechargement:\n{str(e)}")
+
+    # ==============================
+    # LOGIQUE TEST
     # ==============================
 
     def _has_valid_detection_config(self):
@@ -461,7 +721,7 @@ class FinalTestWidget(QtWidgets.QWidget):
             if not self.current_platform:
                 self.test_phase_status.setText("⏳ Sélectionnez une plateforme")
             elif not self._has_valid_detection_config():
-                self.test_phase_status.setText("⏳ Collez du HTML pour générer les sélecteurs")
+                self.test_phase_status.setText("⏳ Configuration détection manquante")
             elif self.test_running:
                 self.test_phase_status.setText("🔄 Test en cours...")
 
@@ -470,229 +730,21 @@ class FinalTestWidget(QtWidgets.QWidget):
         logger.info(
             f"Bouton test: {'activé' if should_enable else 'désactivé'} (plateforme: {self.current_platform}, config: {self._has_valid_detection_config()}, running: {self.test_running})")
 
-    def _on_platform_changed(self, platform_name):
-        """Gestion changement plateforme"""
-        if platform_name and platform_name != "-- Sélectionner --":
-            self.current_platform = platform_name
-            self.current_profile = self.profiles.get(platform_name, {})
-            self._update_platform_status()
-            self._update_browser_status()  # Détection du navigateur
-            self._load_existing_detection_config()
-        else:
-            self.current_platform = None
-            self.current_profile = None
-            self._reset_interface()
-
-        self._update_test_button_state()
-
-    def _load_existing_detection_config(self):
-        """Chargement config existante"""
-        if not self.current_platform or not self.current_profile:
-            return
-
-        try:
-            # Essayer DB d'abord
-            if hasattr(self.conductor, 'database') and self.conductor.database:
-                if hasattr(self.conductor.database, 'get_platform'):
-                    saved_profile = self.conductor.database.get_platform(self.current_platform)
-                    if saved_profile:
-                        self.current_profile = saved_profile
-
-            # Vérifier si on a une config
-            detection_config = self.current_profile.get('detection_config', {})
-            if detection_config and detection_config.get('primary_selector'):
-                self._display_existing_detection_config(detection_config)
-
-        except Exception as e:
-            logger.error(f"Erreur chargement config: {e}")
-
-    def _display_existing_detection_config(self, detection_config):
-        """Affichage config existante"""
-        try:
-            # Afficher les sélecteurs
-            selectors_text = f"Sélecteur principal: {detection_config.get('primary_selector', 'Non défini')}\n"
-            fallback_selectors = detection_config.get('fallback_selectors', [])
-            if fallback_selectors:
-                selectors_text += f"Sélecteurs fallback: {', '.join(fallback_selectors)}\n"
-            selectors_text += f"Méthode: {detection_config.get('detection_method', 'css_selector')}\n"
-            selectors_text += f"Type plateforme: {detection_config.get('platform_type', 'Générique')}"
-
-            self.detection_selectors_display.setPlainText(selectors_text)
-
-            # Sauvegarder en temp pour utilisation
-            self.temp_detection_config = detection_config
-
-            # Mettre à jour les statuts
-            self.detection_phase_status.setText("✅ Configuration existante chargée")
-            self.detection_phase_status.setStyleSheet(PlatformConfigStyle.get_status_success_style())
-
-            # Marquer bouton sauvegarde comme fait
-            self.save_selectors_btn.setText("✅ Sélecteurs sauvés")
-            self.save_selectors_btn.setEnabled(False)
-            self.save_selectors_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #28a745;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 10px 20px;
-                    font-weight: bold;
-                    font-size: 12px;
-                    margin-top: 8px;
-                }
-            """)
-
-            # Mettre à jour bouton test
-            self._update_test_button_state()
-
-            logger.info("Configuration existante chargée et prête")
-
-        except Exception as e:
-            logger.error(f"Erreur affichage config: {e}")
-
-    def _on_detection_html_changed(self):
-        """Analyse HTML automatique"""
-        html_content = self.detection_html_input.toPlainText().strip()
-
-        if len(html_content) > 50:
-            if hasattr(self, '_detection_analysis_timer'):
-                self._detection_analysis_timer.stop()
-
-            self._detection_analysis_timer = QtCore.QTimer()
-            self._detection_analysis_timer.setSingleShot(True)
-            self._detection_analysis_timer.timeout.connect(self._analyze_detection_html)
-            self._detection_analysis_timer.start(1000)
-
-    def _analyze_detection_html(self):
-        """Analyse HTML et génération config"""
-        html_content = self.detection_html_input.toPlainText().strip()
-
-        if not html_content:
-            return
-
-        try:
-            logger.info("Analyse HTML de détection...")
-
-            # Générer la config
-            detection_config = self._generate_detection_config(html_content)
-
-            # Afficher les sélecteurs
-            selectors_text = f"Sélecteur principal: {detection_config['primary_selector']}\n"
-            if detection_config.get('fallback_selectors'):
-                selectors_text += f"Sélecteurs fallback: {', '.join(detection_config['fallback_selectors'])}\n"
-            selectors_text += f"Méthode: {detection_config['detection_method']}\n"
-            selectors_text += f"Type plateforme: {detection_config['platform_type']}"
-
-            self.detection_selectors_display.setPlainText(selectors_text)
-
-            # Sauvegarder en temp
-            self.temp_detection_config = detection_config
-            self.temp_detection_config['original_html'] = html_content
-
-            # Mettre à jour statuts
-            self.detection_phase_status.setText("✅ Sélecteurs générés")
-            self.detection_phase_status.setStyleSheet(
-                "color: #28a745; font-weight: bold; background-color: #E8F5E8; padding: 8px; border-radius: 4px;")
-
-            # Activer bouton sauvegarde
-            self.save_selectors_btn.setEnabled(True)
-            self.save_selectors_btn.setText("💾 Sauvegarder Sélecteurs")
-            self.save_selectors_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #17a2b8;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 10px 20px;
-                    font-weight: bold;
-                    font-size: 12px;
-                    margin-top: 8px;
-                }
-                QPushButton:hover { background-color: #138496; }
-            """)
-
-            # ACTIVER LE TEST IMMÉDIATEMENT
-            self._update_test_button_state()
-
-            logger.info("Configuration générée - Test disponible")
-
-        except Exception as e:
-            self.detection_phase_status.setText(f"❌ Erreur: {str(e)}")
-            self.detection_phase_status.setStyleSheet("color: #FF0000; font-weight: bold;")
-            logger.error(f"Erreur analyse HTML: {e}")
-
-    def _generate_detection_config(self, html_content):
-        """Génération config détection"""
-        classes = re.findall(r'class="([^"]*)"', html_content)
-        ids = re.findall(r'id="([^"]*)"', html_content)
-        data_attrs = re.findall(r'(data-[^=]+)="[^"]*"', html_content)
-
-        platform_type = self._detect_platform_from_html(html_content)
-
-        config = {
-            'platform_type': platform_type,
-            'primary_selector': '',
-            'fallback_selectors': [],
-            'detection_method': 'css_selector_presence',
-            'configured_at': time.time()
-        }
-
-        # Logique ChatGPT
-        if 'data-start' in html_content and 'data-end' in html_content:
-            config.update({
-                'primary_selector': '[data-start][data-end]',
-                'detection_method': 'chatgpt_data_stability',
-                'platform_type': 'ChatGPT',
-                'extraction_selector': '.markdown.prose'
-            })
-            config['fallback_selectors'] = [
-                '[data-message-author-role="assistant"]:last-child .markdown.prose',
-                '[data-message-author-role="assistant"]:last-child'
-            ]
-        # Logique générique
-        elif 'data-end' in html_content:
-            config['primary_selector'] = '[data-end]'
-            config['detection_method'] = 'attribute_presence'
-        elif classes:
-            config['primary_selector'] = f'.{classes[0]}'
-        elif ids:
-            config['primary_selector'] = f'#{ids[0]}'
-        else:
-            config['primary_selector'] = 'div'
-
-        return config
-
-    def _detect_platform_from_html(self, html_content):
-        """Détection plateforme"""
-        html_lower = html_content.lower()
-        if 'data-message-author-role' in html_content or 'chatgpt' in html_lower:
-            return 'ChatGPT'
-        elif 'data-is-streaming' in html_content or 'claude' in html_lower:
-            return 'Claude'
-        elif 'gemini' in html_lower or 'bard' in html_lower:
-            return 'Gemini'
-        else:
-            return 'Générique'
-
-    # ==============================
-    # TEST FINAL AVEC NAVIGATEUR ET FOCUS AMÉLIORÉ
-    # ==============================
-
     def _start_final_test(self):
-        """Test final avec détection du navigateur et gestion du focus améliorée"""
+        """Test final avec synchronisation"""
         # Vérifications de base
         if not self.current_platform:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Sélectionnez d'abord une plateforme")
             return
 
         if not self._has_valid_detection_config():
-            QtWidgets.QMessageBox.warning(self, "Erreur", "Générez d'abord des sélecteurs de détection")
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Configuration détection manquante")
             return
 
         if self.test_running:
             return
 
-        # Vérifier la protection Alt+Tab si disponible
+        # Vérifier protection Alt+Tab si disponible
         if self.keyboard_config_widget and not self.keyboard_config.get('block_alt_tab', False):
             reply = QtWidgets.QMessageBox.warning(
                 self, "Avertissement",
@@ -702,7 +754,7 @@ class FinalTestWidget(QtWidgets.QWidget):
             if reply == QtWidgets.QMessageBox.No:
                 return
 
-        # Récupérer la config à utiliser
+        # Récupérer config à utiliser
         detection_config = self.temp_detection_config or self.current_profile.get('detection_config', {})
 
         # Mise à jour automatique du profil
@@ -711,7 +763,7 @@ class FinalTestWidget(QtWidgets.QWidget):
             if hasattr(self.config_provider, 'profiles'):
                 self.config_provider.profiles[self.current_platform] = self.current_profile
 
-        # Mettre à jour le state_automation avec le type de navigateur
+        # Mettre à jour state_automation avec type navigateur
         if hasattr(self.conductor, 'state_automation') and self.conductor.state_automation:
             self.conductor.state_automation.browser_type = self.detected_browser_type
             logger.info(f"🌐 Type navigateur configuré dans state_automation: {self.detected_browser_type}")
@@ -720,7 +772,7 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.test_running = True
         self._update_test_button_state()
 
-        # Interface - Montrer le bouton stop
+        # Interface - Montrer bouton stop
         self.start_final_test_btn.setVisible(False)
         self.stop_test_btn.setVisible(True)
 
@@ -737,10 +789,10 @@ class FinalTestWidget(QtWidgets.QWidget):
         logger.info(f"Début test pour {self.current_platform} avec navigateur {self.detected_browser_type}")
 
         try:
-            # S'assurer du focus sur le navigateur AVANT le test
+            # S'assurer du focus navigateur AVANT le test
             self._ensure_browser_focus_advanced()
 
-            # Appel au conductor avec le type de navigateur
+            # Appel au conductor avec type navigateur
             if hasattr(self.conductor, 'test_platform_connection_ultra_robust'):
                 test_message = self.final_test_prompt.text() or "Test de configuration"
 
@@ -752,7 +804,7 @@ class FinalTestWidget(QtWidgets.QWidget):
                     skip_browser=True
                 )
 
-                # Re-vérifier le focus après l'envoi du prompt (point critique)
+                # Re-vérifier focus après envoi prompt
                 self._ensure_browser_focus_advanced()
 
                 if result['success']:
@@ -772,11 +824,6 @@ class FinalTestWidget(QtWidgets.QWidget):
                     self.validate_retry_btn.setEnabled(True)
                     self.validation_status.setText("✅ Test terminé - Validez le résultat")
 
-                    # Marquer sauvegarde comme faite
-                    if self.save_selectors_btn.isEnabled():
-                        self.save_selectors_btn.setText("✅ Sélecteurs sauvés")
-                        self.save_selectors_btn.setEnabled(False)
-
                     self.emergency_overlay.hide_overlay()
                     logger.info("Test réussi")
 
@@ -792,14 +839,14 @@ class FinalTestWidget(QtWidgets.QWidget):
             self._reset_test_buttons()
 
     def _ensure_browser_focus_advanced(self):
-        """S'assure que le focus est sur le navigateur avec méthode avancée"""
+        """S'assure que le focus est sur le navigateur"""
         try:
             import pyautogui
             import tkinter as tk
 
-            logger.info("🎯 Focus navigateur avancé - méthode anti-changement de fenêtre")
+            logger.info("🎯 Focus navigateur avancé")
 
-            # Obtenir la taille de l'écran
+            # Obtenir taille écran
             try:
                 root = tk.Tk()
                 screen_width = root.winfo_screenwidth()
@@ -809,25 +856,23 @@ class FinalTestWidget(QtWidgets.QWidget):
                 screen_width = 1920
                 screen_height = 1080
 
-            # MÉTHODE 1: Clic dans une zone neutre du navigateur
-            # Zone centre-haute pour éviter les éléments interactifs
+            # Clic dans zone neutre navigateur
             safe_x = screen_width // 2
-            safe_y = 150  # Assez bas pour éviter les onglets, assez haut pour éviter le contenu
+            safe_y = 150
 
             logger.info(f"🖱️ Clic de focus sécurisé à ({safe_x}, {safe_y})")
             pyautogui.click(safe_x, safe_y)
             time.sleep(0.5)
 
-            # MÉTHODE 2: Double clic pour s'assurer du focus
+            # Double clic pour s'assurer du focus
             pyautogui.click(safe_x, safe_y)
             time.sleep(0.3)
 
-            # MÉTHODE 3: Utiliser pygetwindow si disponible pour forcer l'activation
+            # Utiliser pygetwindow si disponible
             try:
                 import pygetwindow as gw
                 all_windows = gw.getAllWindows()
 
-                # Chercher une fenêtre de navigateur correspondant au type détecté
                 browser_keywords = {
                     'chrome': ['chrome', 'chromium'],
                     'firefox': ['firefox', 'mozilla'],
@@ -908,36 +953,8 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.emergency_overlay.hide_overlay()
 
     # ==============================
-    # SAUVEGARDE ET VALIDATION
+    # VALIDATION
     # ==============================
-
-    def _save_selectors_to_database(self):
-        """Sauvegarde sélecteurs"""
-        try:
-            if not self.temp_detection_config:
-                QtWidgets.QMessageBox.warning(self, "Erreur", "Aucune configuration à sauvegarder")
-                return
-
-            # Sauvegarder dans le profil
-            self.current_profile['detection_config'] = self.temp_detection_config.copy()
-
-            # Sauvegarder en base
-            success = self._save_to_database()
-
-            if success:
-                self.save_selectors_btn.setText("✅ Sélecteurs sauvés")
-                self.save_selectors_btn.setEnabled(False)
-
-                # Mettre à jour config_provider
-                if hasattr(self.config_provider, 'profiles'):
-                    self.config_provider.profiles[self.current_platform] = self.current_profile
-
-                QtWidgets.QMessageBox.information(self, "Sauvegardé", "✅ Sélecteurs sauvegardés !")
-            else:
-                QtWidgets.QMessageBox.critical(self, "Erreur", "❌ Échec sauvegarde")
-
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur:\n{str(e)}")
 
     def _validate_success(self):
         """Validation succès"""
@@ -953,8 +970,9 @@ class FinalTestWidget(QtWidgets.QWidget):
     def _save_final_configuration(self):
         """Sauvegarde finale"""
         try:
-            self.current_profile['detection_config'] = self.temp_detection_config
-            self._save_to_database()
+            if self.temp_detection_config:
+                self.current_profile['detection_config'] = self.temp_detection_config
+                self._save_profile_to_database()
 
             self.validation_status.setText("✅ Configuration validée")
             self.validate_success_btn.setEnabled(False)
@@ -970,32 +988,18 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.temp_detection_config = {}
         self.temp_test_result = ""
 
-        self.detection_html_input.clear()
-        self.detection_selectors_display.clear()
         self.extracted_response.clear()
 
-        self.detection_phase_status.setText("📋 Collez le HTML de nouveau")
-        self.test_phase_status.setText("⏳ Configurez d'abord la détection")
+        self.detection_phase_status.setText("📋 Reconfiguration demandée")
+        self.test_phase_status.setText("⏳ Synchronisez d'abord la configuration")
         self.validation_status.setText("⏳ Effectuez d'abord le test")
 
         self.validate_success_btn.setEnabled(False)
         self.validate_retry_btn.setEnabled(False)
 
-        self.save_selectors_btn.setText("💾 Sauvegarder Sélecteurs")
-        self.save_selectors_btn.setEnabled(False)
-
+        # Relancer synchronisation
+        self._load_and_sync_configuration()
         self._update_test_button_state()
-
-    def _save_to_database(self):
-        """Sauvegarde DB"""
-        try:
-            if hasattr(self.conductor, 'database') and self.conductor.database:
-                if hasattr(self.conductor.database, 'save_platform'):
-                    return self.conductor.database.save_platform(self.current_platform, self.current_profile)
-            return True
-        except Exception as e:
-            logger.error(f"Erreur sauvegarde: {e}")
-            return False
 
     # ==============================
     # UTILITAIRES
@@ -1033,21 +1037,23 @@ class FinalTestWidget(QtWidgets.QWidget):
         self.browser_status.setText("Navigateur: Non détecté")
         self.browser_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
 
+        self.sync_status.setText("Synchronisation: En attente")
+        self.sync_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
+
         if hasattr(self, 'alt_tab_status'):
             self.alt_tab_status.setText("Protection Alt+Tab: Non configurée")
             self.alt_tab_status.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
 
-        self.detection_phase_status.setText("⏳ Collez le HTML de l'indicateur de fin")
-        self.test_phase_status.setText("⏳ Sélectionnez une plateforme avec configuration")
+        self.detection_phase_status.setText("⏳ Chargement depuis Response Area...")
+        self.test_phase_status.setText("⏳ Sélectionnez une plateforme configurée")
         self.validation_status.setText("⏳ Effectuez d'abord le test")
 
-        self.detection_html_input.clear()
-        self.detection_selectors_display.clear()
+        self.detection_config_display.clear()
+        self.extraction_config_display.clear()
         self.extracted_response.clear()
 
         self.validate_success_btn.setEnabled(False)
         self.validate_retry_btn.setEnabled(False)
-        self.save_selectors_btn.setEnabled(False)
 
         self._update_test_button_state()
 
@@ -1095,3 +1101,9 @@ class FinalTestWidget(QtWidgets.QWidget):
                 self._update_keyboard_config(self.keyboard_config_widget._get_current_config())
             except Exception as e:
                 logger.warning(f"Erreur refresh config clavier: {e}")
+
+    def force_sync_from_response_area(self, platform_name):
+        """Force la synchronisation depuis Response Area Widget"""
+        if platform_name == self.current_platform:
+            logger.info(f"🔄 Synchronisation forcée demandée pour {platform_name}")
+            self._load_and_sync_configuration()
