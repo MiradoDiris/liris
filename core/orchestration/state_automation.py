@@ -2,38 +2,23 @@
 # -*- coding: utf-8 -*-
 
 """
-core/orchestration/state_automation.py - VERSION CORRIGÉE EXTRACTION
-
-Corrections principales:
-- Simple clic au lieu de double clic
-- Optimisation temps d'attente
-- Focus par clic sans changement de fenêtre
-- Gestion correcte console sans force_focus
-- 🎯 CORRECTION MAJEURE: Utilisation de extraction_config.response_area pour l'extraction
-- 🔧 CORRECTION FIREFOX: Ctrl+Entrée et récupération résultat console
-- 🎉 CORRECTION COPY: Utilisation copy() directe au lieu de text;
+core/orchestration/state_automation.py
 """
 
 import time
 import json
 import pyperclip
-from enum import Enum
 from PyQt5.QtCore import QObject, pyqtSignal
 from utils.logger import logger
-from utils.exceptions import OrchestrationError
 
 try:
     import pygetwindow as gw
-
     HAS_PYGETWINDOW = True
 except ImportError:
     HAS_PYGETWINDOW = False
 
 
 class StateBasedAutomation(QObject):
-    """Automatisation optimisée avec clic simple et temps rapides"""
-
-    # Signaux pour communication externe
     step_completed = pyqtSignal(str, str)
     automation_completed = pyqtSignal(bool, str, float, str)
     automation_failed = pyqtSignal(str, str)
@@ -45,104 +30,184 @@ class StateBasedAutomation(QObject):
         self.keyboard_controller = keyboard_controller
         self.conductor = conductor
 
-        # État simple
         self.is_running = False
         self.force_stop = False
         self.start_time = None
 
-        # Configuration
         self.platform_profile = None
         self.test_text = ""
         self.skip_browser_activation = False
         self.extracted_response = ""
-        self.browser_type = "chrome"  # Par défaut
+        self.browser_type = "chrome"
 
-        logger.info("StateBasedAutomation OPTIMISÉ initialisé")
+        self.browser_config = {}
+        self.selected_window = None
+        self.window_selection_method = "auto"
 
     def start_test_automation(self, platform_profile, num_tabs, browser_type, url, automation_params=None):
-        """Démarre l'automatisation optimisée"""
         if self.is_running:
-            logger.warning("Automatisation déjà en cours")
             return
 
-        logger.info(f"🚀 DÉMARRAGE automatisation pour {platform_profile.get('name', 'Unknown')}")
-
-        # Configuration
         self.platform_profile = platform_profile
         self.browser_type = browser_type or "chrome"
-        self.test_text = (automation_params or {}).get('test_text', 'Test automatisé')
+        self.test_text = (automation_params or {}).get('test_text', 'Test')
         self.skip_browser_activation = (automation_params or {}).get('skip_browser_activation', False)
         self.extracted_response = ""
 
-        # État
+        self.load_window_config()
+
         self.is_running = True
         self.force_stop = False
         self.start_time = time.time()
 
-        # EXÉCUTION DIRECTE
         try:
-            self._execute_automation_sequence()
+            self.run_automation_sequence()
         except Exception as e:
-            self._handle_automation_failure(f"Erreur séquence: {str(e)}")
+            self.handle_failure(f"Sequence error: {str(e)}")
 
-    def _execute_automation_sequence(self):
-        """Exécute toute la séquence d'automatisation OPTIMISÉE"""
-        logger.info("📋 Début séquence automatisation OPTIMISÉE")
-
+    def load_window_config(self):
         try:
-            # ÉTAPE 1: Focus navigateur PAR CLIC
-            if not self._ensure_browser_focus():
+            if not self.platform_profile:
                 return
 
-            # ÉTAPE 2: Cliquer champ (SIMPLE CLIC)
-            if not self._handle_field_click_step():
+            self.browser_config = self.platform_profile.get('browser', {})
+
+            if 'window_selection_method' not in self.browser_config:
+                self.browser_config.update({
+                    'window_selection_method': 'auto',
+                    'window_order': 1,
+                    'window_title_pattern': '',
+                    'window_position': None,
+                    'window_id': None,
+                    'window_size': None,
+                    'remember_window': False
+                })
+
+            self.window_selection_method = self.browser_config.get('window_selection_method', 'auto')
+
+        except Exception:
+            self.window_selection_method = 'auto'
+            self.browser_config = {}
+
+    def get_target_window(self):
+        try:
+            if self.window_selection_method == 'auto' or not self.browser_config:
+                return None
+
+            if not hasattr(self.conductor, 'window_manager'):
+                return None
+
+            if not HAS_PYGETWINDOW:
+                return None
+
+            selected_window = self.conductor.window_manager.select_window(
+                self.browser_config,
+                self.browser_type
+            )
+
+            if selected_window:
+                return selected_window
+            else:
+                return None
+
+        except Exception:
+            return None
+
+    def focus_window(self, target_window):
+        try:
+            if not target_window:
+                return False
+
+            try:
+                target_window.activate()
+                time.sleep(0.3)
+                return True
+            except Exception:
+                pass
+
+            try:
+                click_x = target_window.left + (target_window.width // 2)
+                click_y = target_window.top + 50
+
+                self.mouse_controller.click(click_x, click_y)
+                time.sleep(0.2)
+                return True
+            except Exception:
+                pass
+
+            return False
+
+        except Exception:
+            return False
+
+    def remember_window_if_needed(self):
+        try:
+            if not self.browser_config.get('remember_window', False):
                 return
 
-            # ÉTAPE 3: Effacer champ
-            if not self._handle_field_clear_step():
+            if not self.selected_window:
                 return
 
-            # ÉTAPE 4: Saisir texte
-            if not self._handle_text_input_step():
+            if not hasattr(self.conductor, 'remember_window_selection'):
                 return
 
-            # ÉTAPE 5: Soumettre
-            if not self._handle_form_submit_step():
+            platform_name = self.platform_profile.get('name', '')
+            if platform_name:
+                self.conductor.remember_window_selection(
+                    platform_name,
+                    self.selected_window,
+                    self.browser_config
+                )
+
+        except Exception:
+            pass
+
+    def run_automation_sequence(self):
+        try:
+            if not self.ensure_browser_focus():
                 return
 
-            # ÉTAPE 6: Attendre réponse IA (OPTIMISÉ)
-            if not self._handle_response_wait_step():
+            if not self.click_prompt_field():
                 return
 
-            # ÉTAPE 7: Extraire réponse
-            if not self._handle_response_extract_step():
+            if not self.clear_field():
                 return
 
-            # SUCCÈS FINAL
-            self._handle_automation_success()
+            if not self.input_text():
+                return
+
+            if not self.submit_form():
+                return
+
+            if not self.wait_for_response():
+                return
+
+            if not self.extract_response():
+                return
+
+            self.handle_success()
 
         except Exception as e:
-            self._handle_automation_failure(f"Erreur dans séquence: {str(e)}")
+            self.handle_failure(f"Sequence error: {str(e)}")
 
-    def _ensure_browser_focus(self):
-        """ÉTAPE 1: S'assurer que le navigateur a le focus PAR CLIC SIMPLE"""
+    def ensure_browser_focus(self):
         if self.force_stop:
             return False
 
-        logger.info("🌐 ÉTAPE 1: Focus navigateur par clic simple")
-        self.step_completed.emit("browser_focusing", "Focus navigateur")
+        self.step_completed.emit("browser_focusing", "Browser focus")
 
         try:
-            # Si skip demandé, on suppose que le conductor a déjà géré
             if self.skip_browser_activation:
-                logger.info("🔄 Skip focus - Conductor a déjà géré")
-                time.sleep(0.3)  # Plus rapide
+                time.sleep(0.3)
                 return True
 
-            # MÉTHODE OPTIMISÉE: Clic simple au centre
-            logger.info("🖱️ Clic simple pour focus navigateur")
+            self.selected_window = self.get_target_window()
 
-            # Position par défaut optimisée
+            if self.selected_window:
+                if self.focus_window(self.selected_window):
+                    self.remember_window_if_needed()
+                    return True
+
             try:
                 import tkinter as tk
                 root = tk.Tk()
@@ -150,266 +215,199 @@ class StateBasedAutomation(QObject):
                 screen_height = root.winfo_screenheight()
                 root.destroy()
 
-                # Zone centre sécurisée
                 click_x = screen_width // 2
-                click_y = 200  # Plus bas pour éviter les onglets
+                click_y = 200
             except:
                 click_x = 960
                 click_y = 200
 
-            # UN SEUL CLIC
             self.mouse_controller.click(click_x, click_y)
-            time.sleep(0.2)  # Plus rapide
+            time.sleep(0.2)
 
-            logger.info(f"✅ Clic simple effectué à ({click_x}, {click_y})")
             return True
 
-        except Exception as e:
-            logger.error(f"Erreur focus navigateur: {e}")
+        except Exception:
             return True
 
-    def _handle_field_click_step(self):
-        """ÉTAPE 2: Clic champ prompt (SIMPLE CLIC)"""
+    def click_prompt_field(self):
         if self.force_stop:
             return False
 
-        logger.info("🎯 ÉTAPE 2: Clic SIMPLE champ prompt")
-        self.step_completed.emit("field_clicking", "Clic sur champ")
+        self.step_completed.emit("field_clicking", "Click field")
 
         try:
             positions = self.platform_profile.get('interface_positions', {})
             prompt_pos = positions.get('prompt_field')
 
             if not prompt_pos:
-                self._handle_automation_failure("Position champ prompt manquante")
+                self.handle_failure("Prompt field position missing")
                 return False
 
             x, y = prompt_pos['center_x'], prompt_pos['center_y']
-            logger.info(f"🎯 Position cible: ({x}, {y})")
 
-            # UN SEUL CLIC au lieu de double clic
             self.mouse_controller.click(x, y)
-            time.sleep(0.2)  # Plus rapide
+            time.sleep(0.2)
 
-            logger.info("✅ Clic simple effectué")
             return True
 
         except Exception as e:
-            self._handle_automation_failure(f"Erreur clic champ: {str(e)}")
+            self.handle_failure(f"Field click error: {str(e)}")
             return False
 
-    def _handle_field_clear_step(self):
-        """ÉTAPE 3: Effacer champ OPTIMISÉ"""
+    def clear_field(self):
         if self.force_stop:
             return False
 
-        logger.info("🧹 ÉTAPE 3: Effacement champ OPTIMISÉ")
-        self.step_completed.emit("field_clearing", "Effacement champ")
+        self.step_completed.emit("field_clearing", "Clear field")
 
         try:
-            # Méthode rapide: Ctrl+A puis Delete
             self.keyboard_controller.hotkey('ctrl', 'a')
             time.sleep(0.1)
             self.keyboard_controller.press_key('delete')
             time.sleep(0.1)
 
-            logger.info("✅ Effacement rapide par Ctrl+A")
             return True
 
         except Exception as e:
-            self._handle_automation_failure(f"Erreur effacement: {str(e)}")
+            self.handle_failure(f"Clear error: {str(e)}")
             return False
 
-    def _handle_text_input_step(self):
-        """ÉTAPE 4: Saisie texte OPTIMISÉE"""
+    def input_text(self):
         if self.force_stop:
             return False
 
-        logger.info("📝 ÉTAPE 4: Saisie texte OPTIMISÉE")
-        self.step_completed.emit("text_typing", "Saisie texte")
+        self.step_completed.emit("text_typing", "Input text")
 
         try:
             if not self.test_text:
-                self._handle_automation_failure("Texte de test manquant")
+                self.handle_failure("Test text missing")
                 return False
 
-            logger.info(f"📝 Saisie: '{self.test_text}' ({len(self.test_text)} caractères)")
-
-            # Méthode presse-papiers optimisée
             try:
-                # Sauvegarder presse-papiers
                 original_clipboard = pyperclip.paste()
-
-                # Copier et coller
                 pyperclip.copy(self.test_text)
-                time.sleep(0.05)  # Plus rapide
+                time.sleep(0.05)
                 self.keyboard_controller.hotkey('ctrl', 'v')
-                time.sleep(0.3)  # Plus rapide
-
-                # Restaurer presse-papiers
+                time.sleep(0.3)
                 pyperclip.copy(original_clipboard)
-
-                logger.info("✅ Saisie rapide par presse-papiers")
                 return True
 
-            except Exception as e:
-                logger.warning(f"Erreur presse-papiers: {e}, fallback saisie directe")
+            except Exception:
                 self.keyboard_controller.type_text(self.test_text)
                 time.sleep(0.5)
                 return True
 
         except Exception as e:
-            self._handle_automation_failure(f"Erreur saisie texte: {str(e)}")
+            self.handle_failure(f"Input error: {str(e)}")
             return False
 
-    def _handle_form_submit_step(self):
-        """ÉTAPE 5: Soumission formulaire RAPIDE"""
+    def submit_form(self):
         if self.force_stop:
             return False
 
-        logger.info("📤 ÉTAPE 5: Soumission RAPIDE")
-        self.step_completed.emit("form_submitting", "Soumission")
+        self.step_completed.emit("form_submitting", "Submit")
 
         try:
-            # Soumission avec Entrée
             self.keyboard_controller.press_key('enter')
-            time.sleep(0.5)  # Plus rapide
-
-            logger.info("✅ Formulaire soumis rapidement")
+            time.sleep(0.5)
             return True
 
         except Exception as e:
-            self._handle_automation_failure(f"Erreur soumission: {str(e)}")
+            self.handle_failure(f"Submit error: {str(e)}")
             return False
 
-    def _handle_response_wait_step(self):
-        """ÉTAPE 6: Attendre réponse IA OPTIMISÉE"""
+    def wait_for_response(self):
         if self.force_stop:
             return False
 
-        logger.info("🔍 ÉTAPE 6: Attente réponse IA OPTIMISÉE")
-        self.step_completed.emit("response_waiting", "Attente réponse")
+        self.step_completed.emit("response_waiting", "Wait response")
 
         try:
             platform_name = self.platform_profile.get('name', '')
+            wait_time = self.calculate_wait_time()
 
-            # Calcul temps d'attente OPTIMISÉ
-            wait_time = self._calculate_optimized_wait_time()
-            logger.info(f"⏱️ Temps d'attente OPTIMISÉ: {wait_time}s")
-
-            # Utiliser le MutationObserver SAFE du conductor
-            if hasattr(self.conductor, '_wait_for_ai_generation_mutation_observer'):
-                logger.info(f"🔍 Utilisation MutationObserver SAFE du Conductor (max {wait_time}s)")
-                result = self.conductor._wait_for_ai_generation_mutation_observer(platform_name, wait_time)
+            if hasattr(self.conductor, 'wait_for_ai_response'):
+                result = self.conductor.wait_for_ai_response(platform_name, wait_time)
 
                 if result.get('detected'):
-                    logger.info(f"✅ Réponse IA détectée RAPIDEMENT en {result.get('duration', 0):.1f}s")
                     return True
                 else:
-                    logger.info(f"⏰ Timeout MutationObserver après {wait_time}s - extraction immédiate")
                     return True
             else:
-                # Fallback délai COURT
-                logger.info(f"Fallback délai COURT {wait_time}s")
                 time.sleep(wait_time)
                 return True
 
-        except Exception as e:
-            logger.warning(f"Erreur attente réponse: {str(e)} - continuation")
+        except Exception:
             return True
 
-    def _calculate_optimized_wait_time(self):
-        """Calcule un temps d'attente OPTIMISÉ et plus court"""
+    def calculate_wait_time(self):
         try:
             if not self.test_text:
-                return 5  # Plus court
+                return 5
 
-            # Analyse RAPIDE du prompt
             char_count = len(self.test_text)
             word_count = len(self.test_text.split())
 
-            # Formule OPTIMISÉE : plus rapide
-            base_time = 2  # Base réduite
-            char_factor = char_count * 0.05  # Facteur réduit
-            word_factor = word_count * 0.15  # Facteur réduit
+            base_time = 2
+            char_factor = char_count * 0.05
+            word_factor = word_count * 0.15
 
             calculated_time = base_time + char_factor + word_factor
 
-            # Limites RÉDUITES
-            min_time = 3  # Minimum réduit
-            max_time = 12  # Maximum réduit
+            min_time = 3
+            max_time = 12
             final_time = max(min_time, min(calculated_time, max_time))
-
-            logger.info(
-                f"📊 Calcul OPTIMISÉ: {char_count} chars × 0.05s + {word_count} mots × 0.15s + 2s base = {final_time:.1f}s")
 
             return int(final_time)
 
-        except Exception as e:
-            logger.warning(f"Erreur calcul temps attente: {e}")
-            return 6  # Défaut plus court
+        except Exception:
+            return 6
 
-    def _handle_response_extract_step(self):
-        """ÉTAPE 7: Extraction réponse OPTIMISÉE - VERSION CORRIGÉE COPY"""
+    def extract_response(self):
         if self.force_stop:
             return False
 
-        logger.info("📄 ÉTAPE 7: Extraction réponse OPTIMISÉE")
-        self.step_completed.emit("response_extracting", "Extraction")
+        self.step_completed.emit("response_extracting", "Extract")
 
         try:
             platform_name = self.platform_profile.get('name', '')
-
-            # 🎯 CORRECTION MAJEURE: Récupérer config d'EXTRACTION (pas détection)
-            extraction_config = self._get_extraction_config_from_profile()
+            extraction_config = self.get_extraction_config()
             detection_config = self.platform_profile.get('detection_config', {})
 
-            # Sélecteurs à tester POUR L'EXTRACTION
             selectors = []
 
-            # PRIORITÉ 1: Config extraction depuis response_area
             if extraction_config:
-                # 🎯 CORRECTION : Forcer les bons sélecteurs pour ChatGPT
                 if 'chatgpt' in platform_name.lower():
-                    logger.info("🔧 CORRECTION : Application sélecteurs ChatGPT optimisés")
                     selectors.extend([
-                        'article[data-testid*="conversation-turn"] .markdown.prose',  # 🎯 PARFAIT
+                        'article[data-testid*="conversation-turn"] .markdown.prose',
                         'article[data-testid*="conversation-turn"] .markdown',
                         '[data-message-author-role="assistant"] .markdown.prose',
                         'article[data-testid*="conversation-turn"]:last-child .prose'
                     ])
                 else:
-                    # Autres plateformes : utiliser config normale
                     if extraction_config.get('primary_selector'):
                         selectors.append(extraction_config['primary_selector'])
-                        logger.info(f"🎯 Sélecteur extraction principal: {extraction_config['primary_selector']}")
 
                     if extraction_config.get('fallback_selectors'):
                         selectors.extend(extraction_config['fallback_selectors'])
-                        logger.info(f"🎯 Sélecteurs extraction fallback: {extraction_config['fallback_selectors']}")
 
-            # PRIORITÉ 2: Fallback depuis detection_config (ancienne méthode)
             elif detection_config:
-                logger.warning("⚠️ Pas de config extraction - utilisation detection_config en fallback")
                 if detection_config.get('primary_selector'):
                     selectors.append(detection_config['primary_selector'])
                 if detection_config.get('fallback_selectors'):
                     selectors.extend(detection_config['fallback_selectors'])
 
-            # PRIORITÉ 3: Sélecteurs génériques basés sur la plateforme
             if 'chatgpt' in platform_name.lower():
-                # 🎯 UTILISER LES SÉLECTEURS QUI FONCTIONNENT (testés manuellement)
                 selectors.extend([
-                    'article[data-testid*="conversation-turn"] .markdown.prose',  # 🎯 PARFAIT - testé
-                    'article[data-testid*="conversation-turn"]:last-of-type',  # 🎯 TESTÉ - marche
-                    'article[data-testid="conversation-turn-2"]',  # 🎯 TESTÉ - marche
-                    'article[data-scroll-anchor="true"]',  # 🎯 TESTÉ - marche
-                    'article[data-testid*="conversation-turn"]',  # 🎯 TESTÉ - marche
+                    'article[data-testid*="conversation-turn"] .markdown.prose',
+                    'article[data-testid*="conversation-turn"]:last-of-type',
+                    'article[data-testid="conversation-turn-2"]',
+                    'article[data-scroll-anchor="true"]',
+                    'article[data-testid*="conversation-turn"]',
                     '[data-message-author-role="assistant"] .markdown.prose',
-                    '[data-start][data-end]'  # Fallback final
+                    '[data-start][data-end]'
                 ])
             else:
-                # Sélecteurs génériques pour autres plateformes
                 selectors.extend([
                     '[data-message-author-role="assistant"]:last-child',
                     '.message:last-child',
@@ -419,222 +417,161 @@ class StateBasedAutomation(QObject):
                     'p:last-child'
                 ])
 
-            logger.info(f"🎯 EXTRACTION OPTIMISÉE avec sélecteurs: {selectors[:3]}...")
-
-            # 🎉 JavaScript d'extraction COPY DIRECTE - VERSION CORRIGÉE
             js_code = f'''
-                        // 🎯 EXTRACTION COPY DIRECTE - MÉTHODE QUI MARCHE
-                        let selectors = {json.dumps(selectors[:5])};
+                let selectors = {json.dumps(selectors[:5])};
 
-                        console.log("🔧 Extraction ChatGPT avec copy() directe...");
-
-                        for (let selector of selectors) {{
-                            try {{
-                                let elements = document.querySelectorAll(selector);
-                                if (elements.length > 0) {{
-                                    let text = (elements[elements.length - 1].textContent || '').trim();
-                                    if (text.length > 15 && 
-                                        !text.includes('console.log') && 
-                                        !text.includes('function()') &&
-                                        !text.includes('🎯') &&
-                                        !text.includes('Échec')) {{
-                                        console.log("✅ Texte trouvé avec:", selector);
-                                        console.log("📏 Longueur:", text.length, "caractères");
-
-                                        // 🎉 COPY DIRECTE dans presse-papiers
-                                        copy(text);
-                                        console.log("✅ LIRIS_COPY_SUCCESS");
-                                        break; // Sortir dès qu'on a trouvé
-                                    }}
-                                }}
-                            }} catch(e) {{ 
-                                console.log("❌ Erreur avec sélecteur:", selector, e.message);
-                                continue; 
+                for (let selector of selectors) {{
+                    try {{
+                        let elements = document.querySelectorAll(selector);
+                        if (elements.length > 0) {{
+                            let text = (elements[elements.length - 1].textContent || '').trim();
+                            if (text.length > 15 && 
+                                !text.includes('console.log') && 
+                                !text.includes('function()') &&
+                                !text.includes('🎯') &&
+                                !text.includes('Échec')) {{
+                                copy(text);
+                                break;
                             }}
                         }}
+                    }} catch(e) {{ 
+                        continue; 
+                    }}
+                }}
+            '''
 
-                        console.log("🔧 Extraction terminée");
-                        '''
-
-            if self._execute_js_optimized(js_code):
-                # Vérifier que l'extraction copy() a fonctionné
+            if self.execute_javascript(js_code):
                 if self.extracted_response and len(self.extracted_response) > 15:
-                    logger.info(f"✅ Réponse extraite via COPY: {len(self.extracted_response)} caractères")
-                    logger.info(f"📝 Aperçu: {self.extracted_response[:150]}..." if len(
-                        self.extracted_response) > 150 else f"📝 Texte: {self.extracted_response}")
                     return True
 
-            # Fallback extraction basique RAPIDE
-            logger.info("Échec extraction spécialisée, tentative basique RAPIDE...")
-            if self._extract_basic_response_fast():
+            if self.extract_fallback():
                 return True
 
-            self._handle_automation_failure("Aucune réponse extraite")
+            self.handle_failure("No response extracted")
             return False
 
         except Exception as e:
-            self._handle_automation_failure(f"Erreur extraction: {str(e)}")
+            self.handle_failure(f"Extract error: {str(e)}")
             return False
 
-    def _get_extraction_config_from_profile(self):
-        """🎯 NOUVELLE MÉTHODE: Récupère la config d'extraction depuis response_area"""
+    def get_extraction_config(self):
         try:
-            # Chemin: platform_profile['extraction_config']['response_area']['platform_config']
             extraction_config = self.platform_profile.get('extraction_config', {})
             if not extraction_config:
-                logger.debug("Pas de extraction_config dans le profil")
                 return None
 
             response_area = extraction_config.get('response_area', {})
             if not response_area:
-                logger.debug("Pas de response_area dans extraction_config")
                 return None
 
             platform_config = response_area.get('platform_config', {})
             if not platform_config:
-                logger.debug("Pas de platform_config dans response_area")
                 return None
-
-            logger.info("✅ Configuration extraction trouvée depuis response_area")
-            logger.info(f"   Sélecteur principal: {platform_config.get('primary_selector', 'N/A')}")
-            logger.info(f"   Méthode: {platform_config.get('extraction_method', 'N/A')}")
 
             return platform_config
 
-        except Exception as e:
-            logger.error(f"Erreur récupération config extraction: {e}")
+        except Exception:
             return None
 
-    def _execute_js_optimized(self, js_code):
-        """Exécution JavaScript OPTIMISÉE avec copy() directe"""
+    def execute_javascript(self, js_code):
         try:
-            # Focus minimal sans changement de fenêtre
-            logger.info("🖱️ Focus minimal avant console")
+            if self.selected_window:
+                try:
+                    self.selected_window.activate()
+                    time.sleep(0.2)
+                except Exception:
+                    pass
 
-            # Clic centre simple
-            try:
-                import tkinter as tk
-                root = tk.Tk()
-                screen_width = root.winfo_screenwidth()
-                screen_height = root.winfo_screenheight()
-                root.destroy()
-                click_x = screen_width // 2
-                click_y = screen_height // 2
-            except:
-                click_x = 960
-                click_y = 540
+            if self.selected_window:
+                try:
+                    click_x = self.selected_window.left + (self.selected_window.width // 2)
+                    click_y = self.selected_window.top + 100
+                except Exception:
+                    click_x = 960
+                    click_y = 540
+            else:
+                try:
+                    import tkinter as tk
+                    root = tk.Tk()
+                    screen_width = root.winfo_screenwidth()
+                    screen_height = root.winfo_screenheight()
+                    root.destroy()
+                    click_x = screen_width // 2
+                    click_y = screen_height // 2
+                except:
+                    click_x = 960
+                    click_y = 540
 
             self.mouse_controller.click(click_x, click_y)
-            time.sleep(0.2)  # Plus rapide
+            time.sleep(0.2)
 
-            # Ouvrir console RAPIDE selon navigateur
-            logger.info(f"📋 Ouverture console RAPIDE pour {self.browser_type}")
+            if hasattr(self.conductor, 'js_executor'):
+                result = self.conductor.js_executor.execute_console_js(js_code, self.browser_type)
+                if result:
+                    self.extracted_response = result
+                    return True
+                return False
+            else:
+                return self.execute_js_fallback(js_code)
 
-            try:
-                from config.console_shortcuts import open_console_for_browser
-                # SANS force_focus pour éviter l'erreur
-                success = open_console_for_browser(self.browser_type, self.keyboard_controller)
-            except Exception as e:
-                logger.info(f"Fallback raccourci direct: {e}")
-                # Fallback direct
-                if self.browser_type == 'firefox':
-                    self.keyboard_controller.hotkey('ctrl', 'shift', 'k')
-                else:
-                    self.keyboard_controller.hotkey('ctrl', 'shift', 'j')
-                time.sleep(0.5)
-                success = True
+        except Exception:
+            return False
 
-            if not success:
-                self.keyboard_controller.press_key('f12')
-                time.sleep(0.4)
+    def execute_js_fallback(self, js_code):
+        try:
+            if self.browser_type == 'firefox':
+                self.keyboard_controller.hotkey('ctrl', 'shift', 'k')
+            else:
+                self.keyboard_controller.hotkey('ctrl', 'shift', 'j')
+            time.sleep(0.5)
 
-            # Nettoyer et exécuter RAPIDE
             pyperclip.copy("console.clear();")
             self.keyboard_controller.hotkey('ctrl', 'v')
-
-            # 🎯 CORRECTION : Ctrl+Entrée pour Firefox
-            if self.browser_type == 'firefox':
-                self.keyboard_controller.hotkey('ctrl', 'enter')
-            else:
-                self.keyboard_controller.press_key('enter')
+            self.keyboard_controller.press_key('enter')
             time.sleep(0.1)
 
             pyperclip.copy(js_code)
             self.keyboard_controller.hotkey('ctrl', 'v')
 
-            # 🎯 CORRECTION : Ctrl+Entrée pour Firefox
-            if self.browser_type == 'firefox':
+            platform_name = self.platform_profile.get('name', '').lower()
+            if 'gemini' in platform_name:
                 self.keyboard_controller.hotkey('ctrl', 'enter')
             else:
                 self.keyboard_controller.press_key('enter')
-            time.sleep(0.5)  # Attendre exécution et copy()
 
-            # 🎯 NOUVELLE MÉTHODE : RÉCUPÉRATION DIRECTE via copy()
-            logger.info("🎯 Récupération directe via copy() - pas de parsing console")
-
-            # Attendre que le copy() JavaScript soit effectué
+            time.sleep(0.5)
             time.sleep(0.3)
 
-            # Récupérer directement depuis le presse-papiers
             result = pyperclip.paste().strip()
 
-            # Vérifier que c'est valide
             if result and len(result) > 15:
-                # Vérification anti-JavaScript
                 if not any(keyword in result.lower() for keyword in
                            ['function()', 'console.log', 'document.query', 'let ', 'const ', '🎯', 'console.clear']):
-                    logger.info(f"✅ Extraction copy() réussie: {len(result)} caractères")
-                    logger.info(f"📝 Aperçu: {result[:100]}..." if len(result) > 100 else f"📝 Texte: {result}")
-
-                    # 🎉 STOCKER DANS extracted_response
                     self.extracted_response = result
-
-                    # Fermer console RAPIDE
-                    try:
-                        from config.console_shortcuts import close_console_for_browser
-                        close_console_for_browser(self.browser_type, self.keyboard_controller)
-                    except:
-                        self.keyboard_controller.press_key('f12')
-
+                    self.keyboard_controller.press_key('f12')
                     time.sleep(0.1)
                     return True
-                else:
-                    logger.warning(f"⚠️ Contenu suspect détecté dans copy(): {result[:50]}...")
-            else:
-                logger.warning(f"⚠️ Copy() vide ou trop court: {len(result)} caractères")
 
-            # Fermer console même en cas d'échec
-            try:
-                from config.console_shortcuts import close_console_for_browser
-                close_console_for_browser(self.browser_type, self.keyboard_controller)
-            except:
-                self.keyboard_controller.press_key('f12')
-
+            self.keyboard_controller.press_key('f12')
             time.sleep(0.1)
             return False
 
-        except Exception as e:
-            logger.error(f"Erreur JS optimisé: {e}")
+        except Exception:
             try:
                 self.keyboard_controller.press_key('f12')
             except:
                 pass
             return False
 
-    def _extract_basic_response_fast(self):
-        """Extraction basique RAPIDE de secours avec COPY"""
+    def extract_fallback(self):
         try:
-            # 🎉 JavaScript COPY pour fallback
             js_code = '''
-            // 🎯 MÉTHODE COPY DIRECTE pour ChatGPT - FALLBACK
             let chatgptSelectors = [
                 'article[data-testid*="conversation-turn"] .markdown.prose',
                 'article[data-testid*="conversation-turn"]:last-of-type', 
                 'article[data-scroll-anchor="true"]',
                 'article[data-testid*="conversation-turn"]'
             ];
-
-            console.log("🔧 Extraction ChatGPT fallback avec copy()...");
 
             for (let selector of chatgptSelectors) {
                 try {
@@ -645,87 +582,73 @@ class StateBasedAutomation(QObject):
                             !text.includes('function()') && 
                             !text.includes('console.log') &&
                             !text.includes('🎯')) {
-                            console.log("✅ Fallback trouvé avec:", selector);
-                            console.log("📏 Longueur:", text.length, "caractères");
-
-                            // 🎉 COPY DIRECTE dans presse-papiers
                             copy(text);
-                            console.log("✅ LIRIS_FALLBACK_COPY_SUCCESS");
-                            break; // Sortir dès qu'on a trouvé
+                            break;
                         }
                     }
                 } catch(e) { 
-                    console.log("❌ Erreur fallback:", selector, e.message);
                     continue; 
                 }
             }
-
-            console.log("🔧 Extraction fallback terminée");
             '''
 
-            if self._execute_js_optimized(js_code):
-                # Vérifier que le copy() fallback a fonctionné
-                if self.extracted_response and len(self.extracted_response) > 15:
-                    logger.info(f"✅ Extraction fallback COPY réussie: {len(self.extracted_response)} caractères")
+            if hasattr(self.conductor, 'js_executor'):
+                result = self.conductor.js_executor.execute_console_js(js_code, self.browser_type)
+                if result:
+                    self.extracted_response = result
                     return True
+                return False
+            else:
+                return self.execute_js_fallback(js_code)
 
+        except Exception:
             return False
 
-        except Exception as e:
-            logger.debug(f"Erreur extraction basique rapide: {e}")
-            return False
-
-    def _handle_automation_success(self):
-        """Gestion succès final"""
+    def handle_success(self):
         duration = time.time() - self.start_time
-        logger.info(f"🎉 AUTOMATISATION OPTIMISÉE RÉUSSIE en {duration:.1f}s")
-
+        self.remember_window_if_needed()
         self.is_running = False
-        self.automation_completed.emit(True, f"Test réussi en {duration:.1f}s", duration, self.extracted_response)
+        self.automation_completed.emit(True, f"Success in {duration:.1f}s", duration, self.extracted_response)
 
-    def _handle_automation_failure(self, error_message):
-        """Gestion échec"""
+    def handle_failure(self, error_message):
         duration = time.time() - self.start_time if self.start_time else 0
-        logger.error(f"❌ AUTOMATISATION ÉCHOUÉE: {error_message}")
-
         self.is_running = False
         self.automation_failed.emit("automation_error", error_message)
 
     def stop_automation(self):
-        """Arrêt RAPIDE"""
-        logger.info("🛑 ARRÊT AUTOMATISATION RAPIDE")
-
         self.force_stop = True
         self.is_running = False
 
-        # Nettoyer console RAPIDE
         try:
-            from config.console_shortcuts import close_console_for_browser
-            close_console_for_browser(self.browser_type, self.keyboard_controller)
+            self.keyboard_controller.press_key('f12')
         except:
-            try:
-                self.keyboard_controller.press_key('f12')
-            except:
-                pass
+            pass
 
-        # Réinitialiser
         if hasattr(self.conductor, 'browser_already_active'):
             self.conductor.browser_already_active = False
 
+        self.selected_window = None
+        self.window_selection_method = "auto"
+
         duration = time.time() - self.start_time if self.start_time else 0
-        self.automation_completed.emit(False, "Arrêté par utilisateur", duration, "")
+        self.automation_completed.emit(False, "Stopped by user", duration, "")
 
     def get_current_status(self):
-        """Statut actuel"""
         duration = time.time() - self.start_time if self.start_time else 0
-        return {
+
+        status = {
             'is_running': self.is_running,
             'duration': duration,
             'force_stop': self.force_stop,
             'platform': self.platform_profile.get('name', '') if self.platform_profile else '',
-            'extracted_response_length': len(self.extracted_response)
+            'extracted_response_length': len(self.extracted_response),
+            'window_selection_method': self.window_selection_method,
+            'has_selected_window': self.selected_window is not None,
+            'selected_window_title': self.selected_window.title if self.selected_window else None,
+            'browser_type': self.browser_type
         }
 
+        return status
+
     def is_automation_running(self):
-        """Vérifie si en cours"""
         return self.is_running and not self.force_stop

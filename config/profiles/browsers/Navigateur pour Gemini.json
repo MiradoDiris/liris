@@ -1,0 +1,14 @@
+{
+  "name": "Navigateur pour Gemini",
+  "type": "Chrome",
+  "path": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "url": "https://aistudio.google.com/",
+  "fullscreen": false,
+  "window_selection_method": "order",
+  "window_order": 2,
+  "window_title_pattern": "",
+  "window_position": null,
+  "window_id": null,
+  "window_size": null,
+  "remember_window": false
+}

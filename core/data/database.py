@@ -36,6 +36,9 @@ class Database:
         # Initialiser les tables
         self._init_tables()
 
+        # Effectuer la migration automatique des profils existants
+        self._migrate_existing_profiles()
+
     def connect(self):
         """
         Établit la connexion à la base de données
@@ -379,12 +382,263 @@ class Database:
             return False
 
     # =====================================================
-    # MÉTHODES POUR GESTION DES PLATEFORMES
+    # NOUVELLES MÉTHODES POUR GESTION MULTI-FENÊTRES
+    # =====================================================
+
+    def _get_default_browser_config(self):
+        """
+        Retourne la configuration navigateur par défaut avec support multi-fenêtres
+
+        Returns:
+            dict: Configuration par défaut
+        """
+        return {
+            "type": "Chrome",
+            "path": "",
+            "url": "",
+            "fullscreen": False,
+            # NOUVELLES OPTIONS MULTI-FENÊTRES (avec valeurs par défaut conservant comportement actuel)
+            "window_selection_method": "auto",  # "auto" = comportement actuel (première fenêtre)
+            "window_order": 1,  # 1 = première fenêtre = comportement actuel
+            "window_title_pattern": "",  # Vide = pas de filtrage par titre
+            "window_position": None,  # None = pas de filtrage par position
+            "window_id": None,  # None = pas de fenêtre spécifique mémorisée
+            "window_size": None,  # None = pas de contrainte de taille
+            "remember_window": False  # False = ne pas mémoriser la sélection
+        }
+
+    def _migrate_browser_config(self, browser_config):
+        """
+        Migre une configuration navigateur vers le nouveau format multi-fenêtres
+
+        Args:
+            browser_config (dict): Configuration existante
+
+        Returns:
+            dict: Configuration migrée
+        """
+        if not browser_config:
+            return self._get_default_browser_config()
+
+        # Créer la nouvelle configuration en préservant l'existante
+        default_config = self._get_default_browser_config()
+        migrated_config = default_config.copy()
+
+        # Préserver toutes les valeurs existantes
+        for key, value in browser_config.items():
+            migrated_config[key] = value
+
+        # Ajouter les nouveaux champs s'ils n'existent pas
+        for key, default_value in default_config.items():
+            if key not in migrated_config:
+                migrated_config[key] = default_value
+
+        logger.debug(f"Configuration navigateur migrée: {list(migrated_config.keys())}")
+        return migrated_config
+
+    def _migrate_existing_profiles(self):
+        """
+        Migre automatiquement tous les profils existants vers le nouveau format
+        """
+        try:
+            logger.info("Vérification de la migration des profils existants...")
+
+            cursor = self.conn.cursor()
+            cursor.execute('SELECT name, profile_data FROM platforms')
+            results = cursor.fetchall()
+
+            migration_count = 0
+
+            for row in results:
+                try:
+                    platform_name = row['name']
+                    profile_data = json.loads(row['profile_data'])
+
+                    # Vérifier si la migration est nécessaire
+                    browser_config = profile_data.get('browser', {})
+                    needs_migration = 'window_selection_method' not in browser_config
+
+                    if needs_migration:
+                        logger.debug(f"Migration du profil {platform_name}...")
+
+                        # Migrer la configuration navigateur
+                        profile_data['browser'] = self._migrate_browser_config(browser_config)
+
+                        # Sauvegarder le profil migré
+                        now = datetime.now().isoformat()
+                        profile_json = json.dumps(profile_data, ensure_ascii=False, indent=2)
+
+                        cursor.execute('''
+                                       UPDATE platforms
+                                       SET profile_data = ?,
+                                           updated_at   = ?
+                                       WHERE name = ?
+                                       ''', (profile_json, now, platform_name))
+
+                        migration_count += 1
+                        logger.debug(f"Profil {platform_name} migré avec succès")
+
+                except Exception as e:
+                    logger.error(f"Erreur migration profil {row['name']}: {str(e)}")
+                    continue
+
+            if migration_count > 0:
+                self.conn.commit()
+                logger.info(f"Migration terminée: {migration_count} profils migrés")
+            else:
+                logger.debug("Aucune migration nécessaire")
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la migration automatique: {str(e)}")
+
+    def validate_browser_config(self, browser_config):
+        """
+        Valide et normalise une configuration navigateur
+
+        Args:
+            browser_config (dict): Configuration à valider
+
+        Returns:
+            tuple: (is_valid, normalized_config, error_message)
+        """
+        try:
+            if not browser_config:
+                return True, self._get_default_browser_config(), None
+
+            # Cloner la configuration
+            normalized = browser_config.copy()
+
+            # Valider window_selection_method
+            valid_methods = ["auto", "order", "title", "position", "manual"]
+            method = normalized.get('window_selection_method', 'auto')
+            if method not in valid_methods:
+                normalized['window_selection_method'] = 'auto'
+                logger.warning(f"Méthode de sélection invalide '{method}', fallback sur 'auto'")
+
+            # Valider window_order
+            order = normalized.get('window_order', 1)
+            if not isinstance(order, int) or order < 1:
+                normalized['window_order'] = 1
+                logger.warning(f"Ordre de fenêtre invalide '{order}', fallback sur 1")
+
+            # Valider window_title_pattern
+            title_pattern = normalized.get('window_title_pattern')
+            if title_pattern is not None and not isinstance(title_pattern, str):
+                normalized['window_title_pattern'] = ""
+                logger.warning("Pattern de titre invalide, réinitialisé")
+
+            # Valider window_position
+            position = normalized.get('window_position')
+            if position is not None:
+                if not isinstance(position, dict) or 'x' not in position or 'y' not in position:
+                    normalized['window_position'] = None
+                    logger.warning("Position de fenêtre invalide, réinitialisée")
+                else:
+                    try:
+                        normalized['window_position']['x'] = int(position['x'])
+                        normalized['window_position']['y'] = int(position['y'])
+                    except (ValueError, TypeError):
+                        normalized['window_position'] = None
+                        logger.warning("Coordonnées de position invalides, réinitialisées")
+
+            # S'assurer que tous les champs requis existent
+            default_config = self._get_default_browser_config()
+            for key, default_value in default_config.items():
+                if key not in normalized:
+                    normalized[key] = default_value
+
+            return True, normalized, None
+
+        except Exception as e:
+            error_msg = f"Erreur validation config navigateur: {str(e)}"
+            logger.error(error_msg)
+            return False, self._get_default_browser_config(), error_msg
+
+    def get_window_selection_info(self, platform_name):
+        """
+        Récupère les informations de sélection de fenêtre pour une plateforme
+
+        Args:
+            platform_name (str): Nom de la plateforme
+
+        Returns:
+            dict: Informations de sélection ou None si non trouvé
+        """
+        try:
+            profile = self.get_platform(platform_name)
+            if not profile:
+                return None
+
+            browser_config = profile.get('browser', {})
+
+            return {
+                'method': browser_config.get('window_selection_method', 'auto'),
+                'order': browser_config.get('window_order', 1),
+                'title_pattern': browser_config.get('window_title_pattern', ''),
+                'position': browser_config.get('window_position'),
+                'window_id': browser_config.get('window_id'),
+                'remember_window': browser_config.get('remember_window', False)
+            }
+
+        except Exception as e:
+            logger.error(f"Erreur récupération info sélection fenêtre {platform_name}: {str(e)}")
+            return None
+
+    def update_window_selection(self, platform_name, selection_info):
+        """
+        Met à jour les informations de sélection de fenêtre pour une plateforme
+
+        Args:
+            platform_name (str): Nom de la plateforme
+            selection_info (dict): Nouvelles informations de sélection
+
+        Returns:
+            bool: True si mise à jour réussie
+        """
+        try:
+            profile = self.get_platform(platform_name)
+            if not profile:
+                logger.error(f"Plateforme {platform_name} non trouvée pour mise à jour sélection fenêtre")
+                return False
+
+            # Mettre à jour la configuration navigateur
+            browser_config = profile.get('browser', {})
+
+            if 'method' in selection_info:
+                browser_config['window_selection_method'] = selection_info['method']
+            if 'order' in selection_info:
+                browser_config['window_order'] = selection_info['order']
+            if 'title_pattern' in selection_info:
+                browser_config['window_title_pattern'] = selection_info['title_pattern']
+            if 'position' in selection_info:
+                browser_config['window_position'] = selection_info['position']
+            if 'window_id' in selection_info:
+                browser_config['window_id'] = selection_info['window_id']
+            if 'remember_window' in selection_info:
+                browser_config['remember_window'] = selection_info['remember_window']
+
+            # Valider la configuration
+            is_valid, normalized_config, error = self.validate_browser_config(browser_config)
+            if not is_valid:
+                logger.error(f"Configuration invalide: {error}")
+                return False
+
+            profile['browser'] = normalized_config
+
+            # Sauvegarder
+            return self.save_platform(platform_name, profile)
+
+        except Exception as e:
+            logger.error(f"Erreur mise à jour sélection fenêtre {platform_name}: {str(e)}")
+            return False
+
+    # =====================================================
+    # MÉTHODES POUR GESTION DES PLATEFORMES (ENRICHIES)
     # =====================================================
 
     def save_platform(self, platform_name, profile_data):
         """
-        Sauvegarde un profil de plateforme en base de données
+        Sauvegarde un profil de plateforme en base de données avec support multi-fenêtres
 
         Args:
             platform_name (str): Nom de la plateforme
@@ -395,6 +649,17 @@ class Database:
         """
         try:
             logger.debug(f"Sauvegarde plateforme {platform_name} en base de données")
+
+            # Validation et normalisation de la configuration navigateur
+            if 'browser' in profile_data:
+                is_valid, normalized_browser, error = self.validate_browser_config(profile_data['browser'])
+                if not is_valid:
+                    logger.error(f"Configuration navigateur invalide pour {platform_name}: {error}")
+                    return False
+                profile_data['browser'] = normalized_browser
+            else:
+                # Ajouter configuration par défaut si absente
+                profile_data['browser'] = self._get_default_browser_config()
 
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
@@ -440,7 +705,7 @@ class Database:
 
     def get_platform(self, platform_name):
         """
-        Récupère un profil de plateforme depuis la base de données
+        Récupère un profil de plateforme depuis la base de données avec migration automatique
 
         Args:
             platform_name (str): Nom de la plateforme
@@ -459,6 +724,16 @@ class Database:
             if result:
                 # Décoder le JSON
                 profile_data = json.loads(result['profile_data'])
+
+                # Migration automatique si nécessaire
+                browser_config = profile_data.get('browser', {})
+                if 'window_selection_method' not in browser_config:
+                    logger.debug(f"Migration automatique du profil {platform_name}")
+                    profile_data['browser'] = self._migrate_browser_config(browser_config)
+
+                    # Sauvegarder la version migrée
+                    self.save_platform(platform_name, profile_data)
+
                 logger.debug(
                     f"Profil {platform_name} récupéré depuis la base (taille: {len(str(profile_data))} caractères)")
 
@@ -473,7 +748,7 @@ class Database:
 
     def get_all_platforms(self):
         """
-        Récupère tous les profils de plateformes
+        Récupère tous les profils de plateformes avec migration automatique
 
         Returns:
             dict: Dictionnaire des profils {nom: profil}
@@ -484,11 +759,38 @@ class Database:
             results = cursor.fetchall()
 
             platforms = {}
+            migration_needed = False
+
             for row in results:
                 try:
-                    platforms[row['name']] = json.loads(row['profile_data'])
+                    platform_name = row['name']
+                    profile_data = json.loads(row['profile_data'])
+
+                    # Migration automatique si nécessaire
+                    browser_config = profile_data.get('browser', {})
+                    if 'window_selection_method' not in browser_config:
+                        logger.debug(f"Migration automatique du profil {platform_name}")
+                        profile_data['browser'] = self._migrate_browser_config(browser_config)
+                        migration_needed = True
+
+                        # Sauvegarder la version migrée
+                        now = datetime.now().isoformat()
+                        profile_json = json.dumps(profile_data, ensure_ascii=False, indent=2)
+                        cursor.execute('''
+                                       UPDATE platforms
+                                       SET profile_data = ?,
+                                           updated_at   = ?
+                                       WHERE name = ?
+                                       ''', (profile_json, now, platform_name))
+
+                    platforms[platform_name] = profile_data
+
                 except Exception as e:
                     logger.error(f"Erreur décodage profil {row['name']}: {str(e)}")
+
+            if migration_needed:
+                self.conn.commit()
+                logger.info("Migration automatique effectuée lors de get_all_platforms")
 
             logger.debug(f"{len(platforms)} profils de plateformes récupérés")
             return platforms
@@ -556,7 +858,7 @@ class Database:
             return False
 
     # =====================================================
-    # MÉTHODES POUR GESTION DU CLAVIER (SIMPLIFIÉES)
+    # MÉTHODES POUR GESTION DU CLAVIER (INCHANGÉES)
     # =====================================================
 
     def save_keyboard_config(self, config_data):
@@ -645,7 +947,7 @@ class Database:
             return None
 
     # =====================================================
-    # MÉTHODES EXISTANTES (SESSIONS, PROMPTS, ETC.)
+    # MÉTHODES EXISTANTES (SESSIONS, PROMPTS, ETC.) - INCHANGÉES
     # =====================================================
 
     def create_session(self, platform_name):

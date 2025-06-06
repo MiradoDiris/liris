@@ -23,7 +23,7 @@ from ui.widgets.tabs.final_test_widget import FinalTestWidget
 
 
 class PlatformConfigWidget(QtWidgets.QWidget):
-    """Widget de configuration des plateformes d'IA"""
+    """Widget de configuration des plateformes d'IA avec support multi-fenêtres"""
 
     # Signaux
     platform_added = pyqtSignal(str)
@@ -41,7 +41,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.setMouseTracking(True)
 
         # Debug
-        print("PlatformConfigWidget: Initialisation...")
+        print("PlatformConfigWidget: Initialisation avec support multi-fenêtres...")
 
         self.config_provider = config_provider
         self.conductor = conductor
@@ -58,11 +58,259 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             # Force tous les widgets à être activés après l'initialisation
             self._force_enable_all_widgets()
 
-            print("PlatformConfigWidget: Initialisation terminée avec succès")
+            print("PlatformConfigWidget: Initialisation terminée avec succès (support multi-fenêtres activé)")
         except Exception as e:
             logger.error(f"Erreur lors de l'initialisation de PlatformConfigWidget: {str(e)}")
             print(f"ERREUR CRITIQUE: {str(e)}")
             print(traceback.format_exc())
+
+    # =====================================================
+    # NOUVELLES MÉTHODES POUR SUPPORT MULTI-FENÊTRES
+    # =====================================================
+
+    def _migrate_profile_browser_config(self, profile):
+        """
+        Migre automatiquement la configuration navigateur d'un profil vers le nouveau format
+
+        Args:
+            profile (dict): Profil à migrer
+
+        Returns:
+            dict: Profil migré avec configuration navigateur enrichie
+        """
+        try:
+            if not profile or 'browser' not in profile:
+                return profile
+
+            browser_config = profile['browser']
+
+            # Vérifier si migration nécessaire
+            if 'window_selection_method' in browser_config:
+                # Déjà au nouveau format
+                return profile
+
+            logger.debug(f"Migration automatique config navigateur pour profil {profile.get('name', 'Unknown')}")
+
+            # Ajouter les nouveaux champs avec valeurs par défaut (comportement actuel préservé)
+            browser_config.update({
+                'window_selection_method': 'auto',  # Comportement actuel = première fenêtre
+                'window_order': 1,  # Première fenêtre = comportement actuel
+                'window_title_pattern': '',  # Pas de filtrage par titre
+                'window_position': None,  # Pas de filtrage par position
+                'window_id': None,  # Pas de fenêtre spécifique mémorisée
+                'window_size': None,  # Pas de contrainte de taille
+                'remember_window': False  # Ne pas mémoriser la sélection
+            })
+
+            logger.debug(f"Migration terminée - nouveaux champs ajoutés: {list(browser_config.keys())}")
+            return profile
+
+        except Exception as e:
+            logger.error(f"Erreur migration config navigateur: {str(e)}")
+            return profile  # Retourner profil original en cas d'erreur
+
+    def _validate_and_enrich_browser_config(self, browser_config):
+        """
+        Valide et enrichit une configuration navigateur avec support multi-fenêtres
+
+        Args:
+            browser_config (dict): Configuration à valider
+
+        Returns:
+            dict: Configuration validée et enrichie
+        """
+        try:
+            if not browser_config:
+                browser_config = {}
+
+            # Valeurs par défaut pour préserver comportement actuel
+            defaults = {
+                'type': 'Chrome',
+                'path': '',
+                'url': '',
+                'fullscreen': False,
+                'window_selection_method': 'auto',
+                'window_order': 1,
+                'window_title_pattern': '',
+                'window_position': None,
+                'window_id': None,
+                'window_size': None,
+                'remember_window': False
+            }
+
+            # Appliquer les valeurs par défaut pour les champs manquants
+            for key, default_value in defaults.items():
+                if key not in browser_config:
+                    browser_config[key] = default_value
+
+            # Validation des valeurs
+            valid_methods = ['auto', 'order', 'title', 'position', 'manual']
+            if browser_config['window_selection_method'] not in valid_methods:
+                logger.warning(
+                    f"Méthode sélection invalide: {browser_config['window_selection_method']}, fallback sur 'auto'")
+                browser_config['window_selection_method'] = 'auto'
+
+            # Validation window_order
+            try:
+                order = int(browser_config['window_order'])
+                if order < 1:
+                    order = 1
+                browser_config['window_order'] = order
+            except (ValueError, TypeError):
+                browser_config['window_order'] = 1
+
+            # Validation window_position
+            if browser_config['window_position'] is not None:
+                if not isinstance(browser_config['window_position'], dict):
+                    browser_config['window_position'] = None
+                elif 'x' not in browser_config['window_position'] or 'y' not in browser_config['window_position']:
+                    browser_config['window_position'] = None
+                else:
+                    try:
+                        browser_config['window_position']['x'] = int(browser_config['window_position']['x'])
+                        browser_config['window_position']['y'] = int(browser_config['window_position']['y'])
+                    except (ValueError, TypeError):
+                        browser_config['window_position'] = None
+
+            logger.debug(
+                f"Configuration navigateur validée: méthode={browser_config['window_selection_method']}, ordre={browser_config['window_order']}")
+            return browser_config
+
+        except Exception as e:
+            logger.error(f"Erreur validation config navigateur: {str(e)}")
+            # Retourner configuration par défaut en cas d'erreur
+            return defaults.copy()
+
+    def _get_browser_window_info(self, platform_name):
+        """
+        Récupère les informations de sélection de fenêtre pour une plateforme
+
+        Args:
+            platform_name (str): Nom de la plateforme
+
+        Returns:
+            dict: Informations de sélection de fenêtre
+        """
+        try:
+            if not platform_name or platform_name not in self.profiles:
+                return None
+
+            profile = self.profiles[platform_name]
+            browser_config = profile.get('browser', {})
+
+            return {
+                'method': browser_config.get('window_selection_method', 'auto'),
+                'order': browser_config.get('window_order', 1),
+                'title_pattern': browser_config.get('window_title_pattern', ''),
+                'position': browser_config.get('window_position'),
+                'window_id': browser_config.get('window_id'),
+                'remember_window': browser_config.get('remember_window', False)
+            }
+
+        except Exception as e:
+            logger.error(f"Erreur récupération info fenêtre {platform_name}: {str(e)}")
+            return None
+
+    def _save_browser_window_info(self, platform_name, window_info):
+        """
+        Sauvegarde les informations de sélection de fenêtre pour une plateforme
+
+        Args:
+            platform_name (str): Nom de la plateforme
+            window_info (dict): Informations de sélection
+
+        Returns:
+            bool: True si sauvegarde réussie
+        """
+        try:
+            if not platform_name or platform_name not in self.profiles:
+                logger.error(f"Plateforme {platform_name} introuvable pour sauvegarde window_info")
+                return False
+
+            profile = self.profiles[platform_name]
+            browser_config = profile.get('browser', {})
+
+            # Mettre à jour les informations de fenêtre
+            if 'method' in window_info:
+                browser_config['window_selection_method'] = window_info['method']
+            if 'order' in window_info:
+                browser_config['window_order'] = window_info['order']
+            if 'title_pattern' in window_info:
+                browser_config['window_title_pattern'] = window_info['title_pattern']
+            if 'position' in window_info:
+                browser_config['window_position'] = window_info['position']
+            if 'window_id' in window_info:
+                browser_config['window_id'] = window_info['window_id']
+            if 'remember_window' in window_info:
+                browser_config['remember_window'] = window_info['remember_window']
+
+            # Valider et enrichir
+            browser_config = self._validate_and_enrich_browser_config(browser_config)
+            profile['browser'] = browser_config
+
+            # Sauvegarder le profil complet
+            return self._save_profile_internal(platform_name, profile)
+
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde window_info {platform_name}: {str(e)}")
+            return False
+
+    def _save_profile_internal(self, platform_name, profile):
+        """
+        Sauvegarde interne d'un profil avec gestion multi-sources
+
+        Args:
+            platform_name (str): Nom de la plateforme
+            profile (dict): Profil à sauvegarder
+
+        Returns:
+            bool: True si sauvegarde réussie
+        """
+        try:
+            # Migration automatique avant sauvegarde
+            profile = self._migrate_profile_browser_config(profile)
+
+            # Validation de la config navigateur
+            if 'browser' in profile:
+                profile['browser'] = self._validate_and_enrich_browser_config(profile['browser'])
+
+            success = False
+
+            # Méthode 1: Base de données
+            if hasattr(self.conductor, 'database') and self.conductor.database:
+                try:
+                    success = self.conductor.database.save_platform(platform_name, profile)
+                    if success:
+                        logger.debug(f"Profil {platform_name} sauvegardé en DB avec support multi-fenêtres")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Erreur sauvegarde DB: {str(e)}")
+
+            # Méthode 2: ConfigProvider
+            if hasattr(self.config_provider, 'save_profile'):
+                try:
+                    success = self.config_provider.save_profile(platform_name, profile)
+                    if success:
+                        logger.debug(f"Profil {platform_name} sauvegardé via ConfigProvider")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Erreur sauvegarde ConfigProvider: {str(e)}")
+
+            # Méthode 3: Fichier direct
+            success = self._save_platform_file(platform_name, profile)
+            if success:
+                logger.debug(f"Profil {platform_name} sauvegardé directement en fichier")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde profil interne {platform_name}: {str(e)}")
+            return False
+
+    # =====================================================
+    # MÉTHODES EXISTANTES ENRICHIES (COMPATIBILITÉ GARANTIE)
+    # =====================================================
 
     # Capture explicite des événements de souris pour garantir que les clics sont traités
     def mousePressEvent(self, event):
@@ -113,7 +361,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.platform_list.raise_()
 
     def _init_ui(self):
-        """Configure l'interface utilisateur - version améliorée avec panneau d'aide"""
+        """Configure l'interface utilisateur"""
         # Layout principal
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setSpacing(PlatformConfigStyle.SPACING)
@@ -124,39 +372,6 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         title_label = QtWidgets.QLabel("Configuration des Plateformes d'IA")
         title_label.setStyleSheet(PlatformConfigStyle.get_title_style())
         main_layout.addWidget(title_label)
-
-        # Créer le panneau d'aide contextuel (invisible par défaut)
-        self.workflow_help = QtWidgets.QWidget()
-        workflow_layout = QtWidgets.QVBoxLayout(self.workflow_help)
-        workflow_layout.setContentsMargins(10, 10, 10, 10)
-
-        help_title = QtWidgets.QLabel("<b>Guide de configuration</b>")
-        help_title.setStyleSheet("font-size: 14px; color: #074E68;")
-
-        help_steps = QtWidgets.QLabel(
-            "Pour configurer correctement une plateforme d'IA, suivez cet ordre:<br>"
-            "1. Configurez d'abord le clavier (disposition, accents)<br>"
-            "2. Complétez les informations générales (nom, limites)<br>"
-            "3. Configurez le navigateur dans l'onglet correspondant<br>"
-            "4. Configurez le champ de prompt<br>"
-            "5. Configurez la zone de réponse<br>"
-            "6. Lancez le test final pour valider le tout<br>"
-            "<br>Terminez en testant la connexion."
-        )
-        help_steps.setStyleSheet("padding: 12px; background-color: #E8F4F8; border-radius: 4px;")
-        help_steps.setWordWrap(True)
-
-        dismiss_button = QtWidgets.QPushButton("Masquer ce guide")
-        dismiss_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        dismiss_button.clicked.connect(lambda: self.workflow_help.setVisible(False))
-
-        workflow_layout.addWidget(help_title)
-        workflow_layout.addWidget(help_steps)
-        workflow_layout.addWidget(dismiss_button)
-
-        # Ajouter au layout principal mais cacher par défaut
-        main_layout.addWidget(self.workflow_help)
-        self.workflow_help.setVisible(False)
 
         # Créer les onglets principaux
         self.tabs = QtWidgets.QTabWidget()
@@ -283,11 +498,14 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         general_tab.layout().addWidget(content_widget)
         self.tabs.addTab(general_tab, "Configuration Générale")
 
-        # Onglet 3: Navigateur
+        # Onglet 3: Navigateur (ENRICHI pour support multi-fenêtres)
         self.browser_widget = BrowserConfigWidget(self.config_provider, self.conductor)
         self.browser_widget.browser_saved.connect(self._on_browser_config_saved)
         self.browser_widget.browser_used.connect(self._on_browser_used)
         self.browser_widget.elements_detected.connect(self._on_elements_detected)
+        # NOUVEAU: Connecter les signaux pour gestion multi-fenêtres
+        if hasattr(self.browser_widget, 'window_selection_changed'):
+            self.browser_widget.window_selection_changed.connect(self._on_window_selection_changed)
         self.tabs.addTab(self.browser_widget, "Gestion des navigateurs")
 
         # Onglet 4: Champ de prompt
@@ -440,8 +658,39 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             self._on_platform_selected(self.platform_list.currentItem(), None)
             self._update_tab_status()
 
+    def _on_window_selection_changed(self, platform_name, selection_info):
+        """
+        NOUVEAU: Gère l'événement de changement de sélection de fenêtre
+
+        Args:
+            platform_name (str): Nom de la plateforme
+            selection_info (dict): Informations de sélection de fenêtre
+        """
+        print(f"DEBUG: Sélection de fenêtre changée pour '{platform_name}': {selection_info}")
+
+        try:
+            # Sauvegarder les nouvelles informations de sélection
+            success = self._save_browser_window_info(platform_name, selection_info)
+
+            if success:
+                logger.info(f"Informations de fenêtre sauvegardées pour {platform_name}")
+
+                # Mettre à jour le cache local
+                if platform_name in self.profiles:
+                    browser_config = self.profiles[platform_name].get('browser', {})
+                    browser_config.update(selection_info)
+
+                # Actualiser l'affichage si c'est la plateforme courante
+                if self.current_platform == platform_name:
+                    self._update_tab_status()
+            else:
+                logger.error(f"Échec sauvegarde informations fenêtre pour {platform_name}")
+
+        except Exception as e:
+            logger.error(f"Erreur gestion changement sélection fenêtre: {str(e)}")
+
     def _load_profiles_from_files(self):
-        """Charge directement les profils depuis les fichiers pour garantir un chargement robuste"""
+        """Charge directement les profils depuis les fichiers pour garantir un chargement robuste avec migration"""
         try:
             profiles_dir = getattr(self.config_provider, 'profiles_dir', 'config/profiles')
             print(f"DEBUG: Chargement direct des profils depuis {profiles_dir}")
@@ -451,6 +700,8 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 print(f"DEBUG: Répertoire des profils créé: {profiles_dir}")
 
             file_count = 0
+            migration_count = 0
+
             for filename in os.listdir(profiles_dir):
                 if filename.endswith('.json'):
                     file_path = os.path.join(profiles_dir, filename)
@@ -458,16 +709,34 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                         with open(file_path, 'r', encoding='utf-8') as f:
                             profile = json.load(f)
                             name = profile.get('name', filename.replace('.json', ''))
+
+                            # NOUVEAU: Migration automatique
+                            original_profile = profile.copy()
+                            profile = self._migrate_profile_browser_config(profile)
+
+                            # Sauvegarder si migration effectuée
+                            if profile != original_profile:
+                                try:
+                                    with open(file_path, 'w', encoding='utf-8') as f_write:
+                                        json.dump(profile, f_write, indent=2, ensure_ascii=False)
+                                    migration_count += 1
+                                    logger.info(f"Profil {name} migré automatiquement")
+                                except Exception as save_error:
+                                    logger.warning(f"Erreur sauvegarde migration {name}: {save_error}")
+
                             self.profiles[name] = profile
                             file_count += 1
                             print(f"DEBUG: Profil chargé depuis fichier: {name}")
+
                     except Exception as e:
                         logger.error(f"Erreur lors du chargement du fichier {filename}: {str(e)}")
                         print(f"DEBUG: Erreur fichier {filename}: {str(e)}")
 
             print(f"DEBUG: {file_count} profils chargés depuis les fichiers")
+            if migration_count > 0:
+                print(f"DEBUG: {migration_count} profils migrés automatiquement")
 
-            # Mettre à jour le widget navigateur avec les profils
+            # Mettre à jour le widget navigateur avec les profils enrichis
             if hasattr(self, 'browser_widget'):
                 self.browser_widget.set_profiles(self.profiles)
 
@@ -488,8 +757,11 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             print(f"DEBUG: Erreur chargement direct: {str(e)}")
 
     def _save_platform_file(self, platform_name, profile):
-        """Sauvegarde un profil dans un fichier"""
+        """Sauvegarde un profil dans un fichier avec migration automatique"""
         try:
+            # Migration automatique avant sauvegarde
+            profile = self._migrate_profile_browser_config(profile)
+
             profiles_dir = getattr(self.config_provider, 'profiles_dir', 'config/profiles')
             os.makedirs(profiles_dir, exist_ok=True)
 
@@ -497,7 +769,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(profile, f, indent=2, ensure_ascii=False)
 
-            print(f"DEBUG: Profil {platform_name} sauvegardé dans {file_path}")
+            print(f"DEBUG: Profil {platform_name} sauvegardé dans {file_path} (avec support multi-fenêtres)")
             return True
         except Exception as e:
             logger.error(f"Erreur lors de la sauvegarde du fichier {platform_name}: {str(e)}")
@@ -506,7 +778,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
     def _ensure_default_platforms(self):
         """
-        S'assure que les plateformes par défaut existent
+        S'assure que les plateformes par défaut existent avec support multi-fenêtres
         Ne les recrée pas si elles ont été supprimées délibérément
         """
         # Vérifier si c'est la première exécution
@@ -520,10 +792,10 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             print("DEBUG: Ce n'est pas la première exécution, pas de création des plateformes par défaut")
             return
 
-        print("DEBUG: Création des plateformes par défaut (première exécution)")
-        logger.info("Création des plateformes par défaut (première exécution)")
+        print("DEBUG: Création des plateformes par défaut (première exécution avec support multi-fenêtres)")
+        logger.info("Création des plateformes par défaut (première exécution avec support multi-fenêtres)")
 
-        # Définir les plateformes par défaut
+        # Définir les plateformes par défaut AVEC support multi-fenêtres
         default_platforms = {
             "ChatGPT": {
                 "name": "ChatGPT",
@@ -554,6 +826,14 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                     "type": "Chrome",
                     "path": "",
                     "url": "https://chat.openai.com",
+                    # NOUVEAUX CHAMPS MULTI-FENÊTRES avec valeurs par défaut
+                    "window_selection_method": "auto",
+                    "window_order": 1,
+                    "window_title_pattern": "",
+                    "window_position": None,
+                    "window_id": None,
+                    "window_size": None,
+                    "remember_window": False
                 },
                 "limits": {
                     "tokens_per_prompt": 8000,
@@ -598,6 +878,14 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                     "type": "Chrome",
                     "path": "",
                     "url": "https://claude.ai",
+                    # NOUVEAUX CHAMPS MULTI-FENÊTRES avec valeurs par défaut
+                    "window_selection_method": "auto",
+                    "window_order": 1,
+                    "window_title_pattern": "",
+                    "window_position": None,
+                    "window_id": None,
+                    "window_size": None,
+                    "remember_window": False
                 },
                 "limits": {
                     "tokens_per_prompt": 10000,
@@ -661,14 +949,14 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                     success = self._create_platform(name, profile)
                     print(f"DEBUG: Création plateforme {name}: {'Succès' if success else 'Échec'}")
                     if success:
-                        logger.info(f"Plateforme par défaut créée: {name}")
+                        logger.info(f"Plateforme par défaut créée avec support multi-fenêtres: {name}")
                 else:
                     print(f"DEBUG: Plateforme {name} existe déjà, pas de création")
 
             # Créer le marqueur pour indiquer que l'initialisation a été effectuée
             try:
                 with open(first_run_marker, 'w') as f:
-                    f.write(f"Plateformes initialisées le {datetime.now().isoformat()}")
+                    f.write(f"Plateformes initialisées le {datetime.now().isoformat()} avec support multi-fenêtres")
                 print(f"DEBUG: Marqueur d'initialisation créé: {first_run_marker}")
             except Exception as e:
                 logger.error(f"Erreur lors de la création du marqueur: {str(e)}")
@@ -681,7 +969,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
     def _create_platform(self, name, profile):
         """
-        Crée une nouvelle plateforme
+        Crée une nouvelle plateforme avec support multi-fenêtres
 
         Args:
             name (str): Nom de la plateforme
@@ -691,50 +979,21 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             bool: True si la création est réussie
         """
         try:
-            print(f"DEBUG: Tentative de création de la plateforme {name}")
+            print(f"DEBUG: Tentative de création de la plateforme {name} avec support multi-fenêtres")
 
-            # Essayer d'abord la base de données
-            db_success = False
-            if hasattr(self.conductor, 'database') and self.conductor.database:
-                if hasattr(self.conductor.database, 'save_platform'):
-                    try:
-                        db_success = self.conductor.database.save_platform(name, profile)
-                        print(f"DEBUG: Sauvegarde dans la DB: {db_success}")
-                    except Exception as e:
-                        print(f"DEBUG: Erreur sauvegarde DB: {str(e)}")
+            # Migration et validation automatique
+            profile = self._migrate_profile_browser_config(profile)
 
-                    if db_success:
-                        return True
+            # Utiliser la sauvegarde interne avec gestion multi-sources
+            success = self._save_profile_internal(name, profile)
 
-            # Fallback sur le ConfigProvider
-            config_success = False
-            if hasattr(self.config_provider, 'save_profile'):
-                try:
-                    config_success = self.config_provider.save_profile(name, profile)
-                    print(f"DEBUG: Sauvegarde via ConfigProvider: {config_success}")
-                except Exception as e:
-                    print(f"DEBUG: Erreur sauvegarde ConfigProvider: {str(e)}")
-
-                if config_success:
-                    return True
-
-            # Fallback direct sur les fichiers (méthode la plus robuste)
-            try:
-                profiles_dir = getattr(self.config_provider, 'profiles_dir', 'config/profiles')
-                os.makedirs(profiles_dir, exist_ok=True)
-
-                file_path = os.path.join(profiles_dir, f"{name}.json")
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(profile, f, indent=2, ensure_ascii=False)
-
-                print(f"DEBUG: Sauvegarde directe fichier: {file_path}")
-
+            if success:
                 # Mettre à jour le cache interne
                 self.profiles[name] = profile
-
+                logger.info(f"Plateforme {name} créée avec succès (support multi-fenêtres)")
                 return True
-            except Exception as e:
-                print(f"DEBUG: Erreur sauvegarde fichier: {str(e)}")
+            else:
+                logger.error(f"Échec création plateforme {name}")
                 return False
 
         except Exception as e:
@@ -743,8 +1002,8 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             return False
 
     def _load_platforms(self):
-        """Charge la liste des plateformes depuis toutes les sources disponibles"""
-        print("DEBUG: Chargement des plateformes...")
+        """Charge la liste des plateformes depuis toutes les sources disponibles avec migration"""
+        print("DEBUG: Chargement des plateformes avec support multi-fenêtres...")
 
         try:
             # Essayer plusieurs méthodes pour charger les plateformes
@@ -757,9 +1016,14 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                         # Utiliser la base de données
                         platforms = self.conductor.database.get_all_platforms()
                         if platforms:
+                            # Migration automatique des profils DB
+                            for name, profile in platforms.items():
+                                platforms[name] = self._migrate_profile_browser_config(profile)
+
                             self.profiles.update(platforms)
                             loaded = True
-                            print(f"DEBUG: Plateformes chargées depuis la base de données: {len(platforms)}")
+                            print(
+                                f"DEBUG: Plateformes chargées depuis la base de données avec migration: {len(platforms)}")
                     except Exception as e:
                         logger.error(f"Erreur lors du chargement depuis la base de données: {str(e)}")
                         print(f"DEBUG: Erreur chargement DB: {str(e)}")
@@ -769,20 +1033,24 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 try:
                     platforms = self.config_provider.get_profiles(reload=True)
                     if platforms:
+                        # Migration automatique des profils ConfigProvider
+                        for name, profile in platforms.items():
+                            platforms[name] = self._migrate_profile_browser_config(profile)
+
                         self.profiles.update(platforms)
                         loaded = True
-                        print(f"DEBUG: Plateformes chargées depuis ConfigProvider: {len(platforms)}")
+                        print(f"DEBUG: Plateformes chargées depuis ConfigProvider avec migration: {len(platforms)}")
                 except Exception as e:
                     logger.error(f"Erreur lors du chargement depuis ConfigProvider: {str(e)}")
                     print(f"DEBUG: Erreur chargement ConfigProvider: {str(e)}")
 
-            # Méthode 3: Les fichiers ont déjà été chargés dans _load_profiles_from_files
+            # Méthode 3: Les fichiers ont déjà été chargés dans _load_profiles_from_files (avec migration)
             # Assurons-nous que self.profiles n'est pas vide
             if not self.profiles:
                 logger.warning("Aucune source de données pour les plateformes d'IA")
                 print("DEBUG: Aucune plateforme trouvée dans aucune source!")
             else:
-                print(f"DEBUG: Plateformes disponibles: {list(self.profiles.keys())}")
+                print(f"DEBUG: Plateformes disponibles avec support multi-fenêtres: {list(self.profiles.keys())}")
 
             # Mettre à jour la liste
             self.platform_list.clear()
@@ -793,7 +1061,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 self.platform_list.addItem(item)
                 print(f"DEBUG: Plateforme ajoutée à la liste: {name}")
 
-            # Mettre à jour le widget navigateur avec les profils chargés
+            # Mettre à jour le widget navigateur avec les profils enrichis
             if hasattr(self, 'browser_widget'):
                 self.browser_widget.set_profiles(self.profiles)
 
@@ -843,9 +1111,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         print(f"DEBUG: Widgets activés (_set_details_enabled({enabled}))")
 
     def _on_platform_selected(self, current, previous):
-        """Gère la sélection d'une plateforme dans la liste"""
-        # Masquer le guide d'aide contextuel
-        self.workflow_help.setVisible(False)
+        """Gère la sélection d'une plateforme dans la liste avec support multi-fenêtres"""
         self.is_new_platform = False
 
         if not current:
@@ -858,10 +1124,12 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             # Récupérer le nom de la plateforme
             platform_name = current.data(Qt.UserRole)
             self.current_platform = platform_name
-            print(f"DEBUG: Plateforme sélectionnée: {platform_name}")
+            print(f"DEBUG: Plateforme sélectionnée (avec support multi-fenêtres): {platform_name}")
 
-            # Charger le profil
+            # Charger le profil avec migration automatique
             profile = self.profiles.get(platform_name, {})
+            profile = self._migrate_profile_browser_config(profile)
+            self.profiles[platform_name] = profile  # Mettre à jour le cache
 
             if not profile:
                 print(f"DEBUG: Profil vide pour {platform_name}!")
@@ -932,9 +1200,10 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             )
 
     def _on_add_platform(self):
-        """Crée une nouvelle plateforme"""
+        """Crée une nouvelle plateforme avec support multi-fenêtres"""
         # Réinitialiser les champs
-        self.name_edit.setText("Custom AI Platform")
+        platform_name = "Custom AI Platform"
+        self.name_edit.setText(platform_name)
         self.tokens_spin.setValue(8000)
         self.prompts_spin.setValue(30)
         self.cooldown_spin.setValue(120)
@@ -944,14 +1213,26 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         # Activer le panneau de détails et désactiver le bouton de suppression
         self._set_details_enabled(True)
         self.delete_button.setEnabled(False)
-        self.current_platform = None
 
-        # Activer le mode "nouvelle plateforme" et afficher le guide
+        # Activer le mode "nouvelle plateforme"
         self.is_new_platform = True
-        self.workflow_help.setVisible(True)
+        self.current_platform = platform_name  # Définir comme plateforme courante
 
-        # Sélectionner le premier onglet (Configuration clavier)
-        self.tabs.setCurrentIndex(0)
+        # Ajouter temporairement la plateforme à la liste avec un style visuel différent
+        temp_item = QtWidgets.QListWidgetItem(f"{platform_name} (non sauvegardé)")
+        temp_item.setData(Qt.UserRole, platform_name)
+        # Style pour indiquer que c'est temporaire (italique + couleur différente)
+        font = temp_item.font()
+        font.setItalic(True)
+        temp_item.setFont(font)
+        temp_item.setForeground(QtGui.QBrush(QtGui.QColor(128, 128, 128)))  # Gris
+        self.platform_list.addItem(temp_item)
+
+        # Sélectionner immédiatement cet item
+        self.platform_list.setCurrentItem(temp_item)
+
+        # Rester sur l'onglet Configuration Générale pour remplir les infos de base
+        self.tabs.setCurrentIndex(1)
 
         # Mettre à jour les indicateurs visuels
         self._update_tab_status()
@@ -960,7 +1241,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self._force_enable_all_widgets()
 
     def _on_save_platform(self):
-        """Enregistre la plateforme actuelle"""
+        """Enregistre la plateforme actuelle avec support multi-fenêtres"""
         # Vérifier le nom
         name = self.name_edit.text().strip()
         if not name:
@@ -971,7 +1252,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             )
             return
 
-        # Construire le profil
+        # Construire le profil avec support multi-fenêtres
         profile = {
             "name": name,
             "interface": {
@@ -1001,6 +1282,14 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 "type": "Chrome",  # Valeurs par défaut - seront remplacées par le navigateur choisi
                 "path": "",
                 "url": "",
+                # NOUVEAUX CHAMPS MULTI-FENÊTRES avec valeurs par défaut
+                "window_selection_method": "auto",
+                "window_order": 1,
+                "window_title_pattern": "",
+                "window_position": None,
+                "window_id": None,
+                "window_size": None,
+                "remember_window": False
             },
             "limits": {
                 "tokens_per_prompt": self.tokens_spin.value(),
@@ -1019,10 +1308,12 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
         # Conserver les informations de navigateur si on met à jour une plateforme existante
         if self.current_platform and 'browser' in self.profiles.get(self.current_platform, {}):
-            profile['browser'] = self.profiles[self.current_platform]['browser']
+            existing_browser = self.profiles[self.current_platform]['browser']
+            # Préserver toutes les informations navigateur existantes y compris multi-fenêtres
+            profile['browser'].update(existing_browser)
 
         try:
-            print(f"DEBUG: Sauvegarde de la plateforme {name}")
+            print(f"DEBUG: Sauvegarde de la plateforme {name} avec support multi-fenêtres")
 
             # Déterminer si c'est une mise à jour ou une création
             is_update = self.current_platform is not None and self.current_platform != name
@@ -1035,63 +1326,37 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             else:
                 print(f"DEBUG: C'est une création: {name}")
 
-            # Sauvegarder dans la base de données si disponible
-            db_success = False
-            if hasattr(self.conductor, 'database') and self.conductor.database:
-                if hasattr(self.conductor.database, 'save_platform'):
+            # Utiliser la sauvegarde interne avec support multi-fenêtres
+            success = self._save_profile_internal(name, profile)
+
+            if not success:
+                raise ConfigurationError("Échec de l'enregistrement du profil")
+
+            # Si c'est une mise à jour avec changement de nom, supprimer l'ancien
+            if is_update and self.current_platform != name:
+                # Supprimer l'ancien profil
+                if hasattr(self.conductor, 'database') and self.conductor.database:
                     try:
-                        # Sauvegarder dans la base de données
-                        db_success = self.conductor.database.save_platform(name, profile)
-                        print(f"DEBUG: Sauvegarde DB: {db_success}")
+                        self.conductor.database.delete_platform(self.current_platform)
+                    except:
+                        pass
 
-                        if is_update and self.current_platform != name:
-                            # Si le nom a changé et que c'est une mise à jour, supprimer l'ancien
-                            deleted = self.conductor.database.delete_platform(self.current_platform)
-                            print(f"DEBUG: Suppression ancien nom dans DB: {deleted}")
-                    except Exception as e:
-                        print(f"DEBUG: Erreur sauvegarde DB: {str(e)}")
-
-            # Si la sauvegarde dans la base de données a échoué ou n'est pas disponible, utiliser le provider de configuration
-            if not db_success:
-                print("DEBUG: Sauvegarde DB échouée ou non disponible, utilisation alternatives")
-
-                # Si c'est une mise à jour et que le nom a changé, supprimer l'ancien fichier
-                if is_update:
-                    profiles_dir = getattr(self.config_provider, 'profiles_dir', 'config/profiles')
-                    old_file_path = os.path.join(profiles_dir, f"{self.current_platform}.json")
-                    if os.path.exists(old_file_path):
-                        try:
-                            os.remove(old_file_path)
-                            print(f"DEBUG: Ancien fichier supprimé: {old_file_path}")
-                        except Exception as e:
-                            print(f"DEBUG: Erreur suppression ancien fichier: {str(e)}")
-
-                # Vérifier que save_profile existe
-                if hasattr(self.config_provider, 'save_profile'):
+                # Supprimer l'ancien fichier
+                profiles_dir = getattr(self.config_provider, 'profiles_dir', 'config/profiles')
+                old_file_path = os.path.join(profiles_dir, f"{self.current_platform}.json")
+                if os.path.exists(old_file_path):
                     try:
-                        success = self.config_provider.save_profile(name, profile)
-                        print(f"DEBUG: Sauvegarde ConfigProvider: {success}")
-
-                        if not success:
-                            raise ConfigurationError("Échec de l'enregistrement du profil")
+                        os.remove(old_file_path)
+                        print(f"DEBUG: Ancien fichier supprimé: {old_file_path}")
                     except Exception as e:
-                        print(f"DEBUG: Erreur sauvegarde ConfigProvider: {str(e)}")
+                        print(f"DEBUG: Erreur suppression ancien fichier: {str(e)}")
 
-                        # Sauvegarde manuelle du fichier si la méthode échoue
-                        self._save_platform_file(name, profile)
-                else:
-                    # Sauvegarde manuelle du fichier si la méthode n'existe pas
-                    print("DEBUG: ConfigProvider.save_profile n'existe pas, sauvegarde directe fichier")
-                    self._save_platform_file(name, profile)
+                # Supprimer du cache
+                self.profiles.pop(self.current_platform, None)
 
             # Mettre à jour le cache interne
             self.profiles[name] = profile
             print(f"DEBUG: Cache interne mis à jour pour {name}")
-
-            # Supprimer l'ancienne entrée si le nom a changé
-            if is_update and self.current_platform != name:
-                self.profiles.pop(self.current_platform, None)
-                print(f"DEBUG: Ancienne entrée supprimée du cache: {self.current_platform}")
 
             # Actualiser la liste
             self._load_platforms()
@@ -1106,14 +1371,13 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
             # Reset le mode nouvelle plateforme
             self.is_new_platform = False
-            self.workflow_help.setVisible(False)
 
             # Si c'était une nouvelle plateforme, suggérer de configurer le clavier d'abord
             if was_new:
                 QtWidgets.QMessageBox.information(
                     self,
                     "Enregistrement réussi",
-                    f"La plateforme {name} a été créée. Vous devriez maintenant configurer "
+                    f"La plateforme {name} a été créée avec support multi-fenêtres. Vous devriez maintenant configurer "
                     f"le clavier dans l'onglet 'Configuration clavier'."
                 )
                 # Passer automatiquement à l'onglet clavier
@@ -1122,7 +1386,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.information(
                     self,
                     "Enregistrement réussi",
-                    f"La plateforme {name} a été enregistrée avec succès."
+                    f"La plateforme {name} a été enregistrée avec succès (support multi-fenêtres activé)."
                 )
 
             # Mettre à jour les indicateurs d'état
@@ -1264,7 +1528,6 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             # Réinitialiser les indicateurs
             self.current_platform = None
             self.is_new_platform = False
-            self.workflow_help.setVisible(False)
 
         except Exception as e:
             logger.error(f"Erreur lors de la suppression: {str(e)}")
@@ -1278,12 +1541,12 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             )
 
     def _on_test_platform(self):
-        """Teste la connexion avec la plateforme"""
+        """Teste la connexion avec la plateforme avec informations multi-fenêtres"""
         if not self.current_platform:
             return
 
         try:
-            print(f"DEBUG: Test de connexion pour {self.current_platform}")
+            print(f"DEBUG: Test de connexion pour {self.current_platform} avec support multi-fenêtres")
 
             # Vérifier si la plateforme est disponible
             available_platforms = []
@@ -1305,7 +1568,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 self.platform_tested.emit(self.current_platform, False, "Plateforme non disponible")
                 return
 
-            # Récupérer les informations du navigateur
+            # Récupérer les informations du navigateur avec support multi-fenêtres
             profile = self.profiles.get(self.current_platform, {})
             browser_info = profile.get('browser', {})
 
@@ -1323,7 +1586,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
             # Afficher un dialogue de progression
             progress = QtWidgets.QProgressDialog(
-                f"Test de la connexion avec {self.current_platform}...",
+                f"Test de la connexion avec {self.current_platform} (multi-fenêtres)...",
                 "Annuler",
                 0, 100,
                 self
@@ -1340,22 +1603,29 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 remember_positions = self.browser_widget.should_remember_positions()
 
             print(f"DEBUG: Force détection: {force_detection}")
+            print(f"DEBUG: Sélection fenêtre: {browser_info.get('window_selection_method', 'auto')}")
 
             try:
-                # Utiliser la nouvelle méthode de test
+                # Utiliser la nouvelle méthode de test avec informations multi-fenêtres
                 if hasattr(self.conductor, 'test_platform_connection'):
-                    print("DEBUG: Utilisation de test_platform_connection")
+                    print("DEBUG: Utilisation de test_platform_connection avec support multi-fenêtres")
                     progress.setValue(20)
                     progress.setLabelText("Connexion au navigateur...")
 
-                    # Appeler la méthode de test avec les informations du navigateur
+                    # Appeler la méthode de test avec toutes les informations navigateur
                     result = self.conductor.test_platform_connection(
                         self.current_platform,
                         force_detection=force_detection,
                         browser_type=browser_info.get('type', 'Chrome'),
                         browser_path=browser_info.get('path', ''),
                         url=browser_info.get('url', ''),
-                        timeout=30
+                        timeout=30,
+                        # NOUVELLES OPTIONS MULTI-FENÊTRES
+                        window_selection_method=browser_info.get('window_selection_method', 'auto'),
+                        window_order=browser_info.get('window_order', 1),
+                        window_title_pattern=browser_info.get('window_title_pattern', ''),
+                        window_position=browser_info.get('window_position'),
+                        window_id=browser_info.get('window_id')
                     )
 
                     print(f"DEBUG: Résultat du test: {result}")
@@ -1369,17 +1639,12 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                             profile['interface_positions'] = result['positions']
                             print(f"DEBUG: Positions enregistrées: {len(result['positions'])}")
 
-                            # Sauvegarder le profil mis à jour
-                            if hasattr(self.conductor.database, 'save_platform'):
-                                try:
-                                    self.conductor.database.save_platform(self.current_platform, profile)
-                                    print("DEBUG: Profil avec positions sauvegardé dans DB")
-                                except Exception as e:
-                                    print(f"DEBUG: Erreur sauvegarde positions DB: {str(e)}")
-                                    self._save_platform_file(self.current_platform, profile)
+                            # Sauvegarder le profil mis à jour avec support multi-fenêtres
+                            success = self._save_profile_internal(self.current_platform, profile)
+                            if success:
+                                print("DEBUG: Profil avec positions sauvegardé")
                             else:
-                                # Fallback sur le système de fichiers
-                                self._save_platform_file(self.current_platform, profile)
+                                print("DEBUG: Erreur sauvegarde positions")
 
                         # Mettre à jour les indicateurs d'état après un test réussi
                         self._update_tab_status()
@@ -1387,7 +1652,8 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                         QtWidgets.QMessageBox.information(
                             self,
                             "Test réussi",
-                            f"La connexion avec {self.current_platform} fonctionne correctement."
+                            f"La connexion avec {self.current_platform} fonctionne correctement "
+                            f"(sélection: {browser_info.get('window_selection_method', 'auto')})."
                         )
                         self.platform_tested.emit(self.current_platform, True, "Test réussi")
                     else:
@@ -1472,8 +1738,6 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         # Si une plateforme est sélectionnée, recharger ses données
         print("DEBUG: Annulation de l'édition")
 
-        # Masquer le guide d'aide
-        self.workflow_help.setVisible(False)
         self.is_new_platform = False
 
         if self.current_platform:
@@ -1496,8 +1760,8 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self._force_enable_all_widgets()
 
     def refresh(self):
-        """Actualise la liste des plateformes"""
-        print("DEBUG: Rafraîchissement de la liste des plateformes")
+        """Actualise la liste des plateformes avec support multi-fenêtres"""
+        print("DEBUG: Rafraîchissement de la liste des plateformes (avec support multi-fenêtres)")
         # Charger directement depuis les fichiers pour être sûr
         self._load_profiles_from_files()
         self._load_platforms()
@@ -1523,3 +1787,32 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
         # Mettre à jour les indicateurs d'état
         self._update_tab_status()
+
+    # =====================================================
+    # MÉTHODES PUBLIQUES POUR ACCÈS AUX NOUVELLES FONCTIONNALITÉS
+    # =====================================================
+
+    def get_platform_browser_window_info(self, platform_name):
+        """
+        API publique pour récupérer les informations de fenêtre d'une plateforme
+
+        Args:
+            platform_name (str): Nom de la plateforme
+
+        Returns:
+            dict: Informations de sélection de fenêtre ou None
+        """
+        return self._get_browser_window_info(platform_name)
+
+    def set_platform_browser_window_info(self, platform_name, window_info):
+        """
+        API publique pour définir les informations de fenêtre d'une plateforme
+
+        Args:
+            platform_name (str): Nom de la plateforme
+            window_info (dict): Informations de sélection
+
+        Returns:
+            bool: True si sauvegarde réussie
+        """
+        return self._save_browser_window_info(platform_name, window_info)

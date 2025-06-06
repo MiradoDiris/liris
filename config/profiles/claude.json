@@ -1,60 +1,109 @@
 {
-    "name": "Claude",
-    "interface": {
-        "prompt_field": {
-            "type": "textarea",
-            "placeholder": "Message Claude...",
-            "detection": {
-                "method": "findContour",
-                "color_range": {
-                    "lower": [240, 240, 240],
-                    "upper": [255, 255, 255]
-                }
-            }
-        },
-        "submit_button": {
-            "type": "button",
-            "detection": {
-                "method": "findContour",
-                "color_range": {
-                    "lower": [0, 0, 150],
-                    "upper": [100, 100, 255]
-                }
-            }
-        },
-        "response_area": {
-            "type": "div",
-            "detection": {
-                "method": "findContour",
-                "color_range": {
-                    "lower": [245, 245, 245],
-                    "upper": [255, 255, 255]
-                }
-            }
-        },
-        "new_chat_button": {
-            "type": "button",
-            "detection": {
-                "method": "findContour",
-                "color_range": {
-                    "lower": [230, 230, 230],
-                    "upper": [255, 255, 255]
-                }
-            }
+  "name": "Claude",
+  "interface": {
+    "prompt_field": {
+      "type": "textarea",
+      "placeholder": "Message Claude...",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            240,
+            240,
+            240
+          ],
+          "upper": [
+            255,
+            255,
+            255
+          ]
         }
+      }
     },
-    "limits": {
-        "tokens_per_prompt": 8000,
-        "prompts_per_day": 30,
-        "reset_time": "00:00:00",
-        "cooldown_period": 120
+    "submit_button": {
+      "type": "button",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            0,
+            0,
+            150
+          ],
+          "upper": [
+            100,
+            100,
+            255
+          ]
+        }
+      }
     },
-    "error_detection": {
-        "patterns": [
-            "rate limited",
-            "please try again later",
-            "too many requests",
-            "something went wrong"
-        ]
+    "response_area": {
+      "type": "div",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            245,
+            245,
+            245
+          ],
+          "upper": [
+            255,
+            255,
+            255
+          ]
+        }
+      }
+    },
+    "new_chat_button": {
+      "type": "button",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            230,
+            230,
+            230
+          ],
+          "upper": [
+            255,
+            255,
+            255
+          ]
+        }
+      }
     }
+  },
+  "limits": {
+    "tokens_per_prompt": 8000,
+    "prompts_per_day": 30,
+    "reset_time": "00:00:00",
+    "cooldown_period": 120
+  },
+  "error_detection": {
+    "patterns": [
+      "rate limited",
+      "please try again later",
+      "too many requests",
+      "something went wrong"
+    ]
+  },
+  "browser": {
+    "type": "Chrome",
+    "path": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "url": "https://claude.ai/",
+    "fullscreen": false,
+    "window_selection_method": "order",
+    "window_order": 1,
+    "window_title_pattern": "",
+    "window_position": null,
+    "window_id": null,
+    "window_size": null,
+    "remember_window": false,
+    "method": "order",
+    "order": 1,
+    "title_pattern": "",
+    "position": null
+  }
 }

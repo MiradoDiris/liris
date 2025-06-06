@@ -1,0 +1,14 @@
+{
+  "name": "Navigateur pour Claude",
+  "type": "Chrome",
+  "path": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "url": "https://claude.ai/",
+  "fullscreen": false,
+  "window_selection_method": "order",
+  "window_order": 1,
+  "window_title_pattern": "",
+  "window_position": null,
+  "window_id": null,
+  "window_size": null,
+  "remember_window": false
+}

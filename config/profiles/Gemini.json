@@ -1,0 +1,85 @@
+{
+  "name": "Gemini",
+  "interface": {
+    "prompt_field": {
+      "type": "textarea",
+      "placeholder": "",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            240,
+            240,
+            240
+          ],
+          "upper": [
+            255,
+            255,
+            255
+          ]
+        }
+      }
+    },
+    "response_area": {
+      "type": "div",
+      "detection": {
+        "method": "findContour",
+        "color_range": {
+          "lower": [
+            245,
+            245,
+            245
+          ],
+          "upper": [
+            255,
+            255,
+            255
+          ]
+        }
+      }
+    }
+  },
+  "browser": {
+    "type": "Chrome",
+    "path": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "url": "https://aistudio.google.com/",
+    "window_selection_method": "order",
+    "window_order": 2,
+    "window_title_pattern": "",
+    "window_position": null,
+    "window_id": null,
+    "window_size": null,
+    "remember_window": false,
+    "fullscreen": false,
+    "method": "order",
+    "order": 2,
+    "title_pattern": "",
+    "position": null
+  },
+  "limits": {
+    "tokens_per_prompt": 2000,
+    "prompts_per_day": 100,
+    "reset_time": "00:00:00",
+    "cooldown_period": 30
+  },
+  "error_detection": {
+    "patterns": [
+      "erreur",
+      "réessayez plus tard",
+      "limite atteinte",
+      "problème technique"
+    ]
+  },
+  "interface_positions": {
+    "prompt_field": {
+      "x": 32,
+      "y": 768,
+      "width": 202,
+      "height": 51,
+      "center_x": 133,
+      "center_y": 793,
+      "confidence": 1.0,
+      "method": "contour_detection"
+    }
+  }
+}
