@@ -87,7 +87,7 @@ class BrowserManager:
                 else:
                     subprocess.run(["microsoft-edge", url])
                     
-            else:  # Chrome default
+            else:
                 if sys.platform == "win32":
                     cmd = f'start chrome {"--new-window" if new_window else ""} "{url}"'
                     os.system(cmd)
@@ -124,11 +124,10 @@ class WindowManager:
         self.cache = {}
         self.cache_timestamp = 0
         self.cache_duration = 5
-        self.sort_method = "natural"
 
     def get_browser_windows(self, browser_type=None, use_cache=True):
         current_time = time.time()
-        cache_key = f"{browser_type or 'all'}_{self.sort_method}"
+        cache_key = f"{browser_type or 'all'}"
         
         if (use_cache and 
             cache_key in self.cache and 
@@ -154,127 +153,29 @@ class WindowManager:
         for window in all_windows:
             if window.title and any(keyword in window.title.lower() for keyword in browser_keywords):
                 try:
-                    if window.width > 0 and window.height > 0:
-                        browser_windows.append(window)
+                    browser_windows.append(window)
                 except Exception:
                     continue
-
-        if self.sort_method == "creation":
-            try:
-                browser_windows.sort(key=lambda w: w._hWnd if hasattr(w, '_hWnd') else 0)
-            except Exception:
-                pass
-        elif self.sort_method == "position":
-            browser_windows.sort(key=lambda w: (w.left, w.top, w.title.lower()))
 
         self.cache[cache_key] = browser_windows
         self.cache_timestamp = current_time
         return browser_windows
 
     def select_window(self, browser_config, browser_type=None):
-        browser_config = self.normalize_config(browser_config)
         browser_windows = self.get_browser_windows(browser_type, use_cache=True)
-
-        if not browser_windows:
-            return None
-
-        method = browser_config.get('window_selection_method', 'auto')
-
-        if method == 'auto':
-            return browser_windows[0] if browser_windows else None
-
-        elif method == 'order':
-            order = browser_config.get('window_order', 1)
-            if 1 <= order <= len(browser_windows):
-                return browser_windows[order - 1]
-            else:
-                return browser_windows[0] if browser_windows else None
-
-        elif method == 'title':
-            title_pattern = browser_config.get('window_title_pattern', '')
-            if title_pattern:
-                for window in browser_windows:
-                    try:
-                        if re.search(title_pattern, window.title, re.IGNORECASE):
-                            return window
-                    except re.error:
-                        break
-            return browser_windows[0] if browser_windows else None
-
-        elif method == 'position':
-            target_position = browser_config.get('window_position')
-            if target_position and 'x' in target_position and 'y' in target_position:
-                target_x, target_y = target_position['x'], target_position['y']
-                closest_window = None
-                min_distance = float('inf')
-
-                for window in browser_windows:
-                    try:
-                        distance = ((window.left - target_x) ** 2 + (window.top - target_y) ** 2) ** 0.5
-                        if distance < min_distance:
-                            min_distance = distance
-                            closest_window = window
-                    except Exception:
-                        continue
-
-                if closest_window:
-                    return closest_window
-
-            return browser_windows[0] if browser_windows else None
-
-        elif method == 'manual':
-            window_id = browser_config.get('window_id')
-            if window_id:
-                for window in browser_windows:
-                    try:
-                        current_id = f"{window.title}_{window.left}_{window.top}_{window.width}_{window.height}"
-                        if current_id == window_id:
-                            return window
-                    except Exception:
-                        continue
-
-            return browser_windows[0] if browser_windows else None
-
-        else:
-            return browser_windows[0] if browser_windows else None
+        return browser_windows[0] if browser_windows else None
 
     def normalize_config(self, browser_config):
         if not browser_config:
             return self.get_default_config()
-
-        if 'window_selection_method' in browser_config:
-            return browser_config
-
-        migrated_config = browser_config.copy()
-        defaults = {
-            'window_selection_method': 'auto',
-            'window_order': 1,
-            'window_title_pattern': '',
-            'window_position': None,
-            'window_id': None,
-            'window_size': None,
-            'remember_window': False
-        }
-        
-        for key, default_value in defaults.items():
-            if key not in migrated_config:
-                migrated_config[key] = default_value
-
-        return migrated_config
+        return browser_config
 
     def get_default_config(self):
         return {
             "type": "Chrome",
             "path": "",
             "url": "",
-            "fullscreen": False,
-            "window_selection_method": "auto",
-            "window_order": 1,
-            "window_title_pattern": "",
-            "window_position": None,
-            "window_id": None,
-            "window_size": None,
-            "remember_window": False
+            "fullscreen": False
         }
 
     def focus_window(self, window):
@@ -565,160 +466,130 @@ class AIConductor:
         except Exception as e:
             raise OrchestrationError(f"Init failed: {str(e)}")
 
+    def _navigate_in_active_window(self, url):
+        """Navigate to URL in the currently active window using keyboard shortcuts"""
+        try:
+            if not url or not url.strip():
+                return False
+            
+            # Clean the URL - ensure no double protocol
+            clean_url = url.strip()
+            if clean_url.startswith('http://https://'):
+                clean_url = clean_url.replace('http://https://', 'https://')
+            elif clean_url.startswith('https://http://'):
+                clean_url = clean_url.replace('https://http://', 'https://')
+            
+            logger.info(f"Navigating to URL in active window: {clean_url}")
+            
+            # Focus address bar
+            self.keyboard_controller.hotkey('ctrl', 'l')
+            time.sleep(0.5)  # Wait longer for address bar to be selected
+            
+            # Make sure everything is selected and cleared
+            self.keyboard_controller.hotkey('ctrl', 'a')
+            time.sleep(0.2)
+            self.keyboard_controller.press_key('delete')
+            time.sleep(0.2)
+            
+            # Always use clipboard method for reliability
+            pyperclip.copy(clean_url)
+            time.sleep(0.1)
+            self.keyboard_controller.hotkey('ctrl', 'v')
+            time.sleep(0.5)
+            
+            # Press Enter to navigate
+            self.keyboard_controller.press_key('enter')
+            
+            logger.info(f"URL navigation completed: {clean_url}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during navigation: {str(e)}")
+            return False
+
     def select_existing_window(self, browser_type='Chrome', window_order=1, platform_name=None, url=None):
-        """
-        ✅ CORRIGÉ: Méthode correctement indentée dans la classe AIConductor
-        Sélectionne une fenêtre existante selon le numéro demandé et ouvre optionnellement une URL
-        """
         start_time = time.time()
         
         try:
-            # Récupérer window_order depuis la base si pas fourni
-            if window_order is None:
-                if platform_name and self.database:
-                    try:
-                        window_info = self.database.get_window_selection_info(platform_name)
-                        if window_info:
-                            window_order = window_info.get('order', 1)
-                            logger.info(f"Window order from database for {platform_name}: {window_order}")
-                        else:
-                            window_order = 1
-                            logger.info(f"No window config found for {platform_name}, using default: 1")
-                    except Exception as e:
-                        logger.warning(f"Error getting window config from database: {e}")
-                        window_order = 1
-                else:
-                    window_order = 1
-                    logger.info("No platform_name provided, using default window_order: 1")
-            else:
-                logger.info(f"Using provided window_order: {window_order}")
-                
-            logger.info(f"Selecting existing {browser_type} window #{window_order}")
+            logger.info(f"Selecting existing {browser_type} window")
             
-            # Lister les fenêtres existantes
+            profile = self.get_platform_profile(platform_name) if platform_name else {}
+            window_position = profile.get('window_position')
+            
+            if window_position and 'x' in window_position and 'y' in window_position:
+                logger.info(f"Clicking on saved position: ({window_position['x']}, {window_position['y']})")
+                
+                # Click on saved position to activate window
+                self.mouse_controller.click(window_position['x'], window_position['y'])
+                time.sleep(1.0)  # Wait for window to activate
+                
+                # Navigate to URL in the now-active window
+                if url and url.strip():
+                    navigation_success = self._navigate_in_active_window(url)
+                    if navigation_success:
+                        time.sleep(1.5)  # Wait for page to start loading
+                        logger.info(f"Successfully navigated to {url} in activated window")
+                    else:
+                        logger.warning(f"Navigation to {url} failed, but window was activated")
+                
+                return {
+                    'success': True,
+                    'message': f"{browser_type} window selected successfully",
+                    'duration': time.time() - start_time,
+                    'method': 'click_position'
+                }
+            
+            # Fallback: try to find and focus existing window
+            logger.info("No saved position found, trying to find existing window")
+            
             self.window_manager.clear_cache()
             existing_windows = self.window_manager.get_browser_windows(browser_type, use_cache=False)
-            logger.info(f"Found {len(existing_windows)} existing {browser_type} windows")
             
             if not existing_windows:
                 return {
                     'success': False,
-                    'message': f"No {browser_type} windows found",
+                    'message': f"No {browser_type} windows found. Please save a window position first.",
                     'duration': time.time() - start_time,
-                    'available_windows': 0,
-                    'requested_order': window_order
+                    'method': 'window_search'
                 }
             
-            # Vérifier si le numéro demandé existe
-            if window_order > len(existing_windows):
-                return {
-                    'success': False,
-                    'message': f"Window #{window_order} not found. Only {len(existing_windows)} windows available",
-                    'duration': time.time() - start_time,
-                    'available_windows': len(existing_windows),
-                    'requested_order': window_order
-                }
-            
-            # Sélectionner la fenêtre demandée (index 0-based)
-            target_window = existing_windows[window_order - 1]
-            
-            # Focus/maximiser la fenêtre
-            focus_success = self.window_manager.focus_window(target_window)
-            
-            # ✅ NOUVEAU: Ouvrir l'URL si fournie
-            url_opened = False
-            if url and url.strip():
-                logger.info(f"Opening URL in selected window: {url}")
-                try:
-                    # Ouvrir l'URL dans un nouvel onglet
-                    result = self.browser_manager.open_url(url, browser_type, new_window=False)
-                    if result.get('success'):
-                        url_opened = True
-                        logger.info(f"URL opened successfully in window #{window_order}")
-                        time.sleep(1)  # Laisser le temps à l'onglet de s'ouvrir
-                    else:
-                        logger.warning(f"Failed to open URL: {result.get('error', 'Unknown error')}")
-                except Exception as e:
-                    logger.warning(f"Error opening URL: {e}")
-            
-            total_duration = time.time() - start_time
+            target_window = existing_windows[0] if existing_windows else None
+            if target_window:
+                logger.info(f"Focusing window: {target_window.title}")
+                self.window_manager.focus_window(target_window)
+                time.sleep(1.0)
+                
+                # Navigate to URL in focused window
+                if url and url.strip():
+                    navigation_success = self._navigate_in_active_window(url)
+                    if navigation_success:
+                        time.sleep(1.5)
             
             return {
                 'success': True,
-                'message': f"{browser_type} window #{window_order} selected successfully" + 
-                          (f" and URL opened" if url_opened else ""),
-                'duration': total_duration,
-                'browser_type': browser_type,
-                'window_order': window_order,
-                'platform_name': platform_name,
-                'url_opened': url_opened,  # ✅ Nouveau champ
-                'selected_window': {
-                    'title': target_window.title,
-                    'position': {'x': target_window.left, 'y': target_window.top},
-                    'size': {'width': target_window.width, 'height': target_window.height},
-                    'focused': focus_success
-                },
-                'total_windows': len(existing_windows),
-                'config_source': 'database' if platform_name and window_order != 1 else 'default',
-                'method': 'existing_window_selection'
+                'message': f"{browser_type} window selected successfully",
+                'duration': time.time() - start_time,
+                'method': 'window_focus'
             }
             
         except Exception as e:
+            logger.error(f"Error in select_existing_window: {str(e)}")
             return {
                 'success': False,
                 'message': f"Error selecting window: {str(e)}",
-                'duration': time.time() - start_time
+                'duration': time.time() - start_time,
+                'method': 'error'
             }
-
             
     def open_browser_only(self, browser_type='Chrome', url='', window_order=None, new_window=True, platform_name=None):
-        """
-        Ouvre simplement le navigateur et sélectionne la fenêtre demandée
-        
-        Args:
-            browser_type (str): Type de navigateur ('Chrome', 'Firefox', 'Edge')
-            url (str): URL à ouvrir
-            window_order (int, optional): Numéro de la fenêtre à sélectionner - si None, récupère depuis la base
-            new_window (bool): Forcer nouvelle fenêtre ou pas
-            platform_name (str, optional): Nom de plateforme pour récupérer config depuis base
-            
-        Returns:
-            dict: Résultat avec infos de la fenêtre sélectionnée
-        """
         start_time = time.time()
         
         try:
             if not url:
                 url = "about:blank"
-
-            # Récupérer window_order depuis la base si pas fourni
-            if window_order is None:
-                if platform_name and self.database:
-                    try:
-                        window_info = self.database.get_window_selection_info(platform_name)
-                        if window_info:
-                            window_order = window_info.get('order', 1)
-                            logger.info(f"Window order from database for {platform_name}: {window_order}")
-                        else:
-                            window_order = 1
-                            logger.info(f"No window config found for {platform_name}, using default: 1")
-                    except Exception as e:
-                        logger.warning(f"Error getting window config from database: {e}")
-                        window_order = 1
-                else:
-                    window_order = 1
-                    logger.info("No platform_name provided, using default window_order: 1")
-            else:
-                logger.info(f"Using provided window_order: {window_order}")
                 
-            logger.info(f"Opening browser {browser_type} with window #{window_order}")
+            logger.info(f"Opening browser {browser_type}")
             
-            # Lister fenêtres avant ouverture
-            self.window_manager.clear_cache()
-            windows_before = self.window_manager.get_browser_windows(browser_type, use_cache=False)
-            logger.info(f"Windows before: {len(windows_before)}")
-            
-            # Ouvrir navigateur
             result = self.browser_manager.open_url(url, browser_type, new_window=new_window)
             
             if not result.get('success'):
@@ -728,49 +599,13 @@ class AIConductor:
                     'duration': time.time() - start_time
                 }
             
-            # Attendre que le navigateur se lance
             time.sleep(3)
-            
-            # Lister fenêtres après ouverture
-            self.window_manager.clear_cache()
-            windows_after = self.window_manager.get_browser_windows(browser_type, use_cache=False)
-            logger.info(f"Windows after: {len(windows_after)}")
-            
-            # Sélectionner la fenêtre demandée
-            target_window = self.select_window_intelligently(
-                windows_before, windows_after, window_order, url, browser_type
-            )
-            
-            if not target_window:
-                return {
-                    'success': False,
-                    'message': f"No window found for order #{window_order}",
-                    'duration': time.time() - start_time,
-                    'available_windows': len(windows_after),
-                    'requested_order': window_order
-                }
-            
-            # Focus/maximiser la fenêtre
-            focus_success = self.window_manager.focus_window(target_window)
-            
-            total_duration = time.time() - start_time
             
             return {
                 'success': True,
-                'message': f"Browser {browser_type} opened and window #{window_order} selected",
-                'duration': total_duration,
-                'browser_type': browser_type,
-                'window_order': window_order,
-                'platform_name': platform_name,
-                'selected_window': {
-                    'title': target_window.title,
-                    'position': {'x': target_window.left, 'y': target_window.top},
-                    'size': {'width': target_window.width, 'height': target_window.height},
-                    'focused': focus_success
-                },
-                'method': result.get('method', 'unknown'),
-                'total_windows': len(windows_after),
-                'config_source': 'database' if platform_name and window_order != 1 else 'default'
+                'message': f"Browser {browser_type} opened successfully",
+                'duration': time.time() - start_time,
+                'method': result.get('method', 'unknown')
             }
             
         except Exception as e:
@@ -785,44 +620,18 @@ class AIConductor:
         test_id = f"browser_test_{platform_name}_{int(start_time)}"
 
         try:
-            self.window_manager.clear_cache()
-            windows_before = self.window_manager.get_browser_windows(browser_type, use_cache=False)
-
             result = self.browser_manager.open_url(url, browser_type, new_window=True)
             
             if result.get('success'):
                 time.sleep(3)
                 
-                self.window_manager.clear_cache()
-                windows_after = self.window_manager.get_browser_windows(browser_type, use_cache=False)
-                
-                target_window = self.select_window_intelligently(
-                    windows_before, windows_after, window_order, url, browser_type
-                )
-                
-                if target_window:
-                    self.window_manager.focus_window(target_window)
-                    
-                    total_duration = time.time() - start_time
-                    
-                    return {
-                        'success': True,
-                        'message': f"Browser {browser_type} opened successfully",
-                        'duration': total_duration,
-                        'test_id': test_id,
-                        'method': result.get('method', 'unknown'),
-                        'browser_type': browser_type,
-                        'window_order': window_order,
-                        'selected_window': target_window.title
-                    }
-                else:
-                    return {
-                        'success': False,
-                        'message': f"No window found for #{window_order}",
-                        'duration': time.time() - start_time,
-                        'test_id': test_id
-                    }
-            
+                return {
+                    'success': True,
+                    'message': f"Browser {browser_type} opened successfully",
+                    'duration': time.time() - start_time,
+                    'test_id': test_id,
+                    'method': result.get('method', 'unknown')
+                }
             else:
                 return {
                     'success': False,
@@ -843,24 +652,12 @@ class AIConductor:
         try:
             if not windows_after:
                 return None
-
-            handles_before = {w._hWnd for w in windows_before if hasattr(w, '_hWnd')}
-            new_windows = [w for w in windows_after if hasattr(w, '_hWnd') and w._hWnd not in handles_before]
-
-            if new_windows:
-                return new_windows[0]
-            else:
-                if 1 <= window_order <= len(windows_after):
-                    return windows_after[window_order - 1]
-                else:
-                    return windows_after[-1] if windows_after else None
-                
+            return windows_after[0]
         except Exception:
-            return windows_after[0] if windows_after else None
+            return None
 
     def test_platform(self, platform_name, test_message="Test", timeout=30, wait_for_response=12, 
-                     skip_browser=True, window_selection_method=None, window_order=None,
-                     window_title_pattern=None, window_position=None, window_id=None, **kwargs):
+                     skip_browser=True, **kwargs):
         start_time = time.time()
         test_id = f"test_{platform_name}_{int(start_time)}"
 
@@ -879,19 +676,6 @@ class AIConductor:
 
             profile = config_result['profile']
             browser_config = profile.get('browser', {})
-
-            if window_selection_method is not None:
-                browser_config['window_selection_method'] = window_selection_method
-            if window_order is not None:
-                browser_config['window_order'] = window_order
-            if window_title_pattern is not None:
-                browser_config['window_title_pattern'] = window_title_pattern
-            if window_position is not None:
-                browser_config['window_position'] = window_position
-            if window_id is not None:
-                browser_config['window_id'] = window_id
-
-            browser_config = self.window_manager.normalize_config(browser_config)
             browser_type = self.detect_browser_type_from_profile(profile)
 
             if hasattr(self.state_automation, 'browser_type'):
@@ -941,10 +725,7 @@ class AIConductor:
                     'response_length': len(response_text),
                     'extraction_method': 'state_automation_internal',
                     'browser_skipped': skip_browser,
-                    'browser_type': browser_type,
-                    'window_selection_method': browser_config.get('window_selection_method', 'auto'),
-                    'window_order': browser_config.get('window_order', 1),
-                    'sort_method': self.window_manager.sort_method
+                    'browser_type': browser_type
                 }
             }
 
@@ -964,8 +745,6 @@ class AIConductor:
     def detect_browser_type_from_profile(self, profile):
         try:
             browser_config = profile.get('browser', {})
-            browser_config = self.window_manager.normalize_config(browser_config)
-
             browser_type = browser_config.get('type', '').lower()
             browser_path = browser_config.get('path', '').lower()
 
@@ -999,9 +778,6 @@ class AIConductor:
                     'message': f"Profile {platform_name} not found",
                     'profile': None
                 }
-
-            if 'browser' in profile:
-                profile['browser'] = self.window_manager.normalize_config(profile['browser'])
 
             missing_elements = []
             browser_config = profile.get('browser', {})
@@ -1038,15 +814,11 @@ class AIConductor:
             memory_profile = profiles.get(platform_name)
 
             if memory_profile:
-                if 'browser' in memory_profile:
-                    memory_profile['browser'] = self.window_manager.normalize_config(memory_profile['browser'])
                 return memory_profile
 
             if self.database and hasattr(self.database, 'get_platform'):
                 db_profile = self.database.get_platform(platform_name)
                 if db_profile:
-                    if 'browser' in db_profile:
-                        db_profile['browser'] = self.window_manager.normalize_config(db_profile['browser'])
                     return db_profile
 
             return None
@@ -1059,24 +831,20 @@ class AIConductor:
             if not url:
                 url = "about:blank"
 
-            if browser_config:
-                browser_config = self.window_manager.normalize_config(browser_config)
-
-            if hasattr(self, 'browser_manager'):
-                result = self.browser_manager.open_url(url, browser_type)
-                if result.get('success'):
-                    time.sleep(3)
-                    if fullscreen:
-                        self.maximize_selected_window(browser_config, browser_type, platform_name)
-                    
-                    elapsed = 3
-                    self.browser_already_active = True
-                    
-                    return {
-                        'success': True,
-                        'message': f"Browser activated in {elapsed:.1f}s",
-                        'duration': elapsed
-                    }
+            result = self.browser_manager.open_url(url, browser_type)
+            if result.get('success'):
+                time.sleep(3)
+                if fullscreen:
+                    self.maximize_selected_window(browser_config, browser_type, platform_name)
+                
+                elapsed = 3
+                self.browser_already_active = True
+                
+                return {
+                    'success': True,
+                    'message': f"Browser activated in {elapsed:.1f}s",
+                    'duration': elapsed
+                }
 
             if browser_type.lower() == "firefox":
                 cmd = f'start firefox "{url}"'
@@ -1113,10 +881,15 @@ class AIConductor:
             }
 
     def focus_existing_browser(self, browser_config, platform_name=None):
-        browser_found = False
-        platform_url = browser_config.get('url', '')
+        profile = self.get_platform_profile(platform_name) if platform_name else {}
+        window_position = profile.get('window_position')
+        
+        if window_position and 'x' in window_position and 'y' in window_position:
+            self.mouse_controller.click(window_position['x'], window_position['y'])
+            time.sleep(0.5)
+            self.browser_already_active = True
+            return
 
-        browser_config = self.window_manager.normalize_config(browser_config)
         self.window_manager.clear_cache()
 
         if HAS_PYGETWINDOW:
@@ -1125,53 +898,26 @@ class AIConductor:
                 target_window = self.window_manager.select_window(browser_config, browser_type)
 
                 if target_window:
-                    browser_found = True
                     self.browser_already_active = True
-
                     try:
                         if not target_window.isMaximized:
                             target_window.maximize()
-
-                        if platform_name:
-                            self.remember_window_selection(platform_name, target_window, browser_config)
-
                     except Exception:
                         pass
 
             except Exception:
                 pass
 
-        if browser_found and platform_url:
-            
-            if hasattr(self, 'browser_manager') and self.browser_manager.can_open():
-                result = self.browser_manager.open_url(platform_url, browser_config.get('type', 'Chrome'))
-                if result.get('success'):
-                    random_sleep(1.5, 0.10, 0.20)
-                    self.window_manager.clear_cache()
-                    return
-            
-            try:
-                browser_type = browser_config.get('type', 'Chrome')
-                if browser_type.lower() == "firefox":
-                    cmd = f'start firefox "{platform_url}"'
-                elif browser_type.lower() == "chrome":
-                    cmd = f'start chrome "{platform_url}"'
-                elif browser_type.lower() == "edge":
-                    cmd = f'start msedge "{platform_url}"'
-                else:
-                    cmd = f'start "{platform_url}"'
-
-                os.system(cmd)
+        platform_url = browser_config.get('url', '')
+        if platform_url and hasattr(self, 'browser_manager') and self.browser_manager.can_open():
+            result = self.browser_manager.open_url(platform_url, browser_config.get('type', 'Chrome'))
+            if result.get('success'):
                 random_sleep(1.5, 0.10, 0.20)
                 self.window_manager.clear_cache()
-                
-            except Exception:
-                pass
 
     def maximize_selected_window(self, browser_config=None, browser_type=None, platform_name=None):
         try:
             if browser_config:
-                browser_config = self.window_manager.normalize_config(browser_config)
                 target_window = self.window_manager.select_window(browser_config, browser_type)
 
                 if target_window:
@@ -1180,10 +926,6 @@ class AIConductor:
                         time.sleep(0.5)
                     else:
                         target_window.activate()
-
-                    if platform_name:
-                        self.remember_window_selection(platform_name, target_window, browser_config)
-
                     return True
 
             return self.window_manager.focus_window(None)
@@ -1244,28 +986,7 @@ class AIConductor:
             }
 
     def remember_window_selection(self, platform_name, window, browser_config):
-        try:
-            if not browser_config.get('remember_window', False):
-                return
-
-            if not window:
-                return
-
-            window_id = f"{window.title}_{window.left}_{window.top}_{window.width}_{window.height}"
-            browser_config['window_id'] = window_id
-            browser_config['window_selection_method'] = 'manual'
-
-            try:
-                if self.database and hasattr(self.database, 'update_window_selection'):
-                    self.database.update_window_selection(platform_name, {
-                        'method': 'manual',
-                        'window_id': window_id
-                    })
-            except Exception:
-                pass
-
-        except Exception:
-            pass
+        pass
 
     def get_browser_windows_info(self, browser_type=None):
         try:
@@ -1279,10 +1000,7 @@ class AIConductor:
                         'order': i,
                         'title': window.title,
                         'position': {'x': window.left, 'y': window.top},
-                        'size': {'width': window.width, 'height': window.height},
-                        'is_maximized': window.isMaximized,
-                        'window_id': f"{window.title}_{window.left}_{window.top}_{window.width}_{window.height}",
-                        'sort_method': self.window_manager.sort_method
+                        'size': {'width': window.width, 'height': window.height}
                     }
                     if hasattr(window, '_hWnd'):
                         window_info['handle'] = window._hWnd
@@ -1296,44 +1014,10 @@ class AIConductor:
             return []
 
     def test_window_selection(self, platform_name, window_selection_config):
-        try:
-            self.window_manager.clear_cache()
-            browser_config = self.window_manager.get_default_config()
-            browser_config.update(window_selection_config)
-
-            selected_window = self.window_manager.select_window(
-                browser_config,
-                browser_config.get('type', 'Chrome')
-            )
-
-            if selected_window:
-                result_info = {
-                    'title': selected_window.title,
-                    'position': {'x': selected_window.left, 'y': selected_window.top},
-                    'size': {'width': selected_window.width, 'height': selected_window.height},
-                    'sort_method': self.window_manager.sort_method
-                }
-                if hasattr(selected_window, '_hWnd'):
-                    result_info['handle'] = selected_window._hWnd
-                    
-                return {
-                    'success': True,
-                    'selected_window': result_info,
-                    'message': f"Window selected: {selected_window.title}"
-                }
-            else:
-                return {
-                    'success': False,
-                    'selected_window': None,
-                    'message': f"No window found with these criteria"
-                }
-
-        except Exception as e:
-            return {
-                'success': False,
-                'selected_window': None,
-                'message': f"Error: {str(e)}"
-            }
+        return {
+            'success': False,
+            'message': "Window selection test not available in simplified mode"
+        }
 
     def get_available_platforms(self):
         try:

@@ -2,17 +2,19 @@
 # -*- coding: utf-8 -*-
 
 """
-ui/widgets/tabs/browser_config_widget.py
+ui/widgets/tabs/browser_config_widget.py - VERSION CORRIGÉE
 """
 
 import os
 import json
+import time
 import traceback
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal
 
 from utils.logger import logger
 from ui.styles.platform_config_style import PlatformConfigStyle
+from config.detect_clic_user import detect_window_click, save_window_position, get_window_position
 
 
 class BrowserConfigWidget(QtWidgets.QWidget):
@@ -27,232 +29,119 @@ class BrowserConfigWidget(QtWidgets.QWidget):
 
         self.config_provider = config_provider
         self.conductor = conductor
-        self.saved_browsers = {}
         self.profiles = {}
         self.database = getattr(conductor, 'database', None)
+        self.click_detection_running = False
 
         try:
             self._init_ui()
-            self._load_saved_browsers()
         except Exception as e:
             logger.error(f"Error initializing BrowserConfigWidget: {str(e)}")
 
     def _init_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
 
         explanation = QtWidgets.QLabel(
-            "Configure browser settings for AI platforms.\n"
-            "You can now use multiple platforms with the same browser by specifying window numbers.\n"
-            "Start by selecting your platform, then configure the browser and test the connection."
+            "Configure browser window selection for AI platforms.\n"
+            "Select your platform, enter the URL, then click on the browser window you want to use."
         )
         explanation.setStyleSheet(PlatformConfigStyle.get_explanation_style())
         explanation.setWordWrap(True)
         explanation.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(explanation)
 
-        columns_layout = QtWidgets.QHBoxLayout()
-        columns_layout.setSpacing(20)
-
-        # Left column
-        left_column = QtWidgets.QVBoxLayout()
-        left_column.setSpacing(10)
-
-        # Platform selection
-        platform_group = QtWidgets.QGroupBox("Platform")
-        platform_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
-        platform_group.setMaximumWidth(300)
-        platform_layout = QtWidgets.QVBoxLayout(platform_group)
+        main_form_group = QtWidgets.QGroupBox("Platform Configuration")
+        main_form_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
+        main_form = QtWidgets.QFormLayout(main_form_group)
+        main_form.setSpacing(15)
 
         self.browser_platform_combo = QtWidgets.QComboBox()
         self.browser_platform_combo.setStyleSheet(PlatformConfigStyle.get_input_style())
         self.browser_platform_combo.currentIndexChanged.connect(self._on_platform_selected)
-        platform_layout.addWidget(self.browser_platform_combo)
-
-        left_column.addWidget(platform_group)
-
-        # Actions
-        actions_group = QtWidgets.QGroupBox("Actions")
-        actions_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
-        actions_group.setMaximumWidth(300)
-        actions_layout = QtWidgets.QVBoxLayout(actions_group)
-
-        self.test_browser_button = QtWidgets.QPushButton("◉ Test Browser")
-        self.test_browser_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.test_browser_button.clicked.connect(self._test_browser)
-        actions_layout.addWidget(self.test_browser_button)
-
-        self.detection_status = QtWidgets.QLabel("No test performed")
-        self.detection_status.setAlignment(Qt.AlignCenter)
-        self.detection_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
-        actions_layout.addWidget(self.detection_status)
-
-        self.remember_positions_check = QtWidgets.QCheckBox("Remember detected positions")
-        self.remember_positions_check.setChecked(True)
-        actions_layout.addWidget(self.remember_positions_check)
-
-        self.force_detect_check = QtWidgets.QCheckBox("Force detection each time")
-        actions_layout.addWidget(self.force_detect_check)
-
-        left_column.addWidget(actions_group)
-
-        # Saved browsers
-        saved_browsers_group = QtWidgets.QGroupBox("Saved Browsers")
-        saved_browsers_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
-        saved_browsers_group.setMaximumWidth(300)
-        saved_browsers_layout = QtWidgets.QVBoxLayout(saved_browsers_group)
-
-        self.saved_browsers_list = QtWidgets.QListWidget()
-        self.saved_browsers_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.saved_browsers_list.currentItemChanged.connect(self._on_saved_browser_selected)
-        self.saved_browsers_list.setStyleSheet(PlatformConfigStyle.get_small_list_style())
-        saved_browsers_layout.addWidget(self.saved_browsers_list)
-
-        saved_browsers_buttons = QtWidgets.QHBoxLayout()
-
-        self.edit_browser_button = QtWidgets.QPushButton("Edit")
-        self.edit_browser_button.clicked.connect(self._edit_browser)
-        self.edit_browser_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-
-        self.delete_browser_button = QtWidgets.QPushButton("Delete")
-        self.delete_browser_button.clicked.connect(self._delete_browser)
-        self.delete_browser_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-
-        saved_browsers_buttons.addWidget(self.edit_browser_button)
-        saved_browsers_buttons.addWidget(self.delete_browser_button)
-
-        saved_browsers_layout.addLayout(saved_browsers_buttons)
-
-        left_column.addWidget(saved_browsers_group)
-
-        # Save section
-        save_group = QtWidgets.QGroupBox("Save")
-        save_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
-        save_group.setMaximumWidth(300)
-        save_layout = QtWidgets.QVBoxLayout(save_group)
-
-        self.save_browser_button = QtWidgets.QPushButton("⬇ Save Configuration")
-        self.save_browser_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.save_browser_button.clicked.connect(self._save_browser_config)
-        save_layout.addWidget(self.save_browser_button)
-
-        left_column.addWidget(save_group)
-        left_column.addStretch()
-
-        # Right column
-        right_column = QtWidgets.QVBoxLayout()
-
-        # Browser configuration
-        browser_form_group = QtWidgets.QGroupBox("Browser Configuration")
-        browser_form_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
-        browser_form = QtWidgets.QFormLayout(browser_form_group)
-
-        self.browser_name_edit = QtWidgets.QLineEdit()
-        self.browser_name_edit.setPlaceholderText("Configuration name (e.g., Firefox Personal)")
-        self.browser_name_edit.setStyleSheet(PlatformConfigStyle.get_input_style())
-        browser_form.addRow("Name:", self.browser_name_edit)
+        main_form.addRow("Platform:", self.browser_platform_combo)
 
         self.browser_type_combo = QtWidgets.QComboBox()
-        self.browser_type_combo.addItems(["Chrome", "Firefox", "Edge", "Safari", "Other"])
+        self.browser_type_combo.addItems(["Chrome", "Firefox", "Edge"])
         self.browser_type_combo.setStyleSheet(PlatformConfigStyle.get_input_style())
-        browser_form.addRow("Browser Type:", self.browser_type_combo)
-
-        self.browser_path_edit = QtWidgets.QLineEdit()
-        self.browser_path_edit.setPlaceholderText("Path to browser executable (empty = default)")
-        self.browser_path_edit.setStyleSheet(PlatformConfigStyle.get_input_style())
-
-        path_layout = QtWidgets.QHBoxLayout()
-        self.browser_path_browse = QtWidgets.QPushButton("...")
-        self.browser_path_browse.setMaximumWidth(30)
-        self.browser_path_browse.clicked.connect(self._browse_browser_path)
-        self.browser_path_browse.setStyleSheet(PlatformConfigStyle.get_button_style())
-        path_layout.addWidget(self.browser_path_edit)
-        path_layout.addWidget(self.browser_path_browse)
-        browser_form.addRow("Path:", path_layout)
+        main_form.addRow("Browser Type:", self.browser_type_combo)
 
         self.browser_url_edit = QtWidgets.QLineEdit()
         self.browser_url_edit.setPlaceholderText("Platform URL (e.g., https://chat.openai.com)")
         self.browser_url_edit.setStyleSheet(PlatformConfigStyle.get_input_style())
-        browser_form.addRow("URL:", self.browser_url_edit)
+        main_form.addRow("Platform URL:", self.browser_url_edit)
 
-        self.window_number_spin = QtWidgets.QSpinBox()
-        self.window_number_spin.setRange(1, 10)
-        self.window_number_spin.setValue(1)
-        self.window_number_spin.setStyleSheet(PlatformConfigStyle.get_input_style())
-        self.window_number_spin.setToolTip("Window number in taskbar (1 = first)")
-        browser_form.addRow("Window Number:", self.window_number_spin)
+        main_layout.addWidget(main_form_group)
 
-        # Window selection mode
-        self.window_mode_combo = QtWidgets.QComboBox()
-        self.window_mode_combo.addItems(["Select existing window", "Open new window"])
-        self.window_mode_combo.setStyleSheet(PlatformConfigStyle.get_input_style())
-        self.window_mode_combo.setToolTip("Choose to select existing window or open new one")
-        browser_form.addRow("Window Mode:", self.window_mode_combo)
+        steps_group = QtWidgets.QGroupBox("Setup Steps")
+        steps_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
+        steps_layout = QtWidgets.QVBoxLayout(steps_group)
 
-        right_column.addWidget(browser_form_group)
+        step1_layout = QtWidgets.QHBoxLayout()
+        step1_label = QtWidgets.QLabel("1. Setup Window Position:")
+        step1_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.detect_click_button = QtWidgets.QPushButton("📍 Click to Select Window")
+        self.detect_click_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.detect_click_button.clicked.connect(self._start_click_detection)
+        step1_layout.addWidget(step1_label)
+        step1_layout.addStretch()
+        step1_layout.addWidget(self.detect_click_button)
+        steps_layout.addLayout(step1_layout)
 
-        # Browser options
-        options_group = QtWidgets.QGroupBox("Browser Options")
-        options_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
-        options_layout = QtWidgets.QVBoxLayout(options_group)
+        self.click_status = QtWidgets.QLabel("No window position configured")
+        self.click_status.setAlignment(Qt.AlignCenter)
+        self.click_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
+        steps_layout.addWidget(self.click_status)
 
-        self.maximize_window_check = QtWidgets.QCheckBox("Maximize window (recommended)")
-        self.maximize_window_check.setChecked(True)
-        self.maximize_window_check.setToolTip("Maximize browser window for better detection")
-        options_layout.addWidget(self.maximize_window_check)
+        step2_layout = QtWidgets.QHBoxLayout()
+        step2_label = QtWidgets.QLabel("2. Test Configuration:")
+        step2_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.test_browser_button = QtWidgets.QPushButton("🧪 Test Browser Setup")
+        self.test_browser_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.test_browser_button.clicked.connect(self._test_browser)
+        self.test_browser_button.setEnabled(False)
+        step2_layout.addWidget(step2_label)
+        step2_layout.addStretch()
+        step2_layout.addWidget(self.test_browser_button)
+        steps_layout.addLayout(step2_layout)
 
-        self.incognito_mode_check = QtWidgets.QCheckBox("Private/Incognito mode")
-        self.incognito_mode_check.setChecked(False)
-        self.incognito_mode_check.setToolTip("Launch browser in private browsing mode")
-        options_layout.addWidget(self.incognito_mode_check)
+        self.test_status = QtWidgets.QLabel("No test performed")
+        self.test_status.setAlignment(Qt.AlignCenter)
+        self.test_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
+        steps_layout.addWidget(self.test_status)
 
-        self.disable_extensions_check = QtWidgets.QCheckBox("Disable extensions")
-        self.disable_extensions_check.setChecked(False)
-        self.disable_extensions_check.setToolTip("Launch browser without extensions to avoid interference")
-        options_layout.addWidget(self.disable_extensions_check)
+        main_layout.addWidget(steps_group)
 
-        right_column.addWidget(options_group)
+        save_layout = QtWidgets.QHBoxLayout()
+        save_layout.addStretch()
+        self.save_config_button = QtWidgets.QPushButton("💾 Save Configuration")
+        self.save_config_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.save_config_button.clicked.connect(self._save_configuration)
+        self.save_config_button.setEnabled(False)
+        save_layout.addWidget(self.save_config_button)
+        save_layout.addStretch()
+        main_layout.addLayout(save_layout)
 
-        # Detection info
-        info_group = QtWidgets.QGroupBox("Detection Information")
+        info_group = QtWidgets.QGroupBox("How It Works")
         info_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         info_layout = QtWidgets.QVBoxLayout(info_group)
 
         info_text = QtWidgets.QLabel(
-            "Browser test will:\n\n"
-            "🔹 Select existing window mode:\n"
-            "  - Find already open browser windows\n"
-            "  - Select window according to specified number\n"
-            "  - Focus and maximize the selected window\n\n"
-            "🔹 Open new window mode:\n"
-            "  - Open browser to specified URL\n"
-            "  - Create new window or tab\n"
-            "  - Select window according to specified number\n\n"
-            "💡 Use 'Select existing window' for normal workflow.\n"
-            "Use 'Open new window' only for initial setup.\n\n"
-            "This test does NOT configure interface elements yet.\n"
-            "Use the following tabs for that."
+            "🎯 <b>Window Selection Process:</b>\n\n"
+            "1. Select your platform and enter the URL\n"
+            "2. Open your browser and navigate to the platform\n"
+            "3. Click 'Click to Select Window' and then click on the browser window\n"
+            "4. Test the configuration to verify it works\n"
+            "5. Save the configuration\n\n"
+            "💡 <b>During tests:</b> The system will click on the saved position to activate your window and open the URL."
         )
         info_text.setWordWrap(True)
-        info_text.setStyleSheet("color: #555; padding: 10px; background-color: #f8f9fa; border-radius: 5px;")
+        info_text.setStyleSheet("color: #555; padding: 15px; background-color: #f8f9fa; border-radius: 8px; line-height: 1.4;")
         info_layout.addWidget(info_text)
 
-        right_column.addWidget(info_group)
-
-        columns_layout.addLayout(left_column, 0)
-        columns_layout.addLayout(right_column, 1)
-
-        main_layout.addLayout(columns_layout)
-
-        help_note = QtWidgets.QLabel(
-            "<b>Workflow:</b> 1▸ Select platform → 2▸ Configure browser and window number → "
-            "3▸ Choose window mode (existing/new) → 4▸ Test connection → 5▸ Save configuration"
-        )
-        help_note.setWordWrap(True)
-        help_note.setStyleSheet("color: #074E68; padding: 10px; font-style: italic;")
-        help_note.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(help_note)
+        main_layout.addWidget(info_group)
+        main_layout.addStretch()
 
     def set_profiles(self, profiles):
         self.profiles = profiles
@@ -263,45 +152,8 @@ class BrowserConfigWidget(QtWidgets.QWidget):
         if index >= 0:
             self.browser_platform_combo.setCurrentIndex(index)
 
-    def should_force_detect(self):
-        return self.force_detect_check.isChecked()
-
-    def should_remember_positions(self):
-        return self.remember_positions_check.isChecked()
-
     def refresh(self):
-        self._load_saved_browsers()
         self._update_platforms_combo()
-
-    def _load_saved_browsers(self):
-        try:
-            browsers_dir = os.path.join(getattr(self.config_provider, 'profiles_dir', 'config/profiles'), 'browsers')
-            if not os.path.exists(browsers_dir):
-                os.makedirs(browsers_dir, exist_ok=True)
-                return
-
-            self.saved_browsers = {}
-
-            for filename in os.listdir(browsers_dir):
-                if filename.endswith('.json'):
-                    file_path = os.path.join(browsers_dir, filename)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            browser_config = json.load(f)
-                            name = browser_config.get('name', filename.replace('.json', ''))
-                            self.saved_browsers[name] = browser_config
-                    except Exception as e:
-                        logger.error(f"Error loading browser {filename}: {str(e)}")
-
-            self._update_saved_browsers_list()
-
-        except Exception as e:
-            logger.error(f"Error loading browsers: {str(e)}")
-
-    def _update_saved_browsers_list(self):
-        self.saved_browsers_list.clear()
-        for name in sorted(self.saved_browsers.keys()):
-            self.saved_browsers_list.addItem(name)
 
     def _update_platforms_combo(self):
         current_text = self.browser_platform_combo.currentText()
@@ -317,111 +169,72 @@ class BrowserConfigWidget(QtWidgets.QWidget):
             if index >= 0:
                 self.browser_platform_combo.setCurrentIndex(index)
 
-    def _browse_browser_path(self):
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self,
-            "Select Browser",
-            "",
-            "Executables (*.exe);;All Files (*.*)"
-        )
-
-        if file_path:
-            self.browser_path_edit.setText(file_path)
-
     def _on_platform_selected(self, index):
         if index <= 0:
+            self._reset_ui()
             return
 
         platform_name = self.browser_platform_combo.currentText()
-
         profile = self.profiles.get(platform_name, {})
         browser_info = profile.get('browser', {})
 
-        self.browser_name_edit.setText(f"Browser for {platform_name}")
-
         browser_type = browser_info.get('type', 'Chrome')
-        index = self.browser_type_combo.findText(browser_type)
-        if index >= 0:
-            self.browser_type_combo.setCurrentIndex(index)
+        type_index = self.browser_type_combo.findText(browser_type)
+        if type_index >= 0:
+            self.browser_type_combo.setCurrentIndex(type_index)
 
-        self.browser_path_edit.setText(browser_info.get('path', ''))
         self.browser_url_edit.setText(browser_info.get('url', ''))
-        self.maximize_window_check.setChecked(True)
 
-        window_order = browser_info.get('window_order', 1)
-        self.window_number_spin.setValue(window_order)
-
-        # Set default window mode to existing window selection
-        self.window_mode_combo.setCurrentIndex(0)  # "Select existing window"
+        window_position = profile.get('window_position')
+        if window_position and 'x' in window_position and 'y' in window_position:
+            self.click_status.setText(f"Window position: ({window_position['x']}, {window_position['y']})")
+            self.click_status.setStyleSheet(PlatformConfigStyle.get_status_success_style())
+            self.test_browser_button.setEnabled(True)
+        else:
+            self.click_status.setText("No window position configured")
+            self.click_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
+            self.test_browser_button.setEnabled(False)
 
         if 'interface_positions' in profile:
-            self.detection_status.setText("Interface positions remembered")
-            self.detection_status.setStyleSheet(PlatformConfigStyle.get_status_success_style())
+            self.test_status.setText("Interface positions configured")
+            self.test_status.setStyleSheet(PlatformConfigStyle.get_status_success_style())
+            self.save_config_button.setEnabled(True)
         else:
-            self.detection_status.setText("No test performed")
-            self.detection_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
+            self.test_status.setText("No test performed")
+            self.test_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
+            self.save_config_button.setEnabled(False)
 
-    def _on_saved_browser_selected(self, current, previous):
-        if not current:
-            return
+    def _reset_ui(self):
+        self.click_status.setText("No window position configured")
+        self.click_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
+        self.test_status.setText("No test performed")
+        self.test_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
+        self.test_browser_button.setEnabled(False)
+        self.save_config_button.setEnabled(False)
+        self.browser_url_edit.clear()
 
-        browser_name = current.text()
-        browser_config = self.saved_browsers.get(browser_name, {})
+    def _sync_profile_to_config_provider(self, platform_name, profile):
+        """Synchronise le profil avec le config_provider du conductor pour éviter les désynchronisations"""
+        try:
+            # Mettre à jour dans le widget
+            self.profiles[platform_name] = profile
+            
+            # Mettre à jour dans le config_provider si disponible
+            if hasattr(self.config_provider, 'profiles'):
+                self.config_provider.profiles[platform_name] = profile
+            elif hasattr(self.config_provider, 'set_profile'):
+                self.config_provider.set_profile(platform_name, profile)
+            elif hasattr(self.config_provider, '_profiles'):
+                self.config_provider._profiles[platform_name] = profile
+            
+            logger.debug(f"Profile synchronized for {platform_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error synchronizing profile for {platform_name}: {str(e)}")
+            return False
 
-        self.browser_name_edit.setText(browser_name)
-
-        browser_type = browser_config.get('type', 'Chrome')
-        index = self.browser_type_combo.findText(browser_type)
-        if index >= 0:
-            self.browser_type_combo.setCurrentIndex(index)
-
-        self.browser_path_edit.setText(browser_config.get('path', ''))
-        self.browser_url_edit.setText(browser_config.get('url', ''))
-        self.maximize_window_check.setChecked(True)
-
-        window_order = browser_config.get('window_order', 1)
-        self.window_number_spin.setValue(window_order)
-
-        # Set default window mode
-        self.window_mode_combo.setCurrentIndex(0)  # "Select existing window"
-
-        # Set default window mode
-        self.window_mode_combo.setCurrentIndex(0)  # "Select existing window"
-
-    def _edit_browser(self):
-        if not self.saved_browsers_list.currentItem():
-            QtWidgets.QMessageBox.warning(
-                self,
-                "No browser selected",
-                "Please select a browser first."
-            )
-            return
-
-        browser_name = self.saved_browsers_list.currentItem().text()
-        browser_config = self.saved_browsers.get(browser_name, {})
-
-        self.browser_name_edit.setText(browser_name)
-
-        browser_type = browser_config.get('type', 'Chrome')
-        index = self.browser_type_combo.findText(browser_type)
-        if index >= 0:
-            self.browser_type_combo.setCurrentIndex(index)
-
-        self.browser_path_edit.setText(browser_config.get('path', ''))
-        self.browser_url_edit.setText(browser_config.get('url', ''))
-        self.maximize_window_check.setChecked(True)
-
-        window_order = browser_config.get('window_order', 1)
-        self.window_number_spin.setValue(window_order)
-
-        QtWidgets.QMessageBox.information(
-            self,
-            "Browser loaded",
-            f"Browser configuration '{browser_name}' loaded for editing. Use 'Test Browser' button to verify and save changes."
-        )
-
-    def _test_browser(self):
-        """Test browser using appropriate method based on window mode"""
+    def _start_click_detection(self):
         platform_index = self.browser_platform_combo.currentIndex()
         if platform_index <= 0:
             QtWidgets.QMessageBox.warning(
@@ -431,56 +244,186 @@ class BrowserConfigWidget(QtWidgets.QWidget):
             )
             return
 
-        name = self.browser_name_edit.text().strip()
-        if not name:
+        url = self.browser_url_edit.text().strip()
+        if not url:
             QtWidgets.QMessageBox.warning(
                 self,
-                "Name missing",
-                "Please enter a name for this browser configuration."
+                "URL missing",
+                "Please enter the platform URL first."
             )
             return
 
         platform_name = self.browser_platform_combo.currentText()
 
-        self.detection_status.setText("Testing...")
-        self.detection_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
+        QtWidgets.QMessageBox.information(
+            self,
+            "Click Detection",
+            f"Setup for {platform_name}:\n\n"
+            f"1. Make sure your browser is open with {platform_name}\n"
+            f"2. Click OK to start detection\n"
+            f"3. Click anywhere on the {platform_name} browser window\n\n"
+            f"You have 30 seconds to click on the window."
+        )
+
+        self.click_detection_running = True
+        self.detect_click_button.setText("⏳ Click on browser window...")
+        self.detect_click_button.setEnabled(False)
         QtWidgets.QApplication.processEvents()
 
         try:
-            browser_type = self.browser_type_combo.currentText()
-            browser_path = self.browser_path_edit.text()
-            browser_url = self.browser_url_edit.text().strip()
-            window_number = self.window_number_spin.value()
-            window_mode = self.window_mode_combo.currentText()
-
-            # Check URL - recommended for both modes but only required for new window
-            if not browser_url:
-                if "new window" in window_mode.lower():
-                    QtWidgets.QMessageBox.warning(
-                        self,
-                        "URL missing",
-                        "Please specify the website URL for opening new window."
-                    )
-                    self.detection_status.setText("Test cancelled: URL missing")
-                    self.detection_status.setStyleSheet(PlatformConfigStyle.get_status_error_style())
-                    return
+            position = detect_window_click(timeout=30)
+            
+            if position:
+                logger.info(f"Position detected: {position}")
+                
+                # Récupérer le profil existant ou créer un nouveau
+                profile = self.profiles.get(platform_name, {})
+                profile['window_position'] = position
+                
+                if self.database:
+                    # Sauvegarder en base de données
+                    save_success = self.database.save_platform(platform_name, profile)
+                    if save_success:
+                        # Synchroniser avec le config_provider
+                        sync_success = self._sync_profile_to_config_provider(platform_name, profile)
+                        
+                        if sync_success:
+                            self.click_status.setText(f"Window position: ({position['x']}, {position['y']})")
+                            self.click_status.setStyleSheet(PlatformConfigStyle.get_status_success_style())
+                            self.test_browser_button.setEnabled(True)
+                            
+                            logger.info(f"Window position saved and synchronized for {platform_name}: {position}")
+                            
+                            QtWidgets.QMessageBox.information(
+                                self,
+                                "Position Saved",
+                                f"Window position saved: ({position['x']}, {position['y']})\n\n"
+                                f"You can now test the configuration."
+                            )
+                        else:
+                            QtWidgets.QMessageBox.warning(
+                                self,
+                                "Sync Warning",
+                                "Position saved to database but sync with conductor failed.\nTry restarting the application."
+                            )
+                    else:
+                        QtWidgets.QMessageBox.critical(
+                            self,
+                            "Save Error",
+                            "Failed to save window position to database."
+                        )
                 else:
-                    # URL optional for existing window mode, but recommend it
-                    reply = QtWidgets.QMessageBox.question(
+                    QtWidgets.QMessageBox.critical(
                         self,
-                        "No URL specified",
-                        "No URL specified. The existing window will be selected but no new tab will be opened.\n\n"
-                        "Do you want to continue without opening the platform URL?",
-                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                        QtWidgets.QMessageBox.No
+                        "Database Error",
+                        "Database not available for saving position."
                     )
-                    if reply != QtWidgets.QMessageBox.Yes:
-                        self.detection_status.setText("Test cancelled by user")
-                        self.detection_status.setStyleSheet(PlatformConfigStyle.get_status_error_style())
-                        return
+            else:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Detection Failed",
+                    "No click detected within 30 seconds.\nPlease try again."
+                )
 
+        except Exception as e:
+            logger.error(f"Error during click detection: {str(e)}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Detection Error",
+                f"An error occurred during click detection:\n{str(e)}"
+            )
+
+        finally:
+            self.click_detection_running = False
+            self.detect_click_button.setText("📍 Click to Select Window")
+            self.detect_click_button.setEnabled(True)
+
+    def _test_browser(self):
+        platform_index = self.browser_platform_combo.currentIndex()
+        if platform_index <= 0:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No platform selected",
+                "Please select a platform first."
+            )
+            return
+
+        platform_name = self.browser_platform_combo.currentText()
+        browser_type = self.browser_type_combo.currentText()
+        browser_url = self.browser_url_edit.text().strip()
+
+        if not browser_url:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "URL missing",
+                "Please enter the platform URL."
+            )
+            return
+
+        # Vérifier que les coordonnées sont bien sauvegardées
+        profile = self.profiles.get(platform_name, {})
+        window_position = profile.get('window_position')
+        
+        if not window_position or 'x' not in window_position or 'y' not in window_position:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Window Position",
+                "Please click 'Click to Select Window' first to save a window position."
+            )
+            return
+
+        # S'assurer que le conductor a bien les coordonnées - forcer la synchronisation
+        logger.info(f"Testing browser for {platform_name} with position {window_position}")
+        
+        # Vérifier que le conductor peut récupérer les coordonnées
+        conductor_profile = self.conductor.get_platform_profile(platform_name)
+        conductor_position = conductor_profile.get('window_position') if conductor_profile else None
+        
+        logger.info(f"Conductor profile position: {conductor_position}")
+        
+        if not conductor_position:
+            # Forcer la synchronisation
+            logger.warning("Conductor doesn't have the position, forcing sync...")
+            self._sync_profile_to_config_provider(platform_name, profile)
+            
+            # Revérifier
+            conductor_profile = self.conductor.get_platform_profile(platform_name)
+            conductor_position = conductor_profile.get('window_position') if conductor_profile else None
+            
+            if not conductor_position:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Sync Error",
+                    "Could not synchronize window position with conductor.\nPlease try saving the position again."
+                )
+                return
+
+        # Important warning before test
+        reply = QtWidgets.QMessageBox.information(
+            self,
+            "Test Starting",
+            f"🚨 <b>IMPORTANT:</b>\n\n"
+            f"The test will now automatically:\n"
+            f"• Click on saved position: ({window_position['x']}, {window_position['y']})\n"
+            f"• Navigate to the platform URL in that window\n\n"
+            f"⚠️ <b>Make sure your browser window is open and visible!</b>\n"
+            f"⚠️ <b>DO NOT TOUCH YOUR MOUSE OR KEYBOARD</b> during the test!\n\n"
+            f"The test will take about 3-4 seconds.\n"
+            f"Ready to start?",
+            QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel,
+            QtWidgets.QMessageBox.Ok
+        )
+        
+        if reply != QtWidgets.QMessageBox.Ok:
+            return
+
+        self.test_status.setText("Testing...")
+        self.test_status.setStyleSheet(PlatformConfigStyle.get_status_normal_style())
+        QtWidgets.QApplication.processEvents()
+
+        try:
             progress = QtWidgets.QProgressDialog(
-                f"Testing browser for {platform_name} (window #{window_number})...",
+                f"Testing browser setup for {platform_name}...\n\nDO NOT TOUCH MOUSE OR KEYBOARD!",
                 "Cancel",
                 0, 100,
                 self
@@ -488,62 +431,41 @@ class BrowserConfigWidget(QtWidgets.QWidget):
             progress.setWindowModality(Qt.WindowModal)
             progress.setValue(10)
 
-            # Choose method based on window mode
-            if "existing" in window_mode.lower():
-                # Select existing window
-                progress.setLabelText("Selecting existing window...")
-                progress.setValue(50)
+            progress.setLabelText(f"Step 1/2: Clicking on saved position ({window_position['x']}, {window_position['y']})...")
+            progress.setValue(30)
+            QtWidgets.QApplication.processEvents()
 
-                result = self.conductor.select_existing_window(
-                    browser_type=browser_type,
-                    window_order=window_number,
-                    platform_name=platform_name,
-                    url=browser_url  # Pass URL to open in selected window
-                )
-            else:
-                # Open new window
-                progress.setLabelText("Opening new browser window...")
-                progress.setValue(30)
+            result = self.conductor.select_existing_window(
+                browser_type=browser_type,
+                platform_name=platform_name,
+                url=browser_url
+            )
 
-                result = self.conductor.open_browser_only(
-                    browser_type=browser_type,
-                    url=browser_url,
-                    window_order=window_number,
-                    new_window=True,
-                    platform_name=platform_name
-                )
+            progress.setValue(70)
+            progress.setLabelText("Step 2/2: Navigating to URL in activated window...")
+            QtWidgets.QApplication.processEvents()
 
-            progress.setValue(80)
+            time.sleep(1)  # Let URL navigation complete
+            progress.setValue(100)
 
             if result.get('success'):
-                progress.setValue(100)
-
-                self.detection_status.setText("Test successful!")
-                self.detection_status.setStyleSheet(PlatformConfigStyle.get_status_success_style())
+                self.test_status.setText("Test successful!")
+                self.test_status.setStyleSheet(PlatformConfigStyle.get_status_success_style())
 
                 duration = result.get('duration', 0)
-                selected_window = result.get('selected_window', {})
-                window_title = selected_window.get('title', 'Unknown')
                 method = result.get('method', 'unknown')
-                url_opened = result.get('url_opened', False)
 
                 success_message = (
-                    f"Browser {browser_type} test successful for {platform_name}.\n"
-                    f"Window selected: #{window_number} - {window_title}\n"
-                    f"Test completed in {duration:.1f}s\n"
-                    f"Method: {method}\n"
-                    f"Config source: {result.get('config_source', 'default')}\n"
+                    f"Browser setup test successful for {platform_name}!\n\n"
+                    f"✅ Clicked on saved position: ({window_position['x']}, {window_position['y']})\n"
+                    f"✅ Window activated successfully\n"
+                    f"✅ Platform URL opened: {browser_url}\n"
+                    f"⏱️ Test completed in {duration:.1f}s\n"
+                    f"🔧 Method: {method}\n\n"
+                    f"The browser configuration is working correctly.\n"
+                    f"You can now proceed to configure interface elements.\n\n"
+                    f"You can now safely use your mouse and keyboard again."
                 )
-                
-                if "existing" in window_mode.lower():
-                    if url_opened:
-                        success_message += f"Platform URL opened in new tab: {browser_url}\n"
-                    elif browser_url:
-                        success_message += "Note: URL was specified but may not have opened.\n"
-                    else:
-                        success_message += "No URL was opened (window selection only).\n"
-                
-                success_message += "\nBrowser is configured and ready to use.\nYou can now proceed to the next tabs to configure interface elements."
 
                 QtWidgets.QMessageBox.information(
                     self,
@@ -551,67 +473,48 @@ class BrowserConfigWidget(QtWidgets.QWidget):
                     success_message
                 )
 
-                self._save_successful_config(platform_name, browser_type, browser_path, browser_url, window_number)
+                self._save_browser_config(platform_name, browser_type, browser_url)
 
             else:
                 progress.cancel()
                 error_msg = result.get('message', 'Unknown error')
-                available_windows = result.get('available_windows', 0)
                 
-                self.detection_status.setText(f"Failed: {error_msg}")
-                self.detection_status.setStyleSheet(PlatformConfigStyle.get_status_error_style())
+                self.test_status.setText("Test failed!")
+                self.test_status.setStyleSheet(PlatformConfigStyle.get_status_error_style())
 
-                if "existing" in window_mode.lower():
-                    QtWidgets.QMessageBox.critical(
-                        self,
-                        "Window Selection Failed",
-                        f"Window selection failed: {error_msg}\n\n"
-                        f"Available {browser_type} windows: {available_windows}\n"
-                        f"Requested window: #{window_number}\n\n"
-                        f"Please:\n"
-                        f"- Open {browser_type} browser first\n"
-                        f"- Choose a valid window number (1-{available_windows})\n"
-                        f"- Or switch to 'Open new window' mode"
-                    )
-                else:
-                    QtWidgets.QMessageBox.critical(
-                        self,
-                        "Browser Test Failed",
-                        f"Browser opening failed: {error_msg}\n\n"
-                        f"Please verify:\n"
-                        f"- URL is correct\n"
-                        f"- Browser is installed\n"
-                        f"- No other browser instance is blocking"
-                    )
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Test Failed",
+                    f"Browser test failed: {error_msg}\n\n"
+                    f"Possible solutions:\n"
+                    f"• Make sure the browser window is open and visible\n"
+                    f"• Try detecting the window position again\n"
+                    f"• Check that the URL is correct\n"
+                    f"• Ensure the saved position ({window_position['x']}, {window_position['y']}) is still valid\n\n"
+                    f"You can now safely use your mouse and keyboard again."
+                )
 
         except Exception as e:
             logger.error(f"Error during test: {str(e)}")
-            self.detection_status.setText(f"Error: {str(e)}")
-            self.detection_status.setStyleSheet(PlatformConfigStyle.get_status_error_style())
+            self.test_status.setText("Test error!")
+            self.test_status.setStyleSheet(PlatformConfigStyle.get_status_error_style())
 
             QtWidgets.QMessageBox.critical(
                 self,
-                "Error",
-                f"An error occurred during testing: {str(e)}"
+                "Test Error",
+                f"An error occurred during testing:\n{str(e)}\n\n"
+                f"You can now safely use your mouse and keyboard again."
             )
 
-    def _save_successful_config(self, platform_name, browser_type, browser_path, browser_url, window_number):
-        """Save configuration after successful test"""
+    def _save_browser_config(self, platform_name, browser_type, browser_url):
         try:
             profile = self.profiles.get(platform_name, {})
 
             browser_config = {
                 "type": browser_type,
-                "path": browser_path,
                 "url": browser_url,
-                "fullscreen": False,
-                "window_selection_method": "order",
-                "window_order": window_number,
-                "window_title_pattern": "",
-                "window_position": None,
-                "window_id": None,
-                "window_size": None,
-                "remember_window": False
+                "path": "",
+                "fullscreen": False
             }
 
             if 'browser' not in profile:
@@ -621,106 +524,38 @@ class BrowserConfigWidget(QtWidgets.QWidget):
             if self.database:
                 save_success = self.database.save_platform(platform_name, profile)
                 if save_success:
-                    logger.info(f"Configuration saved for {platform_name}")
+                    # Synchroniser avec le config_provider
+                    self._sync_profile_to_config_provider(platform_name, profile)
+                    
+                    logger.info(f"Browser configuration saved for {platform_name}")
+                    self.save_config_button.setEnabled(True)
                 else:
-                    logger.error(f"Failed to save configuration for {platform_name}")
+                    logger.error(f"Failed to save browser configuration for {platform_name}")
             else:
-                self.profiles[platform_name] = profile
+                # Juste synchroniser en mémoire
+                self._sync_profile_to_config_provider(platform_name, profile)
                 logger.warning("Database not available, saving to memory only")
 
             self.browser_used.emit(platform_name, browser_type)
 
         except Exception as e:
-            logger.error(f"Error saving successful test config: {str(e)}")
+            logger.error(f"Error saving browser config: {str(e)}")
 
-    def _save_browser_config(self):
-        """Save current browser configuration"""
-        name = self.browser_name_edit.text().strip()
-        if not name:
+    def _save_configuration(self):
+        platform_index = self.browser_platform_combo.currentIndex()
+        if platform_index <= 0:
             QtWidgets.QMessageBox.warning(
                 self,
-                "Name missing",
-                "Please enter a name for this browser configuration."
+                "No platform selected",
+                "Please select a platform first."
             )
             return
 
-        browser_config = {
-            "name": name,
-            "type": self.browser_type_combo.currentText(),
-            "path": self.browser_path_edit.text(),
-            "url": self.browser_url_edit.text(),
-            "fullscreen": False,
-            "window_order": self.window_number_spin.value()
-        }
-
-        try:
-            self.saved_browsers[name] = browser_config
-
-            browsers_dir = os.path.join(getattr(self.config_provider, 'profiles_dir', 'config/profiles'), 'browsers')
-            os.makedirs(browsers_dir, exist_ok=True)
-
-            file_path = os.path.join(browsers_dir, f"{name}.json")
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(browser_config, f, indent=2, ensure_ascii=False)
-
-            self._update_saved_browsers_list()
-            self.browser_saved.emit(name, browser_config)
-
-            QtWidgets.QMessageBox.information(
-                self,
-                "Configuration Saved",
-                f"Browser configuration '{name}' saved successfully."
-            )
-
-        except Exception as e:
-            logger.error(f"Error saving configuration: {str(e)}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Save Error",
-                f"Cannot save configuration: {str(e)}"
-            )
-
-    def _delete_browser(self):
-        """Delete selected browser configuration"""
-        if not self.saved_browsers_list.currentItem():
-            return
-
-        browser_name = self.saved_browsers_list.currentItem().text()
-
-        reply = QtWidgets.QMessageBox.question(
+        platform_name = self.browser_platform_combo.currentText()
+        
+        QtWidgets.QMessageBox.information(
             self,
-            "Confirm Deletion",
-            f"Are you sure you want to delete configuration '{browser_name}'?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            QtWidgets.QMessageBox.No
+            "Configuration Saved",
+            f"Browser configuration for {platform_name} has been saved successfully!\n\n"
+            f"You can now use this platform for AI interactions."
         )
-
-        if reply != QtWidgets.QMessageBox.Yes:
-            return
-
-        try:
-            if browser_name in self.saved_browsers:
-                del self.saved_browsers[browser_name]
-
-            browsers_dir = os.path.join(getattr(self.config_provider, 'profiles_dir', 'config/profiles'), 'browsers')
-            file_path = os.path.join(browsers_dir, f"{browser_name}.json")
-
-            if os.path.exists(file_path):
-                os.remove(file_path)
-
-            self._update_saved_browsers_list()
-            self.browser_deleted.emit(browser_name)
-
-            QtWidgets.QMessageBox.information(
-                self,
-                "Configuration Deleted",
-                f"Browser configuration '{browser_name}' deleted."
-            )
-
-        except Exception as e:
-            logger.error(f"Error deleting configuration: {str(e)}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Delete Error",
-                f"Cannot delete configuration: {str(e)}"
-            )

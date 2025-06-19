@@ -197,17 +197,47 @@ class StateBasedAutomation(QObject):
         self.step_completed.emit("browser_focusing", "Browser focus")
 
         try:
-            if self.skip_browser_activation:
-                time.sleep(0.3)
-                return True
-
-            self.selected_window = self.get_target_window()
-
-            if self.selected_window:
-                if self.focus_window(self.selected_window):
-                    self.remember_window_if_needed()
+            logger.info("🎯 ensure_browser_focus() - NOUVEAU avec window_position")
+            
+            # ÉTAPE 1: TOUJOURS essayer d'utiliser window_position d'abord
+            window_position = self.platform_profile.get('window_position') if self.platform_profile else None
+            
+            if window_position and 'x' in window_position and 'y' in window_position:
+                x, y = window_position['x'], window_position['y']
+                logger.info(f"🖱️ Utilisation window_position configurées: ({x}, {y})")
+                
+                try:
+                    self.mouse_controller.click(x, y)
+                    time.sleep(0.5)
+                    logger.info("✅ Clic window_position réussi")
+                    
+                    # Double clic pour s'assurer
+                    self.mouse_controller.click(x, y)
+                    time.sleep(0.3)
+                    
                     return True
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur clic window_position: {e}")
+                    # Continuer vers fallback
+            else:
+                logger.warning("⚠️ Pas de window_position configurées")
 
+            # ÉTAPE 2: Fallback vers méthodes existantes
+            logger.info("🔄 Fallback vers méthodes existantes")
+            
+            if not self.skip_browser_activation:
+                self.selected_window = self.get_target_window()
+
+                if self.selected_window:
+                    if self.focus_window(self.selected_window):
+                        self.remember_window_if_needed()
+                        logger.info("✅ Focus via selected_window réussi")
+                        return True
+
+            # ÉTAPE 3: Fallback ultime - centre écran
+            logger.info("🔄 Fallback ultime - clic centre écran")
+            
             try:
                 import tkinter as tk
                 root = tk.Tk()
@@ -221,12 +251,14 @@ class StateBasedAutomation(QObject):
                 click_x = 960
                 click_y = 200
 
+            logger.info(f"🖱️ Clic fallback: ({click_x}, {click_y})")
             self.mouse_controller.click(click_x, click_y)
             time.sleep(0.2)
 
             return True
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"❌ Erreur ensure_browser_focus: {e}")
             return True
 
     def click_prompt_field(self):
@@ -245,6 +277,7 @@ class StateBasedAutomation(QObject):
 
             x, y = prompt_pos['center_x'], prompt_pos['center_y']
 
+            logger.info(f"🖱️ Clic champ prompt: ({x}, {y})")
             self.mouse_controller.click(x, y)
             time.sleep(0.2)
 
@@ -261,6 +294,7 @@ class StateBasedAutomation(QObject):
         self.step_completed.emit("field_clearing", "Clear field")
 
         try:
+            logger.info("⌨️ Effacement champ")
             self.keyboard_controller.hotkey('ctrl', 'a')
             time.sleep(0.1)
             self.keyboard_controller.press_key('delete')
@@ -283,6 +317,8 @@ class StateBasedAutomation(QObject):
                 self.handle_failure("Test text missing")
                 return False
 
+            logger.info(f"⌨️ Saisie texte: {self.test_text[:50]}...")
+
             try:
                 original_clipboard = pyperclip.paste()
                 pyperclip.copy(self.test_text)
@@ -290,9 +326,11 @@ class StateBasedAutomation(QObject):
                 self.keyboard_controller.hotkey('ctrl', 'v')
                 time.sleep(0.3)
                 pyperclip.copy(original_clipboard)
+                logger.info("✅ Saisie via presse-papiers réussie")
                 return True
 
             except Exception:
+                logger.info("🔄 Fallback vers saisie clavier")
                 self.keyboard_controller.type_text(self.test_text)
                 time.sleep(0.5)
                 return True
@@ -308,6 +346,7 @@ class StateBasedAutomation(QObject):
         self.step_completed.emit("form_submitting", "Submit")
 
         try:
+            logger.info("⌨️ Envoi formulaire (Enter)")
             self.keyboard_controller.press_key('enter')
             time.sleep(0.5)
             return True
@@ -326,12 +365,16 @@ class StateBasedAutomation(QObject):
             platform_name = self.platform_profile.get('name', '')
             wait_time = self.calculate_wait_time()
 
+            logger.info(f"⏳ Attente réponse IA ({wait_time}s)")
+
             if hasattr(self.conductor, 'wait_for_ai_response'):
                 result = self.conductor.wait_for_ai_response(platform_name, wait_time)
 
                 if result.get('detected'):
+                    logger.info("✅ Fin génération détectée")
                     return True
                 else:
+                    logger.info("⏳ Timeout atteint, continuation")
                     return True
             else:
                 time.sleep(wait_time)
@@ -370,6 +413,8 @@ class StateBasedAutomation(QObject):
         self.step_completed.emit("response_extracting", "Extract")
 
         try:
+            logger.info("📄 Début extraction réponse")
+            
             platform_name = self.platform_profile.get('name', '')
             extraction_config = self.get_extraction_config()
             detection_config = self.platform_profile.get('detection_config', {})
@@ -377,6 +422,7 @@ class StateBasedAutomation(QObject):
             selectors = []
 
             if extraction_config:
+                logger.info("✅ Utilisation extraction_config")
                 if 'chatgpt' in platform_name.lower():
                     selectors.extend([
                         'article[data-testid*="conversation-turn"] .markdown.prose',
@@ -392,6 +438,7 @@ class StateBasedAutomation(QObject):
                         selectors.extend(extraction_config['fallback_selectors'])
 
             elif detection_config:
+                logger.info("✅ Utilisation detection_config")
                 if detection_config.get('primary_selector'):
                     selectors.append(detection_config['primary_selector'])
                 if detection_config.get('fallback_selectors'):
@@ -416,6 +463,8 @@ class StateBasedAutomation(QObject):
                     '.markdown:last-child',
                     'p:last-child'
                 ])
+
+            logger.info(f"🎯 Sélecteurs d'extraction: {selectors[:3]}...")
 
             js_code = f'''
                 let selectors = {json.dumps(selectors[:5])};
@@ -442,9 +491,11 @@ class StateBasedAutomation(QObject):
 
             if self.execute_javascript(js_code):
                 if self.extracted_response and len(self.extracted_response) > 15:
+                    logger.info(f"✅ Extraction réussie: {len(self.extracted_response)} caractères")
                     return True
 
             if self.extract_fallback():
+                logger.info(f"✅ Extraction fallback réussie: {len(self.extracted_response)} caractères")
                 return True
 
             self.handle_failure("No response extracted")
@@ -475,50 +526,68 @@ class StateBasedAutomation(QObject):
 
     def execute_javascript(self, js_code):
         try:
-            if self.selected_window:
-                try:
-                    self.selected_window.activate()
-                    time.sleep(0.2)
-                except Exception:
-                    pass
-
-            if self.selected_window:
-                try:
-                    click_x = self.selected_window.left + (self.selected_window.width // 2)
-                    click_y = self.selected_window.top + 100
-                except Exception:
-                    click_x = 960
-                    click_y = 540
+            logger.info("🖥️ Exécution JavaScript pour extraction")
+            
+            # Utiliser window_position pour le focus avant JS si disponible
+            window_position = self.platform_profile.get('window_position') if self.platform_profile else None
+            
+            if window_position and 'x' in window_position and 'y' in window_position:
+                x, y = window_position['x'], window_position['y']
+                logger.info(f"🖱️ Focus fenêtre avant JS: ({x}, {y})")
+                self.mouse_controller.click(x, y)
+                time.sleep(0.2)
             else:
-                try:
-                    import tkinter as tk
-                    root = tk.Tk()
-                    screen_width = root.winfo_screenwidth()
-                    screen_height = root.winfo_screenheight()
-                    root.destroy()
-                    click_x = screen_width // 2
-                    click_y = screen_height // 2
-                except:
-                    click_x = 960
-                    click_y = 540
+                # Fallback vers selected_window ou coordonnées génériques
+                if self.selected_window:
+                    try:
+                        self.selected_window.activate()
+                        time.sleep(0.2)
+                    except Exception:
+                        pass
 
-            self.mouse_controller.click(click_x, click_y)
-            time.sleep(0.2)
+                if self.selected_window:
+                    try:
+                        click_x = self.selected_window.left + (self.selected_window.width // 2)
+                        click_y = self.selected_window.top + 100
+                    except Exception:
+                        click_x = 960
+                        click_y = 540
+                else:
+                    try:
+                        import tkinter as tk
+                        root = tk.Tk()
+                        screen_width = root.winfo_screenwidth()
+                        screen_height = root.winfo_screenheight()
+                        root.destroy()
+                        click_x = screen_width // 2
+                        click_y = screen_height // 2
+                    except:
+                        click_x = 960
+                        click_y = 540
+
+                logger.info(f"🖱️ Focus fallback: ({click_x}, {click_y})")
+                self.mouse_controller.click(click_x, click_y)
+                time.sleep(0.2)
 
             if hasattr(self.conductor, 'js_executor'):
+                logger.info("⚙️ Utilisation js_executor du conductor")
                 result = self.conductor.js_executor.execute_console_js(js_code, self.browser_type)
                 if result:
                     self.extracted_response = result
                     return True
                 return False
             else:
+                logger.info("⚙️ Utilisation js_executor fallback")
                 return self.execute_js_fallback(js_code)
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"❌ Erreur execute_javascript: {e}")
             return False
 
     def execute_js_fallback(self, js_code):
         try:
+            logger.info(f"⌨️ Ouverture console navigateur ({self.browser_type})")
+            
             if self.browser_type == 'firefox':
                 self.keyboard_controller.hotkey('ctrl', 'shift', 'k')
             else:
@@ -550,13 +619,15 @@ class StateBasedAutomation(QObject):
                     self.extracted_response = result
                     self.keyboard_controller.press_key('f12')
                     time.sleep(0.1)
+                    logger.info("✅ Extraction JS fallback réussie")
                     return True
 
             self.keyboard_controller.press_key('f12')
             time.sleep(0.1)
             return False
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"❌ Erreur js_fallback: {e}")
             try:
                 self.keyboard_controller.press_key('f12')
             except:
@@ -565,6 +636,8 @@ class StateBasedAutomation(QObject):
 
     def extract_fallback(self):
         try:
+            logger.info("🔄 Extraction fallback ChatGPT")
+            
             js_code = '''
             let chatgptSelectors = [
                 'article[data-testid*="conversation-turn"] .markdown.prose',
@@ -601,23 +674,33 @@ class StateBasedAutomation(QObject):
             else:
                 return self.execute_js_fallback(js_code)
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"❌ Erreur extract_fallback: {e}")
             return False
 
     def handle_success(self):
         duration = time.time() - self.start_time
         self.remember_window_if_needed()
         self.is_running = False
+        
+        logger.info(f"✅ Automation terminée avec succès en {duration:.1f}s")
+        logger.info(f"📄 Réponse extraite: {len(self.extracted_response)} caractères")
+        
         self.automation_completed.emit(True, f"Success in {duration:.1f}s", duration, self.extracted_response)
 
     def handle_failure(self, error_message):
         duration = time.time() - self.start_time if self.start_time else 0
         self.is_running = False
+        
+        logger.error(f"❌ Automation échouée: {error_message}")
+        
         self.automation_failed.emit("automation_error", error_message)
 
     def stop_automation(self):
         self.force_stop = True
         self.is_running = False
+
+        logger.info("🛑 Arrêt automation demandé")
 
         try:
             self.keyboard_controller.press_key('f12')

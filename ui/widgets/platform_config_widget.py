@@ -20,6 +20,7 @@ from ui.widgets.tabs.browser_config_widget import BrowserConfigWidget
 from ui.widgets.tabs.prompt_field_widget import PromptFieldWidget
 from ui.widgets.tabs.response_area_widget import ResponseAreaWidget
 from ui.widgets.tabs.final_test_widget import FinalTestWidget
+from utils.tab_refresh_helper import add_refresh_to_existing_tabs
 
 
 class PlatformConfigWidget(QtWidgets.QWidget):
@@ -484,7 +485,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         content_layout.addWidget(left_panel, 1)
         content_layout.addWidget(right_panel, 2)
 
-        # === CRÉATION DES ONGLETS ===
+# === CRÉATION DES ONGLETS ===
 
         # Onglet 1: Configuration du clavier (NOUVEAU - ÉTAPE 1)
         self.keyboard_widget = KeyboardConfigWidget(self.config_provider, self.conductor)
@@ -525,6 +526,18 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.final_test_widget = FinalTestWidget(self.config_provider, self.conductor)
         self.final_test_widget.test_completed.connect(self._on_final_test_completed)
         self.tabs.addTab(self.final_test_widget, "Test final")
+
+        # ===== NOUVEAU: CONFIGURATION DU RAFRAÎCHISSEMENT AUTOMATIQUE =====
+        # Configurer le rafraîchissement automatique pour TOUS les onglets
+        database = getattr(self.conductor, 'database', None)
+        self.refresh_helper = add_refresh_to_existing_tabs(
+            self.tabs,              # Le QTabWidget avec tous les onglets
+            self.config_provider,   # Le provider de config
+            self.conductor,         # Le conducteur
+            database               # La base de données
+        )
+        logger.info("Rafraîchissement automatique des onglets configuré pour tous les onglets")
+        # ===== FIN NOUVEAU =====
 
         # Pour la compatibilité avec le code existant
         self.main_tabs = self.tabs
