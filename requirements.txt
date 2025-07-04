@@ -20,3 +20,6 @@ matplotlib>=3.4.0  # Pour les visualisations
 requests>=2.26.0   # Pour les appels API si nécessaire
 tabulate>=0.8.0    # Pour l'affichage formaté des tables
 pyyaml>=5.4.0      # Pour le parsing YAML si utilisé
+
+# Input monitoring
+pynput>=1.7.0

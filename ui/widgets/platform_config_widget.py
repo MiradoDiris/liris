@@ -20,6 +20,7 @@ from ui.widgets.tabs.browser_config_widget import BrowserConfigWidget
 from ui.widgets.tabs.prompt_field_widget import PromptFieldWidget
 from ui.widgets.tabs.response_area_widget import ResponseAreaWidget
 from ui.widgets.tabs.final_test_widget import FinalTestWidget
+from ui.widgets.tabs.project_config_widget import ProjectConfigWidget
 from utils.tab_refresh_helper import add_refresh_to_existing_tabs
 
 
@@ -527,6 +528,18 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.final_test_widget.test_completed.connect(self._on_final_test_completed)
         self.tabs.addTab(self.final_test_widget, "Test final")
 
+        # Onglet 7: Configuration des projets (NOUVEAU)
+        self.project_config_widget = ProjectConfigWidget(self.config_provider, self.conductor)
+        self.project_config_widget.project_profile_saved.connect(self._on_project_profile_saved)
+        self.project_config_widget.project_profile_deleted.connect(self._on_project_profile_deleted)
+        self.tabs.addTab(self.project_config_widget, "Configuration projets dev")
+
+        # Onglet 7: Configuration des projets (NOUVEAU)
+        self.project_config_widget = ProjectConfigWidget(self.config_provider, self.conductor)
+        self.project_config_widget.project_profile_saved.connect(self._on_project_profile_saved)
+        self.project_config_widget.project_profile_deleted.connect(self._on_project_profile_deleted)
+        self.tabs.addTab(self.project_config_widget, "Configuration projets data science")
+
         # ===== NOUVEAU: CONFIGURATION DU RAFRAÎCHISSEMENT AUTOMATIQUE =====
         # Configurer le rafraîchissement automatique pour TOUS les onglets
         database = getattr(self.conductor, 'database', None)
@@ -598,6 +611,18 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         print(f"DEBUG: Test final terminé pour '{platform_name}': {success} - {message}")
         self.platform_tested.emit(platform_name, success, f"Test final: {message}")
 
+    def _on_project_profile_saved(self, project_name, profile):
+        """Gère l'événement de sauvegarde d'un profil de projet."""
+        print(f"DEBUG: Profil de projet '{project_name}' sauvegardé.")
+        # Optionally, update tab status or refresh other parts of the UI
+        self._update_tab_status()
+
+    def _on_project_profile_deleted(self, project_name):
+        """Gère l'événement de suppression d'un profil de projet."""
+        print(f"DEBUG: Profil de projet '{project_name}' supprimé.")
+        # Optionally, update tab status or refresh other parts of the UI
+        self._update_tab_status()
+
     def _update_tab_status(self):
         """Met à jour les indicateurs visuels d'état des onglets"""
         if not self.current_platform:
@@ -627,6 +652,22 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 'response_area' in interface_positions
             ])
         }
+
+        # Add status for Project Configuration tab
+        # Find the index of "Configuration des projets" tab
+        project_tab_index = -1
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == "Configuration des projets":
+                project_tab_index = i
+                break
+
+        if project_tab_index != -1:
+            project_configured = hasattr(self, 'project_config_widget') and self.project_config_widget.is_configured()
+            base_title_project = "Configuration des projets"
+            if self.is_new_platform and not project_configured: # Check if it's a new platform being set up
+                self.tabs.setTabText(project_tab_index, f"{base_title_project} *")
+            else:
+                self.tabs.setTabText(project_tab_index, base_title_project)
 
         # Mettre à jour les titres des onglets en fonction de l'état
         base_titles = ["Configuration clavier", "Configuration Générale", "Gestion des navigateurs",
@@ -1064,6 +1105,20 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 print("DEBUG: Aucune plateforme trouvée dans aucune source!")
             else:
                 print(f"DEBUG: Plateformes disponibles avec support multi-fenêtres: {list(self.profiles.keys())}")
+
+            # After loading all platforms (self.profiles is populated)
+            # You'll likely have a separate mechanism for project profiles
+            # For simplicity, let's assume config_provider handles both
+            # You might need to call a new method on config_provider
+            # like self.config_provider.get_all_project_profiles()
+
+            if hasattr(self, 'project_config_widget'):
+                # This is a placeholder. You need to ensure self.project_profiles
+                # in PlatformConfigWidget is populated correctly, or the
+                # ProjectConfigWidget itself handles its loading from config_provider.
+                # The provided ProjectConfigWidget loads them internally.
+                # So, simply calling its refresh method would be good:
+                self.project_config_widget.refresh()
 
             # Mettre à jour la liste
             self.platform_list.clear()

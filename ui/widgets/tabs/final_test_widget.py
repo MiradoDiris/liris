@@ -166,7 +166,7 @@ class SimpleTestWorker(QThread):
                     self.debug_log(f"Ouverture URL plateforme: {platform_url}")
                     result = self.conductor.browser_manager.open_url(platform_url, self.detected_browser_type, new_window=False)
                     if result.get('success'):
-                        time.sleep(2)  # Attendre chargement page
+                        time.sleep(4)  # Attendre chargement page
                         self.debug_log("URL ouverte avec succès")
                     else:
                         self.debug_log(f"⚠️ Échec ouverture URL: {result.get('error', 'Erreur inconnue')}")
@@ -464,8 +464,7 @@ class SimpleTestWorker(QThread):
                         console.log("Cleaned text length:", text.length);
                         console.log("Text preview:", text.substring(0, 100));
                         
-                        if (text.length > 20 && 
-                            !text.includes('console.log') && 
+                        if (!text.includes('console.log') && 
                             !text.includes('function()') &&
                             !text.includes('Testing selector') &&
                             !text.includes('document.querySelector') &&
@@ -475,7 +474,7 @@ class SimpleTestWorker(QThread):
                             copy(text);
                             break;
                         }} else {{
-                            console.log("❌ Text rejected (too short or contains debug info)");
+                            console.log("❌ Text rejected (contains debug info)");
                         }}
                     }}
                 }} catch(e) {{ 
@@ -498,19 +497,20 @@ class SimpleTestWorker(QThread):
         """Exécute le script d'extraction universel et retourne le résultat"""
         try:
             self.debug_log("🖥️ Ouverture console pour extraction universelle")
+            # self.conductor.keyboard_controller.press_key('f12')
             
-            if self.detected_browser_type == 'firefox':
-                self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'k')
-            else:
-                self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'j')
-            time.sleep(0.5)
+            # if self.detected_browser_type == 'firefox':
+            #     self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'k')
+            # else:
+            #     self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'j')
+            # time.sleep(0.5)
             
             if self.should_stop:
                 self.debug_log("🛑 Arrêt pendant ouverture console extraction")
                 return ""
             
             self.debug_log("🧹 Nettoyage console pour extraction")
-            pyperclip.copy("console.clear();")
+            # pyperclip.copy("console.clear();")
             self.conductor.keyboard_controller.hotkey('ctrl', 'v')
             self.conductor.keyboard_controller.press_key('enter')
             time.sleep(0.1)
@@ -528,7 +528,7 @@ class SimpleTestWorker(QThread):
             if result:
                 self.debug_log(f"Aperçu résultat: '{result[:100]}...'")
             
-            self.conductor.keyboard_controller.press_key('f12')
+            # self.conductor.keyboard_controller.press_key('f12')
             time.sleep(0.1)
             
             if result and len(result) > 15:
@@ -648,8 +648,18 @@ class SimpleTestWorker(QThread):
                 self.debug_log("🛑 Arrêt pendant ouverture console")
                 return False
             
+            self.debug_log("🔐 Activation du collage")
+            try:
+                # Type 'allow pasting' to enable pasting in browser console
+                self.conductor.keyboard_controller.type_text("allow pasting")
+                self.conductor.keyboard_controller.press_key('enter')
+                time.sleep(1)  # Wait for browser to process the allow pasting command
+                self.debug_log("✅ Collage autorisé")
+            except Exception as e:
+                self.debug_log(f"⚠️ Erreur activation collage: {e}")
+            
             self.debug_log("🧹 Nettoyage console")
-            pyperclip.copy("console.clear();")
+            # pyperclip.copy("console.clear();")
             self.conductor.keyboard_controller.hotkey('ctrl', 'v')
             self.conductor.keyboard_controller.press_key('enter')
             time.sleep(0.2)
@@ -660,31 +670,56 @@ class SimpleTestWorker(QThread):
             self.conductor.keyboard_controller.press_key('enter')
             time.sleep(0.5)
             
-            max_wait = 20
+            max_wait = 80
             waited = 0
             check_interval = 0.5
             
             self.debug_log(f"👀 Surveillance console (max {max_wait}s, check chaque {check_interval}s)")
-            
+
             while waited < max_wait and not self.should_stop:
-                self.conductor.keyboard_controller.hotkey('ctrl', 'a')
-                self.conductor.keyboard_controller.hotkey('ctrl', 'c')
-                console_content = pyperclip.paste()
-                
-                self.debug_log(f"Console content length: {len(console_content)}")
-                
-                for line in console_content.split('\n'):
-                    if 'LIRIS_DETECTION_COMPLETE:' in line:
-                        status = line.split('LIRIS_DETECTION_COMPLETE:')[1].strip()
-                        self.debug_log(f"🎯 Marqueur trouvé: {status}")
-                        
-                        self.conductor.keyboard_controller.press_key('f12')
-                        time.sleep(0.1)
+                try:
+                    # Check the global variable instead of parsing console output
+                    check_script = "console.log('STATUS_CHECK:' + window.LIRIS_DETECTION_RESULT);"
+                    
+                    # Execute the status check script
+                    pyperclip.copy(check_script)
+                    self.conductor.keyboard_controller.hotkey('ctrl', 'v')
+                    self.conductor.keyboard_controller.press_key('enter')
+                    time.sleep(0.2)
+                    
+                    # Now we need to get the last console output
+                    # Clear clipboard first
+                    # pyperclip.copy("")
+                    
+                    # Use a simple script to copy the detection result to clipboard
+                    result_copy_script = """
+                    if (window.LIRIS_DETECTION_RESULT) {
+                        copy('RESULT:' + window.LIRIS_DETECTION_RESULT);
+                    } else {
+                        copy('RESULT:not_set');
+                    }
+                    """
+                    
+                    pyperclip.copy(result_copy_script)
+                    self.conductor.keyboard_controller.hotkey('ctrl', 'v')
+                    self.conductor.keyboard_controller.press_key('enter')
+                    time.sleep(0.3)
+                    
+                    # Get the result from clipboard
+                    result_content = pyperclip.paste().strip()
+                    
+                    self.debug_log(f"Detection result: {result_content}")
+                    
+                    # Parse the result
+                    if result_content.startswith('RESULT:'):
+                        status = result_content.replace('RESULT:', '').strip()
                         
                         if status == 'success':
                             self.debug_log(f"✅ Détection réussie après {waited:.1f}s")
                             logger.info(f"✅ Détection réussie après {waited:.1f}s")
                             return True
+                        elif status == 'running':
+                            continue
                         elif status == 'timeout':
                             self.debug_log(f"⏱️ Détection timeout après {waited:.1f}s")
                             logger.warning(f"⏱️ Détection timeout après {waited:.1f}s")
@@ -693,6 +728,9 @@ class SimpleTestWorker(QThread):
                             self.debug_log(f"❌ Détection erreur: {status}")
                             logger.error(f"❌ Détection erreur: {status}")
                             return False
+                    
+                except Exception as e:
+                    self.debug_log(f"❌ Erreur vérification statut: {e}")
                 
                 time.sleep(check_interval)
                 waited += check_interval
@@ -700,7 +738,7 @@ class SimpleTestWorker(QThread):
                 if waited % 2 == 0:
                     self.debug_log(f"⏳ Attente détection... {waited:.1f}s/{max_wait}s")
             
-            self.conductor.keyboard_controller.press_key('f12')
+            # self.conductor.keyboard_controller.press_key('f12')
             self.debug_log(f"⏱️ Timeout global détection après {waited:.1f}s")
             logger.warning(f"⏱️ Timeout global détection après {waited:.1f}s")
             return False
@@ -708,10 +746,10 @@ class SimpleTestWorker(QThread):
         except Exception as e:
             self.debug_log(f"❌ Erreur exécution détection: {e}")
             logger.error(f"❌ Erreur exécution détection: {e}")
-            try:
-                self.conductor.keyboard_controller.press_key('f12')
-            except:
-                pass
+            # try:
+            #     self.conductor.keyboard_controller.press_key('f12')
+            # except:
+            #     pass
             return False
 
     # 🔄 MÉTHODES FALLBACK - Garder les anciennes méthodes pour compatibilité
@@ -722,13 +760,20 @@ class SimpleTestWorker(QThread):
             let lastDataState = '';
             let stableCount = 0;
             let checkCount = 0;
-            let maxChecks = 50;
+            let maxChecks = 1000;
+            
+            // Store result in global variable AND console log
+            function setDetectionResult(result) {
+                window.LIRIS_DETECTION_RESULT = result;
+                console.log("LIRIS_DETECTION_COMPLETE:" + result);
+                console.log("Detection result stored in window.LIRIS_DETECTION_RESULT");
+            }
             
             function checkDataStability() {
                 try {
                     checkCount++;
                     if (checkCount > maxChecks) {
-                        console.log("LIRIS_DETECTION_COMPLETE:timeout");
+                        setDetectionResult("timeout");
                         return;
                     }
                     
@@ -739,11 +784,11 @@ class SimpleTestWorker(QThread):
                         let end = el.getAttribute('data-end') || '';
                         currentState += start + ':' + end + ';';
                     });
-
+                    
                     if (currentState === lastDataState && currentState.length > 0) {
                         stableCount++;
                         if (stableCount >= 3) {
-                            console.log("LIRIS_DETECTION_COMPLETE:success");
+                            setDetectionResult("success");
                             return;
                         }
                     } else {
@@ -753,10 +798,12 @@ class SimpleTestWorker(QThread):
                     
                     setTimeout(checkDataStability, 300);
                 } catch(e) {
-                    console.log("LIRIS_DETECTION_COMPLETE:error");
+                    setDetectionResult("error");
                 }
             }
-
+            
+            // Initialize detection result
+            window.LIRIS_DETECTION_RESULT = "running";
             checkDataStability();
             return "ChatGPT detection started";
         })();
@@ -769,7 +816,7 @@ class SimpleTestWorker(QThread):
             let lastContentState = '';
             let stableCount = 0;
             let checkCount = 0;
-            let maxChecks = 50;
+            let maxChecks = 1000;
             
             function checkGeminiCompletion() {
                 try {
@@ -818,30 +865,39 @@ class SimpleTestWorker(QThread):
         return '''
         (function() {
             let checkCount = 0;
-            let maxChecks = 50;
-            
+            let maxChecks = 1000;
+        
+            // Store result in global variable AND console log
+            function setDetectionResult(result) {
+                window.LIRIS_DETECTION_RESULT = result;
+                console.log("LIRIS_DETECTION_COMPLETE:" + result);
+                console.log("Detection result stored in window.LIRIS_DETECTION_RESULT");
+            }
+        
             function checkClaudeCompletion() {
                 try {
                     checkCount++;
                     if (checkCount > maxChecks) {
-                        console.log("LIRIS_DETECTION_COMPLETE:timeout");
+                        setDetectionResult("timeout");
                         return;
                     }
-                    
+                
                     let streamingElements = document.querySelectorAll('[data-is-streaming="true"]');
                     let completedElements = document.querySelectorAll('[data-is-streaming="false"]');
-                    
+                
                     if (streamingElements.length === 0 && completedElements.length > 0) {
-                        console.log("LIRIS_DETECTION_COMPLETE:success");
+                        setDetectionResult("success");
                         return;
                     }
-                    
+                
                     setTimeout(checkClaudeCompletion, 300);
                 } catch(e) {
-                    console.log("LIRIS_DETECTION_COMPLETE:error");
+                    setDetectionResult("error");
                 }
             }
-
+        
+            // Initialize detection result
+            window.LIRIS_DETECTION_RESULT = "running";
             checkClaudeCompletion();
             return "Claude detection started";
         })();
@@ -854,7 +910,7 @@ class SimpleTestWorker(QThread):
             let lastText = '';
             let stableCount = 0;
             let checkCount = 0;
-            let maxChecks = 40;
+            let maxChecks = 1000;
             
             function checkTextStability() {{
                 try {{
@@ -1246,6 +1302,8 @@ class FinalTestWidget(QtWidgets.QWidget):
         if platform_name and platform_name != "-- Sélectionner --":
             self.current_platform = platform_name
             self.current_profile = self.profiles.get(platform_name, {})
+            logger.info(f'Profile:')
+            logger.info(f'{self.current_profile}')
             self._update_platform_status()
             self._update_browser_status()
             self._load_and_sync_configuration()

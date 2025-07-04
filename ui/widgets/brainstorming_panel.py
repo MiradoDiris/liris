@@ -1,18 +1,964 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-"""
-Liris/ui/widgets/brainstorming_panel.py
-"""
-
 import os
+import time
+import pyperclip
+import json
+import re
 from datetime import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QThread
 
 from utils.logger import logger
 from utils.exceptions import BrainstormingError
 from ui.localization.translator import tr
+from utils.selector_generator import UniversalSelectorGenerator # Assuming this exists and is importable
+
+# Copy SimpleTestWorker from final_test_widget.py
+class SimpleTestWorker(QThread):
+    test_completed = pyqtSignal(bool, str, float, str)
+    step_update = pyqtSignal(str, str)
+    debug_info = pyqtSignal(str)
+    finished = pyqtSignal()
+    
+    def __init__(self, conductor, platform_profile, test_message, detected_browser_type):
+        super().__init__()
+        self.conductor = conductor
+        self.platform_profile = platform_profile
+        self.test_message = test_message
+        self.detected_browser_type = detected_browser_type
+        self.should_stop = False
+        self.current_step = ""
+        self.step_start_time = 0
+
+        # NOUVEAU : Initialiser le générateur universel
+        self.selector_generator = UniversalSelectorGenerator()
+    
+    def debug_log(self, message):
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        full_message = f"[{timestamp}] {self.current_step}: {message}"
+        logger.info(full_message)
+        self.debug_info.emit(full_message)
+    
+    def start_step(self, step_name):
+        self.current_step = step_name
+        self.step_start_time = time.time()
+        self.debug_log(f"🚀 DÉBUT de l'étape")
+    
+    def end_step(self, success=True):
+        duration = time.time() - self.step_start_time
+        status = "✅ SUCCÈS" if success else "❌ ÉCHEC"
+        self.debug_log(f"{status} - Durée: {duration:.2f}s")
+    
+    def stop_test(self):
+        self.should_stop = True
+        self.debug_log("🛑 ARRÊT DEMANDÉ")
+    
+    def _get_platform_submit_method(self):
+        """
+        Détermine la méthode d'envoi selon l'URL de la plateforme
+        
+        Returns:
+            str: 'ctrl_enter' pour Gemini, 'enter' pour les autres
+        """
+        try:
+            browser_config = self.platform_profile.get('browser', {})
+            platform_url = browser_config.get('url', '').lower()
+            
+            # Détection Gemini par URL
+            gemini_domains = [
+                'aistudio.google.com',
+                'gemini.google.com',
+                'bard.google.com'  # Au cas où il y aurait encore des anciennes URLs
+            ]
+            
+            if any(domain in platform_url for domain in gemini_domains):
+                return 'ctrl_enter'
+            
+            # Par défaut : Enter normal
+            return 'enter'
+            
+        except Exception as e:
+            self.debug_log(f"⚠️ Erreur détection méthode envoi: {e}")
+            return 'enter'  # Fallback sécurisé
+    
+    def _execute_form_submit(self):
+        """Exécute l'envoi du formulaire avec la bonne méthode"""
+        try:
+            submit_method = self._get_platform_submit_method()
+            
+            if submit_method == 'ctrl_enter':
+                self.debug_log("Envoi formulaire (Ctrl+Enter pour Gemini)")
+                self.conductor.keyboard_controller.hotkey('ctrl', 'enter')
+            else:
+                self.debug_log("Envoi formulaire (Enter)")
+                self.conductor.keyboard_controller.press_key('enter')
+            
+            time.sleep(0.5)
+            self.debug_log("Envoi formulaire réussi")
+            return True
+            
+        except Exception as e:
+            self.debug_log(f"❌ Erreur envoi: {e}")
+            return False
+    
+    def run(self):
+        try:
+            start_time = time.time()
+            self.debug_log("🎯 DÉBUT DU TEST COMPLET UNIVERSEL")
+            
+            # ÉTAPE 1: Validation configuration
+            self.start_step("VALIDATION_CONFIG")
+            
+            window_position = self.platform_profile.get('window_position')
+            prompt_field = self.platform_profile.get('interface_positions', {}).get('prompt_field')
+            extraction_config = self.platform_profile.get('extraction_config', {})
+            detection_config = self.platform_profile.get('detection_config', {})
+            
+            self.debug_log(f"window_position: {window_position}")
+            self.debug_log(f"prompt_field: {prompt_field}")
+            self.debug_log(f"extraction_config présent: {bool(extraction_config)}")
+            self.debug_log(f"detection_config présent: {bool(detection_config)}")
+            
+            # 🎯 NOUVEAU : Vérification configuration universelle
+            response_area = extraction_config.get('response_area', {})
+            universal_config = response_area.get('universal_config')
+            if universal_config:
+                self.debug_log(f"🎯 Configuration universelle détectée pour: {universal_config.get('platform', 'Unknown')}")
+            else:
+                self.debug_log("📋 Configuration legacy détectée")
+            
+            if not window_position or 'x' not in window_position or 'y' not in window_position:
+                self.debug_log("❌ window_position invalide!")
+                self.test_completed.emit(False, "Configuration incomplète: window_position invalide", 0, "")
+                # self.finished.emit()
+                return
+                
+            if not prompt_field or 'center_x' not in prompt_field or 'center_y' not in prompt_field:
+                self.debug_log("❌ prompt_field invalide!")
+                self.test_completed.emit(False, "Configuration incomplète: prompt_field invalide", 0, "")
+                # self.finished.emit()
+                return
+            
+            self.end_step(True)
+            
+            if self.should_stop:
+                self.debug_log("🛑 Arrêt demandé avant début des actions")
+                return
+                
+            # ÉTAPE 2: Clic icône fenêtre
+            self.start_step("BROWSER_FOCUS")
+            self.step_update.emit("browser_focusing", "Clic icône fenêtre...")
+            
+            try:
+                x, y = window_position['x'], window_position['y']
+                self.debug_log(f"Clic sur position: ({x}, {y})")
+                self.conductor.mouse_controller.click(x, y)
+                time.sleep(0.5)
+                self.debug_log("Clic icône réussi")
+                
+                # Ouverture URL de la plateforme
+                browser_config = self.platform_profile.get('browser', {})
+                platform_url = browser_config.get('url', '')
+                if platform_url:
+                    self.debug_log(f"Ouverture URL plateforme: {platform_url}")
+                    result = self.conductor.browser_manager.open_url(platform_url, self.detected_browser_type, new_window=False)
+                    if result.get('success'):
+                        time.sleep(4)  # Attendre chargement page
+                        self.debug_log("URL ouverte avec succès")
+                    else:
+                        self.debug_log(f"⚠️ Échec ouverture URL: {result.get('error', 'Erreur inconnue')}")
+                else:
+                    self.debug_log("⚠️ Aucune URL configurée")
+                
+                self.end_step(True)
+            except Exception as e:
+                self.debug_log(f"❌ Erreur clic icône: {e}")
+                self.end_step(False)
+                self.test_completed.emit(False, f"Erreur clic icône: {str(e)}", 0, "")
+                # self.finished.emit()
+                return
+            
+            if self.should_stop:
+                self.debug_log("🛑 Arrêt demandé après clic icône")
+                return
+            
+            # ÉTAPE 3: Clic champ de saisie
+            self.start_step("FIELD_CLICK")
+            self.step_update.emit("field_clicking", "Clic champ de saisie...")
+            
+            try:
+                x, y = prompt_field['center_x'], prompt_field['center_y']
+                self.debug_log(f"Clic champ prompt: ({x}, {y})")
+                self.conductor.mouse_controller.click(x, y)
+                time.sleep(0.3)
+                self.debug_log("Clic champ réussi")
+                self.end_step(True)
+            except Exception as e:
+                self.debug_log(f"❌ Erreur clic champ: {e}")
+                self.end_step(False)
+                self.test_completed.emit(False, f"Erreur clic champ: {str(e)}", 0, "")
+                # self.finished.emit()
+                return
+            
+            if self.should_stop:
+                self.debug_log("🛑 Arrêt demandé après clic champ")
+                return
+            
+            # ÉTAPE 4: Nettoyage champ
+            self.start_step("FIELD_CLEAR")
+            self.step_update.emit("text_typing", "Nettoyage et saisie...")
+            
+            try:
+                self.debug_log("Effacement champ (Ctrl+A + Delete)")
+                self.conductor.keyboard_controller.hotkey('ctrl', 'a')
+                time.sleep(0.1)
+                self.conductor.keyboard_controller.press_key('delete')
+                time.sleep(0.1)
+                self.debug_log("Nettoyage champ réussi")
+                self.end_step(True)
+            except Exception as e:
+                self.debug_log(f"❌ Erreur nettoyage: {e}")
+                self.end_step(False)
+                self.test_completed.emit(False, f"Erreur nettoyage: {str(e)}", 0, "")
+                # self.finished.emit()
+                return
+            
+            # ÉTAPE 5: Saisie texte
+            self.start_step("TEXT_INPUT")
+            
+            try:
+                self.debug_log(f"Saisie texte: '{self.test_message}' (longueur: {len(self.test_message)})")
+                
+                try:
+                    original_clipboard = pyperclip.paste()
+                    pyperclip.copy(self.test_message)
+                    time.sleep(0.05)
+                    self.conductor.keyboard_controller.hotkey('ctrl', 'v')
+                    time.sleep(0.3)
+                    pyperclip.copy(original_clipboard)
+                    self.debug_log("Saisie via presse-papiers réussie")
+                except Exception as e:
+                    self.debug_log(f"Échec presse-papiers: {e}, fallback clavier")
+                    self.conductor.keyboard_controller.type_text(self.test_message)
+                    time.sleep(0.5)
+                    self.debug_log("Saisie via clavier réussie")
+                
+                self.end_step(True)
+            except Exception as e:
+                self.debug_log(f"❌ Erreur saisie texte: {e}")
+                self.end_step(False)
+                self.test_completed.emit(False, f"Erreur saisie: {str(e)}", 0, "")
+                # self.finished.emit()
+                return
+            
+            if self.should_stop:
+                self.debug_log("🛑 Arrêt demandé après saisie")
+                return
+            
+            # ÉTAPE 6: Envoi formulaire (CORRIGÉ POUR GEMINI)
+            self.start_step("FORM_SUBMIT")
+            self.step_update.emit("form_submitting", "Envoi...")
+            
+            if not self._execute_form_submit():
+                self.end_step(False)
+                self.test_completed.emit(False, "Erreur envoi formulaire", 0, "")
+                # self.finished.emit()
+                return
+            
+            self.end_step(True)
+            
+            if self.should_stop:
+                self.debug_log("🛑 Arrêt demandé après envoi")
+                return
+            
+            # ÉTAPE 7: Attente réponse avec DÉTECTION UNIVERSELLE
+            self.start_step("RESPONSE_WAIT")
+            self.step_update.emit("response_waiting", "Détection fin génération universelle...")
+            
+            detection_success = False
+            try:
+                self.debug_log("🎯 Début détection IA universelle...")
+                detection_success = self._wait_for_ai_completion(detection_config)
+                self.debug_log(f"Résultat détection universelle: {detection_success}")
+                self.end_step(detection_success)
+            except Exception as e:
+                self.debug_log(f"❌ Erreur détection universelle: {e}")
+                self.end_step(False)
+                logger.warning("Détection timeout - extraction forcée")
+            
+            if self.should_stop:
+                self.debug_log("🛑 Arrêt demandé après détection")
+                return
+            
+            if not detection_success:
+                self.debug_log("⚠️ Détection a échoué, mais continuation vers extraction")
+            
+            # ÉTAPE 8: Extraction réponse avec EXTRACTION UNIVERSELLE
+            self.start_step("RESPONSE_EXTRACT")
+            self.step_update.emit("response_extracting", "Extraction console avec sélecteurs universels...")
+            
+            response = ""
+            try:
+                self.debug_log("🎯 Début extraction universelle...")
+                response = self._extract_response_universal(extraction_config)
+                self.debug_log(f"Extraction universelle terminée - Longueur: {len(response) if response else 0}")
+                
+                if response:
+                    self.debug_log(f"Aperçu réponse: '{response[:100]}...'")
+                else:
+                    self.debug_log("❌ Aucune réponse extraite")
+                
+                self.end_step(bool(response))
+            except Exception as e:
+                self.debug_log(f"❌ Erreur extraction universelle: {e}")
+                response = ""
+                self.end_step(False)
+            
+            # ÉTAPE 9: Finalisation
+            duration = time.time() - start_time
+            self.debug_log(f"🏁 TEST UNIVERSEL TERMINÉ - Durée totale: {duration:.2f}s")
+            
+            if response and len(response) > 10:
+                self.debug_log(f"✅ SUCCÈS UNIVERSEL - Réponse extraite: {len(response)} caractères")
+                self.test_completed.emit(True, f"Test universel réussi en {duration:.1f}s", duration, response)
+                # self.finished.emit()
+            else:
+                self.debug_log("❌ ÉCHEC UNIVERSEL - Aucune réponse valide extraite")
+                self.test_completed.emit(False, "Aucune réponse extraite", duration, "")
+                # self.finished.emit()
+                
+        except Exception as e:
+            duration = time.time() - start_time if 'start_time' in locals() else 0
+            error_msg = f"Erreur étape {self.current_step}: {str(e)}"
+            self.debug_log(f"💥 EXCEPTION UNIVERSELLE: {error_msg}")
+            logger.error(error_msg, exc_info=True)
+            self.test_completed.emit(False, error_msg, duration, "")
+            # self.finished.emit()
+    
+    def _wait_for_ai_completion(self, detection_config):
+        """VERSION AMÉLIORÉE avec générateur universel"""
+        try:
+            if not detection_config:
+                self.debug_log("⚠️ Pas de config détection - attente fallback 8s")
+                time.sleep(8)
+                return True
+            
+            # 🎯 NOUVEAU : Utilisation du générateur universel pour les scripts
+            universal_config = detection_config.get('universal_config')
+            if universal_config:
+                self.debug_log(f"🎯 Utilisation détection universelle pour {universal_config['platform']}")
+                js_code = self.selector_generator.generate_detection_script(universal_config)
+                self.debug_log("📜 Script de détection universel généré")
+            else:
+                # Fallback vers les scripts spécialisés existants
+                platform_type = detection_config.get('platform_type', '').lower()
+                self.debug_log(f"🔄 Fallback scripts spécialisés pour {platform_type}")
+                if 'chatgpt' in platform_type:
+                    js_code = self._get_chatgpt_detection_script()
+                elif 'gemini' in platform_type:
+                    js_code = self._get_gemini_detection_script()
+                elif 'claude' in platform_type:
+                    js_code = self._get_claude_detection_script()
+                else:
+                    primary_selector = detection_config.get('primary_selector', 'div')
+                    js_code = self._get_generic_detection_script(primary_selector)
+
+            # Focus fenêtre avant détection
+            window_position = self.platform_profile.get('window_position', {})
+            if window_position:
+                self.debug_log(f"Focus fenêtre avant détection: ({window_position['x']}, {window_position['y']})")
+                self.conductor.mouse_controller.click(window_position['x'], window_position['y'])
+                time.sleep(0.2)
+            
+            return self._execute_detection_script(js_code)
+            
+        except Exception as e:
+            self.debug_log(f"❌ Erreur _wait_for_ai_completion: {e}")
+            logger.error(f"Erreur détection IA: {e}")
+            time.sleep(6)
+            return False
+
+    def _get_chatgpt_detection_script(self):
+        """Ancienne méthode ChatGPT en fallback"""
+        return '''
+        (function() {
+            let lastDataState = '';
+            let stableCount = 0;
+            let checkCount = 0;
+            let maxChecks = 1000;
+            
+            // Store result in global variable AND console log
+            function setDetectionResult(result) {
+                window.LIRIS_DETECTION_RESULT = result;
+                console.log("LIRIS_DETECTION_COMPLETE:" + result);
+                console.log("Detection result stored in window.LIRIS_DETECTION_RESULT");
+            }
+            
+            function checkDataStability() {
+                try {
+                    checkCount++;
+                    if (checkCount > maxChecks) {
+                        setDetectionResult("timeout");
+                        return;
+                    }
+                    
+                    let elements = document.querySelectorAll('[data-start][data-end]');
+                    let currentState = '';
+                    elements.forEach(el => {
+                        let start = el.getAttribute('data-start') || '';
+                        let end = el.getAttribute('data-end') || '';
+                        currentState += start + ':' + end + ';';
+                    });
+                    
+                    if (currentState === lastDataState && currentState.length > 0) {
+                        stableCount++;
+                        if (stableCount >= 3) {
+                            setDetectionResult("success");
+                            return;
+                        }
+                    } else {
+                        lastDataState = currentState;
+                        stableCount = 0;
+                    }
+                    
+                    setTimeout(checkDataStability, 300);
+                } catch(e) {
+                    setDetectionResult("error");
+                }
+            }
+            
+            // Initialize detection result
+            window.LIRIS_DETECTION_RESULT = "running";
+            checkDataStability();
+            return "ChatGPT detection started";
+        })();
+        '''
+    
+    def _get_gemini_detection_script(self):
+        """Ancienne méthode Gemini en fallback"""
+        return '''
+        (function() {
+            let lastContentState = '';
+            let stableCount = 0;
+            let checkCount = 0;
+            let maxChecks = 1000;
+            
+            function checkGeminiCompletion() {
+                try {
+                    checkCount++;
+                    console.log("Gemini check #" + checkCount);
+                    
+                    if (checkCount > maxChecks) {
+                        console.log("LIRIS_DETECTION_COMPLETE:timeout");
+                        return;
+                    }
+                    
+                    let generatingDiv = document.querySelector('[class*="_ngcontent-ng-c2459883256"]');
+                    let completedDiv = document.querySelector('[class*="_ngcontent-ng-c1375136285"]');
+                    
+                    console.log("Generating div found:", !!generatingDiv);
+                    console.log("Completed div found:", !!completedDiv);
+                    
+                    let currentState = (generatingDiv ? 'generating' : '') + (completedDiv ? 'completed' : '');
+                    
+                    if (currentState === lastContentState && completedDiv) {
+                        stableCount++;
+                        console.log("Stable count:", stableCount);
+                        if (stableCount >= 2) {
+                            console.log("LIRIS_DETECTION_COMPLETE:success");
+                            return;
+                        }
+                    } else {
+                        lastContentState = currentState;
+                        stableCount = 0;
+                    }
+                    
+                    setTimeout(checkGeminiCompletion, 400);
+                } catch(e) {
+                    console.log("Error in Gemini detection:", e);
+                    console.log("LIRIS_DETECTION_COMPLETE:error");
+                }
+            }
+
+            checkGeminiCompletion();
+            return "Gemini detection started";
+        })();
+        '''
+    
+    def _get_claude_detection_script(self):
+        """Ancienne méthode Claude en fallback"""
+        return '''
+        (function() {
+            let checkCount = 0;
+            let maxChecks = 1000;
+        
+            // Store result in global variable AND console log
+            function setDetectionResult(result) {
+                window.LIRIS_DETECTION_RESULT = result;
+                console.log("LIRIS_DETECTION_COMPLETE:" + result);
+                console.log("Detection result stored in window.LIRIS_DETECTION_RESULT");
+            }
+        
+            function checkClaudeCompletion() {
+                try {
+                    checkCount++;
+                    if (checkCount > maxChecks) {
+                        setDetectionResult("timeout");
+                        return;
+                    }
+                
+                    let streamingElements = document.querySelectorAll('[data-is-streaming="true"]');
+                    let completedElements = document.querySelectorAll('[data-is-streaming="false"]');
+                
+                    if (streamingElements.length === 0 && completedElements.length > 0) {
+                        setDetectionResult("success");
+                        return;
+                    }
+                
+                    setTimeout(checkClaudeCompletion, 300);
+                } catch(e) {
+                    setDetectionResult("error");
+                }
+            }
+        
+            // Initialize detection result
+            window.LIRIS_DETECTION_RESULT = "running";
+            checkClaudeCompletion();
+            return "Claude detection started";
+        })();
+        '''
+    
+    def _get_generic_detection_script(self, selector):
+        """Ancienne méthode générique en fallback"""
+        return f'''
+        (function() {{
+            let lastText = '';
+            let stableCount = 0;
+            let checkCount = 0;
+            let maxChecks = 1000;
+            
+            function checkTextStability() {{
+                try {{
+                    checkCount++;
+                    console.log("Generic check #" + checkCount + " with selector: {selector}");
+                    
+                    if (checkCount > maxChecks) {{
+                        console.log("LIRIS_DETECTION_COMPLETE:timeout");
+                        return;
+                    }}
+                    
+                    let element = document.querySelector("{selector}");
+                    console.log("Element found:", !!element);
+                    
+                    let currentText = element ? (element.textContent || '').trim() : '';
+                    console.log("Current text length:", currentText.length);
+                    
+                    if (currentText === lastText && currentText.length > 30) {{
+                        stableCount++;
+                        console.log("Stable count:", stableCount);
+                        if (stableCount >= 3) {{
+                            console.log("LIRIS_DETECTION_COMPLETE:success");
+                            return;
+                        }}
+                    }} else {{
+                        lastText = currentText;
+                        stableCount = 0;
+                    }}
+                    
+                    setTimeout(checkTextStability, 500);
+                }} catch(e) {{
+                    console.log("Error in generic detection:", e);
+                    console.log("LIRIS_DETECTION_COMPLETE:error");
+                }}
+            }}
+
+            checkTextStability();
+            return "Generic detection started";
+        }})();
+        '''
+
+    def _execute_detection_script(self, js_code):
+        """Exécute le script de détection et surveille les résultats"""
+        try:
+            self.debug_log(f"🖥️ Ouverture console ({self.detected_browser_type})")
+            
+            if self.detected_browser_type == 'firefox':
+                self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'k')
+            else:
+                self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'j')
+            time.sleep(0.5)
+            
+            if self.should_stop:
+                self.debug_log("🛑 Arrêt pendant ouverture console")
+                return False
+            
+            self.debug_log("🔐 Activation du collage")
+            try:
+                # Type 'allow pasting' to enable pasting in browser console
+                self.conductor.keyboard_controller.type_text("allow pasting")
+                self.conductor.keyboard_controller.press_key('enter')
+                time.sleep(1)  # Wait for browser to process the allow pasting command
+                self.debug_log("✅ Collage autorisé")
+            except Exception as e:
+                self.debug_log(f"⚠️ Erreur activation collage: {e}")
+            
+            self.debug_log("🧹 Nettoyage console")
+            # pyperclip.copy("console.clear();")
+            self.conductor.keyboard_controller.hotkey('ctrl', 'v')
+            self.conductor.keyboard_controller.press_key('enter')
+            time.sleep(0.2)
+            
+            self.debug_log("💉 Injection script de détection")
+            pyperclip.copy(js_code)
+            self.conductor.keyboard_controller.hotkey('ctrl', 'v')
+            self.conductor.keyboard_controller.press_key('enter')
+            time.sleep(0.5)
+            
+            max_wait = 80
+            waited = 0
+            check_interval = 0.5
+            
+            self.debug_log(f"👀 Surveillance console (max {max_wait}s, check chaque {check_interval}s)")
+
+            while waited < max_wait and not self.should_stop:
+                try:
+                    # Check the global variable instead of parsing console output
+                    check_script = "console.log('STATUS_CHECK:' + window.LIRIS_DETECTION_RESULT);"
+                    
+                    # Execute the status check script
+                    pyperclip.copy(check_script)
+                    self.conductor.keyboard_controller.hotkey('ctrl', 'v')
+                    self.conductor.keyboard_controller.press_key('enter')
+                    time.sleep(0.2)
+                    
+                    # Now we need to get the last console output
+                    # Clear clipboard first
+                    # pyperclip.copy("")
+                    
+                    # Use a simple script to copy the detection result to clipboard
+                    result_copy_script = """
+                    if (window.LIRIS_DETECTION_RESULT) {
+                        copy('RESULT:' + window.LIRIS_DETECTION_RESULT);
+                    } else {
+                        copy('RESULT:not_set');
+                    }
+                    """
+                    
+                    pyperclip.copy(result_copy_script)
+                    self.conductor.keyboard_controller.hotkey('ctrl', 'v')
+                    self.conductor.keyboard_controller.press_key('enter')
+                    time.sleep(0.3)
+                    
+                    # Get the result from clipboard
+                    result_content = pyperclip.paste().strip()
+                    
+                    self.debug_log(f"Detection result: {result_content}")
+                    
+                    # Parse the result
+                    if result_content.startswith('RESULT:'):
+                        status = result_content.replace('RESULT:', '').strip()
+                        
+                        if status == 'success':
+                            self.debug_log(f"✅ Détection réussie après {waited:.1f}s")
+                            logger.info(f"✅ Détection réussie après {waited:.1f}s")
+                            return True
+                        elif status == 'running':
+                            continue
+                        elif status == 'timeout':
+                            self.debug_log(f"⏱️ Détection timeout après {waited:.1f}s")
+                            logger.warning(f"⏱️ Détection timeout après {waited:.1f}s")
+                            return False
+                        else:
+                            self.debug_log(f"❌ Détection erreur: {status}")
+                            logger.error(f"❌ Détection erreur: {status}")
+                            return False
+                    
+                except Exception as e:
+                    self.debug_log(f"❌ Erreur vérification statut: {e}")
+                
+                time.sleep(check_interval)
+                waited += check_interval
+                
+                if waited % 2 == 0:
+                    self.debug_log(f"⏳ Attente détection... {waited:.1f}s/{max_wait}s")
+            
+            # self.conductor.keyboard_controller.press_key('f12')
+            self.debug_log(f"⏱️ Timeout global détection après {waited:.1f}s")
+            logger.warning(f"⏱️ Timeout global détection après {waited:.1f}s")
+            return False
+            
+        except Exception as e:
+            self.debug_log(f"❌ Erreur exécution détection: {e}")
+            logger.error(f"❌ Erreur exécution détection: {e}")
+            # try:
+            #     self.conductor.keyboard_controller.press_key('f12')
+            # except:
+            #     pass
+            return False
+
+    def _extract_response_universal(self, extraction_config):
+        """VERSION UNIVERSELLE avec sélecteurs automatiques"""
+        try:
+            self.debug_log("🎯 Début extraction réponse universelle")
+            
+            response_area = extraction_config.get('response_area', {})
+            
+            # 🆕 NOUVEAU : Utiliser la configuration universelle si disponible
+            universal_config = response_area.get('universal_config')
+            if universal_config:
+                self.debug_log("🎯 Utilisation extraction universelle")
+                extraction_selectors = universal_config['extraction']
+                primary_selector = extraction_selectors['primary_selector']
+                fallback_selectors = extraction_selectors.get('fallback_selectors', [])
+                cleaning_method = extraction_selectors.get('text_cleaning', 'basic_text_extraction')
+                platform = universal_config.get('platform', 'unknown')
+                
+                self.debug_log(f"🎯 Plateforme: {platform}")
+                self.debug_log(f"🧹 Méthode nettoyage: {cleaning_method}")
+            else:
+                # Fallback vers l'ancienne méthode
+                self.debug_log("🔄 Fallback extraction classique")
+                platform_config = response_area.get('platform_config', {})
+                primary_selector = platform_config.get('primary_selector', 'p:last-child')
+                fallback_selectors = platform_config.get('fallback_selectors', [])
+                cleaning_method = 'basic_text_extraction'
+                platform = 'legacy'
+
+            self.debug_log(f"Primary selector: {primary_selector}")
+            self.debug_log(f"Fallback selectors: {fallback_selectors}")
+            
+            # Focus fenêtre avant extraction
+            window_position = self.platform_profile.get('window_position', {})
+            if window_position:
+                self.debug_log(f"Focus fenêtre avant extraction: ({window_position['x']}, {window_position['y']})")
+                self.conductor.mouse_controller.click(window_position['x'], window_position['y'])
+                time.sleep(0.2)
+            
+            selectors = [primary_selector] + fallback_selectors[:3]
+            self.debug_log(f"Sélecteurs à tester: {selectors}")
+            
+            # 🎯 Script d'extraction universel optimisé
+            js_code = f'''
+            let selectors = {json.dumps(selectors)};
+            let cleaningMethod = "basic_text_extraction";
+            let platform = "legacy";
+
+            // Define classes to be excluded from text content
+            const excludedClasses = ["pt-3", "pb-3"]; // Add any other classes you want to exclude
+
+            console.log("🎯 Testing universal selectors for " + platform + ":", selectors);
+            console.log("🧹 Cleaning method:", cleaningMethod);
+            console.log("🚫 Excluded classes:", excludedClasses);
+
+            for (let i = 0; i < selectors.length; i++) {{
+                let selector = selectors[i];
+                console.log("Testing selector " + (i + 1) + ":", selector);
+
+                try {{
+                    let elements = document.querySelectorAll(selector);
+                    console.log("Found " + elements.length + " elements for selector:", selector);
+
+                    if (elements.length > 0) {{
+                        // Get the last element (the most recent)
+                        let element = elements[elements.length - 1];
+
+                        // Create a deep clone of the element to avoid modifying the live DOM
+                        let clonedElement = element.cloneNode(true);
+
+                        // Replace elements with excluded classes with a newline character in the cloned element
+                        excludedClasses.forEach(className => {{
+                            const elementsToExclude = clonedElement.querySelectorAll(`.${{className}}`);
+                            elementsToExclude.forEach(el => {{
+                                // Create a text node with a newline
+                                const newlineTextNode = document.createTextNode('\\n');
+                                // Replace the excluded element with the newline text node
+                                el.replaceWith(newlineTextNode);
+                            }});
+                        }});
+
+                        let text = (clonedElement.textContent || '').trim();
+
+                        // Clean the text based on the universal method
+                        if (cleaningMethod === 'remove_ui_elements') {{
+                            // Claude cleaning
+                            text = text.replace(/Send a message\.\.\..*$/gi, '');
+                            text = text.replace(/Stop generating.*$/gi, '');
+                            text = text.replace(/Regenerate.*$/gi, '');
+                        }} else if (cleaningMethod === 'preserve_markdown_structure') {{
+                            // ChatGPT cleaning
+                            text = text.replace(/Copy code.*$/gi, '');
+                            text = text.replace(/Send a message.*$/gi, '');
+                            text = text.replace(/Stop generating.*$/gi, '');
+                        }} else if (cleaningMethod === 'extract_from_nested_spans') {{
+                            // Gemini cleaning
+                            text = text.replace(/Send a message.*$/gi, '');
+                            text = text.replace(/Écrivez votre message.*$/gi, '');
+                        }}
+
+                        // Common cleaning
+                        text = text.replace(/function\\(\\)\\s*\\{{.*\\}}/gi, '');
+                        text = text.replace(/console\\.log.*$/gi, '');
+                        text = text.replace(/let selectors.*$/gi, '');
+                        text = text.replace(/Testing selector.*$/gi, '');
+                        text = text.replace(/document\\.querySelector.*$/gi, '');
+                        text = text.trim();
+
+                        console.log("Cleaned text length:", text.length);
+                        console.log("Text preview:", text.substring(0, 100));
+
+                        if (!text.includes('console.log') &&
+                            !text.includes('function()') &&
+                            !text.includes('Testing selector') &&
+                            !text.includes('document.querySelector') &&
+                            !text.includes('Found ') &&
+                            !text.includes('elements for selector')) {{
+                            console.log("✅ Valid universal extraction found for " + platform + ", copying...");
+                            copy(text);
+                            break;
+                        }} else {{
+                            console.log("❌ Text rejected (contains debug info)");
+                        }}
+                    }}
+                }} catch (e) {{
+                    console.log("❌ Error with selector " + selector + ":", e);
+                    continue;
+                }}
+            }}
+            console.log("🎯 Universal extraction script completed for " + platform);
+            '''
+            return self._execute_extraction_script(js_code)
+        except Exception as e:
+            self.debug_log(f"❌ Erreur extraction universelle: {e}")
+            logger.error(f"Erreur extraction: {e}")
+            # Fallback vers l'ancienne méthode
+            return self._extract_response_simple_fallback(extraction_config)
+
+    def _execute_extraction_script(self, js_code):
+        """Exécute le script d'extraction universel et retourne le résultat"""
+        try:
+            self.debug_log("🖥️ Ouverture console pour extraction universelle")
+            # In a real scenario, this would involve keyboard shortcuts to open dev tools
+            # self.conductor.keyboard_controller.press_key('f12') 
+            # if self.detected_browser_type == 'firefox':
+            # self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'k')
+            # else:
+            # self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'j')
+            # time.sleep(0.5) 
+            if self.should_stop:
+                self.debug_log("🛑 Arrêt pendant ouverture console extraction")
+                return ""
+            self.debug_log("🧹 Nettoyage console pour extraction")
+            pyperclip.copy("console.clear();")
+            self.conductor.keyboard_controller.hotkey('ctrl', 'v')
+            self.conductor.keyboard_controller.press_key('enter')
+            time.sleep(0.1)
+            self.debug_log("💉 Injection script d'extraction universel")
+            pyperclip.copy(js_code)
+            self.conductor.keyboard_controller.hotkey('ctrl', 'v')
+            self.conductor.keyboard_controller.press_key('enter')
+            time.sleep(0.8)
+            self.debug_log("📋 Lecture résultat extraction universelle")
+            result = pyperclip.paste().strip()
+            self.debug_log(f"Résultat brut longueur: {len(result)}")
+            if result:
+                self.debug_log(f"Aperçu résultat: '{result[:100]}...'")
+                # self.conductor.keyboard_controller.press_key('f12') # Close dev tools
+                time.sleep(0.1)
+                if result: # Validation supplémentaire
+                    excluded_keywords = [
+                        'function()', 'console.log', 'document.query', 'let ', 'const ', 
+                        'Testing selector', 'Found ', 'elements for selector', 
+                        'Error with selector', 'Universal extraction', 'Cleaning method'
+                    ]
+                    has_excluded = any(keyword in result.lower() for keyword in excluded_keywords)
+                    self.debug_log(f"Test exclusion keywords: {has_excluded}")
+                    if not has_excluded:
+                        self.debug_log(f"✅ Réponse universelle valide extraite: {len(result)} caractères")
+                        return result
+                    else:
+                        self.debug_log("❌ Réponse rejetée (contient du code/debug)")
+                else:
+                    self.debug_log("❌ Réponse vide")
+            return ""
+        except Exception as e:
+            self.debug_log(f"❌ Erreur extraction universelle: {e}")
+            try:
+                # Attempt to close dev tools if an error occurs
+                self.conductor.keyboard_controller.press_key('f12')
+            except:
+                pass
+            return ""
+
+    def _extract_response_simple_fallback(self, extraction_config):
+        """Ancienne méthode d'extraction en fallback"""
+        try:
+            self.debug_log("🔄 Fallback vers extraction simple")
+            response_area = extraction_config.get('response_area', {})
+            platform_config = response_area.get('platform_config', {})
+            primary_selector = platform_config.get('primary_selector', 'p:last-child')
+            fallback_selectors = platform_config.get('fallback_selectors', [])
+            self.debug_log(f"Primary selector fallback: {primary_selector}")
+            self.debug_log(f"Fallback selectors: {fallback_selectors}")
+            
+            # Focus fenêtre avant extraction
+            window_position = self.platform_profile.get('window_position', {})
+            if window_position:
+                self.debug_log(f"Focus fenêtre avant extraction: ({window_position['x']}, {window_position['y']})")
+                self.conductor.mouse_controller.click(window_position['x'], window_position['y'])
+                time.sleep(0.2)
+            
+            selectors = [primary_selector] + fallback_selectors[:3]
+            self.debug_log(f"Sélecteurs fallback à tester: {selectors}")
+            
+            # Script d'extraction simple
+            js_code = f'''
+            let selectors = {json.dumps(selectors)};
+            // Define classes to be excluded from text content
+            const excludedClasses = ["pt-3", "pb-3"]; // Add any other classes you want to exclude
+
+            console.log("🔄 Testing fallback selectors:", selectors);
+            console.log("🚫 Excluded classes:", excludedClasses); // Log the excluded classes
+
+            for (let i = 0; i < selectors.length; i++) {{
+                let selector = selectors[i];
+                console.log("Testing selector " + (i + 1) + ":", selector);
+                try {{
+                    let elements = document.querySelectorAll(selector);
+                    console.log("Found " + elements.length + " elements for selector:", selector);
+                    if (elements.length > 0) {{
+                        let element = elements[elements.length - 1];
+
+                        // Create a deep clone of the element to avoid modifying the live DOM
+                        let clonedElement = element.cloneNode(true);
+
+                        // Remove elements with excluded classes from the cloned element
+                        excludedClasses.forEach(className => {{
+                            const elementsToExclude = clonedElement.querySelectorAll(`.${{className}}`);
+                            elementsToExclude.forEach(el => el.remove());
+                        }});
+
+                        let text = (clonedElement.textContent || '').trim(); // Get text from the cloned element
+                        
+                        console.log("Text length:", text.length);
+                        console.log("Text preview:", text.substring(0, 50));
+                        if (text.length > 15 && !text.includes('console.log') && !text.includes('function()') && !text.includes('Testing selector')) {{
+                            console.log("Valid fallback text found, copying...");
+                            copy(text);
+                            break;
+                        }} else {{
+                            console.log("Text rejected (too short or contains debug)");
+                        }}
+                    }}
+                }} catch(e) {{
+                    console.log("Error with selector " + selector + ":", e);
+                    continue;
+                }}
+            }}
+            console.log("Fallback extraction script completed");
+            '''
+            return self._execute_extraction_script(js_code)
+        except Exception as e:
+            self.debug_log(f"❌ Erreur extraction fallback: {e}")
+            return ""
 
 
 class BrainstormingPanel(QtWidgets.QWidget):
@@ -30,7 +976,8 @@ class BrainstormingPanel(QtWidgets.QWidget):
         super().__init__(parent)
 
         self.conductor = None
-        self.platforms = []
+        self.profiles = {} # Store full profiles
+        self.running_workers = [] # To keep track of active test workers
         self.current_session_id = None
         self.orchestrator = None
 
@@ -43,6 +990,7 @@ class BrainstormingPanel(QtWidgets.QWidget):
 
         self._init_style()
         self._init_ui()
+        self._update_ui_texts() # Call this to ensure texts are set initially
 
     def _init_style(self):
         """Configure le style global du widget"""
@@ -227,21 +1175,21 @@ class BrainstormingPanel(QtWidgets.QWidget):
         header_layout = QtWidgets.QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
 
-        title_label = QtWidgets.QLabel(tr("brainstorming.title"))
-        title_label.setStyleSheet(f"""
+        self.title_label = QtWidgets.QLabel(tr("brainstorming.title"))
+        self.title_label.setStyleSheet(f"""
             font-size: 20px;
             font-weight: bold;
             color: {self.primary_color};
             margin: 0;
             padding: 0;
         """)
-        header_layout.addWidget(title_label)
+        header_layout.addWidget(self.title_label)
         header_layout.addStretch()
         main_layout.addLayout(header_layout)
 
         # Groupe pour les paramètres de session
-        session_group = QtWidgets.QGroupBox(tr("brainstorming.session_params"))
-        session_layout = QtWidgets.QFormLayout(session_group)
+        self.session_group = QtWidgets.QGroupBox(tr("brainstorming.session_params"))
+        session_layout = QtWidgets.QFormLayout(self.session_group)
         session_layout.setSpacing(10)
         session_layout.setContentsMargins(10, 10, 10, 10)
 
@@ -252,17 +1200,17 @@ class BrainstormingPanel(QtWidgets.QWidget):
         session_layout.addRow(tr("brainstorming.name"), self.session_name_edit)
 
         # Sélection des plateformes
-        platform_label = QtWidgets.QLabel(tr("brainstorming.platforms"))
-        session_layout.addRow(platform_label)
+        self.platform_label = QtWidgets.QLabel(tr("brainstorming.platforms"))
+        session_layout.addRow(self.platform_label)
 
         self.platforms_list = QtWidgets.QListWidget()
-        self.platforms_list.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
+        self.platforms_list.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection) # Keep MultiSelection
         self.platforms_list.setMaximumHeight(120)
         session_layout.addWidget(self.platforms_list)
 
         # Champ pour le contexte/problème
-        context_label = QtWidgets.QLabel(tr("brainstorming.context"))
-        session_layout.addRow(context_label)
+        self.context_label = QtWidgets.QLabel(tr("brainstorming.context"))
+        session_layout.addRow(self.context_label)
 
         self.context_edit = QtWidgets.QTextEdit()
         self.context_edit.setPlaceholderText(tr("brainstorming.context_placeholder"))
@@ -288,11 +1236,11 @@ class BrainstormingPanel(QtWidgets.QWidget):
         buttons_layout.addWidget(self.export_button)
 
         session_layout.addRow("", buttons_layout)
-        main_layout.addWidget(session_group)
+        main_layout.addWidget(self.session_group)
 
         # Zone de résultats
-        results_group = QtWidgets.QGroupBox(tr("brainstorming.results"))
-        results_layout = QtWidgets.QVBoxLayout(results_group)
+        self.results_group = QtWidgets.QGroupBox(tr("brainstorming.results"))
+        results_layout = QtWidgets.QVBoxLayout(self.results_group)
         results_layout.setSpacing(10)
         results_layout.setContentsMargins(10, 10, 10, 10)
 
@@ -348,41 +1296,29 @@ class BrainstormingPanel(QtWidgets.QWidget):
             padding: 20px;
         """)
         viz_layout.addWidget(self.viz_view)
-
         self.results_tabs.addTab(viz_tab, tr("brainstorming.visualization"))
 
         # Statut de la session
         status_layout = QtWidgets.QHBoxLayout()
         status_layout.setContentsMargins(0, 0, 0, 0)
-
         self.status_label = QtWidgets.QLabel(tr("brainstorming.status_ready"))
         self.status_label.setStyleSheet(f"color: {self.primary_color}; font-weight: bold;")
         status_layout.addWidget(self.status_label)
-
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
         status_layout.addWidget(self.progress_bar)
-
         results_layout.addLayout(status_layout)
-        main_layout.addWidget(results_group)
+        main_layout.addWidget(self.results_group)
 
     def set_conductor(self, conductor):
-        """
-        Définit le chef d'orchestre
-
-        Args:
-            conductor: Instance du chef d'orchestre
-        """
+        """ Définit le chef d'orchestre """
         self.conductor = conductor
-
-        # Initialiser l'orchestrateur de brainstorming si disponible
         if hasattr(conductor, 'modules') and hasattr(conductor.modules, 'brainstorming_orchestrator'):
             self.orchestrator = conductor.modules.brainstorming_orchestrator
         else:
-            # Tenter d'importer et d'initialiser manuellement
             try:
                 from modules.brainstorming.orchestrator import BrainstormingOrchestrator
                 self.orchestrator = BrainstormingOrchestrator(conductor, conductor.database)
@@ -390,34 +1326,25 @@ class BrainstormingPanel(QtWidgets.QWidget):
             except Exception as e:
                 logger.error(f"Impossible d'initialiser l'orchestrateur de brainstorming: {str(e)}")
 
-    def set_platforms(self, platforms):
+    def set_platforms(self, profiles):
         """
-        Définit la liste des plateformes disponibles
-
+        Définit la liste des profils de plateformes disponibles (renommé de set_platforms pour la clarté)
         Args:
-            platforms (list): Liste des plateformes
+            profiles (dict): Dictionnaire des profils de plateformes {name: profile_data}
         """
-        self.platforms = platforms
-
-        # Mettre à jour la liste des plateformes
+        self.profiles = profiles
+        self.platforms = self.conductor.database.get_all_platforms()
         self.platforms_list.clear()
-
-        for platform in platforms:
-            item = QtWidgets.QListWidgetItem(platform)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked)
+        for name in self.profiles:
+            item = QtWidgets.QListWidgetItem(name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled) # Ensure selectable and checkable
+            item.setCheckState(Qt.Unchecked) # Start unchecked
             self.platforms_list.addItem(item)
+        logger.info(f"Loaded {len(profiles)} platform profiles.")
 
     def update_status(self, message, progress=None):
-        """
-        Met à jour le statut de la session
-
-        Args:
-            message (str): Message de statut
-            progress (int, optional): Valeur de progression
-        """
+        """ Met à jour le statut de la session """
         self.status_label.setText(message)
-
         if progress is not None:
             self.progress_bar.setValue(progress)
             self.progress_bar.setVisible(True)
@@ -426,835 +1353,278 @@ class BrainstormingPanel(QtWidgets.QWidget):
 
     def new_session(self):
         """Crée une nouvelle session"""
-        # Réinitialiser les champs
         self.session_name_edit.clear()
         self.context_edit.clear()
-
-        # Sélectionner toutes les plateformes
         for i in range(self.platforms_list.count()):
             item = self.platforms_list.item(i)
-            item.setCheckState(Qt.Checked)
-
-        # Réinitialiser les résultats
+            item.setCheckState(Qt.Unchecked) # Uncheck all for a new session
         self.clear_results()
         self.current_session_id = None
-
-        # Mettre à jour les boutons
         self.view_results_button.setEnabled(False)
         self.export_button.setEnabled(False)
-
-        # Mettre à jour le statut
         self.update_status(tr("brainstorming.new_session_created"))
 
     def clear_results(self):
         """Efface les résultats"""
-        # Effacer le tableau des solutions
         self.solutions_table.setRowCount(0)
-
-        # Effacer la comparaison
         self.comparison_view.clear()
-
-        # Réinitialiser la visualisation
         self.viz_view.setText(tr("brainstorming.visualization"))
 
     def load_file(self, file_path):
-        """
-        Charge une session depuis un fichier
-
-        Args:
-            file_path (str): Chemin du fichier
-        """
+        """ Charge une session depuis un fichier """
         try:
-            # Vérifier l'extension
             if not file_path.lower().endswith(('.json', '.txt')):
                 QtWidgets.QMessageBox.warning(
-                    self,
-                    tr("brainstorming.unsupported_format"),
-                    tr("brainstorming.file_format_error")
+                    self, tr("brainstorming.unsupported_format"), tr("brainstorming.file_format_error")
                 )
                 return
-
-            # Lire le fichier
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-
-            # Importer simplement le contenu dans le contexte
             self.context_edit.setPlainText(content)
-
-            # Mettre à jour le nom de session
-            file_name = os.path.basename(file_path)
-            file_name_without_ext = os.path.splitext(file_name)[0]
-            self.session_name_edit.setText(tr("brainstorming.session_from_file", file=file_name_without_ext))
-
-            # Mettre à jour le statut
-            self.update_status(tr("brainstorming.file_loaded", file=file_name))
-
+            file_name = os.path.splitext(os.path.basename(file_path))[0]
+            self.session_name_edit.setText(file_name)
+            self.update_status(tr("brainstorming.session_loaded").format(file_name))
         except Exception as e:
-            logger.error(f"Erreur lors du chargement du fichier: {str(e)}")
-
-            # Message d'erreur
+            logger.error(f"Erreur chargement fichier: {e}")
             QtWidgets.QMessageBox.critical(
-                self,
-                tr("brainstorming.load_error"),
-                tr("brainstorming.load_error_message", error=str(e))
-            )
-
-    def save_session(self):
-        """Enregistre la session actuelle"""
-        # Vérifier si une session est en cours
-        if not self.current_session_id:
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("brainstorming.no_session"),
-                tr("brainstorming.no_session_active")
-            )
-            return
-
-        # Ouvrir un sélecteur de fichier
-        file_path, file_filter = QtWidgets.QFileDialog.getSaveFileName(
-            self,
-            tr("brainstorming.save_session"),
-            os.path.expanduser(f"~/session_{self.current_session_id}.json"),
-            tr("brainstorming.save_dialog_filter")
-        )
-
-        if not file_path:
-            return
-
-        try:
-            # Si l'orchestrateur est disponible, utiliser sa méthode d'exportation
-            if self.orchestrator:
-                # Créer un exportateur temporaire si nécessaire
-                if not hasattr(self, 'exporter'):
-                    from core.data.exporter import DataExporter
-                    self.exporter = DataExporter(None)
-
-                # Exporter les résultats
-                format_type = 'json' if file_path.lower().endswith('.json') else 'text'
-                self.orchestrator.export_results(self.current_session_id, self.exporter, format_type)
-
-                # Message de confirmation
-                QtWidgets.QMessageBox.information(
-                    self,
-                    tr("brainstorming.save_success"),
-                    tr("brainstorming.save_success_message", file=file_path)
-                )
-            else:
-                # Sauvegarde basique
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(self.context_edit.toPlainText())
-
-                # Message de confirmation
-                QtWidgets.QMessageBox.information(
-                    self,
-                    tr("brainstorming.save_success"),
-                    tr("brainstorming.save_success_message", file=file_path)
-                )
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'enregistrement de la session: {str(e)}")
-
-            # Message d'erreur
-            QtWidgets.QMessageBox.critical(
-                self,
-                tr("brainstorming.save_error"),
-                tr("brainstorming.save_error_message", error=str(e))
+                self, tr("brainstorming.load_error"), tr("brainstorming.load_error_detail").format(str(e))
             )
 
     def _on_start_session(self):
-        """Démarre une session de brainstorming"""
-        # Vérifier la disponibilité du système
-        if not self.conductor or not self.orchestrator:
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("brainstorming.system_unavailable"),
-                tr("brainstorming.system_init_error")
-            )
+        """Lance une session de brainstorming en exécutant les tests sur les plateformes sélectionnées."""
+        if not self.conductor:
+            self.update_status(tr("brainstorming.error_no_conductor"), 0)
+            logger.error("Conductor not set. Cannot start session.")
             return
 
-        # Récupérer les paramètres
-        session_name = self.session_name_edit.text().strip()
-        if not session_name:
-            session_name = tr("brainstorming.default_session_name", date=datetime.now().strftime('%Y-%m-%d %H:%M'))
-
-        context = self.context_edit.toPlainText().strip()
-        if not context:
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("brainstorming.missing_context"),
-                tr("brainstorming.context_required")
-            )
-            return
-
-        # Récupérer les plateformes sélectionnées
+        # platforms = self.conductor.
         selected_platforms = []
         for i in range(self.platforms_list.count()):
             item = self.platforms_list.item(i)
             if item.checkState() == Qt.Checked:
-                selected_platforms.append(item.text())
+                platform_name = item.text()
+                if platform_name in self.profiles:
+                    selected_platforms.append((platform_name, self.platforms[platform_name]))
+                else:
+                    logger.warning(f"Profile for platform '{platform_name}' not found.")
 
         if not selected_platforms:
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("brainstorming.missing_platforms"),
-                tr("brainstorming.platforms_required")
-            )
+            self.update_status(tr("brainstorming.error_no_platform_selected"), 0)
             return
 
-        # Confirmation
-        reply = QtWidgets.QMessageBox.question(
-            self,
-            tr("brainstorming.start_session"),
-            tr("brainstorming.start_confirmation", count=len(selected_platforms)),
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            QtWidgets.QMessageBox.Yes
-        )
-
-        if reply != QtWidgets.QMessageBox.Yes:
+        test_message = self.context_edit.toPlainText().strip()
+        if not test_message:
+            self.update_status(tr("brainstorming.error_no_context"), 0)
             return
 
-        try:
-            # Créer la session
-            session_id = self.orchestrator.create_session(
-                session_name, context, selected_platforms
-            )
+        self.clear_results()
+        self.update_status(tr("brainstorming.status_starting_session"), 0)
+        self.start_button.setEnabled(False)
+        self.view_results_button.setEnabled(False)
+        self.export_button.setEnabled(False)
 
-            # Mettre à jour l'interface
-            self.update_status(tr("brainstorming.session_created", id=session_id), 10)
-            self.current_session_id = session_id
+        self.running_workers = []
+        total_platforms = len(selected_platforms)
+        self.progress_bar.setMaximum(total_platforms * 100) # Each platform has 100 progress points
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
 
-            # Désactiver les contrôles
-            self.session_name_edit.setEnabled(False)
-            self.context_edit.setEnabled(False)
-            self.platforms_list.setEnabled(False)
-            self.start_button.setEnabled(False)
+        # Initialize worker index
+        self.current_worker_index = -1
 
-            # Émettre le signal de démarrage
-            self.session_started.emit(session_id)
+        for i, (platform_name, platform_profile) in enumerate(selected_platforms):
+            logger.info(f"Starting test for platform: {platform_name}")
+            # Determine detected_browser_type. This should ideally come from main app config or profile.
+            # For now, a simple heuristic or default.
+            detected_browser_type = platform_profile.get('browser', {}).get('type', 'chrome') # Default to chrome
 
-            # Démarrer la session en arrière-plan
-            QtCore.QTimer.singleShot(100, lambda: self._execute_session(session_id))
+            worker = SimpleTestWorker(self.conductor, platform_profile, test_message, detected_browser_type)
+            worker.platform_name = platform_name # Add platform name for easier identification in slots
+            worker.platform_index = i # Add index for progress calculation
 
-        except Exception as e:
-            logger.error(f"Erreur lors de la création de la session: {str(e)}")
+            worker.test_completed.connect(self._on_test_completed)
+            worker.step_update.connect(self._on_step_update)
+            worker.debug_info.connect(self._on_debug_info)
+            
+            # Connect test_completed signal to clean up worker
+            worker.finished.connect(self._on_worker_finished) 
 
-            # Message d'erreur
-            QtWidgets.QMessageBox.critical(
-                self,
-                tr("brainstorming.start_error"),
-                tr("brainstorming.start_error_message", error=str(e))
-            )
+            self.running_workers.append(worker)
 
-    def _execute_session(self, session_id):
-        """
-        Exécute une session de brainstorming
+        # Start the first worker
+        self._start_next_worker()
 
-        Args:
-            session_id (int): ID de la session
-        """
-        try:
-            # Mettre à jour le statut
-            self.update_status(tr("brainstorming.session_running", id=session_id), 20)
+        self.session_started.emit(len(selected_platforms)) # Emit signal with count of platforms
 
-            # Démarrer la session
-            self.orchestrator.start_session(session_id, sync=True, timeout=300)
+    def _start_next_worker(self):
+        self.current_worker_index += 1
+        if self.current_worker_index < len(self.running_workers):
+            worker = self.running_workers[self.current_worker_index]
+            logger.info(f"Starting test for platform: {worker.platform_name} (Worker {self.current_worker_index + 1}/{len(self.running_workers)})")
+            worker.start()
+        else:
+            logger.info("All test workers have completed.")
+            # Optionally, emit a signal that all sessions are done
+            # self.all_sessions_completed.emit()
 
-            # Récupérer les résultats
-            results = self.orchestrator.get_session_results(session_id)
+    def _on_worker_finished(self):
+        print('on worker finished')
+        sender_worker = self.sender() # Get the worker that just finished
+        logger.info(f"Worker for platform {sender_worker.platform_name} finished.")
+        # You might want to disconnect signals here if not automatically handled by Qt's garbage collection
+        # sender_worker.test_completed.disconnect(self._on_test_completed)
+        # sender_worker.step_update.disconnect(self._on_step_update)
+        # sender_worker.debug_info.disconnect(self._on_debug_info)
+        # sender_worker.finished.disconnect(self._on_worker_finished)
 
-            # Mettre à jour l'interface
-            self.update_status(tr("brainstorming.session_completed", id=session_id), 100)
+        # Start the next worker in sequence
+        self._start_next_worker()
 
-            # Réactiver les contrôles
-            self.session_name_edit.setEnabled(True)
-            self.context_edit.setEnabled(True)
-            self.platforms_list.setEnabled(True)
+    def _on_step_update(self, platform_name, step_message):
+        logger.debug(f"[{platform_name}] Step: {step_message}")
+
+    def _on_debug_info(self, debug_message):
+        logger.debug(f"Debug Info: {debug_message}")
+
+    def _on_test_completed(self, success, message, duration, response):
+        # Handle the completion of an individual test here
+        """Slot pour gérer la complétion d'un test de plateforme."""
+
+        sender_worker = self.sender()
+        platform_name = getattr(sender_worker, 'platform_name', 'Unknown Platform')
+        platform_index = getattr(sender_worker, 'platform_index', 0)
+
+        logger.info(f"Test for {platform_name} completed. Success: {success}, Duration: {duration:.2f}s, Message: {message}")
+
+        row_position = self.solutions_table.rowCount()
+        self.solutions_table.insertRow(row_position)
+        
+        self.solutions_table.setItem(row_position, 0, QtWidgets.QTableWidgetItem(platform_name))
+        
+        score_item = QtWidgets.QTableWidgetItem("N/A") # Score not calculated by SimpleTestWorker
+        if success:
+            score_item.setText("Success")
+            score_item.setForeground(QtGui.QColor(QtCore.Qt.darkGreen))
+        else:
+            score_item.setText("Failed")
+            score_item.setForeground(QtGui.QColor(QtCore.Qt.darkRed))
+        self.solutions_table.setItem(row_position, 1, score_item)
+
+        self.solutions_table.setItem(row_position, 2, QtWidgets.QTableWidgetItem(f"{message} ({duration:.1f}s)"))
+        self.solutions_table.setItem(row_position, 3, QtWidgets.QTableWidgetItem(response))
+
+        # Update progress bar based on individual platform completion
+        current_progress = (self.running_workers[self.current_worker_index].platform_index + 1) * 100
+        self.progress_bar.setValue(current_progress)
+
+        self._start_next_worker()
+        
+        # # Update progress bar
+        # current_progress = self.progress_bar.value()
+        # # Each worker contributes a fixed amount (e.g., 100 units of progress)
+        # self.progress_bar.setValue(current_progress + 100) 
+        
+        # # Check if all workers are done
+        # self._check_all_workers_finished()
+
+    def _on_step_update(self, step_name, message):
+        """Slot pour les mises à jour des étapes du test."""
+        sender_worker = self.sender()
+        platform_name = getattr(sender_worker, 'platform_name', 'Unknown Platform')
+        # We can update a more detailed status label or append to a log view
+        self.update_status(f"[{platform_name}] {message}")
+        # Could also update a specific progress for this platform in a more complex UI
+
+    def _on_debug_info(self, message):
+        """Slot pour les informations de débogage du test."""
+        sender_worker = self.sender()
+        platform_name = getattr(sender_worker, 'platform_name', 'Unknown Platform')
+        logger.debug(f"[{platform_name} DEBUG] {message}")
+        # Consider adding a debug log area in the UI if needed
+
+    def _on_worker_finished(self):
+        """Slot appelé quand un SimpleTestWorker a terminé."""
+        sender_worker = self.sender()
+        if sender_worker in self.running_workers:
+            self.running_workers.remove(sender_worker)
+            sender_worker.deleteLater() # Clean up the QThread
+
+        self._check_all_workers_finished()
+
+    def _check_all_workers_finished(self):
+        """Vérifie si tous les workers ont terminé et met à jour l'état de l'UI."""
+        if not self.running_workers:
+            self.update_status(tr("brainstorming.status_completed"), 100)
             self.start_button.setEnabled(True)
-
-            # Activer les boutons de résultat
             self.view_results_button.setEnabled(True)
             self.export_button.setEnabled(True)
+            self.session_completed.emit(self.current_session_id)
+            logger.info("All brainstorming tests completed.")
 
-            # Mettre à jour les résultats
-            self._update_results(results)
-
-            # Émettre le signal de fin
-            self.session_completed.emit(session_id)
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'exécution de la session: {str(e)}")
-
-            # Mettre à jour le statut
-            self.update_status(tr("brainstorming.error", error=str(e)))
-
-            # Réactiver les contrôles
-            self.session_name_edit.setEnabled(True)
-            self.context_edit.setEnabled(True)
-            self.platforms_list.setEnabled(True)
-            self.start_button.setEnabled(True)
-
-            # Émettre le signal d'échec
-            self.session_failed.emit(session_id, str(e))
-
-    def _update_results(self, results):
-        """
-        Met à jour l'interface avec les résultats
-
-        Args:
-            results (dict): Résultats de la session
-        """
-        # Vérifier les résultats
-        if not results or 'solutions' not in results:
-            self.update_status(tr("brainstorming.no_results"))
-            return
-
-        # Initialisation du modèle
-        self.solutions_table.setRowCount(0)
-        solutions = results.get('solutions', {})
-        scores = results.get('final_scores', {})
-        evaluations = results.get('evaluations', {})
-
-        # Trier les solutions par score (si disponible)
-        sorted_platforms = sorted(
-            solutions.keys(),
-            key=lambda p: scores.get(p, 0) if scores else 0,
-            reverse=True
-        )
-
-        # Ajouter les solutions au tableau
-        for i, platform in enumerate(sorted_platforms):
-            solution_data = solutions[platform]
-
-            # Vérifier si la solution est valide
-            if not isinstance(solution_data, dict) or 'content' not in solution_data:
-                continue
-
-            # Récupérer le contenu
-            content = solution_data.get('content', '')
-            if not content:
-                continue
-
-            # Ajouter une ligne
-            row = self.solutions_table.rowCount()
-            self.solutions_table.insertRow(row)
-
-            # Plateforme
-            platform_item = QtWidgets.QTableWidgetItem(platform)
-            platform_item.setFlags(platform_item.flags() & ~Qt.ItemIsEditable)
-            self.solutions_table.setItem(row, 0, platform_item)
-
-            # Score
-            score = scores.get(platform, None)
-            score_item = QtWidgets.QTableWidgetItem(str(score) if score is not None else "-")
-            score_item.setTextAlignment(Qt.AlignCenter)
-            score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
-
-            # Colorer en fonction du score
-            if score is not None:
-                if score >= 80:
-                    score_item.setBackground(QtGui.QColor(200, 255, 200))  # Vert clair
-                elif score >= 60:
-                    score_item.setBackground(QtGui.QColor(255, 255, 200))  # Jaune clair
-                elif score >= 40:
-                    score_item.setBackground(QtGui.QColor(255, 235, 200))  # Orange clair
-                else:
-                    score_item.setBackground(QtGui.QColor(255, 200, 200))  # Rouge clair
-
-            self.solutions_table.setItem(row, 1, score_item)
-
-            # Évaluations
-            eval_count = 0
-            for eval_platform, evals in evaluations.items():
-                if platform in evals:
-                    eval_count += 1
-
-            eval_item = QtWidgets.QTableWidgetItem(str(eval_count))
-            eval_item.setTextAlignment(Qt.AlignCenter)
-            eval_item.setFlags(eval_item.flags() & ~Qt.ItemIsEditable)
-            self.solutions_table.setItem(row, 2, eval_item)
-
-            # Solution (aperçu)
-            preview = content[:100] + "..." if len(content) > 100 else content
-            preview = preview.replace("\n", " ")
-
-            solution_item = QtWidgets.QTableWidgetItem(preview)
-            solution_item.setFlags(solution_item.flags() & ~Qt.ItemIsEditable)
-            solution_item.setToolTip(content[:500] + "..." if len(content) > 500 else content)
-            self.solutions_table.setItem(row, 3, solution_item)
-
-        # Ajuster la hauteur des lignes
-        self.solutions_table.resizeRowsToContents()
-
-        # Mettre à jour la comparaison
-        self._update_comparison(results)
-
-        # Mettre à jour la visualisation
-        self._update_visualization(results)
-
-    def _update_comparison(self, results):
-        """
-        Met à jour la vue de comparaison
-
-        Args:
-            results (dict): Résultats de la session
-        """
-        # Vérifier les résultats
-        if not results or 'solutions' not in results:
-            self.comparison_view.clear()
-            return
-
-        # Préparer le texte de comparaison
-        html = "<html><head><style>"
-        html += "body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; }"
-        html += f"h2 {{ color: {self.primary_color}; font-size: 20px; margin-bottom: 15px; }}"
-        html += f"h3 {{ color: {self.secondary_color}; font-size: 16px; margin-top: 20px; }}"
-        html += "table { border-collapse: collapse; width: 100%; margin-top: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }"
-        html += "th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }"
-        html += f"th {{ background-color: {self.primary_color}; color: white; font-weight: bold; }}"
-        html += "tr:hover { background-color: #f5f5f5; }"
-        html += ".score-high { background-color: #d4edda; color: #155724; font-weight: bold; }"
-        html += ".score-medium { background-color: #fff3cd; color: #856404; }"
-        html += ".score-low { background-color: #f8d7da; color: #721c24; }"
-        html += "p { line-height: 1.5; }"
-        html += "</style></head><body>"
-
-        # Titre
-        session_name = results.get('name', f"Session {results.get('id', '')}")
-        html += f"<h2>{session_name}</h2>"
-
-        # Contexte
-        context = results.get('context', '')
-        if context:
-            html += f"<h3>{tr('brainstorming.problem_context')}</h3>"
-            html += f"<p>{context}</p>"
-
-        # Tableau des scores
-        solutions = results.get('solutions', {})
-        scores = results.get('final_scores', {})
-
-        if solutions:
-            html += f"<h3>{tr('brainstorming.results')}</h3>"
-            html += "<table>"
-            html += f"<tr><th>{tr('brainstorming.platform')}</th><th>{tr('brainstorming.score')}</th><th>{tr('brainstorming.submission_date')}</th></tr>"
-
-            # Trier par score
-            sorted_platforms = sorted(
-                solutions.keys(),
-                key=lambda p: scores.get(p, 0) if scores else 0,
-                reverse=True
-            )
-
-            for platform in sorted_platforms:
-                solution_data = solutions[platform]
-
-                # Vérifier si la solution est valide
-                if not isinstance(solution_data, dict) or 'content' not in solution_data:
-                    continue
-
-                score = scores.get(platform, None)
-                timestamp = solution_data.get('timestamp', '')
-
-                # Formater la date
-                if timestamp:
-                    try:
-                        dt = datetime.fromisoformat(timestamp)
-                        timestamp = dt.strftime("%d/%m/%Y %H:%M")
-                    except:
-                        pass
-
-                # Déterminer la classe CSS pour le score
-                score_class = ""
-                if score is not None:
-                    if score >= 80:
-                        score_class = "score-high"
-                    elif score >= 60:
-                        score_class = "score-medium"
-                    else:
-                        score_class = "score-low"
-
-                html += f"<tr>"
-                html += f"<td><b>{platform}</b></td>"
-                html += f"<td class='{score_class}'>{score if score is not None else '-'}</td>"
-                html += f"<td>{timestamp}</td>"
-                html += f"</tr>"
-
-            html += "</table>"
-
-        # Résumé des évaluations
-        evaluations = results.get('evaluations', {})
-
-        if evaluations:
-            html += f"<h3>{tr('brainstorming.evaluation_matrix')}</h3>"
-            html += "<table>"
-
-            # En-tête du tableau
-            html += f"<tr><th>{tr('brainstorming.evaluator')} \\ {tr('brainstorming.solution')}</th>"
-            for platform in sorted_platforms:
-                html += f"<th>{platform}</th>"
-            html += "</tr>"
-
-            # Lignes du tableau (une par évaluateur)
-            for evaluator in sorted(evaluations.keys()):
-                html += f"<tr><td><b>{evaluator}</b></td>"
-
-                eval_data = evaluations[evaluator]
-
-                for platform in sorted_platforms:
-                    if platform == evaluator:
-                        html += "<td>-</td>"  # Pas d'auto-évaluation
-                    elif platform in eval_data:
-                        # Extraire le score de l'évaluation
-                        eval_text = eval_data[platform]
-                        score_match = QtCore.QRegExp(r"SCORE:\s*(\d+)/100").indexIn(eval_text)
-
-                        if score_match >= 0:
-                            captured_text = QtCore.QRegExp.capturedTexts()
-                            if captured_text and len(captured_text) > 1:
-                                eval_score = captured_text[1]
-                                html += f"<td>{eval_score}/100</td>"
-                            else:
-                                html += f"<td>{tr('brainstorming.score_not_found')}</td>"
-                        else:
-                            html += f"<td>{tr('brainstorming.evaluation_present')}</td>"
-                    else:
-                        html += "<td>-</td>"
-
-                html += "</tr>"
-
-            html += "</table>"
-
-        html += "</body></html>"
-
-        # Mettre à jour la vue
-        self.comparison_view.setHtml(html)
-
-    def _update_visualization(self, results):
-        """
-        Met à jour la visualisation
-
-        Args:
-            results (dict): Résultats de la session
-        """
-        # À implémenter : graphiques de visualisation des résultats
-        # Pour l'instant, afficher un message
-        self.viz_view.setText(tr("brainstorming.visualization_coming_soon"))
 
     def _on_view_results(self):
-        """Affiche les résultats détaillés"""
-        # Vérifier si une session est active
-        if not self.current_session_id:
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("brainstorming.no_session"),
-                tr("brainstorming.no_session_active")
-            )
-            return
-
-        # Afficher l'onglet des résultats
-        self.results_tabs.setCurrentIndex(0)
+        """Affiche les résultats détaillés de la session (à implémenter si nécessaire)."""
+        logger.info("View results button clicked.")
+        # This could open a new dialog or switch to the results tab.
+        self.results_tabs.setCurrentIndex(0) # Switch to solutions table tab
 
     def _on_export_results(self):
-        """Exporte les résultats"""
-        # Vérifier si une session est active
-        if not self.current_session_id:
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("brainstorming.no_session"),
-                tr("brainstorming.no_session_active")
-            )
-            return
-
-        # Émettre le signal d'exportation
-        self.export_requested.emit(str(self.current_session_id))
-
-        # Appeler la méthode d'exportation
-        self.export_session()
-
-    def export_session(self):
-        """Exporte la session actuelle"""
-        # Vérifier si une session est active
-        if not self.current_session_id:
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("brainstorming.no_session"),
-                tr("brainstorming.no_session_active")
-            )
-            return
-
-        # Ouvrir un sélecteur de fichier
-        file_path, file_filter = QtWidgets.QFileDialog.getSaveFileName(
-            self,
-            tr("brainstorming.export_results"),
-            os.path.expanduser(f"~/brainstorming_{self.current_session_id}.json"),
-            tr("brainstorming.export_dialog_filter")
+        """Exporte les résultats de la session (à implémenter si nécessaire)."""
+        logger.info("Export results button clicked.")
+        # This would typically involve saving the data from solutions_table, comparison_view, etc.
+        # to a file (CSV, JSON, PDF).
+        session_name = self.session_name_edit.text() if self.session_name_edit.text() else "brainstorming_results"
+        self.export_requested.emit(session_name)
+        QtWidgets.QMessageBox.information(
+            self, tr("brainstorming.export_title"), tr("brainstorming.export_message")
         )
 
-        if not file_path:
-            return
-
-        try:
-            # Si l'orchestrateur est disponible, utiliser sa méthode d'exportation
-            if self.orchestrator:
-                # Créer un exportateur temporaire si nécessaire
-                if not hasattr(self, 'exporter'):
-                    from core.data.exporter import DataExporter
-                    self.exporter = DataExporter(None)
-
-                # Déterminer le format
-                format_type = 'json'
-                if file_path.lower().endswith('.txt'):
-                    format_type = 'text'
-                elif file_path.lower().endswith('.html'):
-                    format_type = 'html'
-
-                # Exporter les résultats
-                export_path = self.orchestrator.export_results(
-                    self.current_session_id,
-                    self.exporter,
-                    format_type
-                )
-
-                # Si le chemin d'exportation est différent, copier le fichier
-                if export_path != file_path:
-                    import shutil
-                    shutil.copy2(export_path, file_path)
-
-                # Message de confirmation
-                QtWidgets.QMessageBox.information(
-                    self,
-                    tr("brainstorming.export_success"),
-                    tr("brainstorming.export_success_message", file=file_path)
-                )
-            else:
-                # Exportation basique
-                session_results = None
-
-                # Récupérer les résultats directement auprès du chef d'orchestre
-                if self.conductor:
-                    try:
-                        # Tenter de récupérer les résultats via les méthodes disponibles
-                        if hasattr(self.conductor, 'get_brainstorming_results'):
-                            session_results = self.conductor.get_brainstorming_results(self.current_session_id)
-                    except:
-                        pass
-
-                # Si aucun résultat, créer un objet simple
-                if not session_results:
-                    session_results = {
-                        'id': self.current_session_id,
-                        'name': self.session_name_edit.text(),
-                        'context': self.context_edit.toPlainText(),
-                        'timestamp': datetime.now().isoformat()
-                    }
-
-                # Enregistrer selon le format
-                if file_path.lower().endswith('.json'):
-                    import json
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        json.dump(session_results, f, ensure_ascii=False, indent=2)
-                elif file_path.lower().endswith('.html'):
-                    # Créer un HTML stylisé
-                    html_content = f"""
-                    <html>
-                    <head>
-                        <title>{tr('brainstorming.export_title')}</title>
-                        <style>
-                            body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background-color: {self.background_color}; }}
-                            .container {{ max-width: 1000px; margin: 0 auto; background-color: white; padding: 20px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-                            h1 {{ color: {self.primary_color}; font-size: 24px; margin-bottom: 15px; }}
-                            h2 {{ color: {self.secondary_color}; font-size: 18px; margin-top: 20px; }}
-                            pre {{ background-color: #f5f5f5; padding: 10px; border-radius: 4px; }}
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <h1>{tr('brainstorming.session_title', id=self.current_session_id)}</h1>
-                            <h2>{self.session_name_edit.text()}</h2>
-                            <h3>{tr('brainstorming.context')}</h3>
-                            <pre>{self.context_edit.toPlainText()}</pre>
-                        </div>
-                    </body>
-                    </html>
-                    """
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(html_content)
-                else:
-                    # Format texte par défaut
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(tr('brainstorming.session_title', id=self.current_session_id) + "\n")
-                        f.write(tr('brainstorming.name') + ": " + self.session_name_edit.text() + "\n")
-                        f.write(tr('brainstorming.date') + ": " + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + "\n\n")
-                        f.write(tr('brainstorming.context') + ":\n")
-                        f.write(f"{'=' * 80}\n")
-                        f.write(self.context_edit.toPlainText())
-                        f.write(f"\n{'=' * 80}\n")
-
-                # Message de confirmation
-                QtWidgets.QMessageBox.information(
-                    self,
-                    tr("brainstorming.export_success"),
-                    tr("brainstorming.export_info_message", file=file_path)
-                )
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'exportation: {str(e)}")
-
-            # Message d'erreur
-            QtWidgets.QMessageBox.critical(
-                self,
-                tr("brainstorming.export_error"),
-                tr("brainstorming.export_error_message", error=str(e))
-            )
-
     def _on_solution_double_clicked(self, row, column):
-        """
-        Affiche la solution complète lors d'un double-clic
+        """Affiche le contenu complet de la solution double-cliquée."""
+        if column == 3: # Assuming solution text is in the 4th column (index 3)
+            solution_text = self.solutions_table.item(row, column).text()
+            platform_name = self.solutions_table.item(row, 0).text()
+            detail_dialog = QtWidgets.QDialog(self)
+            detail_dialog.setWindowTitle(f"{tr('brainstorming.solution_for')} {platform_name}")
+            detail_layout = QtWidgets.QVBoxLayout(detail_dialog)
+            text_viewer = QtWidgets.QTextEdit()
+            text_viewer.setPlainText(solution_text)
+            text_viewer.setReadOnly(True)
+            detail_layout.addWidget(text_viewer)
+            
+            # Add copy button
+            copy_button = QtWidgets.QPushButton(tr("brainstorming.copy_solution"))
+            copy_button.clicked.connect(lambda: pyperclip.copy(solution_text))
+            detail_layout.addWidget(copy_button)
 
-        Args:
-            row (int): Index de ligne
-            column (int): Index de colonne
-        """
-        # Vérifier si une session est active
-        if not self.current_session_id or row < 0 or row >= self.solutions_table.rowCount():
-            return
+            detail_dialog.exec_()
 
-        # Récupérer la plateforme
-        platform_item = self.solutions_table.item(row, 0)
-        if not platform_item:
-            return
+    def _update_ui_texts(self):
+        """Met à jour les textes de l'interface utilisateur pour la traduction."""
+        self.title_label.setText(tr("brainstorming.title"))
+        self.session_group.setTitle(tr("brainstorming.session_params"))
+        self.results_group.setTitle(tr("brainstorming.results"))
 
-        platform = platform_item.text()
-
-        try:
-            # Récupérer les résultats complets
-            results = self.orchestrator.get_session_results(self.current_session_id)
-
-            # Vérifier les solutions
-            if not results or 'solutions' not in results:
-                return
-
-            solutions = results.get('solutions', {})
-            evaluations = results.get('evaluations', {})
-
-            # Vérifier si la solution existe
-            if platform not in solutions:
-                return
-
-            solution_data = solutions[platform]
-
-            # Vérifier si la solution est valide
-            if not isinstance(solution_data, dict) or 'content' not in solution_data:
-                return
-
-            # Récupérer le contenu
-            content = solution_data.get('content', '')
-
-            # Construire le HTML pour afficher la solution
-            html = "<html><head><style>"
-            html += "body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background-color: #F9F6F6; }"
-            html += ".container { max-width: 800px; margin: 0 auto; background-color: white; padding: 20px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }"
-            html += f"h1 {{ color: {self.primary_color}; font-size: 20px; margin-bottom: 15px; }}"
-            html += f"h2 {{ color: {self.secondary_color}; font-size: 16px; margin-top: 20px; }}"
-            html += "pre { background-color: #f5f5f5; padding: 10px; border-radius: 4px; white-space: pre-wrap; }"
-            html += "blockquote { margin: 10px 0; padding: 10px; background-color: #f9f9f9; border-left: 5px solid #ccc; }"
-            html += f".score-box {{ padding: 8px; border-radius: 4px; background-color: {self.accent_color}; color: white; font-weight: bold; display: inline-block; }}"
-            html += "</style></head><body><div class='container'>"
-
-            # Titre
-            html += f"<h1>{tr('brainstorming.solution_from', platform=platform)}</h1>"
-
-            # Score
-            scores = results.get('final_scores', {})
-            score = scores.get(platform, None)
-
-            if score is not None:
-                html += f"<div class='score-box'>{tr('brainstorming.final_score', score=score)}</div>"
-                html += "<br><br>"
-
-            # Solution
-            html += f"<h2>{tr('brainstorming.proposed_solution')}</h2>"
-            html += f"<pre>{content}</pre>"
-
-            # Évaluations
-            html += f"<h2>{tr('brainstorming.received_evaluations')}</h2>"
-
-            eval_count = 0
-            for evaluator, evals in evaluations.items():
-                if platform in evals:
-                    eval_text = evals[platform]
-                    html += f"<h3>{tr('brainstorming.evaluation_by', evaluator=evaluator)}</h3>"
-                    html += f"<blockquote>{eval_text}</blockquote>"
-                    eval_count += 1
-
-            if eval_count == 0:
-                html += f"<p>{tr('brainstorming.no_evaluation')}</p>"
-
-            html += "</div></body></html>"
-
-            # Afficher la boîte de dialogue
-            dialog = QtWidgets.QDialog(self)
-            dialog.setWindowTitle(tr('brainstorming.solution_from', platform=platform))
-            dialog.setMinimumSize(600, 400)
-
-            # Disposition
-            layout = QtWidgets.QVBoxLayout(dialog)
-
-            # Navigateur pour afficher le HTML
-            browser = QtWidgets.QTextBrowser()
-            browser.setHtml(html)
-            layout.addWidget(browser)
-
-            # Boutons
-            button_box = QtWidgets.QDialogButtonBox(
-                QtWidgets.QDialogButtonBox.Close
-            )
-            button_box.rejected.connect(dialog.reject)
-            layout.addWidget(button_box)
-
-            # Afficher
-            dialog.exec_()
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'affichage de la solution: {str(e)}")
-
-    def update_language(self):
-        """Met à jour tous les textes après un changement de langue"""
-        # Mettre à jour le titre
-        title_label = self.findChild(QtWidgets.QLabel)
-        if title_label:
-            title_label.setText(tr("brainstorming.title"))
-
-        # Mettre à jour les GroupBox
-        for group_box in self.findChildren(QtWidgets.QGroupBox):
-            if "session_params" in group_box.objectName():
-                group_box.setTitle(tr("brainstorming.session_params"))
-            elif "results" in group_box.objectName():
-                group_box.setTitle(tr("brainstorming.results"))
-
-        # Mettre à jour les boutons
         self.start_button.setText(tr("brainstorming.start_session"))
         self.view_results_button.setText(tr("brainstorming.view_results"))
         self.export_button.setText(tr("brainstorming.export"))
 
-        # Mettre à jour les onglets
         self.results_tabs.setTabText(0, tr("brainstorming.solutions"))
         self.results_tabs.setTabText(1, tr("brainstorming.comparison"))
         self.results_tabs.setTabText(2, tr("brainstorming.visualization"))
 
-        # Mettre à jour les placeholders
         self.session_name_edit.setPlaceholderText(tr("brainstorming.session_name_placeholder"))
         self.context_edit.setPlaceholderText(tr("brainstorming.context_placeholder"))
 
-        # Mettre à jour le statut
         self.status_label.setText(tr("brainstorming.status_ready"))
 
-        # Mettre à jour la visualisation
         self.viz_view.setText(tr("brainstorming.visualization"))
 
-        # Mettre à jour les headers du tableau
         self.solutions_table.setHorizontalHeaderLabels([
             tr("brainstorming.platform"),
             tr("brainstorming.score"),
             tr("brainstorming.evaluations"),
             tr("brainstorming.solution")
         ])
+        self.platform_label.setText(tr("brainstorming.platforms"))
+        self.context_label.setText(tr("brainstorming.context"))

@@ -152,13 +152,34 @@ class PlatformConfigStyle:
                 border-bottom: 1px solid #EEEEEE;
             }}
             QListWidget::item:selected {{
-                background-color: {PlatformConfigStyle.PRIMARY_COLOR};
+                background-color: #55acff;
                 color: white;
             }}
             QListWidget::item:hover {{
-                background-color: #A23B2D;
+                background-color: #CCE6FF;
+                color: #333333;
             }}
         """
+        # return f"""
+        #     QListWidget {{
+        #         border: 1px solid #DDDDDD;
+        #         border-radius: 4px;
+        #         background-color: white;
+        #         alternate-background-color: {PlatformConfigStyle.BACKGROUND_COLOR};
+        #         font-size: 11px;
+        #     }}
+        #     QListWidget::item {{
+        #         padding: 8px;
+        #         border-bottom: 1px solid #EEEEEE;
+        #     }}
+        #     QListWidget::item:selected {{
+        #         background-color: {PlatformConfigStyle.PRIMARY_COLOR};
+        #         color: white;
+        #     }}
+        #     QListWidget::item:hover {{
+        #         background-color: #A23B2D;
+        #     }}
+        # """
 
     @staticmethod
     def get_small_list_style():

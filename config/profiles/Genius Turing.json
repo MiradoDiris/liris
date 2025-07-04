@@ -1,0 +1,26 @@
+{
+  "name": "Genius Turing",
+  "turing_ontology": {
+    "cluster": [
+      "Genius Turing"
+    ],
+    "clusters_detailed": [
+      {
+        "name": "Genius Turing",
+        "root_labels": [
+          {
+            "name": "Scripts",
+            "type": "directory",
+            "parent_labels": [
+              {
+                "name": "ActionLog.cs",
+                "type": "file",
+                "category": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
