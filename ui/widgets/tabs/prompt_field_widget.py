@@ -509,7 +509,7 @@ class PromptFieldWidget(QtWidgets.QWidget):
             progress.setValue(60)
             progress.setLabelText("Clicking on prompt field...\nDO NOT TOUCH MOUSE!")
 
-            time.sleep(1)
+            time.sleep(4)
 
             import pyautogui
             

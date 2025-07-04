@@ -1021,12 +1021,12 @@ class AIConductor:
 
     def get_available_platforms(self):
         try:
-            if self.database and hasattr(self.database, 'list_platforms'):
-                db_platforms = self.database.list_platforms()
+            if self.database and hasattr(self.database, 'get_all_platforms'):
+                db_platforms = self.database.get_all_platforms()
                 if db_platforms:
-                    return [p['name'] for p in db_platforms]
+                    return list(db_platforms.keys())
 
-            profiles = self.config_provider.get_profiles()
+            profiles = self.database.get_all_platforms()
             available = []
             for platform_name in profiles.keys():
                 can_use, _ = self.scheduler.can_use_platform(platform_name)

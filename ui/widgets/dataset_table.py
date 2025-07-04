@@ -400,7 +400,8 @@ class DatasetTable(QtWidgets.QWidget):
             self.datasets_table.setRowCount(0)
 
             # Récupérer la liste des datasets
-            datasets = self.database.get_all_datasets()
+            datasets = None
+            # datasets = self.database.get_all_datasets()
 
             if not datasets:
                 self.update_status(tr("datasets.no_datasets"))

@@ -36,7 +36,7 @@ class Database:
         # Initialiser les tables
         self._init_tables()
 
-        # Effectuer la migration automatique des profils existants
+        # Effectuer la migration automatique des profils existants (pour les plateformes IA)
         self._migrate_existing_profiles()
 
     def connect(self):
@@ -74,28 +74,11 @@ class Database:
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS platforms
                            (
-                               id
-                               INTEGER
-                               PRIMARY
-                               KEY
-                               AUTOINCREMENT,
-                               name
-                               TEXT
-                               NOT
-                               NULL
-                               UNIQUE,
-                               profile_data
-                               TEXT
-                               NOT
-                               NULL,
-                               created_at
-                               TEXT
-                               NOT
-                               NULL,
-                               updated_at
-                               TEXT
-                               NOT
-                               NULL
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               name TEXT NOT NULL UNIQUE,
+                               profile_data TEXT NOT NULL,
+                               created_at TEXT NOT NULL,
+                               updated_at TEXT NOT NULL
                            )
                            ''')
 
@@ -103,51 +86,17 @@ class Database:
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS keyboard_config
                            (
-                               id
-                               INTEGER
-                               PRIMARY
-                               KEY
-                               AUTOINCREMENT,
-                               layout_type
-                               TEXT
-                               NOT
-                               NULL,
-                               key_delay
-                               INTEGER
-                               DEFAULT
-                               50,
-                               accent_delay
-                               INTEGER
-                               DEFAULT
-                               100,
-                               accent_method
-                               TEXT
-                               NOT
-                               NULL,
-                               block_alt_tab
-                               BOOLEAN
-                               DEFAULT
-                               1,
-                               focus_lock
-                               BOOLEAN
-                               DEFAULT
-                               1,
-                               protection_timeout
-                               INTEGER
-                               DEFAULT
-                               30,
-                               created_at
-                               TEXT
-                               NOT
-                               NULL,
-                               updated_at
-                               TEXT
-                               NOT
-                               NULL,
-                               is_active
-                               BOOLEAN
-                               DEFAULT
-                               1
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               layout_type TEXT NOT NULL,
+                               key_delay INTEGER DEFAULT 50,
+                               accent_delay INTEGER DEFAULT 100,
+                               accent_method TEXT NOT NULL,
+                               block_alt_tab BOOLEAN DEFAULT 1,
+                               focus_lock BOOLEAN DEFAULT 1,
+                               protection_timeout INTEGER DEFAULT 30,
+                               created_at TEXT NOT NULL,
+                               updated_at TEXT NOT NULL,
+                               is_active BOOLEAN DEFAULT 1
                            )
                            ''')
 
@@ -155,31 +104,12 @@ class Database:
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS ai_sessions
                            (
-                               id
-                               INTEGER
-                               PRIMARY
-                               KEY
-                               AUTOINCREMENT,
-                               platform_name
-                               TEXT
-                               NOT
-                               NULL,
-                               session_date
-                               TEXT
-                               NOT
-                               NULL,
-                               prompt_count
-                               INTEGER
-                               DEFAULT
-                               0,
-                               token_count
-                               INTEGER
-                               DEFAULT
-                               0,
-                               status
-                               TEXT
-                               DEFAULT
-                               'active'
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               platform_name TEXT NOT NULL,
+                               session_date TEXT NOT NULL,
+                               prompt_count INTEGER DEFAULT 0,
+                               token_count INTEGER DEFAULT 0,
+                               status TEXT DEFAULT 'active'
                            )
                            ''')
 
@@ -187,107 +117,40 @@ class Database:
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS prompts
                            (
-                               id
-                               INTEGER
-                               PRIMARY
-                               KEY
-                               AUTOINCREMENT,
-                               session_id
-                               INTEGER,
-                               timestamp
-                               TEXT
-                               NOT
-                               NULL,
-                               content
-                               TEXT
-                               NOT
-                               NULL,
-                               token_count
-                               INTEGER
-                               DEFAULT
-                               0,
-                               operation_type
-                               TEXT
-                               NOT
-                               NULL,
-                               FOREIGN
-                               KEY
-                           (
-                               session_id
-                           ) REFERENCES ai_sessions
-                           (
-                               id
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               session_id INTEGER,
+                               timestamp TEXT NOT NULL,
+                               content TEXT NOT NULL,
+                               token_count INTEGER DEFAULT 0,
+                               operation_type TEXT NOT NULL,
+                               FOREIGN KEY (session_id) REFERENCES ai_sessions (id)
                            )
-                               )
                            ''')
 
             # Table des réponses
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS responses
                            (
-                               id
-                               INTEGER
-                               PRIMARY
-                               KEY
-                               AUTOINCREMENT,
-                               prompt_id
-                               INTEGER,
-                               timestamp
-                               TEXT
-                               NOT
-                               NULL,
-                               content
-                               TEXT
-                               NOT
-                               NULL,
-                               status
-                               TEXT
-                               DEFAULT
-                               'success',
-                               FOREIGN
-                               KEY
-                           (
-                               prompt_id
-                           ) REFERENCES prompts
-                           (
-                               id
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               prompt_id INTEGER,
+                               timestamp TEXT NOT NULL,
+                               content TEXT NOT NULL,
+                               status TEXT DEFAULT 'success',
+                               FOREIGN KEY (prompt_id) REFERENCES prompts (id)
                            )
-                               )
                            ''')
 
             # Table des datasets générés
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS datasets
                            (
-                               id
-                               INTEGER
-                               PRIMARY
-                               KEY
-                               AUTOINCREMENT,
-                               name
-                               TEXT
-                               NOT
-                               NULL,
-                               creation_date
-                               TEXT
-                               NOT
-                               NULL,
-                               type
-                               TEXT
-                               NOT
-                               NULL,
-                               format
-                               TEXT
-                               NOT
-                               NULL,
-                               item_count
-                               INTEGER
-                               DEFAULT
-                               0,
-                               filepath
-                               TEXT
-                               NOT
-                               NULL
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               name TEXT NOT NULL,
+                               creation_date TEXT NOT NULL,
+                               type TEXT NOT NULL,
+                               format TEXT NOT NULL,
+                               item_count INTEGER DEFAULT 0,
+                               filepath TEXT NOT NULL
                            )
                            ''')
 
@@ -295,31 +158,12 @@ class Database:
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS brainstorming_sessions
                            (
-                               id
-                               INTEGER
-                               PRIMARY
-                               KEY
-                               AUTOINCREMENT,
-                               name
-                               TEXT
-                               NOT
-                               NULL,
-                               creation_date
-                               TEXT
-                               NOT
-                               NULL,
-                               ai_platforms
-                               TEXT
-                               NOT
-                               NULL,
-                               context
-                               TEXT
-                               NOT
-                               NULL,
-                               status
-                               TEXT
-                               DEFAULT
-                               'in_progress'
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               name TEXT NOT NULL,
+                               creation_date TEXT NOT NULL,
+                               ai_platforms TEXT NOT NULL,
+                               context TEXT NOT NULL,
+                               status TEXT DEFAULT 'in_progress'
                            )
                            ''')
 
@@ -327,34 +171,26 @@ class Database:
             cursor.execute('''
                            CREATE TABLE IF NOT EXISTS brainstorming_results
                            (
-                               id
-                               INTEGER
-                               PRIMARY
-                               KEY
-                               AUTOINCREMENT,
-                               session_id
-                               INTEGER,
-                               platform_name
-                               TEXT
-                               NOT
-                               NULL,
-                               solution
-                               TEXT
-                               NOT
-                               NULL,
-                               evaluations
-                               TEXT,
-                               final_score
-                               INTEGER,
-                               FOREIGN
-                               KEY
-                           (
-                               session_id
-                           ) REFERENCES brainstorming_sessions
-                           (
-                               id
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               session_id INTEGER,
+                               platform_name TEXT NOT NULL,
+                               solution TEXT NOT NULL,
+                               evaluations TEXT,
+                               final_score INTEGER,
+                               FOREIGN KEY (session_id) REFERENCES brainstorming_sessions (id)
                            )
-                               )
+                           ''')
+            
+            # NOUVELLE TABLE: project_profiles pour les configurations de projets Turing
+            cursor.execute('''
+                           CREATE TABLE IF NOT EXISTS project_profiles
+                           (
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               name TEXT NOT NULL UNIQUE,
+                               profile_data TEXT NOT NULL,
+                               created_at TEXT NOT NULL,
+                               updated_at TEXT NOT NULL
+                           )
                            ''')
 
             self.conn.commit()
@@ -382,7 +218,7 @@ class Database:
             return False
 
     # =====================================================
-    # NOUVELLES MÉTHODES POUR GESTION MULTI-FENÊTRES
+    # NOUVELLES MÉTHODES POUR GESTION MULTI-FENÊTRES (INCHANGÉES ICI)
     # =====================================================
 
     def _get_default_browser_config(self):
@@ -438,10 +274,10 @@ class Database:
 
     def _migrate_existing_profiles(self):
         """
-        Migre automatiquement tous les profils existants vers le nouveau format
+        Migre automatiquement tous les profils existants (plateformes) vers le nouveau format
         """
         try:
-            logger.info("Vérification de la migration des profils existants...")
+            logger.info("Vérification de la migration des profils de plateformes existants...")
 
             cursor = self.conn.cursor()
             cursor.execute('SELECT name, profile_data FROM platforms')
@@ -484,12 +320,12 @@ class Database:
 
             if migration_count > 0:
                 self.conn.commit()
-                logger.info(f"Migration terminée: {migration_count} profils migrés")
+                logger.info(f"Migration terminée: {migration_count} profils de plateformes migrés")
             else:
-                logger.debug("Aucune migration nécessaire")
+                logger.debug("Aucune migration de plateformes nécessaire")
 
         except Exception as e:
-            logger.error(f"Erreur lors de la migration automatique: {str(e)}")
+            logger.error(f"Erreur lors de la migration automatique des plateformes: {str(e)}")
 
     def validate_browser_config(self, browser_config):
         """
@@ -855,6 +691,123 @@ class Database:
 
         except Exception as e:
             logger.error(f"Erreur suppression plateforme {platform_name}: {str(e)}")
+            return False
+
+    # =====================================================
+    # NOUVELLES MÉTHODES POUR GESTION DES PROJETS
+    # =====================================================
+
+    def save_project_profile(self, project_name, profile_data):
+        """
+        Sauvegarde un profil de projet en base de données.
+
+        Args:
+            project_name (str): Nom du projet.
+            profile_data (dict): Données du profil de projet à sauvegarder.
+
+        Returns:
+            bool: True si sauvegarde réussie, False sinon.
+        """
+        try:
+            logger.debug(f"Sauvegarde du profil de projet '{project_name}' en base de données.")
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            profile_json = json.dumps(profile_data, ensure_ascii=False, indent=2)
+
+            cursor.execute('SELECT id FROM project_profiles WHERE name = ?', (project_name,))
+            existing = cursor.fetchone()
+
+            if existing:
+                cursor.execute('''
+                               UPDATE project_profiles
+                               SET profile_data = ?,
+                                   updated_at   = ?
+                               WHERE name = ?
+                               ''', (profile_json, now, project_name))
+                logger.info(f"Profil de projet '{project_name}' mis à jour en base de données.")
+            else:
+                cursor.execute('''
+                               INSERT INTO project_profiles (name, profile_data, created_at, updated_at)
+                               VALUES (?, ?, ?, ?)
+                               ''', (project_name, profile_json, now, now))
+                logger.info(f"Nouveau profil de projet '{project_name}' créé en base de données.")
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Erreur lors de la sauvegarde du profil de projet '{project_name}': {str(e)}")
+            return False
+
+    def get_project_profile(self, project_name):
+        """
+        Récupère un profil de projet spécifique depuis la base de données.
+
+        Args:
+            project_name (str): Nom du projet.
+
+        Returns:
+            dict: Profil du projet ou None si non trouvé.
+        """
+        try:
+            logger.debug(f"Récupération du profil de projet '{project_name}' depuis la base de données.")
+            cursor = self.conn.cursor()
+            cursor.execute('SELECT profile_data FROM project_profiles WHERE name = ?', (project_name,))
+            result = cursor.fetchone()
+            if result:
+                return json.loads(result['profile_data'])
+            else:
+                logger.debug(f"Profil de projet '{project_name}' non trouvé en base de données.")
+                return None
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération du profil de projet '{project_name}': {str(e)}")
+            return None
+
+    def get_all_project_profiles(self):
+        """
+        Récupère tous les profils de projets depuis la base de données.
+
+        Returns:
+            dict: Dictionnaire des profils {nom_projet: données_profil}.
+        """
+        try:
+            logger.debug("Récupération de tous les profils de projets depuis la base de données.")
+            cursor = self.conn.cursor()
+            cursor.execute('SELECT name, profile_data FROM project_profiles')
+            results = cursor.fetchall()
+            profiles = {}
+            for row in results:
+                try:
+                    profiles[row['name']] = json.loads(row['profile_data'])
+                except Exception as e:
+                    logger.error(f"Erreur décodage profil de projet '{row['name']}': {str(e)}")
+            logger.debug(f"{len(profiles)} profils de projets récupérés.")
+            return profiles
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération de tous les profils de projets: {str(e)}")
+            return {}
+
+    def delete_project_profile(self, project_name):
+        """
+        Supprime un profil de projet de la base de données.
+
+        Args:
+            project_name (str): Nom du projet à supprimer.
+
+        Returns:
+            bool: True si suppression réussie, False sinon.
+        """
+        try:
+            logger.debug(f"Suppression du profil de projet '{project_name}' de la base de données.")
+            cursor = self.conn.cursor()
+            cursor.execute('DELETE FROM project_profiles WHERE name = ?', (project_name,))
+            if cursor.rowcount > 0:
+                self.conn.commit()
+                logger.info(f"Profil de projet '{project_name}' supprimé de la base.")
+                return True
+            else:
+                logger.warning(f"Profil de projet '{project_name}' non trouvé pour suppression.")
+                return False
+        except Exception as e:
+            logger.error(f"Erreur lors de la suppression du profil de projet '{project_name}': {str(e)}")
             return False
 
     # =====================================================
@@ -1225,3 +1178,4 @@ class Database:
         except Exception as e:
             logger.error(f"Erreur lors de la mise à jour du statut: {str(e)}")
             raise DatabaseError(f"Échec de la mise à jour du statut: {str(e)}")
+

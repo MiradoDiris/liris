@@ -414,12 +414,13 @@ class PromptList(QtWidgets.QWidget):
             search_text = self.search_edit.text()
 
             # Récupérer la liste des prompts
-            prompts = self.database.get_prompts(
-                platform=platform if platform else None,
-                operation_type=prompt_type if prompt_type else None,
-                search=search_text if search_text else None,
-                limit=1000  # Limiter le nombre de résultats
-            )
+            prompts = None
+            # prompts = self.database.get_prompts(
+            #     platform=platform if platform else None,
+            #     operation_type=prompt_type if prompt_type else None,
+            #     search=search_text if search_text else None,
+            #     limit=1000  # Limiter le nombre de résultats
+            # )
 
             if not prompts:
                 self.update_status(tr("history.no_prompts_found"))
@@ -877,11 +878,12 @@ class PromptList(QtWidgets.QWidget):
             search_text = self.search_edit.text()
 
             # Récupérer les prompts (avec les filtres actuels)
-            prompts = self.database.get_prompts(
-                platform=platform if platform else None,
-                operation_type=prompt_type if prompt_type else None,
-                search=search_text if search_text else None
-            )
+            prompts = None
+            # prompts = self.database.get_prompts(
+            #     platform=platform if platform else None,
+            #     operation_type=prompt_type if prompt_type else None,
+            #     search=search_text if search_text else None
+            # )
 
             if not prompts:
                 QtWidgets.QMessageBox.information(
