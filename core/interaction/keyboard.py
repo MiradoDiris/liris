@@ -1,5 +1,6 @@
 import time
 import pyautogui
+import platform  # Import the platform module to detect OS
 from utils.logger import logger
 from utils.exceptions import InteractionError
 
@@ -29,6 +30,19 @@ class KeyboardController:
 
         # Désactiver le failsafe de PyAutoGUI (optionnel)
         pyautogui.FAILSAFE = True
+
+        # Determine the primary modifier key for the current OS
+        self.modifier_key = self._get_os_modifier_key()
+
+    def _get_os_modifier_key(self):
+        """
+        Détermine la touche de modification principale ('ctrl' ou 'command')
+        en fonction du système d'exploitation.
+        """
+        if platform.system() == "Darwin":  # macOS
+            return 'command'
+        else:  # Windows, Linux, etc.
+            return 'ctrl'
 
     def type_text(self, text, interval=None):
         """
@@ -72,17 +86,21 @@ class KeyboardController:
 
     def hotkey(self, *keys):
         """
-        Utilise une combinaison de touches
+        Utilise une combinaison de touches.
+        Adapte la touche de modification (Ctrl/Command) en fonction de l'OS.
 
         Args:
-            *keys: Liste des touches à appuyer simultanément
+            *keys: Liste des touches à appuyer simultanément. 'ctrl' will be
+                   automatically replaced with 'command' on macOS.
 
         Returns:
             bool: True si l'opération a réussi, False sinon
         """
         try:
-            pyautogui.hotkey(*keys)
-            logger.debug(f"Combinaison de touches utilisée: {' + '.join(keys)}")
+            # Replace 'ctrl' with the appropriate modifier key for the OS
+            adjusted_keys = [self.modifier_key if key == 'ctrl' else key for key in keys]
+            pyautogui.hotkey(*adjusted_keys)
+            logger.debug(f"Combinaison de touches utilisée: {' + '.join(adjusted_keys)}")
             return True
 
         except Exception as e:
@@ -91,17 +109,18 @@ class KeyboardController:
 
     def clear_field(self):
         """
-        Efface le contenu d'un champ (Ctrl+A puis Delete)
+        Efface le contenu d'un champ (sélectionne tout puis supprime)
+        S'adapte à l'OS pour la touche de sélection.
 
         Returns:
             bool: True si l'opération a réussi, False sinon
         """
         try:
-            # Sélectionner tout
-            pyautogui.hotkey('ctrl', 'a')
-            time.sleep(0.1)
+            # Select all (Ctrl+A or Command+A)
+            self.hotkey(self.modifier_key, 'a')
+            time.sleep(0.1) # Small delay to ensure selection registers
 
-            # Supprimer
+            # Delete
             pyautogui.press('delete')
             logger.debug("Champ effacé")
             return True
@@ -130,18 +149,27 @@ class KeyboardController:
 
     def copy_to_clipboard(self):
         """
-        Copie la sélection dans le presse-papiers (Ctrl+C)
+        Copie la sélection dans le presse-papiers (Ctrl+C ou Command+C)
 
         Returns:
             bool: True si l'opération a réussi, False sinon
         """
-        return self.hotkey('ctrl', 'c')
+        return self.hotkey(self.modifier_key, 'c')
 
     def paste_from_clipboard(self):
         """
-        Colle le contenu du presse-papiers (Ctrl+V)
+        Colle le contenu du presse-papiers (Ctrl+V ou Command+V)
 
         Returns:
             bool: True si l'opération a réussi, False sinon
         """
-        return self.hotkey('ctrl', 'v')
+        return self.hotkey(self.modifier_key, 'v')
+
+    def cut_to_clipboard(self):
+        """
+        Coupe la sélection dans le presse-papiers (Ctrl+X ou Command+X)
+
+        Returns:
+            bool: True si l'opération a réussi, False sinon
+        """
+        return self.hotkey(self.modifier_key, 'x')
