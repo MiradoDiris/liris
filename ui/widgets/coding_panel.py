@@ -2,10 +2,9 @@ import os
 import time
 import pyperclip
 import json
-import re
 from datetime import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QThread
+from PyQt5.QtCore import Qt, pyqtSignal, QThread
 
 from utils.logger import logger
 from utils.exceptions import BrainstormingError
@@ -1274,9 +1273,7 @@ class CodingPanel(QtWidgets.QWidget):
 
         # Champ pour le nom de la session
         self.session_name_edit = QtWidgets.QLineEdit()
-        self.session_name_edit.setPlaceholderText(
-            tr("coding.session_name_placeholder")
-        )
+        self.session_name_edit.setPlaceholderText(tr("coding.session_name_placeholder"))
         self.session_name_edit.setMaximumWidth(300)
         session_layout.addRow(tr("coding.name"), self.session_name_edit)
 
@@ -1308,9 +1305,7 @@ class CodingPanel(QtWidgets.QWidget):
         self.start_button.clicked.connect(self._on_start_session)
         buttons_layout.addWidget(self.start_button)
 
-        self.view_results_button = QtWidgets.QPushButton(
-            tr("coding.view_results")
-        )
+        self.view_results_button = QtWidgets.QPushButton(tr("coding.view_results"))
         self.view_results_button.clicked.connect(self._on_view_results)
         self.view_results_button.setEnabled(False)
         buttons_layout.addWidget(self.view_results_button)
@@ -1339,20 +1334,18 @@ class CodingPanel(QtWidgets.QWidget):
         solutions_layout.setContentsMargins(0, 0, 0, 0)
 
         self.solutions_table = QtWidgets.QTableWidget()
-        self.solutions_table.setColumnCount(4)
+        self.solutions_table.setColumnCount(2)
         self.solutions_table.setHorizontalHeaderLabels(
             [
                 tr("coding.platform"),
-                tr("coding.score"),
-                tr("coding.evaluations"),
                 tr("coding.solution"),
             ]
         )
         self.solutions_table.horizontalHeader().setSectionResizeMode(
-            QtWidgets.QHeaderView.ResizeToContents
+            0, QtWidgets.QHeaderView.ResizeToContents
         )
         self.solutions_table.horizontalHeader().setSectionResizeMode(
-            3, QtWidgets.QHeaderView.Stretch
+            1, QtWidgets.QHeaderView.Stretch
         )
         self.solutions_table.verticalHeader().setVisible(False)
         solutions_layout.addWidget(self.solutions_table)
@@ -1625,22 +1618,22 @@ class CodingPanel(QtWidgets.QWidget):
             row_position, 0, QtWidgets.QTableWidgetItem(platform_name)
         )
 
-        score_item = QtWidgets.QTableWidgetItem(
-            "N/A"
-        )  # Score not calculated by SimpleTestWorker
-        if success:
-            score_item.setText("Success")
-            score_item.setForeground(QtGui.QColor(QtCore.Qt.darkGreen))
-        else:
-            score_item.setText("Failed")
-            score_item.setForeground(QtGui.QColor(QtCore.Qt.darkRed))
-        self.solutions_table.setItem(row_position, 1, score_item)
+        # score_item = QtWidgets.QTableWidgetItem(
+        #     "N/A"
+        # )  # Score not calculated by SimpleTestWorker
+        # if success:
+        #     score_item.setText("Success")
+        #     score_item.setForeground(QtGui.QColor(QtCore.Qt.darkGreen))
+        # else:
+        #     score_item.setText("Failed")
+        #     score_item.setForeground(QtGui.QColor(QtCore.Qt.darkRed))
+        # self.solutions_table.setItem(row_position, 1, score_item)
 
+        # self.solutions_table.setItem(
+        #     row_position, 2, QtWidgets.QTableWidgetItem(f"{message} ({duration:.1f}s)")
+        # )
         self.solutions_table.setItem(
-            row_position, 2, QtWidgets.QTableWidgetItem(f"{message} ({duration:.1f}s)")
-        )
-        self.solutions_table.setItem(
-            row_position, 3, QtWidgets.QTableWidgetItem(response)
+            row_position, 1, QtWidgets.QTableWidgetItem(response)
         )
 
         # Update progress bar based on individual platform completion
@@ -1686,12 +1679,12 @@ class CodingPanel(QtWidgets.QWidget):
     def _check_all_workers_finished(self):
         """Vérifie si tous les workers ont terminé et met à jour l'état de l'UI."""
         if not self.running_workers:
-            self.update_status(tr("brainstorming.status_completed"), 100)
+            self.update_status(tr("coding.status_completed"), 100)
             self.start_button.setEnabled(True)
             self.view_results_button.setEnabled(True)
             self.export_button.setEnabled(True)
             self.session_completed.emit(self.current_session_id)
-            logger.info("All brainstorming tests completed.")
+            logger.info("All code tests completed.")
 
     def _on_view_results(self):
         """Affiche les résultats détaillés de la session (à implémenter si nécessaire)."""
@@ -1711,7 +1704,7 @@ class CodingPanel(QtWidgets.QWidget):
         )
         self.export_requested.emit(session_name)
         QtWidgets.QMessageBox.information(
-            self, tr("brainstorming.export_title"), tr("brainstorming.export_message")
+            self, tr("coding.export_title"), tr("coding.export_message")
         )
 
     def _on_solution_double_clicked(self, row, column):
@@ -1720,9 +1713,7 @@ class CodingPanel(QtWidgets.QWidget):
             solution_text = self.solutions_table.item(row, column).text()
             platform_name = self.solutions_table.item(row, 0).text()
             detail_dialog = QtWidgets.QDialog(self)
-            detail_dialog.setWindowTitle(
-                f"{tr('brainstorming.solution_for')} {platform_name}"
-            )
+            detail_dialog.setWindowTitle(f"{tr('coding.solution_for')} {platform_name}")
             detail_layout = QtWidgets.QVBoxLayout(detail_dialog)
             text_viewer = QtWidgets.QTextEdit()
             text_viewer.setPlainText(solution_text)
@@ -1730,7 +1721,7 @@ class CodingPanel(QtWidgets.QWidget):
             detail_layout.addWidget(text_viewer)
 
             # Add copy button
-            copy_button = QtWidgets.QPushButton(tr("brainstorming.copy_solution"))
+            copy_button = QtWidgets.QPushButton(tr("coding.copy_solution"))
             copy_button.clicked.connect(lambda: pyperclip.copy(solution_text))
             detail_layout.addWidget(copy_button)
 
@@ -1760,8 +1751,6 @@ class CodingPanel(QtWidgets.QWidget):
         self.solutions_table.setHorizontalHeaderLabels(
             [
                 tr("coding.platform"),
-                tr("coding.score"),
-                tr("coding.evaluations"),
                 tr("coding.solution"),
             ]
         )
