@@ -7,7 +7,7 @@ Il y a 2 parties à traiter pour que ça puisse bien fonctionner :
 En environnement réel, voici comment ça devrait se passer :
 
 - L'utilisateur entre son prompt dans le champ, sélectionne l'IA à utiliser et le projet sur lequel il est en train de travailler.
-- Lorsqu'il valide sa requête, Liris va effectuer un retrieval dans Turing pour récupérer toutes les informations liées a ce prompt (ar exemple des fonctions qui pourraient être utilisées) pour servir de contexte à envoyer à l'IA
+- Lorsqu'il valide sa requête, Liris va effectuer un retrieval dans Turing pour récupérer toutes les informations liées a ce prompt (par exemple des fonctions qui pourraient être utilisées) pour servir de contexte à envoyer à l'IA
 - Une fois ces informations recueillies, ça va les injecter dans le prompt pour enrichir le contexte, puis procéder à son envoi dans la plateforme IA
 - Une fois l'attente de la réponse terminée le programme va automatiquement extraire le résultat (le code) et l'afficher dans l'interface
 
