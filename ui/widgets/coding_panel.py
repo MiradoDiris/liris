@@ -5,6 +5,13 @@ import json
 from datetime import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
+from PyQt5.Qsci import (
+    QsciScintilla,
+    QsciLexerPython,
+    QsciLexerCPP,
+    QsciLexerJavaScript,
+    QsciLexerHTML,
+)  # Utiliser pour les éditeurs de code
 
 from utils.logger import logger
 from utils.exceptions import BrainstormingError
@@ -1315,6 +1322,11 @@ class CodingPanel(QtWidgets.QWidget):
         self.export_button.setEnabled(False)
         buttons_layout.addWidget(self.export_button)
 
+        # BOUTON DE TEST POUR LE DOUBLE-CLIC
+        self.test_double_click_button = QtWidgets.QPushButton("Test Double-Click")
+        self.test_double_click_button.clicked.connect(self._add_test_data)
+        buttons_layout.addWidget(self.test_double_click_button)
+
         session_layout.addRow("", buttons_layout)
         main_layout.addWidget(self.session_group)
 
@@ -1354,33 +1366,6 @@ class CodingPanel(QtWidgets.QWidget):
         self.solutions_table.cellDoubleClicked.connect(self._on_solution_double_clicked)
 
         self.results_tabs.addTab(solutions_tab, tr("coding.solutions"))
-
-        # Onglet de comparaison
-        # comparison_tab = QtWidgets.QWidget()
-        # comparison_layout = QtWidgets.QVBoxLayout(comparison_tab)
-        # comparison_layout.setContentsMargins(0, 0, 0, 0)
-
-        # self.comparison_view = QtWidgets.QTextEdit()
-        # self.comparison_view.setReadOnly(True)
-        # comparison_layout.addWidget(self.comparison_view)
-
-        # self.results_tabs.addTab(comparison_tab, tr("coding.comparison"))
-
-        # Onglet de visualisation
-        # viz_tab = QtWidgets.QWidget()
-        # viz_layout = QtWidgets.QVBoxLayout(viz_tab)
-        # viz_layout.setContentsMargins(0, 0, 0, 0)
-
-        # self.viz_view = QtWidgets.QLabel(tr("coding.visualization"))
-        # self.viz_view.setAlignment(Qt.AlignCenter)
-        # self.viz_view.setStyleSheet(f"""
-        #     color: {self.primary_color};
-        #     font-size: 14px;
-        #     font-weight: bold;
-        #     padding: 20px;
-        # """)
-        # viz_layout.addWidget(self.viz_view)
-        # self.results_tabs.addTab(viz_tab, tr("coding.visualization"))
 
         # Statut de la session
         status_layout = QtWidgets.QHBoxLayout()
@@ -1618,20 +1603,6 @@ class CodingPanel(QtWidgets.QWidget):
             row_position, 0, QtWidgets.QTableWidgetItem(platform_name)
         )
 
-        # score_item = QtWidgets.QTableWidgetItem(
-        #     "N/A"
-        # )  # Score not calculated by SimpleTestWorker
-        # if success:
-        #     score_item.setText("Success")
-        #     score_item.setForeground(QtGui.QColor(QtCore.Qt.darkGreen))
-        # else:
-        #     score_item.setText("Failed")
-        #     score_item.setForeground(QtGui.QColor(QtCore.Qt.darkRed))
-        # self.solutions_table.setItem(row_position, 1, score_item)
-
-        # self.solutions_table.setItem(
-        #     row_position, 2, QtWidgets.QTableWidgetItem(f"{message} ({duration:.1f}s)")
-        # )
         self.solutions_table.setItem(
             row_position, 1, QtWidgets.QTableWidgetItem(response)
         )
@@ -1643,14 +1614,6 @@ class CodingPanel(QtWidgets.QWidget):
         self.progress_bar.setValue(current_progress)
 
         self._start_next_worker()
-
-        # # Update progress bar
-        # current_progress = self.progress_bar.value()
-        # # Each worker contributes a fixed amount (e.g., 100 units of progress)
-        # self.progress_bar.setValue(current_progress + 100)
-
-        # # Check if all workers are done
-        # self._check_all_workers_finished()
 
     def _on_step_update(self, step_name, message):
         """Slot pour les mises à jour des étapes du test."""
@@ -1708,24 +1671,95 @@ class CodingPanel(QtWidgets.QWidget):
         )
 
     def _on_solution_double_clicked(self, row, column):
+        print("Test : ", self.solutions_table.item(row, 0).text())
+        print("Test : ", self.solutions_table.item(row, 1).text())
         """Affiche le contenu complet de la solution double-cliquée."""
-        if column == 3:  # Assuming solution text is in the 4th column (index 3)
-            solution_text = self.solutions_table.item(row, column).text()
+        if column == 1:  # Assuming solution text is in the 2nd column (index 1)
+            item = self.solutions_table.item(row, column)
+            solution_text = item.text() if item else "(aucune solution)"
             platform_name = self.solutions_table.item(row, 0).text()
+
             detail_dialog = QtWidgets.QDialog(self)
             detail_dialog.setWindowTitle(f"{tr('coding.solution_for')} {platform_name}")
-            detail_layout = QtWidgets.QVBoxLayout(detail_dialog)
-            text_viewer = QtWidgets.QTextEdit()
-            text_viewer.setPlainText(solution_text)
-            text_viewer.setReadOnly(True)
-            detail_layout.addWidget(text_viewer)
+            detail_dialog.resize(800, 600)
 
-            # Add copy button
+            detail_layout = QtWidgets.QVBoxLayout(detail_dialog)
+
+            # Créer le widget QScintilla
+            code_viewer = QsciScintilla()
+            code_viewer.setUtf8(True)
+            code_viewer.setReadOnly(True)
+            code_viewer.setText(solution_text)
+
+            # Détecter le langage pour la coloration syntaxique
+            lexer = self._get_lexer_for_solution(solution_text)
+
+            # Définir la police pour le code et les numéros de ligne
+            code_font = QtGui.QFont("Courier New", 10)
+
+            if lexer:
+                lexer.setDefaultFont(code_font)
+                code_viewer.setLexer(lexer)
+
+            # Configuration des numéros de ligne
+            fontmetrics = QtGui.QFontMetrics(code_font)
+            code_viewer.setMarginWidth(0, fontmetrics.width("0000") + 6)
+            code_viewer.setMarginLineNumbers(0, True)
+            code_viewer.setMarginsBackgroundColor(QtGui.QColor("#eeeeee"))
+            code_viewer.setMarginsForegroundColor(QtGui.QColor("#333333"))
+            code_viewer.setMarginsFont(code_font)
+
+            # Style du curseur
+            code_viewer.setCaretLineVisible(True)
+            code_viewer.setCaretLineBackgroundColor(QtGui.QColor("#f0f0f0"))
+
+            detail_layout.addWidget(code_viewer)
+
+            # Bouton de copie
             copy_button = QtWidgets.QPushButton(tr("coding.copy_solution"))
             copy_button.clicked.connect(lambda: pyperclip.copy(solution_text))
             detail_layout.addWidget(copy_button)
 
             detail_dialog.exec_()
+
+    def _get_lexer_for_solution(self, text):
+        """Tente de deviner le lexer QScintilla approprié en fonction du contenu."""
+        text_lower = text.lower()
+        if (
+            "def " in text_lower
+            and ":" in text_lower
+            and "(" in text_lower
+            and ")" in text_lower
+        ):
+            return QsciLexerPython()
+        if "#include" in text_lower and ("std::" in text_lower or "cout" in text_lower):
+            return QsciLexerCPP()
+        if "function" in text_lower and "{" in text_lower and "}" in text_lower:
+            return QsciLexerJavaScript()
+        if "<!doctype" in text_lower or "<html" in text_lower:
+            return QsciLexerHTML()
+        # Fallback sur Python si on ne sait pas
+        return QsciLexerPython()
+
+    def _add_test_data(self):
+        """Ajoute des données de test au tableau pour vérifier le double-clic."""
+        self.solutions_table.setRowCount(0)  # Clear existing rows
+        test_data = {
+            "Platform A": "def hello_world():\n    print('Hello, World!')",
+            "Platform B": '#include <iostream>\n\nint main() {\n    std::cout << "Hello, World!";\n    return 0;\n}',
+        }
+
+        for platform, solution in test_data.items():
+            row_position = self.solutions_table.rowCount()
+            self.solutions_table.insertRow(row_position)
+            self.solutions_table.setItem(
+                row_position, 0, QtWidgets.QTableWidgetItem(platform)
+            )
+            self.solutions_table.setItem(
+                row_position, 1, QtWidgets.QTableWidgetItem(solution)
+            )
+
+        logger.info("Added test data to the solutions table.")
 
     def _update_ui_texts(self):
         """Met à jour les textes de l'interface utilisateur pour la traduction."""
