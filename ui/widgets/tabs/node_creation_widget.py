@@ -500,20 +500,60 @@ class NodeCreationWidget(QtWidgets.QWidget):
         self.file_list_widget.clear()
         selected_category_filter = self.category_filter_combo.currentText()
 
-         # Define non-development file extensions
+        # Define non-development file extensions
         NOT_DEV_FILE_EXTENSIONS = {
             # Image formats
-            '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.svg', '.ico', '.psd',
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".bmp",
+            ".tiff",
+            ".webp",
+            ".svg",
+            ".ico",
+            ".psd",
             # Video formats
-            '.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.mpeg', '.mpg', '.3gp', '.webm',
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".mkv",
+            ".flv",
+            ".wmv",
+            ".mpeg",
+            ".mpg",
+            ".3gp",
+            ".webm",
             # Document formats
-            '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp',
+            ".pdf",
+            ".doc",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".ppt",
+            ".pptx",
+            ".odt",
+            ".ods",
+            ".odp",
             # Audio formats
-            '.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma',
+            ".mp3",
+            ".wav",
+            ".flac",
+            ".aac",
+            ".ogg",
+            ".wma",
             # Archive formats
-            '.zip', '.rar', '.7z', '.tar', '.gz', 
+            ".zip",
+            ".rar",
+            ".7z",
+            ".tar",
+            ".gz",
             # Other binaries
-            '.exe', '.dll', '.so', '.bin', '.dat'
+            ".exe",
+            ".dll",
+            ".so",
+            ".bin",
+            ".dat",
         }
 
         if not self.current_project_files:
@@ -522,11 +562,10 @@ class NodeCreationWidget(QtWidgets.QWidget):
 
         filtered_files = []
         for file_info in self.current_project_files:
-
             # Vérifier l'extension du fichier
-            file_name = file_info['name']
+            file_name = file_info["name"]
             file_extension = os.path.splitext(file_name)[1].lower()
-            
+
             # Exclure les fichiers non-dev
             if file_extension in NOT_DEV_FILE_EXTENSIONS:
                 continue  # Ignorer ce fichier
@@ -655,7 +694,7 @@ class NodeCreationWidget(QtWidgets.QWidget):
 
             # 4. Construire le prompt pour l'IA
             prompt_template = """
-Étant donné le script Python suivant, décomposez toutes ses fonctions. Pour chaque fonction, créez un script de mutation Dgraph (en utilisant la syntaxe du client pydgraph) pour ajouter un 'Node' représentant la fonction.
+Étant donné le script de code suivant, décomposez toutes ses fonctions. Pour chaque fonction, créez un script de mutation Dgraph (en utilisant la syntaxe du client pydgraph) pour ajouter un 'Node' représentant la fonction.
 
 Le schéma Dgraph pour 'Node' est :
 type Node {{
@@ -680,9 +719,9 @@ Pour chaque nœud de fonction :
 - 'Node.userID' doit être un UUID de remplacement (par exemple, "47ea051e-8cce-4bee-bfe8-76489dd98b60").
 - 'Node.createdAt' et 'Node.updatedAt' doivent être des horodatages ISO actuels (par exemple, `datetime.now().isoformat() + "Z"`).
 
-Voici le script Python à analyser :
+Voici le script à analyser :
 
-```python
+```code
 {file_content}
 ```
 
