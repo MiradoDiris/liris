@@ -1322,11 +1322,6 @@ class CodingPanel(QtWidgets.QWidget):
         self.export_button.setEnabled(False)
         buttons_layout.addWidget(self.export_button)
 
-        # BOUTON DE TEST POUR LE DOUBLE-CLIC
-        self.test_double_click_button = QtWidgets.QPushButton("Test Double-Click")
-        self.test_double_click_button.clicked.connect(self._add_test_data)
-        buttons_layout.addWidget(self.test_double_click_button)
-
         session_layout.addRow("", buttons_layout)
         main_layout.addWidget(self.session_group)
 
@@ -1671,8 +1666,6 @@ class CodingPanel(QtWidgets.QWidget):
         )
 
     def _on_solution_double_clicked(self, row, column):
-        print("Test : ", self.solutions_table.item(row, 0).text())
-        print("Test : ", self.solutions_table.item(row, 1).text())
         """Affiche le contenu complet de la solution double-cliquée."""
         if column == 1:  # Assuming solution text is in the 2nd column (index 1)
             item = self.solutions_table.item(row, column)
@@ -1680,7 +1673,9 @@ class CodingPanel(QtWidgets.QWidget):
             platform_name = self.solutions_table.item(row, 0).text()
 
             detail_dialog = QtWidgets.QDialog(self)
-            detail_dialog.setWindowTitle(f"{tr('coding.solution_for')} {platform_name}")
+            detail_dialog.setWindowTitle(
+                f"{tr('coding.solution_from')} {platform_name}"
+            )
             detail_dialog.resize(800, 600)
 
             detail_layout = QtWidgets.QVBoxLayout(detail_dialog)
@@ -1741,26 +1736,6 @@ class CodingPanel(QtWidgets.QWidget):
         # Fallback sur Python si on ne sait pas
         return QsciLexerPython()
 
-    def _add_test_data(self):
-        """Ajoute des données de test au tableau pour vérifier le double-clic."""
-        self.solutions_table.setRowCount(0)  # Clear existing rows
-        test_data = {
-            "Platform A": "def hello_world():\n    print('Hello, World!')",
-            "Platform B": '#include <iostream>\n\nint main() {\n    std::cout << "Hello, World!";\n    return 0;\n}',
-        }
-
-        for platform, solution in test_data.items():
-            row_position = self.solutions_table.rowCount()
-            self.solutions_table.insertRow(row_position)
-            self.solutions_table.setItem(
-                row_position, 0, QtWidgets.QTableWidgetItem(platform)
-            )
-            self.solutions_table.setItem(
-                row_position, 1, QtWidgets.QTableWidgetItem(solution)
-            )
-
-        logger.info("Added test data to the solutions table.")
-
     def _update_ui_texts(self):
         """Met à jour les textes de l'interface utilisateur pour la traduction."""
         self.title_label.setText(tr("coding.title"))
@@ -1772,15 +1747,11 @@ class CodingPanel(QtWidgets.QWidget):
         self.export_button.setText(tr("coding.export"))
 
         self.results_tabs.setTabText(0, tr("coding.solutions"))
-        # self.results_tabs.setTabText(1, tr("coding.comparison"))
-        # self.results_tabs.setTabText(2, tr("coding.visualization"))
 
         self.session_name_edit.setPlaceholderText(tr("coding.session_name_placeholder"))
         self.context_edit.setPlaceholderText(tr("coding.context_placeholder"))
 
         self.status_label.setText(tr("coding.status_ready"))
-
-        # self.viz_view.setText(tr("coding.visualization"))
 
         self.solutions_table.setHorizontalHeaderLabels(
             [
