@@ -14,11 +14,9 @@ import pyperclip  # Pour la gestion du presse-papiers
 import json  # Pour json.dumps dans les scripts JS
 import traceback  # Pour les traces d'erreurs détaillées
 
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets
 from PyQt5.QtCore import (
     Qt,
-    pyqtSignal,
-    QTimer,
 )  # QTimer pour les mises à jour non bloquantes de l'UI
 
 # Importation du générateur de sélecteurs universel
@@ -661,6 +659,9 @@ class NodeCreationWidget(QtWidgets.QWidget):
             file_path = file_info.get("full_path")
             file_label_id = file_info.get("id")
             file_cluster_id = file_info.get("cluster_id")
+            print(
+                f"DEBUG: Traitement du fichier: {file_name}, Chemin: {file_path}, ID: {file_label_id}, Cluster ID: {file_cluster_id}"
+            )
 
             self._debug_log(f"\n--- Traitement du fichier: {file_name} ---")
 
@@ -693,6 +694,9 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 continue
 
             # 4. Construire le prompt pour l'IA
+            print(
+                f"--- Construction du prompt pour {file_name} voici le contenu du fichier {file_content} ---"
+            )
             prompt_template = """
 Étant donné le script de code suivant, décomposez toutes ses fonctions. Pour chaque fonction, créez un script de mutation Dgraph (en utilisant la syntaxe du client pydgraph) pour ajouter un 'Node' représentant la fonction.
 
@@ -821,7 +825,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                         self.conductor.mouse_controller.click(x, y)
                         time.sleep(0.3)
                         QtWidgets.QApplication.processEvents()
-                        self._debug_log(f"  ✅ Clic champ de saisie réussi.")
+                        self._debug_log("  ✅ Clic champ de saisie réussi.")
                     except Exception as e:
                         self._debug_log(
                             f"  ❌ Erreur clic champ de saisie pour {platform_name}: {e}"
@@ -838,7 +842,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                         self.conductor.keyboard_controller.press_key("delete")
                         time.sleep(0.1)
                         QtWidgets.QApplication.processEvents()
-                        self._debug_log(f"  ✅ Nettoyage champ réussi.")
+                        self._debug_log("  ✅ Nettoyage champ réussi.")
                     except Exception as e:
                         self._debug_log(
                             f"  ❌ Erreur nettoyage champ pour {platform_name}: {e}"
@@ -855,7 +859,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                         time.sleep(0.3)
                         pyperclip.copy(original_clipboard)
                         QtWidgets.QApplication.processEvents()
-                        self._debug_log(f"  ✅ Saisie du prompt réussie.")
+                        self._debug_log("  ✅ Saisie du prompt réussie.")
                     except Exception as e:
                         self._debug_log(
                             f"  ❌ Erreur saisie texte pour {platform_name}: {e}"
@@ -871,7 +875,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                             self.conductor.keyboard_controller.press_key("enter")
                         time.sleep(2)
                         QtWidgets.QApplication.processEvents()
-                        self._debug_log(f"  ✅ Envoi du formulaire réussi.")
+                        self._debug_log("  ✅ Envoi du formulaire réussi.")
                     except Exception as e:
                         self._debug_log(
                             f"  ❌ Erreur envoi formulaire pour {platform_name}: {e}"
@@ -1369,105 +1373,164 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
 
             # Le script JS est maintenant une fonction asynchrone qui retourne le texte
             js_code = f"""
-            let selectors = {json.dumps(selectors)};
-            let cleaningMethod = "basic_text_extraction";
-            let platform = "legacy";
+                // Fonction pour préserver les sauts de ligne et l'indentation
+                function getTextWithFormatting(element) {{
+                    const isBlock = (tag) => ['DIV', 'P', 'PRE', 'CODE', 'BR', 'LI', 'UL', 'OL', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'SECTION', 'ARTICLE'].includes(tag);
+                    let result = '';
 
-            // Define classes to be excluded from text content
-            const excludedClasses = ["pt-3", "pb-3"]; // Add any other classes you want to exclude
-
-            console.log("🎯 Testing universal selectors for " + platform + ":", selectors);
-            console.log("🧹 Cleaning method:", cleaningMethod);
-            console.log("🚫 Excluded classes:", excludedClasses);
-
-            for (let i = 0; i < selectors.length; i++) {{
-                let selector = selectors[i];
-                console.log("Testing selector " + (i + 1) + ":", selector);
-
-                try {{
-                    let elements = document.querySelectorAll(selector);
-                    console.log("Found " + elements.length + " elements for selector:", selector);
-
-                    if (elements.length > 0) {{
-                        // Get the last element (the most recent)
-                        let element = elements[elements.length - 1];
-
-                        // Create a deep clone of the element to avoid modifying the live DOM
-                        let clonedElement = element.cloneNode(true);
-
-                        // Replace elements with excluded classes with a newline character in the cloned element
-                        excludedClasses.forEach(className => {{
-                            const elementsToExclude = clonedElement.querySelectorAll(`.${{className}}`);
-                            elementsToExclude.forEach(el => {{
-                                // Create a text node with a newline
-                                const newlineTextNode = document.createTextNode('\\n');
-                                // Replace the excluded element with the newline text node
-                                el.replaceWith(newlineTextNode);
-                            }});
-                        }});
-
-                        let codeContent = [];
-                        const specificCodeBlocks = clonedElement.querySelectorAll('code.language-python');
-                        if (specificCodeBlocks.length > 0) {{
-                            specificCodeBlocks.forEach(block => {{
-                                codeContent.push(block.textContent);
-                            }});
-                            text = codeContent.join('\\n'); // Joindre tous les blocs de code avec des nouvelles lignes
-                            console.log("Extracted specific code content. Length:", text.length);
-                        }} else {{
-                            // Fallback to full text content if no specific <code> tags are found
-                            text = (clonedElement.textContent || '').trim();
-                            console.log("No specific <code> tags found. Using full text content. Length:", text.length);
+                    element.childNodes.forEach(node => {{
+                        if (node.nodeType === Node.TEXT_NODE) {{
+                            // Préserve les espaces multiples pour l'indentation
+                            result += node.textContent;
+                        }} else if (node.nodeType === Node.ELEMENT_NODE) {{
+                            if (isBlock(node.tagName)) {{
+                                result += '\\n' + getTextWithFormatting(node) + '\\n';
+                            }} else {{
+                                result += getTextWithFormatting(node);
+                            }}
                         }}
-
-                        // Clean the text based on the universal method
-                        if (cleaningMethod === 'remove_ui_elements') {{
-                            // Claude cleaning
-                            text = text.replace(/Send a message\.\.\..*$/gi, '');
-                            text = text.replace(/Stop generating.*$/gi, '');
-                            text = text.replace(/Regenerate.*$/gi, '');
-                        }} else if (cleaningMethod === 'preserve_markdown_structure') {{
-                            // ChatGPT cleaning
-                            text = text.replace(/Copy code.*$/gi, '');
-                            text = text.replace(/Send a message.*$/gi, '');
-                            text = text.replace(/Stop generating.*$/gi, '');
-                        }} else if (cleaningMethod === 'extract_from_nested_spans') {{
-                            // Gemini cleaning
-                            text = text.replace(/Send a message.*$/gi, '');
-                            text = text.replace(/Écrivez votre message.*$/gi, '');
-                        }}
-
-                        // Common cleaning
-                        text = text.replace(/function\\(\\)\\s*\\{{.*\\}}/gi, '');
-                        text = text.replace(/console\\.log.*$/gi, '');
-                        text = text.replace(/let selectors.*$/gi, '');
-                        text = text.replace(/Testing selector.*$/gi, '');
-                        text = text.replace(/document\\.querySelector.*$/gi, '');
-                        text = text.trim();
-
-                        console.log("Cleaned text length:", text.length);
-                        console.log("Text preview:", text.substring(0, 100));
-
-                        if (!text.includes('console.log') &&
-                            !text.includes('function()') &&
-                            !text.includes('Testing selector') &&
-                            !text.includes('document.querySelector') &&
-                            !text.includes('Found ') &&
-                            !text.includes('elements for selector')) {{
-                            console.log("✅ Valid universal extraction found for " + platform + ", copying...");
-                            copy(text);
-                            break;
-                        }} else {{
-                            console.log("❌ Text rejected (contains debug info)");
-                        }}
-                    }}
-                }} catch (e) {{
-                    console.log("❌ Error with selector " + selector + ":", e);
-                    continue;
+                    }});
+                    
+                    return result;
                 }}
-            }}
-            console.log("🎯 Universal extraction script completed for " + platform);
-            """
+
+                let selectors = {json.dumps(selectors)};
+                let cleaningMethod = "basic_text_extraction";
+                let platform = "legacy";
+
+                // Define classes to be excluded from text content
+                const excludedClasses = ["pt-3", "pb-3"]; // Add any other classes you want to exclude
+
+                console.log("🎯 Testing universal selectors for " + platform + ":", selectors);
+                console.log("🧹 Cleaning method:", cleaningMethod);
+                console.log("🚫 Excluded classes:", excludedClasses);
+
+                for (let i = 0; i < selectors.length; i++) {{
+                    let selector = selectors[i];
+                    console.log("Testing selector " + (i + 1) + ":", selector);
+
+                    try {{
+                        let elements = document.querySelectorAll(selector);
+                        console.log("Found " + elements.length + " elements for selector:", selector);
+
+                        if (elements.length > 0) {{
+                            // Get the last element (the most recent)
+                            let element = elements[elements.length - 1];
+
+                            // Create a deep clone of the element to avoid modifying the live DOM
+                            let clonedElement = element.cloneNode(true);
+
+                            // Replace elements with excluded classes with a newline character in the cloned element
+                            excludedClasses.forEach(className => {{
+                                const elementsToExclude = clonedElement.querySelectorAll(`.${{className}}`);
+                                elementsToExclude.forEach(el => {{
+                                    // Create a text node with a newline
+                                    const newlineTextNode = document.createTextNode('\\n');
+                                    // Replace the excluded element with the newline text node
+                                    el.replaceWith(newlineTextNode);
+                                }});
+                            }});
+
+                            let text = '';
+                            const specificCodeBlocks = clonedElement.querySelectorAll('code.language-python');
+                            if (specificCodeBlocks.length > 0) {{
+                                let codeContent = [];
+                                specificCodeBlocks.forEach(block => {{
+                                    // Utilisation de innerText pour préserver l'indentation
+                                    codeContent.push(block.innerText);
+                                }});
+                                text = codeContent.join('\\n');
+                                console.log("Extracted specific code content. Length:", text.length);
+                            }} else {{
+                                // Utilisation de innerText pour préserver l'indentation
+                                text = getTextWithFormatting(clonedElement).trim();
+                                console.log("No specific <code> tags found. Using formatted text content. Length:", text.length);
+                            }}
+
+                            // Clean the text based on the universal method
+                            if (cleaningMethod === 'remove_ui_elements') {{
+                                // Claude cleaning
+                                text = text.replace(/Send a message\\.\\.\\..*$/gim, '');
+                                text = text.replace(/Stop generating.*$/gim, '');
+                                text = text.replace(/Regenerate.*$/gim, '');
+                            }} else if (cleaningMethod === 'preserve_markdown_structure') {{
+                                // ChatGPT cleaning
+                                text = text.replace(/Copy code.*$/gim, '');
+                                text = text.replace(/Send a message.*$/gim, '');
+                                text = text.replace(/Stop generating.*$/gim, '');
+                            }} else if (cleaningMethod === 'extract_from_nested_spans') {{
+                                // Gemini cleaning
+                                text = text.replace(/Send a message.*$/gim, '');
+                                text = text.replace(/Écrivez votre message.*$/gim, '');
+                            }}
+
+                            // ===== SOLUTION DEFINITIVE =====
+                            // Création d'un élément temporaire pour contenir le texte extrait
+                            const tempContainer = document.createElement('div');
+                            tempContainer.textContent = text;  // Préserve le texte brut avec formatage
+
+                            // Suppression spécifique des éléments de debug générés par notre script
+                            const debugElements = tempContainer.querySelectorAll('script, style, .debug-marker');
+                            debugElements.forEach(el => el.remove());
+
+                            // Récupération du texte après nettoyage
+                            text = tempContainer.textContent;
+
+                            // Suppression des lignes spécifiques de debug (méthode plus sûre)
+                            const debugLines = [
+                                /Testing selector \\d+: .+/,
+                                /Found \\d+ elements for selector: .+/,
+                                /Extracted specific code content\\. Length: \\d+/,
+                                /No specific <code> tags found\\. Using .* content\\. Length: \\d+/,
+                                /Cleaned text length: \\d+/,
+                                /Text preview: .+/,
+                                /let selectors = \\[.*\\];?/,
+                                /const excludedClasses = \\[.*\\];?/,
+                                /let cleaningMethod = ".*";?/,
+                                /let platform = ".*";?/,
+                                /console\\.log\\(\\"🎯 Testing universal selectors for .*\\"\\);?/,
+                                /console\\.log\\(\\"🧹 Cleaning method: .*\\"\\);?/,
+                                /console\\.log\\(\\"🚫 Excluded classes: .*\\"\\);?/,
+                                /console\\.log\\(\\"Testing selector .*\\"\\);?/,
+                                /console\\.log\\(\\"Found .*\\"\\);?/,
+                                /console\\.log\\(\\"Extracted specific code content\\. Length: .*\\"\\);?/,
+                                /console\\.log\\(\\"Cleaned text length: .*\\"\\);?/,
+                                /console\\.log\\(\\"Text preview: .*\\"\\);?/,
+                                /console\\.log\\(\\"✅ Valid universal extraction found for .*\\"\\);?/,
+                                /console\\.log\\(\\"❌ Text rejected \\(contains debug info\\)\\"\\);?/
+                            ];
+
+                            debugLines.forEach(pattern => {{
+                                text = text.replace(new RegExp(pattern.source, 'g'), '');
+                            }});
+
+                            // Nettoyage final de la mise en forme
+                            text = text
+                                .replace(/^\\s+\\n|\\n\\s+$/g, '')  // Supprime les lignes vides au début/fin
+                                .replace(/[ \\t]+\\n/g, '\\n')       // Supprime les espaces en fin de ligne
+                                .replace(/\\n{(3,)}/g, '\\n\\n');       // Réduit les sauts de ligne multiples
+
+                            // ===== VALIDATION SIMPLIFIEE =====
+                            const isValid = text.length > 0 && 
+                                        !text.includes('Testing selector ') && 
+                                        !text.includes('Found ') && 
+                                        !text.includes('elements for selector');
+
+                            if (isValid) {{
+                                console.log("✅ Valid extraction, copying...");
+                                copy(text);
+                                break;
+                            }} else {{
+                                console.log("❌ Text rejected (contains debug info)");
+                            }}
+                        }}
+                    }} catch (e) {{
+                        console.log("❌ Error with selector " + selector + ":", e);
+                        continue;
+                    }}
+                }}
+                console.log("🎯 Universal extraction script completed for " + platform);
+                """
             return self._execute_extraction_script(js_code, detected_browser_type)
         except Exception as e:
             self._debug_log(f"❌ Erreur extraction universelle: {e}")
