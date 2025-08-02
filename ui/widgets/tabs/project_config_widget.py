@@ -2080,7 +2080,7 @@ def insert_hierarchy(client, project_data):
             logger.info("No mutations to perform for the current project data.")
             return
 
-        assigned = txn.mutate(set_json=mutations)
+        assigned = txn.mutate(set_obj=mutations)
         txn.commit()
 
         logger.info("Ontology imported successfully.")

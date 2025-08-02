@@ -218,7 +218,7 @@ def main():
     # Project data exported from Liris
     # This data will be dynamically inserted by the script generator
     PROJECT_DATA = {
-        "name": "test_turing",
+        "name": "kakarote",
         "turing_ontology": {
             "cluster": [
                 "deuxième_dossier",
@@ -228,67 +228,98 @@ def main():
             "clusters_detailed": [
                 {
                     "name": "deuxième_dossier",
-                    "id": "80ba2683-71cc-4a8a-9dc7-001362080823",
+                    "id": "ef312bf4-bad8-4df7-a8ba-fbd5a032ede6",
                     "root_labels": []
                 },
                 {
                     "name": "mutation_example.py",
-                    "id": "75104b56-b95a-4331-9625-b280e439861c",
+                    "id": "6ea5f9c4-219a-40c8-a5af-18f0da1f5e80",
                     "root_labels": []
                 },
                 {
                     "name": "premier_dossier",
-                    "id": "08d89968-8ce9-48dd-b106-f542b7053681",
+                    "id": "0342f5ef-07a5-47bf-8b0a-4e5d616f0f9c",
                     "root_labels": [
                         {
                             "name": "AWS_architecture.png",
-                            "id": "0bbe690b-60cf-4bee-9a08-54aca9efbef9",
-                            "full_path": "C:/Users/Ditrakely/Desktop/test_turing\\premier_dossier\\AWS_architecture.png",
+                            "id": "bce1b80b-b970-4147-a949-dfeef83461b5",
+                            "full_path": "C:/Users/Ditrakely/Desktop/kakarote\\premier_dossier\\AWS_architecture.png",
                             "type": "file",
-                            "category": []
+                            "category": [],
+                            "parent_labels": [],
+                            "child_labels": []
                         },
                         {
                             "name": "Attestation_Stage_M1.jpg",
-                            "id": "022616ee-b49a-4b76-83a0-e400c24bad11",
-                            "full_path": "C:/Users/Ditrakely/Desktop/test_turing\\premier_dossier\\Attestation_Stage_M1.jpg",
+                            "id": "cfd61a1d-5dfb-415d-a219-b3c71e467546",
+                            "full_path": "C:/Users/Ditrakely/Desktop/kakarote\\premier_dossier\\Attestation_Stage_M1.jpg",
                             "type": "file",
-                            "category": []
+                            "category": [],
+                            "parent_labels": [],
+                            "child_labels": []
                         },
                         {
                             "name": "hello_world.js",
-                            "id": "d695855c-25ee-4efd-8b05-c652f26d41f8",
-                            "full_path": "C:/Users/Ditrakely/Desktop/test_turing\\premier_dossier\\hello_world.js",
+                            "id": "adeaf476-34ff-41aa-b135-fa50e201d85b",
+                            "full_path": "C:/Users/Ditrakely/Desktop/kakarote\\premier_dossier\\hello_world.js",
                             "type": "file",
-                            "category": []
+                            "category": [],
+                            "parent_labels": [],
+                            "child_labels": []
                         },
                         {
                             "name": "premier_label_racine",
-                            "id": "69d0cb1b-1db1-4636-b6f2-f08ad5b8d9d6",
-                            "full_path": "C:/Users/Ditrakely/Desktop/test_turing\\premier_dossier\\premier_label_racine",
+                            "id": "044d1c2d-5434-44a5-ac2c-6766238ba583",
+                            "full_path": "C:/Users/Ditrakely/Desktop/kakarote\\premier_dossier\\premier_label_racine",
                             "type": "directory",
                             "parent_labels": [
                                 {
                                     "name": "Attestation_Stage_M1.jpg",
-                                    "id": "7e65051e-928e-4c6b-9f69-27e30edce684",
-                                    "full_path": "C:/Users/Ditrakely/Desktop/test_turing\\premier_dossier\\premier_label_racine\\Attestation_Stage_M1.jpg",
+                                    "id": "7940ed32-273e-4ed6-b4a9-8fd570c0b6c0",
+                                    "full_path": "C:/Users/Ditrakely/Desktop/kakarote\\premier_dossier\\premier_label_racine\\Attestation_Stage_M1.jpg",
                                     "type": "file",
-                                    "category": []
+                                    "category": [],
+                                    "parent_labels": [],
+                                    "child_labels": []
                                 },
                                 {
                                     "name": "test.py",
-                                    "id": "60364b8c-af91-43e8-b0b9-b2746f40efd2",
-                                    "full_path": "C:/Users/Ditrakely/Desktop/test_turing\\premier_dossier\\premier_label_racine\\test.py",
+                                    "id": "d7b8d88a-0547-4556-8d08-a5a0972fee7f",
+                                    "full_path": "C:/Users/Ditrakely/Desktop/kakarote\\premier_dossier\\premier_label_racine\\test.py",
                                     "type": "file",
-                                    "category": []
+                                    "category": [],
+                                    "parent_labels": [],
+                                    "child_labels": []
                                 }
-                            ]
+                            ],
+                            "child_labels": []
                         },
                         {
                             "name": "premier_script.py",
-                            "id": "75400424-a938-4af4-a712-63e2d5501230",
-                            "full_path": "C:/Users/Ditrakely/Desktop/test_turing\\premier_dossier\\premier_script.py",
+                            "id": "3c315b4d-46f8-49c0-a924-efeee113e171",
+                            "full_path": "C:/Users/Ditrakely/Desktop/kakarote\\premier_dossier\\premier_script.py",
                             "type": "file",
-                            "category": []
+                            "category": [],
+                            "parent_labels": [],
+                            "child_labels": []
+                        },
+                        {
+                            "name": "premier_script_mutation.py",
+                            "id": "eb457d2d-1cd8-4aaf-adf5-69599c733536",
+                            "full_path": "C:/Users/Ditrakely/Desktop/kakarote\\premier_dossier\\premier_script_mutation.py",
+                            "type": "file",
+                            "category": [],
+                            "parent_labels": [],
+                            "child_labels": []
+                        },
+                        {
+                            "name": "typescript.ts",
+                            "id": "2a869f62-3cb4-4174-868d-c405cbb9eac2",
+                            "full_path": "C:/Users/Ditrakely/Desktop/kakarote\\premier_dossier\\typescript.ts",
+                            "type": "file",
+                            "category": [],
+                            "parent_labels": [],
+                            "child_labels": []
                         }
                     ]
                 }
