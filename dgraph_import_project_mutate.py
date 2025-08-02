@@ -45,7 +45,7 @@ def generate_dgraph_mutations(client, project_data):
         cluster_mutation = {
             "uid": cluster_blank_uid,
             "dgraph.type": "Cluster",
-            "id": cluster_unique_id, # Used by @upsert to find/create
+            "id": str(cluster_unique_id), # Used by @upsert to find/create
             "name": cluster_name,
             "userId": USER_ID, # Corrected to userId
             "createdAt": datetime.now().isoformat() + "Z", # Add creation timestamp
@@ -53,7 +53,8 @@ def generate_dgraph_mutations(client, project_data):
         }
         mutations.append(cluster_mutation)
         
-        all_cluster_blank_uids_for_workspace.append({"uid": cluster_blank_uid})
+        # MODIFICATION ICI: Stocker l'UUID string au lieu de la référence UID
+        all_cluster_blank_uids_for_workspace.append(cluster_unique_id)
         logger.debug(f"Prepared cluster: {cluster_name} (ID: {cluster_unique_id}, Blank UID: {cluster_blank_uid})")
 
     # 2. Prepare mutations for Workspace and its ClusterManagement
@@ -69,7 +70,8 @@ def generate_dgraph_mutations(client, project_data):
             "dgraph.type": "ClusterManagement",
             "lastUpdated": datetime.now().isoformat() + "Z",
             "version": "1.0", # Default version
-            "clusters": all_cluster_blank_uids_for_workspace # Links to all prepared clusters
+            # MODIFICATION CRITIQUE ICI
+            "ClusterManagement.clusters": all_cluster_blank_uids_for_workspace
         }
     }
     mutations.append(workspace_mutation)
@@ -126,7 +128,8 @@ def generate_dgraph_mutations(client, project_data):
 
         # Link this label ONLY to its containing cluster
         if containing_cluster_unique_id and containing_cluster_blank_uid:
-            label_node["clusters"] = [{"uid": containing_cluster_blank_uid}]
+            # MODIFICATION CRITIQUE ICI
+            label_node["Label.clusters"] = [{"uid": containing_cluster_blank_uid}]
             label_node["clusterIds"] = [containing_cluster_unique_id]
             logger.debug(f"  Linked label '{label_name}' (level {level_numeric}) to its containing cluster (ID: {containing_cluster_unique_id}).")
         else:
@@ -193,7 +196,7 @@ def insert_hierarchy(client, project_data):
             logger.info("No mutations to perform for the current project data.")
             return
 
-        assigned = txn.mutate(set_json=mutations)
+        assigned = txn.mutate(set_obj=mutations)
         txn.commit()
 
         logger.info("Ontology imported successfully.")
