@@ -1,8 +1,3 @@
-python3 dgraph_import_project_cluster.py
-INFO:**main**:Attempting to connect to Dgraph at localhost:9080
-ERROR:**main**:Error importing ontology: <\_InactiveRpcError of RPC that terminated with:
-status = StatusCode.UNKNOWN
-details = "Input for predicate "clusters" of type scalar is uid. Edge: entity:40038 attr:"0-clusters" value_type:UID value_id:40041"
-debug_error_string = "UNKNOWN:Error received from peer {created_time:"2025-08-02T06:38:24.457858236-04:00", grpc_status:2, grpc_message:"Input for predicate \"clusters\" of type scalar is uid. Edge: entity:40038 attr:\"0-clusters\" value_type:UID value_id:40041"}"
-
-> INFO:**main**:Transaction discarded.
+Il y a aussi une petite modification du côté de la structure du graph, il faudra adapter votre code par rapport à cela :
+Pour les labels de type fichiers (les scripts), ils ne seront plus reliés directement aux nodes représentant chaque fonction. À la place le label sera relié à un node dont le titre sera le nom du script, et le contenu sera la description de ce que fait le script/son par rapport au projet (généré par l'IA). Et c'est ce nouveau node là qui sera relié aux nodes des fonctions du script.
+En gros donc juste ajouter ce nouveau node intermédiaire entre le label et les nodes des fonctions, et gérer les liaisons.
