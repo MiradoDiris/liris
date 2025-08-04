@@ -13,6 +13,9 @@ import time  # Pour les délais dans l'automatisation du navigateur
 import pyperclip  # Pour la gestion du presse-papiers
 import json  # Pour json.dumps dans les scripts JS
 import traceback  # Pour les traces d'erreurs détaillées
+import ast
+from datetime import datetime
+from typing import List, Dict
 
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import (
@@ -586,6 +589,83 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 item_text = f"{file_info['name']} (Catégories: {categories_str if categories_str else 'N/A'})"
                 self.file_list_widget.addItem(item_text)
 
+    def extract_imports_from_code(self, code: str) -> List[str]:
+        """
+        Extrait les modules importés dans un fichier Python donné (sans duplication).
+        """
+        modules = set()
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    modules.update(alias.name.split(".")[0] for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    modules.add(node.module.split(".")[0])
+        except Exception as e:
+            print(f"[Erreur AST] {e}")
+        return list(modules)
+
+    def match_imports_to_files(self, 
+        imports: List[str], project_files: List[Dict]
+    ) -> Dict[str, str]:
+        """
+        Associe chaque module importé à l'ID du fichier correspondant dans le projet.
+        Retourne un dict: {nom_module: id_du_fichier}
+        """
+        matched = {}
+        for imp in imports:
+            for file_info in project_files:
+                file_name = file_info.get("name", "")
+                base_name = os.path.splitext(file_name)[0]
+                if base_name == imp:
+                    matched[imp] = file_info["id"]
+                    break
+        return matched
+
+    def generate_import_edges_for_file(
+        self, file_info: Dict, project_files: List[Dict], user_id: str
+    ) -> List[Dict]:
+        """
+        Génère les arêtes de type 'IMPORTS' à partir des imports dans file_info['full_path']
+        """
+        edges = []
+        file_path = file_info.get("full_path")
+        source_id = file_info.get("id")
+
+        if not file_path or not os.path.exists(file_path):
+            print(f"[Erreur] Fichier introuvable: {file_path}")
+            return []
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                code = f.read()
+        except Exception as e:
+            print(f"[Erreur lecture] {file_path} : {e}")
+            return []
+
+        imports = self.extract_imports_from_code(code)
+        matched = self.match_imports_to_files(imports, project_files)
+
+        timestamp = datetime.utcnow().isoformat()
+
+        for module_name, target_id in matched.items():
+            edge = {
+                "dgraph.type": "Edge",
+                "Edge.id": str(uuid.uuid4()),
+                "Edge.source": source_id,
+                "Edge.target": target_id,
+                "Edge.type": "IMPORTS",
+                "Edge.label": "imports",
+                "Edge.weight": 1.0,
+                "Edge.userID": user_id,
+                "Edge.createdAt": timestamp,
+                "Edge.updatedAt": timestamp,
+                "Edge.metadata": None,  # ou tu peux ajouter un objet JSON si nécessaire
+            }
+            edges.append(edge)
+
+        return edges
+
     def _on_proceed_creation(self):
         """
         Action pour le bouton "Procéder à la création".
@@ -653,6 +733,7 @@ class NodeCreationWidget(QtWidgets.QWidget):
             return
 
         generated_mutations_results = []  # Pour stocker les résultats de chaque fichier
+        all_import_edges = []  # Pour stocker toutes les arêtes d'import générées
 
         for file_info in selected_files_info:
             file_name = file_info.get("name")
@@ -693,6 +774,40 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 )
                 continue
 
+            # 🔗 Générer les arêtes d'import à partir du contenu lu
+            import_edges = self.generate_import_edges_for_file(
+                file_info=file_info,
+                project_files=self.current_project_files,
+                user_id="47ea051e-8cce-4bee-bfe8-76489dd98b60",
+            )
+            all_import_edges.extend(import_edges)
+
+            # imports_prompt_snippet = ""
+            # if matched_imports:  # matched_imports contient des tuples (import_name, target_node_id)
+            #     imports_prompt_snippet += "\n\nPour chaque import suivant, créez une arête `IMPORTS` du script vers la cible :\n"
+            #     for import_name, target_id in matched_imports:
+            #         imports_prompt_snippet += f"- Import: `{import_name}` → Target ID: `{target_id}`\n"
+
+            #     imports_prompt_snippet += """
+            # Pour chaque arête IMPORT :
+            # - 'id': UUID unique
+            # - 'source': ID du script parent (ce fichier)
+            # - 'target': ID du script importé (target ID donné ci-dessus)
+            # - 'type': "IMPORTS"
+            # - 'label': "imports"
+            # - 'weight': 1.0
+            # - 'userID': Même que les nœuds
+            # - 'createdAt'/'updatedAt': Même que les nœuds
+            # """
+
+            # Créer une chaîne de caractères à partir de la liste d'arêtes
+            import_edges_str = ""
+            if all_import_edges:
+                import_edges_str += "\n\nPour chaque arête d'import ci-dessous, veuillez l'inclure dans le script de mutation :\n"
+                for edge in all_import_edges:
+                    import_edges_str += f"- Edge.source: {edge.get('Edge.source')}, Edge.target: {edge.get('Edge.target')}, Edge.type: {edge.get('Edge.type')}\n"
+                import_edges_str += "\n"
+
             # 4. Construire le prompt pour l'IA
             print(
                 f"--- Construction du prompt pour {file_name} voici le contenu du fichier {file_content} ---"
@@ -702,6 +817,7 @@ class NodeCreationWidget(QtWidgets.QWidget):
 1. Un nœud 'Node' représentant le script parent
 2. Des nœuds 'Node' pour chaque fonction
 3. Des arêtes 'Edge' reliant le script aux fonctions
+4. Des arêtes 'Edge' pour les imports (IMPORTS)
 
 Le schéma Dgraph est :
 type Node {{
@@ -758,6 +874,9 @@ Pour chaque arête SCRIPT → FONCTION :
 - 'userID': Même que les nœuds
 - 'createdAt'/'updatedAt': Même que les nœuds
 
+
+{import_edges_placeholder}
+
 Voici le script à analyser :
 ```code
 {file_content}
@@ -765,11 +884,13 @@ Voici le script à analyser :
 
 Assurez-vous que le script de mutation est complet et exécutable, y compris les importations nécessaires (pydgraph, json, datetime, uuid, logging) et la configuration du client. Ne pas inclure la fonction `main()` ou la fonction `insert_hierarchy`. Fournissez uniquement la fonction `generate_function_mutations` et son appel, ainsi que la configuration du client Dgraph.
 """
+
             full_prompt = prompt_template.format(
                 file_content=file_content,
                 file_label_id=file_label_id,
                 file_cluster_id=file_cluster_id,
-                file_name=file_name
+                file_name=file_name,
+                import_edges_placeholder=import_edges_str,
             )
 
             self._debug_log(f"--- Envoi du prompt pour {file_name} aux IAs ---")
