@@ -698,9 +698,12 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 f"--- Construction du prompt pour {file_name} voici le contenu du fichier {file_content} ---"
             )
             prompt_template = """
-Étant donné le script de code suivant, décomposez toutes ses fonctions. Pour chaque fonction, créez un script de mutation Dgraph (en utilisant la syntaxe du client pydgraph) pour ajouter un 'Node' représentant la fonction.
+Étant donné le script de code suivant, décomposez toutes ses fonctions. Pour chaque fonction, créez un script de mutation Dgraph (en utilisant la syntaxe du client pydgraph) pour ajouter :
+1. Un nœud 'Node' représentant le script parent
+2. Des nœuds 'Node' pour chaque fonction
+3. Des arêtes 'Edge' reliant le script aux fonctions
 
-Le schéma Dgraph pour 'Node' est :
+Le schéma Dgraph est :
 type Node {{
     id: String! @id
     title: String @index(fulltext, term)
@@ -714,17 +717,48 @@ type Node {{
     metadata: Metadata
 }}
 
-Pour chaque nœud de fonction :
-- 'Node.id' doit être un nouvel UUID unique (par exemple, `str(uuid.uuid4())`).
-- 'Node.title' doit être le nom de la fonction.
-- 'Node.content' doit être le code complet de la fonction.
-- 'Node.labelIds' doit être une liste contenant l'ID du nœud Label du fichier parent. L'ID du Label du fichier est '{file_label_id}'.
-- 'Node.clusterIds' doit être une liste contenant l'ID du nœud Cluster conteneur. L'ID du Cluster est '{file_cluster_id}'.
-- 'Node.userID' doit être un UUID de remplacement (par exemple, "47ea051e-8cce-4bee-bfe8-76489dd98b60").
-- 'Node.createdAt' et 'Node.updatedAt' doivent être des horodatages ISO actuels (par exemple, `datetime.now().isoformat() + "Z"`).
+type Edge {{
+    id: String! @id
+    source: String @index(term)
+    target: String @index(term)
+    type: String @index(term)
+    label: String
+    weight: Float
+    userID: String @index(term)
+    createdAt: String
+    updatedAt: String
+    metadata: Metadata
+}}
+
+Pour le nœud SCRIPT (parent) :
+- 'id': UUID unique
+- 'title': Nom du fichier ('{file_name}')
+- 'content': Description du script (générée par l'IA)
+- 'labelIds': ['{file_label_id}']
+- 'clusterIds': ['{file_cluster_id}']
+- 'userID': "47ea051e-8cce-4bee-bfe8-76489dd98b60"
+- 'createdAt'/'updatedAt': Horodatage ISO
+
+Pour chaque nœud FONCTION (enfant) :
+- 'id': UUID unique
+- 'title': Nom de la fonction
+- 'content': Code complet de la fonction
+- 'labelIds': [] (vide)
+- 'clusterIds': ['{file_cluster_id}']
+- 'userID': Même que le script
+- 'createdAt'/'updatedAt': Même que le script
+
+Pour chaque arête SCRIPT → FONCTION :
+- 'id': UUID unique
+- 'source': ID du nœud script
+- 'target': ID du nœud fonction
+- 'type': "CONTAINS"
+- 'label': "contains"
+- 'weight': 1.0
+- 'userID': Même que les nœuds
+- 'createdAt'/'updatedAt': Même que les nœuds
 
 Voici le script à analyser :
-
 ```code
 {file_content}
 ```
@@ -735,6 +769,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                 file_content=file_content,
                 file_label_id=file_label_id,
                 file_cluster_id=file_cluster_id,
+                file_name=file_name
             )
 
             self._debug_log(f"--- Envoi du prompt pour {file_name} aux IAs ---")
@@ -800,7 +835,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                                 platform_url, browser_type, new_window=False
                             )  # Use browser_type here
                             if result.get("success"):
-                                time.sleep(4)  # Attendre chargement page
+                                time.sleep(5)  # Attendre chargement page
                                 self._debug_log("URL ouverte avec succès")
                             else:
                                 self._debug_log(
@@ -823,7 +858,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                     try:
                         x, y = prompt_field["center_x"], prompt_field["center_y"]
                         self.conductor.mouse_controller.click(x, y)
-                        time.sleep(0.3)
+                        time.sleep(0.4)
                         QtWidgets.QApplication.processEvents()
                         self._debug_log("  ✅ Clic champ de saisie réussi.")
                     except Exception as e:
@@ -838,9 +873,9 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                     )
                     try:
                         self.conductor.keyboard_controller.hotkey("ctrl", "a")
-                        time.sleep(0.1)
+                        time.sleep(0.2)
                         self.conductor.keyboard_controller.press_key("delete")
-                        time.sleep(0.1)
+                        time.sleep(0.2)
                         QtWidgets.QApplication.processEvents()
                         self._debug_log("  ✅ Nettoyage champ réussi.")
                     except Exception as e:
@@ -856,7 +891,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                         pyperclip.copy(full_prompt)
                         time.sleep(0.05)
                         self.conductor.keyboard_controller.hotkey("ctrl", "v")
-                        time.sleep(0.3)
+                        time.sleep(0.4)
                         pyperclip.copy(original_clipboard)
                         QtWidgets.QApplication.processEvents()
                         self._debug_log("  ✅ Saisie du prompt réussie.")
@@ -964,7 +999,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
         try:
             if not detection_config:
                 self._debug_log("⚠️ Pas de config détection - attente fallback 8s")
-                time.sleep(8)
+                time.sleep(9)
                 return True
 
             # 🎯 NOUVEAU : Utilisation du générateur universel pour les scripts
@@ -1222,14 +1257,14 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                 self.conductor.keyboard_controller.hotkey("ctrl", "shift", "k")
             else:
                 self.conductor.keyboard_controller.hotkey("ctrl", "shift", "j")
-            time.sleep(0.5)
+            time.sleep(0.7)
 
             self._debug_log("🔐 Activation du collage")
             try:
                 # Type 'allow pasting' to enable pasting in browser console
                 self.conductor.keyboard_controller.type_text("allow pasting")
                 self.conductor.keyboard_controller.press_key("enter")
-                time.sleep(1)  # Wait for browser to process the allow pasting command
+                time.sleep(2)  # Wait for browser to process the allow pasting command
                 self._debug_log("✅ Collage autorisé")
             except Exception as e:
                 self._debug_log(f"⚠️ Erreur activation collage: {e}")
@@ -1238,17 +1273,17 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
             pyperclip.copy("console.clear();")
             self.conductor.keyboard_controller.hotkey("ctrl", "v")
             self.conductor.keyboard_controller.press_key("enter")
-            time.sleep(0.2)
+            time.sleep(0.4)
 
             self._debug_log("💉 Injection script de détection")
             pyperclip.copy(js_code)
             self.conductor.keyboard_controller.hotkey("ctrl", "v")
             self.conductor.keyboard_controller.press_key("enter")
-            time.sleep(0.5)
+            time.sleep(0.8)
 
-            max_wait = 80
+            max_wait = 100
             waited = 0
-            check_interval = 0.5
+            check_interval = 0.7
 
             self._debug_log(
                 f"👀 Surveillance console (max {max_wait}s, check chaque {check_interval}s)"
@@ -1276,7 +1311,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                     pyperclip.copy(result_copy_script)
                     self.conductor.keyboard_controller.hotkey("ctrl", "v")
                     self.conductor.keyboard_controller.press_key("enter")
-                    time.sleep(0.3)
+                    time.sleep(0.5)
 
                     result_content = pyperclip.paste().strip()
 
@@ -1567,7 +1602,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
             pyperclip.copy(js_code)
             self.conductor.keyboard_controller.hotkey("ctrl", "v")
             self.conductor.keyboard_controller.press_key("enter")
-            time.sleep(0.8)  # Give JS time to execute and copy to clipboard
+            time.sleep(0.9)  # Give JS time to execute and copy to clipboard
 
             self._debug_log("📋 Lecture résultat extraction universelle")
             result = pyperclip.paste().strip()
