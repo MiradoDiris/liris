@@ -1,3 +1,0 @@
-Il y a aussi une petite modification du côté de la structure du graph, il faudra adapter votre code par rapport à cela :
-Pour les labels de type fichiers (les scripts), ils ne seront plus reliés directement aux nodes représentant chaque fonction. À la place le label sera relié à un node dont le titre sera le nom du script, et le contenu sera la description de ce que fait le script/son par rapport au projet (généré par l'IA). Et c'est ce nouveau node là qui sera relié aux nodes des fonctions du script.
-En gros donc juste ajouter ce nouveau node intermédiaire entre le label et les nodes des fonctions, et gérer les liaisons.
