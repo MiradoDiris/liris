@@ -787,7 +787,7 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 if base_name.lower() == imp.lower():
                     self._debug_log(f"ID du fichier correspondant: {file_info['id']}")
                     matched[imp] = file_info["id"]
-                    self._debug_log(f"Imports matchés: {matched[imp]} pour {imp}")²
+                    self._debug_log(f"Imports matchés: {matched[imp]} pour {imp}")
                     break
 
         return matched
@@ -944,7 +944,7 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 )
                 continue
 
-            # 🔗 Générer les arêtes d'import à partir du contenu lu
+            # Générer les arêtes d'import à partir du contenu lu
             import_edges = self.generate_import_edges_for_file(
                 file_info=file_info,
                 project_files=self.current_project_files,
