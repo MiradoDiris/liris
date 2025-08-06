@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-Liris/ui/widgets/tabs/node_creation_widget.py
-Widget pour la création de nœuds dans l'ontologie.
+Liris/ui/widgets/tabs/relation_import_widget.py
+Widget pour la création des arêtes de relation d'import dans l'ontologie.
 """
 
 import os
@@ -14,6 +14,7 @@ import pyperclip  # Pour la gestion du presse-papiers
 import json  # Pour json.dumps dans les scripts JS
 import traceback  # Pour les traces d'erreurs détaillées
 import ast
+
 from datetime import datetime
 from typing import List, Dict
 
@@ -180,35 +181,29 @@ class ResultsDialog(QtWidgets.QDialog):
         )
 
 
-class NodeCreationWidget(QtWidgets.QWidget):
-    """
-    Widget pour la création de nœuds (clusters/labels) dans l'ontologie.
-    """
+# --- Classe principale pour l'importation de relations ---
 
+
+class RelationImportWidget(QtWidgets.QWidget):
     def __init__(self, config_provider, conductor, parent=None):
         super().__init__(parent)
         self.config_provider = config_provider
         self.conductor = conductor
         self.current_project_files = []  # Pour stocker les fichiers (labels de type 'file') du projet sélectionné
-        self.platforms = {}  # Pour stocker les profils des plateformes IA disponibles
+        self.platforms = {}  # Pour stocker les plateformes disponibles
 
-        # Initialiser le générateur de sélecteurs universel
+        ## Initialisation du générateur de sélecteurs universel
         self.selector_generator = UniversalSelectorGenerator()
 
         self._init_ui()
         self._populate_project_selection()  # Remplir la sélection de projets au démarrage
-        self._populate_platform_selection()  # Remplir la sélection des plateformes IA au démarrage
+        self._populate_platform_selection()  # Remplir la sélection de plateformes au démarrage
 
     def _init_ui(self):
         """Initialise l'interface utilisateur du widget de création de nœuds."""
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
-
-        # # Titre de l'onglet
-        # title_label = QtWidgets.QLabel("Gestion des Nœuds d'Ontologie")
-        # title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #333333;")
-        # main_layout.addWidget(title_label)
 
         # Section de sélection de projet
         project_selection_group = QtWidgets.QGroupBox("Sélection du Projet")
@@ -589,83 +584,6 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 item_text = f"{file_info['name']} (Catégories: {categories_str if categories_str else 'N/A'})"
                 self.file_list_widget.addItem(item_text)
 
-    # def extract_imports_from_code(self, code: str) -> List[str]:
-    #     """
-    #     Extrait les modules importés dans un fichier Python donné (sans duplication).
-    #     """
-    #     modules = set()
-    #     try:
-    #         tree = ast.parse(code)
-    #         for node in ast.walk(tree):
-    #             if isinstance(node, ast.Import):
-    #                 modules.update(alias.name.split(".")[0] for alias in node.names)
-    #             elif isinstance(node, ast.ImportFrom) and node.module:
-    #                 modules.add(node.module.split(".")[0])
-    #     except Exception as e:
-    #         print(f"[Erreur AST] {e}")
-    #     return list(modules)
-
-    # def match_imports_to_files(
-    #     self, imports: List[str], project_files: List[Dict]
-    # ) -> Dict[str, str]:
-    #     """
-    #     Associe chaque module importé à l'ID du fichier correspondant dans le projet.
-    #     Retourne un dict: {nom_module: id_du_fichier}
-    #     """
-    #     matched = {}
-    #     for imp in imports:
-    #         for file_info in project_files:
-    #             file_name = file_info.get("name", "")
-    #             base_name = os.path.splitext(file_name)[0]
-    #             if base_name == imp:
-    #                 matched[imp] = file_info["id"]
-    #                 break
-    #     return matched
-
-    # def generate_import_edges_for_file(
-    #     self, file_info: Dict, project_files: List[Dict], user_id: str
-    # ) -> List[Dict]:
-    #     """
-    #     Génère les arêtes de type 'IMPORTS' à partir des imports dans file_info['full_path']
-    #     """
-    #     edges = []
-    #     file_path = file_info.get("full_path")
-    #     source_id = file_info.get("id")
-
-    #     if not file_path or not os.path.exists(file_path):
-    #         print(f"[Erreur] Fichier introuvable: {file_path}")
-    #         return []
-
-    #     try:
-    #         with open(file_path, "r", encoding="utf-8") as f:
-    #             code = f.read()
-    #     except Exception as e:
-    #         print(f"[Erreur lecture] {file_path} : {e}")
-    #         return []
-
-    #     imports = self.extract_imports_from_code(code)
-    #     matched = self.match_imports_to_files(imports, project_files)
-
-    #     timestamp = datetime.utcnow().isoformat()
-
-    #     for module_name, target_id in matched.items():
-    #         edge = {
-    #             "dgraph.type": "Edge",
-    #             "Edge.id": str(uuid.uuid4()),
-    #             "Edge.source": source_id,
-    #             "Edge.target": target_id,
-    #             "Edge.type": "IMPORTS",
-    #             "Edge.label": "imports",
-    #             "Edge.weight": 1.0,
-    #             "Edge.userID": user_id,
-    #             "Edge.createdAt": timestamp,
-    #             "Edge.updatedAt": timestamp,
-    #             "Edge.metadata": None,  # ou tu peux ajouter un objet JSON si nécessaire
-    #         }
-    #         edges.append(edge)
-
-    #     return edges
-
     def extract_module_name(self, import_path: str) -> str:
         """
         Extrait le nom du fichier ou module à partir du chemin d'import.
@@ -819,11 +737,19 @@ class NodeCreationWidget(QtWidgets.QWidget):
         timestamp = datetime.utcnow().isoformat()
 
         for module_name, target_id in matched.items():
+            # Recherche des nœuds correspondant au module importé
+            target_nodes = self.conductor.database.get_nodes_by_label(target_id)
+            source_id_node = self.conductor.database.get_node_by_id(source_id)
+
+            if not target_nodes:
+                print(f"[Avertissement] Aucun nœud trouvé pour le module: {module_name}")
+                continue
+
             edge = {
                 "dgraph.type": "Edge",
                 "Edge.id": str(uuid.uuid4()),
-                "Edge.source": source_id,
-                "Edge.target": target_id,
+                "Edge.source": source_id_node[0]["id"],
+                "Edge.target": target_nodes[0]["id"],  # On prend le premier nœud correspondant
                 "Edge.type": "IMPORTS",
                 "Edge.label": "imports",
                 "Edge.weight": 1.0,
