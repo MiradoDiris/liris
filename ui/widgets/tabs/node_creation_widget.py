@@ -745,12 +745,33 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 self._debug_log(
                     f"❌ Le chemin du fichier '{file_name}' est invalide ou le fichier n'existe pas: {file_path}"
                 )
-                generated_mutations_results.append(
-                    {
-                        "file_name": file_name,
-                        "mutation_code": f"Erreur: Fichier introuvable ou chemin invalide: {file_path}",
-                    }
+                continue
+
+            if not file_label_id or not file_cluster_id:
+                self._debug_log(
+                    f"❌ Informations manquantes pour le fichier '{file_name}': label_id ou cluster_id est manquant."
                 )
+                continue
+
+            # Vérifier si un nœud de description existe déjà pour ce label
+            try:
+                existing_nodes = self.conductor.database.get_nodes_by_label(file_label_id)
+                if existing_nodes:
+                    self._debug_log(
+                        f"ℹ️ Un nœud de description pour le label '{file_name}' (ID: {file_label_id}) existe déjà. "
+                        f"Aucune nouvelle création ne sera effectuée."
+                    )
+                    QtWidgets.QMessageBox.information(
+                        self,
+                        "Nœud Existant",
+                        f"Le nœud de description pour '{file_name}' existe déjà et ne sera pas recréé."
+                    )
+                    continue  # Passer au fichier suivant
+            except Exception as e:
+                self._debug_log(
+                    f"❌ Erreur lors de la vérification des nœuds existants pour le label '{file_label_id}': {e}"
+                )
+                # Optionnel : décider si on continue ou pas en cas d'erreur de base de données
                 continue
 
             # 2. Lire le contenu du fichier
@@ -761,26 +782,19 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 self._debug_log(f"Contenu du fichier '{file_name}' lu avec succès.")
             except Exception as e:
                 self._debug_log(f"❌ Impossible de lire le fichier '{file_name}': {e}")
-                generated_mutations_results.append(
-                    {
-                        "file_name": file_name,
-                        "mutation_code": f"Erreur de lecture du fichier: {e}",
-                    }
-                )
                 continue
 
             # =================================================================
             # NOUVELLE LOGIQUE : PRÉ-GÉNÉRATION DU UID POUR LE SCRIPT (DESCRIPTION)
             # =================================================================
             self._debug_log(f"Pré-génération du UID pour le script {file_name}...")
-
             script_uid = str(uuid.uuid4())
 
             try:
                 self.conductor.database.add_node_reference(
                     dgraph_uid=script_uid,
                     cluster_uid=file_cluster_id,
-                    label_uid=file_label_id,  # Le fichier représente le label ici
+                    label_uid=file_label_id,
                 )
                 self._debug_log(
                     f"  - UID {script_uid} pour le script '{file_name}' enregistré dans SQLite."
@@ -789,6 +803,9 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 self._debug_log(
                     f"  - ❌ Erreur lors de l'enregistrement de l'UID pour le script '{file_name}': {e}"
                 )
+                # Si l'enregistrement échoue, il est préférable de ne pas continuer
+                # car le prompt de l'IA ne sera pas correct.
+                continue
 
             # Préparer l'injection dans le prompt
             uids_for_prompt = f"\n\nUtilisez impérativement l'ID suivant pour le noeud SCRIPT (description) :\n- ID du script '{file_name}' : '{script_uid}'\n\n"
