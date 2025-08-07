@@ -739,17 +739,21 @@ class RelationImportWidget(QtWidgets.QWidget):
         for module_name, target_id in matched.items():
             # Recherche des nœuds correspondant au module importé
             target_nodes = self.conductor.database.get_nodes_by_label(target_id)
-            source_id_node = self.conductor.database.get_node_by_id(source_id)
+            source_id_node = self.conductor.database.get_nodes_by_label(source_id)
 
             if not target_nodes:
-                print(f"[Avertissement] Aucun nœud trouvé pour le module: {module_name}")
+                print(
+                    f"[Avertissement] Aucun nœud trouvé pour le module: {module_name}"
+                )
                 continue
 
             edge = {
                 "dgraph.type": "Edge",
                 "Edge.id": str(uuid.uuid4()),
-                "Edge.source": source_id_node[0]["id"],
-                "Edge.target": target_nodes[0]["id"],  # On prend le premier nœud correspondant
+                "Edge.source": source_id_node[0]["dgraph_uid"],
+                "Edge.target": target_nodes[0][
+                    "dgraph_uid"
+                ],  # On prend le premier nœud correspondant
                 "Edge.type": "IMPORTS",
                 "Edge.label": "imports",
                 "Edge.weight": 1.0,
@@ -870,31 +874,6 @@ class RelationImportWidget(QtWidgets.QWidget):
                 )
                 continue
 
-            # =================================================================
-            # NOUVELLE LOGIQUE : PRÉ-GÉNÉRATION DU UID POUR LE SCRIPT (DESCRIPTION)
-            # =================================================================
-            self._debug_log(f"Pré-génération du UID pour le script {file_name}...")
-
-            script_uid = str(uuid.uuid4())
-
-            try:
-                self.conductor.database.add_node_reference(
-                    dgraph_uid=script_uid,
-                    cluster_uid=file_cluster_id,
-                    label_uid=file_label_id,  # Le fichier représente le label ici
-                )
-                self._debug_log(
-                    f"  - UID {script_uid} pour le script '{file_name}' enregistré dans SQLite."
-                )
-            except Exception as e:
-                self._debug_log(
-                    f"  - ❌ Erreur lors de l'enregistrement de l'UID pour le script '{file_name}': {e}"
-                )
-
-            # Préparer l'injection dans le prompt
-            uids_for_prompt = f"\n\nUtilisez impérativement l'ID suivant pour le noeud SCRIPT (description) :\n- ID du script '{file_name}' : '{script_uid}'\n\n"
-            # =================================================================
-
             # Générer les arêtes d'import à partir du contenu lu
             import_edges = self.generate_import_edges_for_file(
                 file_info=file_info,
@@ -921,26 +900,9 @@ class RelationImportWidget(QtWidgets.QWidget):
                 f"--- Construction du prompt pour {file_name} voici le contenu du fichier {file_content} ---"
             )
             prompt_template = """
-Étant donné le script de code suivant, décomposez toutes ses fonctions. Pour chaque fonction, créez un script de mutation Dgraph (en utilisant la syntaxe du client pydgraph) pour ajouter :
-1. Un nœud 'Node' représentant le script parent
-2. Des nœuds 'Node' pour chaque fonction
-3. Des arêtes 'Edge' reliant le script aux fonctions
-4. Des arêtes 'Edge' pour les relations d'appel entre fonctions (quand une fonction A appelle une fonction B)
-5. Des arêtes 'Edge' pour les imports (IMPORTS)
+Étant donné le script de code suivant, décomposez toutes ses fonctions. Votre tâche est de générer UNIQUEMENT le code de mutation pour les relations d'import (arêtes de type "IMPORTS") entre fichiers. (en utilisant la syntaxe du client pydgraph) pour ajouter :
+1. Des arêtes 'Edge' pour les imports (IMPORTS)
 
-Le schéma Dgraph est :
-type Node {{
-    id: String! @id
-    title: String @index(fulltext, term)
-    content: String
-    clusterIds: [String] @index(hash)
-    labelIds: [String] @index(hash)
-    properties: [Property]
-    userID: String @index(term)
-    createdAt: String
-    updatedAt: String
-    metadata: Metadata
-}}
 
 type Edge {{
     id: String! @id
@@ -955,48 +917,10 @@ type Edge {{
     metadata: Metadata
 }}
 
-Pour le nœud SCRIPT (parent) :
-- 'id': **UTILISEZ L'ID FOURNI CI-DESSOUS**
-- 'title': Nom du fichier ('{file_name}')
-- 'content': Description du script (générée par l'IA)
-- 'labelIds': ['{file_label_id}']
-- 'clusterIds': ['{file_cluster_id}']
-- 'userID': "47ea051e-8cce-4bee-bfe8-76489dd98b60"
-- 'createdAt'/'updatedAt': Horodatage ISO
-
-Pour chaque nœud FONCTION (enfant) :
-- 'id': UUID unique
-- 'title': Nom de la fonction
-- 'content': Code complet de la fonction
-- 'labelIds': [] (vide)
-- 'clusterIds': ['{file_cluster_id}']
-- 'userID': Même que le script
-- 'createdAt'/'updatedAt': Même que le script
-
-{uids_for_prompt_placeholder}
-
-Pour chaque arête SCRIPT → FONCTION :
-- 'id': UUID unique
-- 'source': ID du nœud script
-- 'target': ID du nœud fonction
-- 'type': "CONTAINS"
-- 'label': "contains"
-- 'weight': 1.0
-- 'userID': Même que les nœuds
-- 'createdAt'/'updatedAt': Même que les nœuds
-
-Pour les arêtes entre les fonctions (au sein du même script) :
-- Créez des arêtes de type "CALLS" ou "USES" entre les fonctions qui interagissent.
-- Analysez le code pour déterminer si une fonction en appelle une autre ou utilise une variable/classe d'une autre fonction.
-- **`Edge.type`** : "CALLS" si une fonction appelle directement une autre fonction, ou "USES" si elle utilise une variable ou une classe d'une autre.
-- **`Edge.label`** : Une description sémantique de la relation. Par exemple, "calls function `nom_de_la_fonction`", "uses class `nom_de_la_classe`". L'objectif est de rendre la relation explicite.
-- **`Edge.source`** : L'ID de la fonction appelante ou utilisatrice.
-- **`Edge.target`** : L'ID de la fonction appelée ou utilisée.
-- **`Edge.weight`** : 1.0
-- Les autres champs (`id`, `userID`, `createdAt`, `updatedAt`) doivent être gérés de la même manière que pour les autres arêtes.
-
-
+```import pydgraph
 {import_edges_placeholder}
+```
+Et si il n'y a rien dans import pydgraph, répondez "Aucune arête d'import à créer."
 
 Voici le script à analyser :
 ```code
@@ -1012,7 +936,6 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                 file_cluster_id=file_cluster_id,
                 file_name=file_name,
                 import_edges_placeholder=import_edges_str,
-                uids_for_prompt_placeholder=uids_for_prompt,
             )
 
             self._debug_log(f"--- Envoi du prompt pour {file_name} aux IAs ---")

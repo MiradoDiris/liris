@@ -8,14 +8,10 @@ Widget pour la création de nœuds dans l'ontologie.
 
 import os
 import uuid  # Pour générer des UUIDs pour les nœuds de fonction
-import re  # Pour l'extraction des fonctions (si nécessaire, bien que l'IA le fasse)
 import time  # Pour les délais dans l'automatisation du navigateur
 import pyperclip  # Pour la gestion du presse-papiers
 import json  # Pour json.dumps dans les scripts JS
 import traceback  # Pour les traces d'erreurs détaillées
-import ast
-from datetime import datetime
-from typing import List, Dict
 
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import (
@@ -666,176 +662,6 @@ class NodeCreationWidget(QtWidgets.QWidget):
 
     #     return edges
 
-    def extract_module_name(self, import_path: str) -> str:
-        """
-        Extrait le nom du fichier ou module à partir du chemin d'import.
-        """
-        clean = import_path.strip().replace("\\", "/")
-        self._debug_log(f"Extraction du nom du module à partir du chemin: {clean}")
-        name = clean.split("/")[-1]
-        self._debug_log(f"Nom extrait: {name}")
-        if "." in name:
-            name = name.split(".")[0]
-            self._debug_log(f"Nom sans extension: {name}")
-        return name
-
-    def extract_imports_from_code(self, file_name: str, code: str) -> List[str]:
-        """
-        Extrait les modules importés dans un fichier, selon son langage détecté dynamiquement.
-        """
-        ext = file_name.lower().split(".")[-1]
-        self._debug_log(f"Extrait les modules importés dans {file_name} ({ext})")
-
-        self._debug_log(
-            f"Code extrait: {code[:100]}..."
-        )  # Affiche les 100 premiers caractères du code
-        modules = set()
-
-        try:
-            if ext == "py":
-                tree = ast.parse(code)
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Import):
-                        for alias in node.names:
-                            modules.add(self.extract_module_name(alias.name))
-                    elif isinstance(node, ast.ImportFrom) and node.module:
-                        modules.add(self.extract_module_name(node.module))
-
-            elif ext in ["js", "ts", "jsx", "tsx", "mjs", "cjs"]:
-                # Ce pattern est plus robuste et gère les chemins de fichiers absolus (ex: C:/...)
-                pattern = re.compile(
-                    r"""
-                    (?:
-                        ^\s*import\s+(?:['"][^'"]+['"]|[\S\s]+?from)\s*|   # Imports statiques
-                        \bimport\s*\(|                                      # Imports dynamiques
-                        \brequire\s*\(                                       # Appels require()
-                    )
-                    (['"`])                                               # Capture le délimiteur ('", ou `)
-                    (
-                        (?:[a-zA-Z]:)?[/\\].*?|                               # Match les chemins absolus (C:/...) et relatifs (./...)
-                        .*?                                                   # Match les noms de modules simples
-                    )
-                    \1
-                    """,
-                    re.VERBOSE | re.MULTILINE,
-                )
-
-                matches = pattern.findall(code)
-                self._debug_log(f"Matches: {matches}")
-
-                for match in matches:
-                    # Le match est un tuple (délimiteur, module_path)
-                    module_path = match[1]
-                    if module_path:
-                        self._debug_log(
-                            f"Module trouvé ici e : {module_path} dans {file_name}"
-                        )
-                        modules.add(self.extract_module_name(module_path))
-                        self._debug_log(f"Module extrait: {modules} dans {file_name}")
-
-            elif ext == "java":
-                for line in code.splitlines():
-                    line = line.strip()
-                    if line.startswith("import "):
-                        try:
-                            imported = line.split()[1].rstrip(";")
-                            modules.add(self.extract_module_name(imported))
-                        except (IndexError, AttributeError, ValueError):
-                            continue
-
-            elif ext == "php":
-                pattern_use = re.compile(r"^\s*use\s+([^;]+);", re.MULTILINE)
-                matches = pattern_use.findall(code)
-                for imp in matches:
-                    modules.add(self.extract_module_name(imp))
-
-            elif ext == "go":
-                in_block = False
-                for line in code.splitlines():
-                    line = line.strip()
-                    if line.startswith("import ("):
-                        in_block = True
-                        continue
-                    if in_block and line == ")":
-                        in_block = False
-                        continue
-                    if in_block or line.startswith("import"):
-                        match = re.search(r"\"([^\"]+)\"", line)
-                        if match:
-                            modules.add(self.extract_module_name(match.group(1)))
-
-        except Exception as e:
-            print(f"[Erreur extraction import] {e}")
-
-        return list(modules)
-
-    def match_imports_to_files(
-        self, imports: List[str], project_files: List[Dict]
-    ) -> Dict[str, str]:
-        """
-        Associe chaque module importé à l'ID du fichier correspondant dans le projet.
-        Retourne un dict: {nom_module: id_du_fichier}
-        """
-        matched = {}
-        for imp in imports:
-            for file_info in project_files:
-                file_name = file_info.get("name", "")
-                base_name = os.path.splitext(file_name)[0]
-                self._debug_log(
-                    f"Comparaison: base_name='{base_name.lower()}' avec import='{imp.lower()}'"
-                )
-                if base_name.lower() == imp.lower():
-                    self._debug_log(f"ID du fichier correspondant: {file_info['id']}")
-                    matched[imp] = file_info["id"]
-                    self._debug_log(f"Imports matchés: {matched[imp]} pour {imp}")
-                    break
-
-        return matched
-
-    def generate_import_edges_for_file(
-        self, file_info: Dict, project_files: List[Dict], user_id: str
-    ) -> List[Dict]:
-        """
-        Génère les arêtes de type 'IMPORTS' à partir des imports dans file_info['full_path']
-        """
-        edges = []
-        file_path = file_info.get("full_path")
-        source_id = file_info.get("id")
-
-        if not file_path or not os.path.exists(file_path):
-            print(f"[Erreur] Fichier introuvable: {file_path}")
-            return []
-
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                code = f.read()
-        except Exception as e:
-            print(f"[Erreur lecture] {file_path} : {e}")
-            return []
-
-        imports = self.extract_imports_from_code(file_info.get("name", ""), code)
-        matched = self.match_imports_to_files(imports, project_files)
-
-        timestamp = datetime.utcnow().isoformat()
-
-        for module_name, target_id in matched.items():
-            edge = {
-                "dgraph.type": "Edge",
-                "Edge.id": str(uuid.uuid4()),
-                "Edge.source": source_id,
-                "Edge.target": target_id,
-                "Edge.type": "IMPORTS",
-                "Edge.label": "imports",
-                "Edge.weight": 1.0,
-                "Edge.userID": user_id,
-                "Edge.createdAt": timestamp,
-                "Edge.updatedAt": timestamp,
-                "Edge.metadata": None,
-            }
-            edges.append(edge)
-
-        return edges
-
     def _on_proceed_creation(self):
         """
         Action pour le bouton "Procéder à la création".
@@ -903,7 +729,6 @@ class NodeCreationWidget(QtWidgets.QWidget):
             return
 
         generated_mutations_results = []  # Pour stocker les résultats de chaque fichier
-        all_import_edges = []  # Pour stocker toutes les arêtes d'import générées
 
         for file_info in selected_files_info:
             file_name = file_info.get("name")
@@ -969,27 +794,6 @@ class NodeCreationWidget(QtWidgets.QWidget):
             uids_for_prompt = f"\n\nUtilisez impérativement l'ID suivant pour le noeud SCRIPT (description) :\n- ID du script '{file_name}' : '{script_uid}'\n\n"
             # =================================================================
 
-            # Générer les arêtes d'import à partir du contenu lu
-            import_edges = self.generate_import_edges_for_file(
-                file_info=file_info,
-                project_files=self.current_project_files,
-                user_id="47ea051e-8cce-4bee-bfe8-76489dd98b60",
-            )
-
-            all_import_edges.extend(import_edges)
-
-            print(
-                f"DEBUG: Arêtes d'import générées pour {file_name}: {len(import_edges)} arêtes trouvées. {all_import_edges}"
-            )
-
-            # Créer une chaîne de caractères à partir de la liste d'arêtes
-            import_edges_str = ""
-            if all_import_edges:
-                import_edges_str += "\n\nPour chaque arête d'import ci-dessous, veuillez l'inclure dans le script de mutation :\n"
-                for edge in all_import_edges:
-                    import_edges_str += f"- Edge.source: {edge.get('Edge.source')}, Edge.target: {edge.get('Edge.target')}, Edge.type: {edge.get('Edge.type')}\n"
-                import_edges_str += "\n"
-
             # 4. Construire le prompt pour l'IA
             print(
                 f"--- Construction du prompt pour {file_name} voici le contenu du fichier {file_content} ---"
@@ -1000,7 +804,7 @@ class NodeCreationWidget(QtWidgets.QWidget):
 2. Des nœuds 'Node' pour chaque fonction
 3. Des arêtes 'Edge' reliant le script aux fonctions
 4. Des arêtes 'Edge' pour les relations d'appel entre fonctions (quand une fonction A appelle une fonction B)
-5. Des arêtes 'Edge' pour les imports (IMPORTS)
+
 
 Le schéma Dgraph est :
 type Node {{
@@ -1070,8 +874,6 @@ Pour les arêtes entre les fonctions (au sein du même script) :
 - Les autres champs (`id`, `userID`, `createdAt`, `updatedAt`) doivent être gérés de la même manière que pour les autres arêtes.
 
 
-{import_edges_placeholder}
-
 Voici le script à analyser :
 ```code
 {file_content}
@@ -1085,7 +887,6 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                 file_label_id=file_label_id,
                 file_cluster_id=file_cluster_id,
                 file_name=file_name,
-                import_edges_placeholder=import_edges_str,
                 uids_for_prompt_placeholder=uids_for_prompt,
             )
 
