@@ -755,7 +755,9 @@ class NodeCreationWidget(QtWidgets.QWidget):
 
             # Vérifier si un nœud de description existe déjà pour ce label
             try:
-                existing_nodes = self.conductor.database.get_nodes_by_label(file_label_id)
+                existing_nodes = self.conductor.database.get_nodes_by_label(
+                    file_label_id
+                )
                 if existing_nodes:
                     self._debug_log(
                         f"ℹ️ Un nœud de description pour le label '{file_name}' (ID: {file_label_id}) existe déjà. "
@@ -764,7 +766,7 @@ class NodeCreationWidget(QtWidgets.QWidget):
                     QtWidgets.QMessageBox.information(
                         self,
                         "Nœud Existant",
-                        f"Le nœud de description pour '{file_name}' existe déjà et ne sera pas recréé."
+                        f"Le nœud de description pour '{file_name}' existe déjà et ne sera pas recréé.",
                     )
                     continue  # Passer au fichier suivant
             except Exception as e:
@@ -791,7 +793,19 @@ class NodeCreationWidget(QtWidgets.QWidget):
             script_uid = str(uuid.uuid4())
 
             try:
+                # RÉCUPÉRER LE NOM DU PROJET ACTUEL DEPUIS LE COMBOBOX
+                current_project_name = self.project_combo.currentText()
+                if (
+                    not current_project_name
+                    or current_project_name == "Sélectionner un projet..."
+                ):
+                    self._debug_log(
+                        "  - ❌ Erreur: Aucun projet valide n'est sélectionné pour enregistrer la référence du noeud."
+                    )
+                    continue
+
                 self.conductor.database.add_node_reference(
+                    project_name=current_project_name,
                     dgraph_uid=script_uid,
                     cluster_uid=file_cluster_id,
                     label_uid=file_label_id,

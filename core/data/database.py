@@ -198,6 +198,7 @@ class Database:
                            CREATE TABLE IF NOT EXISTS graph_nodes
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               project_name TEXT NOT NULL,
                                dgraph_uid TEXT NOT NULL UNIQUE,
                                cluster_uid TEXT,
                                label_uid TEXT,
@@ -207,6 +208,7 @@ class Database:
                            ''')
             
             # Index pour accélérer les recherches
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_project_name ON graph_nodes (project_name)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_cluster_uid ON graph_nodes (cluster_uid)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_label_uid ON graph_nodes (label_uid)')
 
@@ -804,26 +806,39 @@ class Database:
 
     def delete_project_profile(self, project_name):
         """
-        Supprime un profil de projet de la base de données.
+        Supprime un profil de projet et tous les noeuds de graphe associés.
 
         Args:
             project_name (str): Nom du projet à supprimer.
 
         Returns:
-            bool: True si suppression réussie, False sinon.
+            bool: True si la suppression est réussie, False sinon.
         """
         try:
-            logger.debug(f"Suppression du profil de projet '{project_name}' de la base de données.")
+            logger.debug(f"Tentative de suppression du projet '{project_name}' et de ses noeuds associés.")
             cursor = self.conn.cursor()
+
+            # Étape 1: Supprimer les noeuds de graphe associés au projet
+            cursor.execute('DELETE FROM graph_nodes WHERE project_name = ?', (project_name,))
+            nodes_deleted_count = cursor.rowcount
+            logger.info(f"{nodes_deleted_count} noeuds de graphe associés à '{project_name}' ont été supprimés.")
+
+            # Étape 2: Supprimer le profil du projet
             cursor.execute('DELETE FROM project_profiles WHERE name = ?', (project_name,))
-            if cursor.rowcount > 0:
+            project_deleted_count = cursor.rowcount
+
+            if project_deleted_count > 0:
                 self.conn.commit()
-                logger.info(f"Profil de projet '{project_name}' supprimé de la base.")
+                logger.info(f"Profil de projet '{project_name}' supprimé avec succès.")
                 return True
             else:
+                # Si le projet n'existait pas, on annule la suppression des noeuds
+                self.conn.rollback()
                 logger.warning(f"Profil de projet '{project_name}' non trouvé pour suppression.")
                 return False
+
         except Exception as e:
+            self.conn.rollback()
             logger.error(f"Erreur lors de la suppression du profil de projet '{project_name}': {str(e)}")
             return False
 
@@ -1201,11 +1216,12 @@ class Database:
     # MÉTHODES POUR GESTION DES RÉFÉRENCES DE NOEUDS DGRAPH
     # =====================================================
 
-    def add_node_reference(self, dgraph_uid, cluster_uid, label_uid):
+    def add_node_reference(self, project_name, dgraph_uid, cluster_uid, label_uid):
         """
         Ajoute une référence de noeud Dgraph dans la base de données locale.
 
         Args:
+            project_name (str): Nom du projet auquel le noeud est associé.
             dgraph_uid (str): UID du noeud Dgraph.
             cluster_uid (str): UID du cluster parent.
             label_uid (str): UID du label associé.
@@ -1217,12 +1233,12 @@ class Database:
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
             cursor.execute('''
-                           INSERT INTO graph_nodes (dgraph_uid, cluster_uid, label_uid, created_at, updated_at)
-                           VALUES (?, ?, ?, ?, ?)
-                           ''', (dgraph_uid, cluster_uid, label_uid, now, now))
+                           INSERT INTO graph_nodes (project_name, dgraph_uid, cluster_uid, label_uid, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?)
+                           ''', (project_name, dgraph_uid, cluster_uid, label_uid, now, now))
             self.conn.commit()
             node_id = cursor.lastrowid
-            logger.debug(f"Référence de noeud Dgraph ajoutée pour UID {dgraph_uid}, ID local: {node_id}")
+            logger.debug(f"Référence de noeud Dgraph ajoutée pour UID {dgraph_uid} au projet {project_name}, ID local: {node_id}")
             return node_id
         except Exception as e:
             logger.error(f"Erreur lors de l'ajout de la référence de noeud {dgraph_uid}: {str(e)}")
