@@ -9,9 +9,8 @@ AJOUTÉ: Stockage de 'id' (UUID) et 'full_path' pour chaque noeud de l'ontologie
 
 import os
 import json
-import traceback
 import uuid  # <-- NOUVEL IMPORT
-from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt, pyqtSignal
 
 from utils.logger import logger
