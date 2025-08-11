@@ -1,0 +1,9 @@
+{
+  "layout": "AZERTY (Français)",
+  "key_delay": 30,
+  "accent_delay": 50,
+  "block_alt_tab": true,
+  "focus_lock": true,
+  "protection_timeout": 30,
+  "accent_method": "direct"
+}
