@@ -233,6 +233,7 @@ class SimpleTestWorker(QThread):
                     original_clipboard = pyperclip.paste()
                     pyperclip.copy(self.test_message)
                     time.sleep(0.05)
+                    #self.conductor.keyboard_controller.type_text(self.test_message)
                     self.conductor.keyboard_controller.hotkey('ctrl', 'v')
                     time.sleep(0.3)
                     pyperclip.copy(original_clipboard)
@@ -278,6 +279,7 @@ class SimpleTestWorker(QThread):
                 self.debug_log("🎯 Début détection IA universelle...")
                 detection_success = self._wait_for_ai_completion(detection_config)
                 self.debug_log(f"Résultat détection universelle: {detection_success}")
+                self.conductor.keyboard_controller.press_key('f12')
                 self.end_step(detection_success)
             except Exception as e:
                 self.debug_log(f"❌ Erreur détection universelle: {e}")
@@ -316,7 +318,7 @@ class SimpleTestWorker(QThread):
             duration = time.time() - start_time
             self.debug_log(f"🏁 TEST UNIVERSEL TERMINÉ - Durée totale: {duration:.2f}s")
             
-            if response and len(response) > 10:
+            if response:
                 self.debug_log(f"✅ SUCCÈS UNIVERSEL - Réponse extraite: {len(response)} caractères")
                 self.test_completed.emit(True, f"Test universel réussi en {duration:.1f}s", duration, response)
             else:
@@ -354,6 +356,8 @@ class SimpleTestWorker(QThread):
                     js_code = self._get_gemini_detection_script()
                 elif 'claude' in platform_type:
                     js_code = self._get_claude_detection_script()
+                elif 'grok' in platform_type:
+                    js_code = self._get_grok_detection_script()
                 else:
                     primary_selector = detection_config.get('primary_selector', 'div')
                     js_code = self._get_generic_detection_script(primary_selector)
@@ -395,6 +399,7 @@ class SimpleTestWorker(QThread):
             else:
                 # Fallback vers l'ancienne méthode
                 self.debug_log("🔄 Fallback extraction classique")
+                print(response_area)
                 platform_config = response_area.get('platform_config', {})
                 primary_selector = platform_config.get('primary_selector', 'p:last-child')
                 fallback_selectors = platform_config.get('fallback_selectors', [])
@@ -417,54 +422,73 @@ class SimpleTestWorker(QThread):
             # 🎯 Script d'extraction universel optimisé
             js_code = f'''
             let selectors = {json.dumps(selectors)};
-            let cleaningMethod = "{cleaning_method}";
-            let platform = "{platform}";
-            
+            let cleaningMethod = "basic_text_extraction";
+            let platform = "legacy";
+
+            // Define classes to be excluded from text content
+            const excludedClasses = ["pt-3", "pb-3", "can-focus"]; // Add any other classes you want to exclude
+
             console.log("🎯 Testing universal selectors for " + platform + ":", selectors);
             console.log("🧹 Cleaning method:", cleaningMethod);
-            
+            console.log("🚫 Excluded classes:", excludedClasses);
+
             for (let i = 0; i < selectors.length; i++) {{
                 let selector = selectors[i];
-                console.log("Testing selector " + (i+1) + ":", selector);
-                
+                console.log("Testing selector " + (i + 1) + ":", selector);
+
                 try {{
                     let elements = document.querySelectorAll(selector);
                     console.log("Found " + elements.length + " elements for selector:", selector);
-                    
+
                     if (elements.length > 0) {{
-                        // Prendre le dernier élément (le plus récent)
+                        // Get the last element (the most recent)
                         let element = elements[elements.length - 1];
-                        let text = (element.textContent || '').trim();
-                        
-                        // Nettoyer le texte selon la méthode universelle
+
+                        // Create a deep clone of the element to avoid modifying the live DOM
+                        let clonedElement = element.cloneNode(true);
+
+                        // Replace elements with excluded classes with a newline character in the cloned element
+                        excludedClasses.forEach(className => {{
+                            const elementsToExclude = clonedElement.querySelectorAll(`.${{className}}`);
+                            elementsToExclude.forEach(el => {{
+                                // Create a text node with a newline
+                                const newlineTextNode = document.createTextNode('\\n');
+                                // Replace the excluded element with the newline text node
+                                el.replaceWith(newlineTextNode);
+                            }});
+                        }});
+
+                        let text = (clonedElement.textContent || '').trim();
+
+                        // Clean the text based on the universal method
                         if (cleaningMethod === 'remove_ui_elements') {{
-                            // Nettoyage Claude
-                            text = text.replace(/Send a message\\.\\.\\..*$/gi, '');
+                            // Claude cleaning
+                            text = text.replace(/Send a message\.\.\..*$/gi, '');
                             text = text.replace(/Stop generating.*$/gi, '');
                             text = text.replace(/Regenerate.*$/gi, '');
                         }} else if (cleaningMethod === 'preserve_markdown_structure') {{
-                            // Nettoyage ChatGPT
+                            // ChatGPT cleaning
                             text = text.replace(/Copy code.*$/gi, '');
                             text = text.replace(/Send a message.*$/gi, '');
                             text = text.replace(/Stop generating.*$/gi, '');
                         }} else if (cleaningMethod === 'extract_from_nested_spans') {{
-                            // Nettoyage Gemini
+                            // Gemini cleaning
                             text = text.replace(/Send a message.*$/gi, '');
                             text = text.replace(/Écrivez votre message.*$/gi, '');
                         }}
-                        
-                        // Nettoyage commun
+
+                        // Common cleaning
                         text = text.replace(/function\\(\\)\\s*\\{{.*\\}}/gi, '');
                         text = text.replace(/console\\.log.*$/gi, '');
                         text = text.replace(/let selectors.*$/gi, '');
                         text = text.replace(/Testing selector.*$/gi, '');
                         text = text.replace(/document\\.querySelector.*$/gi, '');
                         text = text.trim();
-                        
+
                         console.log("Cleaned text length:", text.length);
                         console.log("Text preview:", text.substring(0, 100));
-                        
-                        if (!text.includes('console.log') && 
+
+                        if (!text.includes('console.log') &&
                             !text.includes('function()') &&
                             !text.includes('Testing selector') &&
                             !text.includes('document.querySelector') &&
@@ -477,9 +501,9 @@ class SimpleTestWorker(QThread):
                             console.log("❌ Text rejected (contains debug info)");
                         }}
                     }}
-                }} catch(e) {{ 
+                }} catch (e) {{
                     console.log("❌ Error with selector " + selector + ":", e);
-                    continue; 
+                    continue;
                 }}
             }}
             console.log("🎯 Universal extraction script completed for " + platform);
@@ -497,7 +521,7 @@ class SimpleTestWorker(QThread):
         """Exécute le script d'extraction universel et retourne le résultat"""
         try:
             self.debug_log("🖥️ Ouverture console pour extraction universelle")
-            # self.conductor.keyboard_controller.press_key('f12')
+            self.conductor.keyboard_controller.press_key('f12')
             
             # if self.detected_browser_type == 'firefox':
             #     self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'k')
@@ -531,7 +555,7 @@ class SimpleTestWorker(QThread):
             # self.conductor.keyboard_controller.press_key('f12')
             time.sleep(0.1)
             
-            if result and len(result) > 15:
+            if result:
                 # Validation supplémentaire
                 excluded_keywords = [
                     'function()', 'console.log', 'document.query', 'let ', 'const ', 
@@ -548,7 +572,7 @@ class SimpleTestWorker(QThread):
                 else:
                     self.debug_log("❌ Réponse rejetée (contient du code/debug)")
             else:
-                self.debug_log("❌ Réponse trop courte ou vide")
+                self.debug_log("❌ Réponse tvide")
             
             return ""
             
@@ -638,10 +662,11 @@ class SimpleTestWorker(QThread):
         try:
             self.debug_log(f"🖥️ Ouverture console ({self.detected_browser_type})")
             
-            if self.detected_browser_type == 'firefox':
-                self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'k')
-            else:
-                self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'j')
+            self.conductor.keyboard_controller.press_key('f12')
+            # if self.detected_browser_type == 'firefox':
+            #     self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'k')
+            # else:
+            #     self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'j')
             time.sleep(0.5)
             
             if self.should_stop:
@@ -659,7 +684,7 @@ class SimpleTestWorker(QThread):
                 self.debug_log(f"⚠️ Erreur activation collage: {e}")
             
             self.debug_log("🧹 Nettoyage console")
-            # pyperclip.copy("console.clear();")
+            pyperclip.copy("console.clear();")
             self.conductor.keyboard_controller.hotkey('ctrl', 'v')
             self.conductor.keyboard_controller.press_key('enter')
             time.sleep(0.2)
@@ -813,48 +838,39 @@ class SimpleTestWorker(QThread):
         """Ancienne méthode Gemini en fallback"""
         return '''
         (function() {
-            let lastContentState = '';
-            let stableCount = 0;
             let checkCount = 0;
             let maxChecks = 1000;
-            
+        
+            // Store result in global variable AND console log
+            function setDetectionResult(result) {
+                window.LIRIS_DETECTION_RESULT = result;
+                console.log("LIRIS_DETECTION_COMPLETE:" + result);
+                console.log("Detection result stored in window.LIRIS_DETECTION_RESULT");
+            }
+        
             function checkGeminiCompletion() {
                 try {
                     checkCount++;
-                    console.log("Gemini check #" + checkCount);
-                    
                     if (checkCount > maxChecks) {
-                        console.log("LIRIS_DETECTION_COMPLETE:timeout");
+                        setDetectionResult("timeout");
                         return;
                     }
-                    
-                    let generatingDiv = document.querySelector('[class*="_ngcontent-ng-c2459883256"]');
-                    let completedDiv = document.querySelector('[class*="_ngcontent-ng-c1375136285"]');
-                    
-                    console.log("Generating div found:", !!generatingDiv);
-                    console.log("Completed div found:", !!completedDiv);
-                    
-                    let currentState = (generatingDiv ? 'generating' : '') + (completedDiv ? 'completed' : '');
-                    
-                    if (currentState === lastContentState && completedDiv) {
-                        stableCount++;
-                        console.log("Stable count:", stableCount);
-                        if (stableCount >= 2) {
-                            console.log("LIRIS_DETECTION_COMPLETE:success");
-                            return;
-                        }
-                    } else {
-                        lastContentState = currentState;
-                        stableCount = 0;
+                
+                    let streamingElements = document.querySelectorAll('div.animate');
+                
+                    if (streamingElements.length === 0) {
+                        setDetectionResult("success");
+                        return;
                     }
-                    
-                    setTimeout(checkGeminiCompletion, 400);
+                
+                    setTimeout(checkGeminiCompletion, 300);
                 } catch(e) {
-                    console.log("Error in Gemini detection:", e);
-                    console.log("LIRIS_DETECTION_COMPLETE:error");
+                    setDetectionResult("error");
                 }
             }
-
+        
+            // Initialize detection result
+            window.LIRIS_DETECTION_RESULT = "running";
             checkGeminiCompletion();
             return "Gemini detection started";
         })();
@@ -900,6 +916,47 @@ class SimpleTestWorker(QThread):
             window.LIRIS_DETECTION_RESULT = "running";
             checkClaudeCompletion();
             return "Claude detection started";
+        })();
+        '''
+    
+    def _get_grok_detection_script(self):
+        return '''
+        (function() {
+            let checkCount = 0;
+            let maxChecks = 1000;
+        
+            // Store result in global variable AND console log
+            function setDetectionResult(result) {
+                window.LIRIS_DETECTION_RESULT = result;
+                console.log("LIRIS_DETECTION_COMPLETE:" + result);
+                console.log("Detection result stored in window.LIRIS_DETECTION_RESULT");
+            }
+        
+            function checkGrokCompletion() {
+                try {
+                    checkCount++;
+                    if (checkCount > maxChecks) {
+                        setDetectionResult("timeout");
+                        return;
+                    }
+                
+                    let streamingElements = document.querySelectorAll('#last-reply-container > div.relative.group.flex.flex-col.justify-center.w-full');
+                
+                    if (streamingElements.length === 0) {
+                        setDetectionResult("success");
+                        return;
+                    }
+                
+                    setTimeout(checkGrokCompletion, 300);
+                } catch(e) {
+                    setDetectionResult("error");
+                }
+            }
+        
+            // Initialize detection result
+            window.LIRIS_DETECTION_RESULT = "running";
+            checkGrokCompletion();
+            return "Grok detection started";
         })();
         '''
     

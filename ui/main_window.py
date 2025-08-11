@@ -19,6 +19,7 @@ from ui.widgets.annotation_form import AnnotationForm
 from ui.widgets.dataset_table import DatasetTable
 from ui.widgets.prompt_list import PromptList
 from ui.widgets.language_selector import LanguageSelector
+from ui.widgets.dataset_generation import DatasetGenerationWidget
 from ui.widgets.platform_config_widget import PlatformConfigWidget
 # Importer le nouveau widget ProjectConfigOnlyWidget
 from ui.widgets.project_config_only_widget import ProjectConfigOnlyWidget # <-- NOUVEL IMPORT
@@ -99,6 +100,7 @@ class MainWindow(QMainWindow):
         self.annotation_form = AnnotationForm()
         self.dataset_table = DatasetTable()
         self.prompt_list = PromptList()
+        self.dataset_generation= DatasetGenerationWidget()
 
         # Barres de progression
         self.progress_bar = QtWidgets.QProgressBar()
@@ -261,7 +263,10 @@ class MainWindow(QMainWindow):
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
         main_layout.addWidget(self.tab_widget)
-
+    def set_conductor(self, conductor):
+        """Set the conductor for all relevant widgets"""
+        self.conductor = conductor
+        self.dataset_widget.set_conductor(conductor)
     def _on_mode_switched(self):
         """
         Active ou désactive les onglets selon le mode sélectionné (Dev vs Data science).
@@ -270,9 +275,10 @@ class MainWindow(QMainWindow):
             self.current_mode = "data"
             # Supprimer tous les onglets
             self.tab_widget.clear()
-            self.tab_widget.addTab(self.brainstorming_panel, tr("brainstorming_tab"))
-            self.tab_widget.addTab(self.annotation_form, tr("annotation_tab"))
-            self.tab_widget.addTab(self.dataset_table, tr("datasets_tab"))
+            #self.tab_widget.addTab(self.brainstorming_panel, tr("brainstorming_tab"))
+            #self.tab_widget.addTab(self.annotation_form, tr("annotation_tab"))
+            #self.tab_widget.addTab(self.dataset_table, tr("datasets_tab"))
+            self.tab_widget.addTab(self.dataset_generation, tr("Generation"))
             self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
             self.tab_widget.setCurrentIndex(0)
         else:
@@ -548,7 +554,7 @@ class MainWindow(QMainWindow):
         """Notifie les widgets enfants du changement de langue"""
         # Informer les panneaux principaux
         for panel in [self.coding_panel, self.brainstorming_panel, self.annotation_form,
-                      self.dataset_table, self.prompt_list]:
+                      self.dataset_table, self.dataset_generation, self.prompt_list]:
             if hasattr(panel, 'update_language'):
                 panel.update_language()
 
@@ -680,8 +686,11 @@ class MainWindow(QMainWindow):
         self.brainstorming_panel.set_conductor(self.conductor)
         self.brainstorming_panel.set_platforms(platforms)
 
-        self.annotation_form.set_conductor(self.conductor)
-        self.annotation_form.set_platforms(platforms)
+        self.dataset_generation.set_conductor(self.conductor)
+        self.dataset_generation.set_platforms(platforms)
+
+        #self.annotation_form.set_conductor(self.conductor)
+        #self.annotation_form.set_platforms(platforms)
 
         self.dataset_table.set_database(self.database)
         self.dataset_table.set_exporter(self.exporter)
