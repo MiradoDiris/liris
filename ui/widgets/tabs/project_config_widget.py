@@ -1205,22 +1205,22 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 if os.path.isdir(item_full_path):
                     new_node["type"] = "directory"
                     if current_ontology_level == "root":
-                        new_node["parent_labels"] = []
+                        new_node["parents"] = []
                         target_list.append(new_node)
                         logger.debug(
                             f"    Ajout d'un label racine (répertoire) : {item_name} (ID: {new_node['id']})"
                         )
                         self._populate_ontology_from_directory(
-                            item_full_path, new_node["parent_labels"], "parent"
+                            item_full_path, new_node["parents"], "parent"
                         )
                     elif current_ontology_level == "parent":
-                        new_node["child_labels"] = []
+                        new_node["children"] = []
                         target_list.append(new_node)
                         logger.debug(
                             f"    Ajout d'un label parent (répertoire) : {item_name} (ID: {new_node['id']})"
                         )
                         self._populate_ontology_from_directory(
-                            item_full_path, new_node["child_labels"], "child"
+                            item_full_path, new_node["children"], "child"
                         )
                     elif current_ontology_level == "child":
                         # If we reach child level and it's a directory, we still add it
@@ -2736,9 +2736,9 @@ def generate_dgraph_mutations(client, project_data):
         children_list_key = None # Key in the Liris data model for children of current level
 
         if level_numeric == 0: # Root level
-            children_list_key = "parent_labels" 
+            children_list_key = "parents" 
         elif level_numeric == 1: # Parent level
-            children_list_key = "child_labels"
+            children_list_key = "children"
         # For level_numeric == 2 (child), there are no further nested labels in the current Liris data model
 
         if children_list_key and children_list_key in label_data:
