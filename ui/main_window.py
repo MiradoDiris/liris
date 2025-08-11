@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import QMainWindow, QApplication, QMessageBox, QFileDialog,
 from PyQt5.QtCore import Qt, QSettings, QTimer
 
 from ui.widgets.brainstorming_panel import BrainstormingPanel
+from ui.widgets.coding_panel import CodingPanel
 from ui.widgets.annotation_form import AnnotationForm
 from ui.widgets.dataset_table import DatasetTable
 from ui.widgets.prompt_list import PromptList
@@ -95,7 +96,7 @@ class MainWindow(QMainWindow):
     def _init_components(self):
         """Initialise les composants principaux"""
         print("   - Création des widgets principaux...")
-        self.coding_panel = BrainstormingPanel()
+        self.coding_panel = CodingPanel()
         self.brainstorming_panel = BrainstormingPanel()
         self.annotation_form = AnnotationForm()
         self.dataset_table = DatasetTable()
