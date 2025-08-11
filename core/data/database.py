@@ -20,8 +20,11 @@ class Database:
         """
         if db_path is None:
             # Utiliser un chemin par défaut s'il n'est pas spécifié
-            self.db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                                        "data", "liris.db")
+            self.db_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "data",
+                "liris.db",
+            )
         else:
             self.db_path = db_path
 
@@ -71,7 +74,7 @@ class Database:
             cursor = self.conn.cursor()
 
             # Table des plateformes et leurs configurations
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS platforms
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,10 +83,10 @@ class Database:
                                created_at TEXT NOT NULL,
                                updated_at TEXT NOT NULL
                            )
-                           ''')
+                           """)
 
             # Table de configuration du clavier (simplifiée)
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS keyboard_config
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,10 +101,10 @@ class Database:
                                updated_at TEXT NOT NULL,
                                is_active BOOLEAN DEFAULT 1
                            )
-                           ''')
+                           """)
 
             # Table des sessions d'IA
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS ai_sessions
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,10 +114,10 @@ class Database:
                                token_count INTEGER DEFAULT 0,
                                status TEXT DEFAULT 'active'
                            )
-                           ''')
+                           """)
 
             # Table des prompts
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS prompts
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,10 +128,10 @@ class Database:
                                operation_type TEXT NOT NULL,
                                FOREIGN KEY (session_id) REFERENCES ai_sessions (id)
                            )
-                           ''')
+                           """)
 
             # Table des réponses
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS responses
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,10 +141,10 @@ class Database:
                                status TEXT DEFAULT 'success',
                                FOREIGN KEY (prompt_id) REFERENCES prompts (id)
                            )
-                           ''')
+                           """)
 
             # Table des datasets générés
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS datasets
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,10 +155,10 @@ class Database:
                                item_count INTEGER DEFAULT 0,
                                filepath TEXT NOT NULL
                            )
-                           ''')
+                           """)
 
             # Table des sessions de brainstorming
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS brainstorming_sessions
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,10 +168,10 @@ class Database:
                                context TEXT NOT NULL,
                                status TEXT DEFAULT 'in_progress'
                            )
-                           ''')
+                           """)
 
             # Table des résultats de brainstorming
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS brainstorming_results
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,10 +182,10 @@ class Database:
                                final_score INTEGER,
                                FOREIGN KEY (session_id) REFERENCES brainstorming_sessions (id)
                            )
-                           ''')
-            
+                           """)
+
             # NOUVELLE TABLE: project_profiles pour les configurations de projets Turing
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS project_profiles
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -191,10 +194,10 @@ class Database:
                                created_at TEXT NOT NULL,
                                updated_at TEXT NOT NULL
                            )
-                           ''')
+                           """)
 
             # Table pour stocker les références des noeuds Dgraph
-            cursor.execute('''
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS graph_nodes
                            (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -205,12 +208,50 @@ class Database:
                                created_at TEXT NOT NULL,
                                updated_at TEXT NOT NULL
                            )
-                           ''')
-            
+                           """)
+
             # Index pour accélérer les recherches
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_project_name ON graph_nodes (project_name)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_cluster_uid ON graph_nodes (cluster_uid)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_label_uid ON graph_nodes (label_uid)')
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_project_name ON graph_nodes (project_name)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cluster_uid ON graph_nodes (cluster_uid)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_label_uid ON graph_nodes (label_uid)"
+            )
+
+            # Création de la table des projets dataset
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS dataset_project (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                name TEXT NOT NULL,
+                                description TEXT
+                            );
+                            """)
+
+            # Table typologie (appartient à un dataset_project)
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS typology (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                project_id INTEGER NOT NULL,
+                                name TEXT NOT NULL,
+                                is_hierarchical BOOLEAN NOT NULL DEFAULT 0,
+                                FOREIGN KEY (project_id) REFERENCES dataset_project(id)
+                            );
+                            """)
+
+            # Table des labels (taxonomie pour les typologies)
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS label (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                typology_id INTEGER NOT NULL,
+                                parent_id INTEGER, -- NULL si c'est un label root
+                                label_value TEXT NOT NULL,
+                                FOREIGN KEY (typology_id) REFERENCES typology(id),
+                                FOREIGN KEY (parent_id) REFERENCES label(id)
+                            );
+                            """)
 
             self.conn.commit()
             logger.info("Initialisation des tables terminée")
@@ -228,7 +269,7 @@ class Database:
             bool: True si la fermeture est réussie, False sinon
         """
         try:
-            if hasattr(self, 'conn') and self.conn:
+            if hasattr(self, "conn") and self.conn:
                 self.conn.close()
                 logger.debug("Connexion à la base de données fermée")
             return True
@@ -259,7 +300,7 @@ class Database:
             "window_position": None,  # None = pas de filtrage par position
             "window_id": None,  # None = pas de fenêtre spécifique mémorisée
             "window_size": None,  # None = pas de contrainte de taille
-            "remember_window": False  # False = ne pas mémoriser la sélection
+            "remember_window": False,  # False = ne pas mémoriser la sélection
         }
 
     def _migrate_browser_config(self, browser_config):
@@ -296,39 +337,48 @@ class Database:
         Migre automatiquement tous les profils existants (plateformes) vers le nouveau format
         """
         try:
-            logger.info("Vérification de la migration des profils de plateformes existants...")
+            logger.info(
+                "Vérification de la migration des profils de plateformes existants..."
+            )
 
             cursor = self.conn.cursor()
-            cursor.execute('SELECT name, profile_data FROM platforms')
+            cursor.execute("SELECT name, profile_data FROM platforms")
             results = cursor.fetchall()
 
             migration_count = 0
 
             for row in results:
                 try:
-                    platform_name = row['name']
-                    profile_data = json.loads(row['profile_data'])
+                    platform_name = row["name"]
+                    profile_data = json.loads(row["profile_data"])
 
                     # Vérifier si la migration est nécessaire
-                    browser_config = profile_data.get('browser', {})
-                    needs_migration = 'window_selection_method' not in browser_config
+                    browser_config = profile_data.get("browser", {})
+                    needs_migration = "window_selection_method" not in browser_config
 
                     if needs_migration:
                         logger.debug(f"Migration du profil {platform_name}...")
 
                         # Migrer la configuration navigateur
-                        profile_data['browser'] = self._migrate_browser_config(browser_config)
+                        profile_data["browser"] = self._migrate_browser_config(
+                            browser_config
+                        )
 
                         # Sauvegarder le profil migré
                         now = datetime.now().isoformat()
-                        profile_json = json.dumps(profile_data, ensure_ascii=False, indent=2)
+                        profile_json = json.dumps(
+                            profile_data, ensure_ascii=False, indent=2
+                        )
 
-                        cursor.execute('''
+                        cursor.execute(
+                            """
                                        UPDATE platforms
                                        SET profile_data = ?,
                                            updated_at   = ?
                                        WHERE name = ?
-                                       ''', (profile_json, now, platform_name))
+                                       """,
+                            (profile_json, now, platform_name),
+                        )
 
                         migration_count += 1
                         logger.debug(f"Profil {platform_name} migré avec succès")
@@ -339,12 +389,16 @@ class Database:
 
             if migration_count > 0:
                 self.conn.commit()
-                logger.info(f"Migration terminée: {migration_count} profils de plateformes migrés")
+                logger.info(
+                    f"Migration terminée: {migration_count} profils de plateformes migrés"
+                )
             else:
                 logger.debug("Aucune migration de plateformes nécessaire")
 
         except Exception as e:
-            logger.error(f"Erreur lors de la migration automatique des plateformes: {str(e)}")
+            logger.error(
+                f"Erreur lors de la migration automatique des plateformes: {str(e)}"
+            )
 
     def validate_browser_config(self, browser_config):
         """
@@ -365,36 +419,44 @@ class Database:
 
             # Valider window_selection_method
             valid_methods = ["auto", "order", "title", "position", "manual"]
-            method = normalized.get('window_selection_method', 'auto')
+            method = normalized.get("window_selection_method", "auto")
             if method not in valid_methods:
-                normalized['window_selection_method'] = 'auto'
-                logger.warning(f"Méthode de sélection invalide '{method}', fallback sur 'auto'")
+                normalized["window_selection_method"] = "auto"
+                logger.warning(
+                    f"Méthode de sélection invalide '{method}', fallback sur 'auto'"
+                )
 
             # Valider window_order
-            order = normalized.get('window_order', 1)
+            order = normalized.get("window_order", 1)
             if not isinstance(order, int) or order < 1:
-                normalized['window_order'] = 1
+                normalized["window_order"] = 1
                 logger.warning(f"Ordre de fenêtre invalide '{order}', fallback sur 1")
 
             # Valider window_title_pattern
-            title_pattern = normalized.get('window_title_pattern')
+            title_pattern = normalized.get("window_title_pattern")
             if title_pattern is not None and not isinstance(title_pattern, str):
-                normalized['window_title_pattern'] = ""
+                normalized["window_title_pattern"] = ""
                 logger.warning("Pattern de titre invalide, réinitialisé")
 
             # Valider window_position
-            position = normalized.get('window_position')
+            position = normalized.get("window_position")
             if position is not None:
-                if not isinstance(position, dict) or 'x' not in position or 'y' not in position:
-                    normalized['window_position'] = None
+                if (
+                    not isinstance(position, dict)
+                    or "x" not in position
+                    or "y" not in position
+                ):
+                    normalized["window_position"] = None
                     logger.warning("Position de fenêtre invalide, réinitialisée")
                 else:
                     try:
-                        normalized['window_position']['x'] = int(position['x'])
-                        normalized['window_position']['y'] = int(position['y'])
+                        normalized["window_position"]["x"] = int(position["x"])
+                        normalized["window_position"]["y"] = int(position["y"])
                     except (ValueError, TypeError):
-                        normalized['window_position'] = None
-                        logger.warning("Coordonnées de position invalides, réinitialisées")
+                        normalized["window_position"] = None
+                        logger.warning(
+                            "Coordonnées de position invalides, réinitialisées"
+                        )
 
             # S'assurer que tous les champs requis existent
             default_config = self._get_default_browser_config()
@@ -424,19 +486,21 @@ class Database:
             if not profile:
                 return None
 
-            browser_config = profile.get('browser', {})
+            browser_config = profile.get("browser", {})
 
             return {
-                'method': browser_config.get('window_selection_method', 'auto'),
-                'order': browser_config.get('window_order', 1),
-                'title_pattern': browser_config.get('window_title_pattern', ''),
-                'position': browser_config.get('window_position'),
-                'window_id': browser_config.get('window_id'),
-                'remember_window': browser_config.get('remember_window', False)
+                "method": browser_config.get("window_selection_method", "auto"),
+                "order": browser_config.get("window_order", 1),
+                "title_pattern": browser_config.get("window_title_pattern", ""),
+                "position": browser_config.get("window_position"),
+                "window_id": browser_config.get("window_id"),
+                "remember_window": browser_config.get("remember_window", False),
             }
 
         except Exception as e:
-            logger.error(f"Erreur récupération info sélection fenêtre {platform_name}: {str(e)}")
+            logger.error(
+                f"Erreur récupération info sélection fenêtre {platform_name}: {str(e)}"
+            )
             return None
 
     def update_window_selection(self, platform_name, selection_info):
@@ -453,38 +517,44 @@ class Database:
         try:
             profile = self.get_platform(platform_name)
             if not profile:
-                logger.error(f"Plateforme {platform_name} non trouvée pour mise à jour sélection fenêtre")
+                logger.error(
+                    f"Plateforme {platform_name} non trouvée pour mise à jour sélection fenêtre"
+                )
                 return False
 
             # Mettre à jour la configuration navigateur
-            browser_config = profile.get('browser', {})
+            browser_config = profile.get("browser", {})
 
-            if 'method' in selection_info:
-                browser_config['window_selection_method'] = selection_info['method']
-            if 'order' in selection_info:
-                browser_config['window_order'] = selection_info['order']
-            if 'title_pattern' in selection_info:
-                browser_config['window_title_pattern'] = selection_info['title_pattern']
-            if 'position' in selection_info:
-                browser_config['window_position'] = selection_info['position']
-            if 'window_id' in selection_info:
-                browser_config['window_id'] = selection_info['window_id']
-            if 'remember_window' in selection_info:
-                browser_config['remember_window'] = selection_info['remember_window']
+            if "method" in selection_info:
+                browser_config["window_selection_method"] = selection_info["method"]
+            if "order" in selection_info:
+                browser_config["window_order"] = selection_info["order"]
+            if "title_pattern" in selection_info:
+                browser_config["window_title_pattern"] = selection_info["title_pattern"]
+            if "position" in selection_info:
+                browser_config["window_position"] = selection_info["position"]
+            if "window_id" in selection_info:
+                browser_config["window_id"] = selection_info["window_id"]
+            if "remember_window" in selection_info:
+                browser_config["remember_window"] = selection_info["remember_window"]
 
             # Valider la configuration
-            is_valid, normalized_config, error = self.validate_browser_config(browser_config)
+            is_valid, normalized_config, error = self.validate_browser_config(
+                browser_config
+            )
             if not is_valid:
                 logger.error(f"Configuration invalide: {error}")
                 return False
 
-            profile['browser'] = normalized_config
+            profile["browser"] = normalized_config
 
             # Sauvegarder
             return self.save_platform(platform_name, profile)
 
         except Exception as e:
-            logger.error(f"Erreur mise à jour sélection fenêtre {platform_name}: {str(e)}")
+            logger.error(
+                f"Erreur mise à jour sélection fenêtre {platform_name}: {str(e)}"
+            )
             return False
 
     # =====================================================
@@ -506,15 +576,19 @@ class Database:
             logger.debug(f"Sauvegarde plateforme {platform_name} en base de données")
 
             # Validation et normalisation de la configuration navigateur
-            if 'browser' in profile_data:
-                is_valid, normalized_browser, error = self.validate_browser_config(profile_data['browser'])
+            if "browser" in profile_data:
+                is_valid, normalized_browser, error = self.validate_browser_config(
+                    profile_data["browser"]
+                )
                 if not is_valid:
-                    logger.error(f"Configuration navigateur invalide pour {platform_name}: {error}")
+                    logger.error(
+                        f"Configuration navigateur invalide pour {platform_name}: {error}"
+                    )
                     return False
-                profile_data['browser'] = normalized_browser
+                profile_data["browser"] = normalized_browser
             else:
                 # Ajouter configuration par défaut si absente
-                profile_data['browser'] = self._get_default_browser_config()
+                profile_data["browser"] = self._get_default_browser_config()
 
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
@@ -523,24 +597,30 @@ class Database:
             profile_json = json.dumps(profile_data, ensure_ascii=False, indent=2)
 
             # Vérifier si la plateforme existe déjà
-            cursor.execute('SELECT id FROM platforms WHERE name = ?', (platform_name,))
+            cursor.execute("SELECT id FROM platforms WHERE name = ?", (platform_name,))
             existing = cursor.fetchone()
 
             if existing:
                 # Mettre à jour
-                cursor.execute('''
+                cursor.execute(
+                    """
                                UPDATE platforms
                                SET profile_data = ?,
                                    updated_at   = ?
                                WHERE name = ?
-                               ''', (profile_json, now, platform_name))
+                               """,
+                    (profile_json, now, platform_name),
+                )
                 logger.info(f"Profil {platform_name} mis à jour en base de données")
             else:
                 # Créer nouveau
-                cursor.execute('''
+                cursor.execute(
+                    """
                                INSERT INTO platforms (name, profile_data, created_at, updated_at)
                                VALUES (?, ?, ?, ?)
-                               ''', (platform_name, profile_json, now, now))
+                               """,
+                    (platform_name, profile_json, now, now),
+                )
                 logger.info(f"Nouveau profil {platform_name} créé en base de données")
 
             self.conn.commit()
@@ -569,28 +649,35 @@ class Database:
             dict: Profil de la plateforme ou None si non trouvé
         """
         try:
-            logger.debug(f"Récupération plateforme {platform_name} depuis la base de données")
+            logger.debug(
+                f"Récupération plateforme {platform_name} depuis la base de données"
+            )
 
             cursor = self.conn.cursor()
 
-            cursor.execute('SELECT profile_data FROM platforms WHERE name = ?', (platform_name,))
+            cursor.execute(
+                "SELECT profile_data FROM platforms WHERE name = ?", (platform_name,)
+            )
             result = cursor.fetchone()
 
             if result:
                 # Décoder le JSON
-                profile_data = json.loads(result['profile_data'])
+                profile_data = json.loads(result["profile_data"])
 
                 # Migration automatique si nécessaire
-                browser_config = profile_data.get('browser', {})
-                if 'window_selection_method' not in browser_config:
+                browser_config = profile_data.get("browser", {})
+                if "window_selection_method" not in browser_config:
                     logger.debug(f"Migration automatique du profil {platform_name}")
-                    profile_data['browser'] = self._migrate_browser_config(browser_config)
+                    profile_data["browser"] = self._migrate_browser_config(
+                        browser_config
+                    )
 
                     # Sauvegarder la version migrée
                     self.save_platform(platform_name, profile_data)
 
                 logger.debug(
-                    f"Profil {platform_name} récupéré depuis la base (taille: {len(str(profile_data))} caractères)")
+                    f"Profil {platform_name} récupéré depuis la base (taille: {len(str(profile_data))} caractères)"
+                )
 
                 return profile_data
             else:
@@ -610,7 +697,7 @@ class Database:
         """
         try:
             cursor = self.conn.cursor()
-            cursor.execute('SELECT name, profile_data FROM platforms')
+            cursor.execute("SELECT name, profile_data FROM platforms")
             results = cursor.fetchall()
 
             platforms = {}
@@ -618,25 +705,32 @@ class Database:
 
             for row in results:
                 try:
-                    platform_name = row['name']
-                    profile_data = json.loads(row['profile_data'])
+                    platform_name = row["name"]
+                    profile_data = json.loads(row["profile_data"])
 
                     # Migration automatique si nécessaire
-                    browser_config = profile_data.get('browser', {})
-                    if 'window_selection_method' not in browser_config:
+                    browser_config = profile_data.get("browser", {})
+                    if "window_selection_method" not in browser_config:
                         logger.debug(f"Migration automatique du profil {platform_name}")
-                        profile_data['browser'] = self._migrate_browser_config(browser_config)
+                        profile_data["browser"] = self._migrate_browser_config(
+                            browser_config
+                        )
                         migration_needed = True
 
                         # Sauvegarder la version migrée
                         now = datetime.now().isoformat()
-                        profile_json = json.dumps(profile_data, ensure_ascii=False, indent=2)
-                        cursor.execute('''
+                        profile_json = json.dumps(
+                            profile_data, ensure_ascii=False, indent=2
+                        )
+                        cursor.execute(
+                            """
                                        UPDATE platforms
                                        SET profile_data = ?,
                                            updated_at   = ?
                                        WHERE name = ?
-                                       ''', (profile_json, now, platform_name))
+                                       """,
+                            (profile_json, now, platform_name),
+                        )
 
                     platforms[platform_name] = profile_data
 
@@ -666,11 +760,13 @@ class Database:
         """
         try:
             cursor = self.conn.cursor()
-            cursor.execute('SELECT id FROM platforms WHERE name = ?', (platform_name,))
+            cursor.execute("SELECT id FROM platforms WHERE name = ?", (platform_name,))
             return cursor.fetchone() is not None
 
         except Exception as e:
-            logger.error(f"Erreur vérification existence plateforme {platform_name}: {str(e)}")
+            logger.error(
+                f"Erreur vérification existence plateforme {platform_name}: {str(e)}"
+            )
             return False
 
     def was_platform_deleted(self, platform_name):
@@ -698,14 +794,16 @@ class Database:
         """
         try:
             cursor = self.conn.cursor()
-            cursor.execute('DELETE FROM platforms WHERE name = ?', (platform_name,))
+            cursor.execute("DELETE FROM platforms WHERE name = ?", (platform_name,))
 
             if cursor.rowcount > 0:
                 self.conn.commit()
                 logger.info(f"Plateforme {platform_name} supprimée de la base")
                 return True
             else:
-                logger.warning(f"Plateforme {platform_name} non trouvée pour suppression")
+                logger.warning(
+                    f"Plateforme {platform_name} non trouvée pour suppression"
+                )
                 return False
 
         except Exception as e:
@@ -728,32 +826,48 @@ class Database:
             bool: True si sauvegarde réussie, False sinon.
         """
         try:
-            logger.debug(f"Sauvegarde du profil de projet '{project_name}' en base de données.")
+            logger.debug(
+                f"Sauvegarde du profil de projet '{project_name}' en base de données."
+            )
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
             profile_json = json.dumps(profile_data, ensure_ascii=False, indent=2)
 
-            cursor.execute('SELECT id FROM project_profiles WHERE name = ?', (project_name,))
+            cursor.execute(
+                "SELECT id FROM project_profiles WHERE name = ?", (project_name,)
+            )
             existing = cursor.fetchone()
 
             if existing:
-                cursor.execute('''
+                cursor.execute(
+                    """
                                UPDATE project_profiles
                                SET profile_data = ?,
                                    updated_at   = ?
                                WHERE name = ?
-                               ''', (profile_json, now, project_name))
-                logger.info(f"Profil de projet '{project_name}' mis à jour en base de données.")
+                               """,
+                    (profile_json, now, project_name),
+                )
+                logger.info(
+                    f"Profil de projet '{project_name}' mis à jour en base de données."
+                )
             else:
-                cursor.execute('''
+                cursor.execute(
+                    """
                                INSERT INTO project_profiles (name, profile_data, created_at, updated_at)
                                VALUES (?, ?, ?, ?)
-                               ''', (project_name, profile_json, now, now))
-                logger.info(f"Nouveau profil de projet '{project_name}' créé en base de données.")
+                               """,
+                    (project_name, profile_json, now, now),
+                )
+                logger.info(
+                    f"Nouveau profil de projet '{project_name}' créé en base de données."
+                )
             self.conn.commit()
             return True
         except Exception as e:
-            logger.error(f"Erreur lors de la sauvegarde du profil de projet '{project_name}': {str(e)}")
+            logger.error(
+                f"Erreur lors de la sauvegarde du profil de projet '{project_name}': {str(e)}"
+            )
             return False
 
     def get_project_profile(self, project_name):
@@ -767,17 +881,26 @@ class Database:
             dict: Profil du projet ou None si non trouvé.
         """
         try:
-            logger.debug(f"Récupération du profil de projet '{project_name}' depuis la base de données.")
+            logger.debug(
+                f"Récupération du profil de projet '{project_name}' depuis la base de données."
+            )
             cursor = self.conn.cursor()
-            cursor.execute('SELECT profile_data FROM project_profiles WHERE name = ?', (project_name,))
+            cursor.execute(
+                "SELECT profile_data FROM project_profiles WHERE name = ?",
+                (project_name,),
+            )
             result = cursor.fetchone()
             if result:
-                return json.loads(result['profile_data'])
+                return json.loads(result["profile_data"])
             else:
-                logger.debug(f"Profil de projet '{project_name}' non trouvé en base de données.")
+                logger.debug(
+                    f"Profil de projet '{project_name}' non trouvé en base de données."
+                )
                 return None
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération du profil de projet '{project_name}': {str(e)}")
+            logger.error(
+                f"Erreur lors de la récupération du profil de projet '{project_name}': {str(e)}"
+            )
             return None
 
     def get_all_project_profiles(self):
@@ -788,20 +911,26 @@ class Database:
             dict: Dictionnaire des profils {nom_projet: données_profil}.
         """
         try:
-            logger.debug("Récupération de tous les profils de projets depuis la base de données.")
+            logger.debug(
+                "Récupération de tous les profils de projets depuis la base de données."
+            )
             cursor = self.conn.cursor()
-            cursor.execute('SELECT name, profile_data FROM project_profiles')
+            cursor.execute("SELECT name, profile_data FROM project_profiles")
             results = cursor.fetchall()
             profiles = {}
             for row in results:
                 try:
-                    profiles[row['name']] = json.loads(row['profile_data'])
+                    profiles[row["name"]] = json.loads(row["profile_data"])
                 except Exception as e:
-                    logger.error(f"Erreur décodage profil de projet '{row['name']}': {str(e)}")
+                    logger.error(
+                        f"Erreur décodage profil de projet '{row['name']}': {str(e)}"
+                    )
             logger.debug(f"{len(profiles)} profils de projets récupérés.")
             return profiles
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération de tous les profils de projets: {str(e)}")
+            logger.error(
+                f"Erreur lors de la récupération de tous les profils de projets: {str(e)}"
+            )
             return {}
 
     def delete_project_profile(self, project_name):
@@ -815,16 +944,24 @@ class Database:
             bool: True si la suppression est réussie, False sinon.
         """
         try:
-            logger.debug(f"Tentative de suppression du projet '{project_name}' et de ses noeuds associés.")
+            logger.debug(
+                f"Tentative de suppression du projet '{project_name}' et de ses noeuds associés."
+            )
             cursor = self.conn.cursor()
 
             # Étape 1: Supprimer les noeuds de graphe associés au projet
-            cursor.execute('DELETE FROM graph_nodes WHERE project_name = ?', (project_name,))
+            cursor.execute(
+                "DELETE FROM graph_nodes WHERE project_name = ?", (project_name,)
+            )
             nodes_deleted_count = cursor.rowcount
-            logger.info(f"{nodes_deleted_count} noeuds de graphe associés à '{project_name}' ont été supprimés.")
+            logger.info(
+                f"{nodes_deleted_count} noeuds de graphe associés à '{project_name}' ont été supprimés."
+            )
 
             # Étape 2: Supprimer le profil du projet
-            cursor.execute('DELETE FROM project_profiles WHERE name = ?', (project_name,))
+            cursor.execute(
+                "DELETE FROM project_profiles WHERE name = ?", (project_name,)
+            )
             project_deleted_count = cursor.rowcount
 
             if project_deleted_count > 0:
@@ -834,12 +971,16 @@ class Database:
             else:
                 # Si le projet n'existait pas, on annule la suppression des noeuds
                 self.conn.rollback()
-                logger.warning(f"Profil de projet '{project_name}' non trouvé pour suppression.")
+                logger.warning(
+                    f"Profil de projet '{project_name}' non trouvé pour suppression."
+                )
                 return False
 
         except Exception as e:
             self.conn.rollback()
-            logger.error(f"Erreur lors de la suppression du profil de projet '{project_name}': {str(e)}")
+            logger.error(
+                f"Erreur lors de la suppression du profil de projet '{project_name}': {str(e)}"
+            )
             return False
 
     # =====================================================
@@ -863,24 +1004,31 @@ class Database:
             now = datetime.now().isoformat()
 
             # Désactiver l'ancienne configuration
-            cursor.execute('UPDATE keyboard_config SET is_active = 0 WHERE is_active = 1')
+            cursor.execute(
+                "UPDATE keyboard_config SET is_active = 0 WHERE is_active = 1"
+            )
 
             # Insérer la nouvelle configuration
-            cursor.execute('''
+            cursor.execute(
+                """
                            INSERT INTO keyboard_config (layout_type, key_delay, accent_delay, accent_method,
                                                         block_alt_tab, focus_lock, protection_timeout,
                                                         created_at, updated_at, is_active)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                           ''', (
-                               config_data.get('layout', 'AZERTY (Français)'),
-                               config_data.get('key_delay', 50),
-                               config_data.get('accent_delay', 100),
-                               config_data.get('accent_method', 'direct'),
-                               config_data.get('block_alt_tab', True),
-                               config_data.get('focus_lock', True),
-                               config_data.get('protection_timeout', 30),
-                               now, now, True
-                           ))
+                           """,
+                (
+                    config_data.get("layout", "AZERTY (Français)"),
+                    config_data.get("key_delay", 50),
+                    config_data.get("accent_delay", 100),
+                    config_data.get("accent_method", "direct"),
+                    config_data.get("block_alt_tab", True),
+                    config_data.get("focus_lock", True),
+                    config_data.get("protection_timeout", 30),
+                    now,
+                    now,
+                    True,
+                ),
+            )
 
             self.conn.commit()
             logger.info("Configuration clavier sauvegardée")
@@ -899,26 +1047,26 @@ class Database:
         """
         try:
             cursor = self.conn.cursor()
-            cursor.execute('''
+            cursor.execute("""
                            SELECT *
                            FROM keyboard_config
                            WHERE is_active = 1
                            ORDER BY updated_at DESC LIMIT 1
-                           ''')
+                           """)
 
             result = cursor.fetchone()
 
             if result:
                 config_data = {
-                    'layout': result['layout_type'],
-                    'key_delay': result['key_delay'],
-                    'accent_delay': result['accent_delay'],
-                    'accent_method': result['accent_method'],
-                    'block_alt_tab': bool(result['block_alt_tab']),
-                    'focus_lock': bool(result['focus_lock']),
-                    'protection_timeout': result['protection_timeout'],
-                    'created_at': result['created_at'],
-                    'updated_at': result['updated_at']
+                    "layout": result["layout_type"],
+                    "key_delay": result["key_delay"],
+                    "accent_delay": result["accent_delay"],
+                    "accent_method": result["accent_method"],
+                    "block_alt_tab": bool(result["block_alt_tab"]),
+                    "focus_lock": bool(result["focus_lock"]),
+                    "protection_timeout": result["protection_timeout"],
+                    "created_at": result["created_at"],
+                    "updated_at": result["updated_at"],
                 }
 
                 logger.debug("Configuration clavier récupérée")
@@ -949,15 +1097,20 @@ class Database:
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
 
-            cursor.execute('''
+            cursor.execute(
+                """
                            INSERT INTO ai_sessions (platform_name, session_date, status)
                            VALUES (?, ?, ?)
-                           ''', (platform_name, now, 'active'))
+                           """,
+                (platform_name, now, "active"),
+            )
 
             self.conn.commit()
             session_id = cursor.lastrowid
 
-            logger.debug(f"Nouvelle session créée pour {platform_name}, ID: {session_id}")
+            logger.debug(
+                f"Nouvelle session créée pour {platform_name}, ID: {session_id}"
+            )
             return session_id
 
         except Exception as e:
@@ -981,18 +1134,24 @@ class Database:
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
 
-            cursor.execute('''
+            cursor.execute(
+                """
                            INSERT INTO prompts (session_id, timestamp, content, token_count, operation_type)
                            VALUES (?, ?, ?, ?, ?)
-                           ''', (session_id, now, content, token_count, operation_type))
+                           """,
+                (session_id, now, content, token_count, operation_type),
+            )
 
             # Mettre à jour les compteurs de la session
-            cursor.execute('''
+            cursor.execute(
+                """
                            UPDATE ai_sessions
                            SET prompt_count = prompt_count + 1,
                                token_count  = token_count + ?
                            WHERE id = ?
-                           ''', (token_count, session_id))
+                           """,
+                (token_count, session_id),
+            )
 
             self.conn.commit()
             prompt_id = cursor.lastrowid
@@ -1004,7 +1163,7 @@ class Database:
             logger.error(f"Erreur lors de l'enregistrement du prompt: {str(e)}")
             raise DatabaseError(f"Échec de l'enregistrement du prompt: {str(e)}")
 
-    def record_response(self, prompt_id, content, status='success'):
+    def record_response(self, prompt_id, content, status="success"):
         """
         Enregistre une réponse reçue
 
@@ -1020,10 +1179,13 @@ class Database:
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
 
-            cursor.execute('''
+            cursor.execute(
+                """
                            INSERT INTO responses (prompt_id, timestamp, content, status)
                            VALUES (?, ?, ?, ?)
-                           ''', (prompt_id, now, content, status))
+                           """,
+                (prompt_id, now, content, status),
+            )
 
             self.conn.commit()
             response_id = cursor.lastrowid
@@ -1098,10 +1260,13 @@ class Database:
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
 
-            cursor.execute('''
+            cursor.execute(
+                """
                            INSERT INTO datasets (name, creation_date, type, format, item_count, filepath)
                            VALUES (?, ?, ?, ?, ?, ?)
-                           ''', (name, now, dataset_type, format, item_count, filepath))
+                           """,
+                (name, now, dataset_type, format, item_count, filepath),
+            )
 
             self.conn.commit()
             dataset_id = cursor.lastrowid
@@ -1132,10 +1297,13 @@ class Database:
             # Convertir la liste des plateformes en JSON
             platforms_json = json.dumps(ai_platforms)
 
-            cursor.execute('''
+            cursor.execute(
+                """
                            INSERT INTO brainstorming_sessions (name, creation_date, ai_platforms, context, status)
                            VALUES (?, ?, ?, ?, ?)
-                           ''', (name, now, platforms_json, context, 'in_progress'))
+                           """,
+                (name, now, platforms_json, context, "in_progress"),
+            )
 
             self.conn.commit()
             session_id = cursor.lastrowid
@@ -1144,10 +1312,16 @@ class Database:
             return session_id
 
         except Exception as e:
-            logger.error(f"Erreur lors de la création de session de brainstorming: {str(e)}")
-            raise DatabaseError(f"Échec de la création de session de brainstorming: {str(e)}")
+            logger.error(
+                f"Erreur lors de la création de session de brainstorming: {str(e)}"
+            )
+            raise DatabaseError(
+                f"Échec de la création de session de brainstorming: {str(e)}"
+            )
 
-    def record_brainstorming_result(self, session_id, platform_name, solution, evaluations=None, final_score=None):
+    def record_brainstorming_result(
+        self, session_id, platform_name, solution, evaluations=None, final_score=None
+    ):
         """
         Enregistre un résultat de brainstorming
 
@@ -1167,10 +1341,13 @@ class Database:
             # Convertir les évaluations en JSON si présentes
             evaluations_json = json.dumps(evaluations) if evaluations else None
 
-            cursor.execute('''
+            cursor.execute(
+                """
                            INSERT INTO brainstorming_results (session_id, platform_name, solution, evaluations, final_score)
                            VALUES (?, ?, ?, ?, ?)
-                           ''', (session_id, platform_name, solution, evaluations_json, final_score))
+                           """,
+                (session_id, platform_name, solution, evaluations_json, final_score),
+            )
 
             self.conn.commit()
             result_id = cursor.lastrowid
@@ -1196,11 +1373,14 @@ class Database:
         try:
             cursor = self.conn.cursor()
 
-            cursor.execute('''
+            cursor.execute(
+                """
                            UPDATE brainstorming_sessions
                            SET status = ?
                            WHERE id = ?
-                           ''', (status, session_id))
+                           """,
+                (status, session_id),
+            )
 
             self.conn.commit()
 
@@ -1210,7 +1390,6 @@ class Database:
         except Exception as e:
             logger.error(f"Erreur lors de la mise à jour du statut: {str(e)}")
             raise DatabaseError(f"Échec de la mise à jour du statut: {str(e)}")
-
 
     # =====================================================
     # MÉTHODES POUR GESTION DES RÉFÉRENCES DE NOEUDS DGRAPH
@@ -1232,19 +1411,28 @@ class Database:
         try:
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
-            cursor.execute('''
+            cursor.execute(
+                """
                            INSERT INTO graph_nodes (project_name, dgraph_uid, cluster_uid, label_uid, created_at, updated_at)
                            VALUES (?, ?, ?, ?, ?, ?)
-                           ''', (project_name, dgraph_uid, cluster_uid, label_uid, now, now))
+                           """,
+                (project_name, dgraph_uid, cluster_uid, label_uid, now, now),
+            )
             self.conn.commit()
             node_id = cursor.lastrowid
-            logger.debug(f"Référence de noeud Dgraph ajoutée pour UID {dgraph_uid} au projet {project_name}, ID local: {node_id}")
+            logger.debug(
+                f"Référence de noeud Dgraph ajoutée pour UID {dgraph_uid} au projet {project_name}, ID local: {node_id}"
+            )
             return node_id
         except Exception as e:
-            logger.error(f"Erreur lors de l'ajout de la référence de noeud {dgraph_uid}: {str(e)}")
+            logger.error(
+                f"Erreur lors de l'ajout de la référence de noeud {dgraph_uid}: {str(e)}"
+            )
             raise DatabaseError(f"Échec de l'ajout de la référence de noeud: {str(e)}")
 
-    def update_node_reference(self, dgraph_uid, new_cluster_uid=None, new_label_uid=None):
+    def update_node_reference(
+        self, dgraph_uid, new_cluster_uid=None, new_label_uid=None
+    ):
         """
         Met à jour la référence d'un noeud Dgraph.
 
@@ -1259,20 +1447,22 @@ class Database:
         try:
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
-            
+
             updates = []
             params = []
 
             if new_cluster_uid is not None:
                 updates.append("cluster_uid = ?")
                 params.append(new_cluster_uid)
-            
+
             if new_label_uid is not None:
                 updates.append("label_uid = ?")
                 params.append(new_label_uid)
 
             if not updates:
-                logger.warning("Aucune mise à jour spécifiée pour le noeud {dgraph_uid}")
+                logger.warning(
+                    "Aucune mise à jour spécifiée pour le noeud {dgraph_uid}"
+                )
                 return False
 
             updates.append("updated_at = ?")
@@ -1280,13 +1470,15 @@ class Database:
             params.append(dgraph_uid)
 
             query = f"UPDATE graph_nodes SET {', '.join(updates)} WHERE dgraph_uid = ?"
-            
+
             cursor.execute(query, tuple(params))
             self.conn.commit()
             logger.info(f"Référence du noeud {dgraph_uid} mise à jour.")
             return True
         except Exception as e:
-            logger.error(f"Erreur lors de la mise à jour de la référence du noeud {dgraph_uid}: {str(e)}")
+            logger.error(
+                f"Erreur lors de la mise à jour de la référence du noeud {dgraph_uid}: {str(e)}"
+            )
             return False
 
     def delete_node_reference(self, dgraph_uid):
@@ -1301,16 +1493,22 @@ class Database:
         """
         try:
             cursor = self.conn.cursor()
-            cursor.execute('DELETE FROM graph_nodes WHERE dgraph_uid = ?', (dgraph_uid,))
+            cursor.execute(
+                "DELETE FROM graph_nodes WHERE dgraph_uid = ?", (dgraph_uid,)
+            )
             if cursor.rowcount > 0:
                 self.conn.commit()
                 logger.info(f"Référence du noeud {dgraph_uid} supprimée.")
                 return True
             else:
-                logger.warning(f"Référence du noeud {dgraph_uid} non trouvée pour suppression.")
+                logger.warning(
+                    f"Référence du noeud {dgraph_uid} non trouvée pour suppression."
+                )
                 return False
         except Exception as e:
-            logger.error(f"Erreur lors de la suppression de la référence du noeud {dgraph_uid}: {str(e)}")
+            logger.error(
+                f"Erreur lors de la suppression de la référence du noeud {dgraph_uid}: {str(e)}"
+            )
             return False
 
     def get_nodes_by_cluster(self, cluster_uid):
@@ -1325,11 +1523,15 @@ class Database:
         """
         try:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT * FROM graph_nodes WHERE cluster_uid = ?", (cluster_uid,))
+            cursor.execute(
+                "SELECT * FROM graph_nodes WHERE cluster_uid = ?", (cluster_uid,)
+            )
             results = cursor.fetchall()
             return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération des noeuds pour le cluster {cluster_uid}: {str(e)}")
+            logger.error(
+                f"Erreur lors de la récupération des noeuds pour le cluster {cluster_uid}: {str(e)}"
+            )
             return []
 
     def get_nodes_by_label(self, label_uid):
@@ -1344,11 +1546,15 @@ class Database:
         """
         try:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT * FROM graph_nodes WHERE label_uid = ?", (label_uid,))
+            cursor.execute(
+                "SELECT * FROM graph_nodes WHERE label_uid = ?", (label_uid,)
+            )
             results = cursor.fetchall()
             return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération des noeuds pour le label {label_uid}: {str(e)}")
+            logger.error(
+                f"Erreur lors de la récupération des noeuds pour le label {label_uid}: {str(e)}"
+            )
             return []
 
     def get_node_reference(self, dgraph_uid):
@@ -1363,10 +1569,153 @@ class Database:
         """
         try:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT * FROM graph_nodes WHERE dgraph_uid = ?", (dgraph_uid,))
+            cursor.execute(
+                "SELECT * FROM graph_nodes WHERE dgraph_uid = ?", (dgraph_uid,)
+            )
             result = cursor.fetchone()
             return dict(result) if result else None
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération de la référence du noeud {dgraph_uid}: {str(e)}")
+            logger.error(
+                f"Erreur lors de la récupération de la référence du noeud {dgraph_uid}: {str(e)}"
+            )
             return None
 
+    # =====================================================
+    # MÉTHODES POUR GESTION DES  DATASETS_PROJECTS
+    # =====================================================
+
+    def save_dataset_projet(self, nom, description):
+        try:
+            logger.debug(f"Sauvegarde projet dataset: {nom}")
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+
+            cursor.execute("SELECT id FROM dataset_project WHERE nom = ?", (nom,))
+            existing = cursor.fetchone()
+
+            if existing:
+                cursor.execute(
+                    """
+                    UPDATE dataset_project
+                    SET description = ?, updated_at = ?
+                    WHERE nom = ?
+                """,
+                    (description, now, nom),
+                )
+                logger.info(f"Dataset projet {nom} mis à jour")
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO dataset_project (nom, description, created_at, updated_at)
+                    VALUES (?, ?, ?, ?)
+                """,
+                    (nom, description, now, now),
+                )
+                logger.info(f"Nouveau projet de dataset {nom} créé")
+
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde projet de dataset {nom}: {str(e)}")
+            return False
+
+    def get_dataset_projet(self, nom):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM dataset_project WHERE nom = ?", (nom,))
+        return cursor.fetchone()
+
+    def delete_dataset_project(self, project_id):
+        try:
+            logger.debug(f"Delete project ID {project_id}")
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM dataset_project WHERE id = ?", (project_id,))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting project ID {project_id}: {e}")
+            return False
+
+    # =====================================================
+    # MÉTHODES POUR GESTION DES  TYPOLOGIES CONTEXT
+    # =====================================================
+
+    def save_typology(self, project_id, name, is_hierarchical=False):
+        try:
+            logger.debug(f"Save typology: {name}")
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO typology (project_id, name, is_hierarchical, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                (project_id, name, int(is_hierarchical), now, now),
+            )
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving typology '{name}': {e}")
+            return False
+
+    def get_typologies(self, project_id):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM typology WHERE project_id = ?", (project_id,))
+        return cursor.fetchall()
+
+    def delete_typology(self, typology_id):
+        try:
+            logger.debug(f"Delete typology ID {typology_id}")
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM typology WHERE id = ?", (typology_id,))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting typology ID {typology_id}: {e}")
+            return False
+
+    # =====================================================
+    # MÉTHODES POUR GESTION DES  TAXIONOMIES ET LABELS
+    # =====================================================
+
+    def save_label(self, typology_id, label_value, parent_id=None):
+        try:
+            logger.debug(f"Save label: {label_value}")
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO label (typology_id, parent_id, label_value, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                (typology_id, parent_id, label_value, now, now),
+            )
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving label '{label_value}': {e}")
+            return False
+
+    def get_labels(self, typology_id, parent_id=None):
+        cursor = self.conn.cursor()
+        if parent_id is None:
+            cursor.execute(
+                "SELECT * FROM label WHERE typology_id = ? AND parent_id IS NULL",
+                (typology_id,),
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM label WHERE typology_id = ? AND parent_id = ?",
+                (typology_id, parent_id),
+            )
+        return cursor.fetchall()
+
+    def delete_label(self, label_id):
+        try:
+            logger.debug(f"Delete label ID {label_id}")
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM label WHERE id = ?", (label_id,))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting label ID {label_id}: {e}")
+            return False
