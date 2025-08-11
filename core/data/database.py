@@ -193,6 +193,25 @@ class Database:
                            )
                            ''')
 
+            # Table pour stocker les références des noeuds Dgraph
+            cursor.execute('''
+                           CREATE TABLE IF NOT EXISTS graph_nodes
+                           (
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               project_name TEXT NOT NULL,
+                               dgraph_uid TEXT NOT NULL UNIQUE,
+                               cluster_uid TEXT,
+                               label_uid TEXT,
+                               created_at TEXT NOT NULL,
+                               updated_at TEXT NOT NULL
+                           )
+                           ''')
+            
+            # Index pour accélérer les recherches
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_project_name ON graph_nodes (project_name)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_cluster_uid ON graph_nodes (cluster_uid)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_label_uid ON graph_nodes (label_uid)')
+
             self.conn.commit()
             logger.info("Initialisation des tables terminée")
             return True
@@ -787,26 +806,39 @@ class Database:
 
     def delete_project_profile(self, project_name):
         """
-        Supprime un profil de projet de la base de données.
+        Supprime un profil de projet et tous les noeuds de graphe associés.
 
         Args:
             project_name (str): Nom du projet à supprimer.
 
         Returns:
-            bool: True si suppression réussie, False sinon.
+            bool: True si la suppression est réussie, False sinon.
         """
         try:
-            logger.debug(f"Suppression du profil de projet '{project_name}' de la base de données.")
+            logger.debug(f"Tentative de suppression du projet '{project_name}' et de ses noeuds associés.")
             cursor = self.conn.cursor()
+
+            # Étape 1: Supprimer les noeuds de graphe associés au projet
+            cursor.execute('DELETE FROM graph_nodes WHERE project_name = ?', (project_name,))
+            nodes_deleted_count = cursor.rowcount
+            logger.info(f"{nodes_deleted_count} noeuds de graphe associés à '{project_name}' ont été supprimés.")
+
+            # Étape 2: Supprimer le profil du projet
             cursor.execute('DELETE FROM project_profiles WHERE name = ?', (project_name,))
-            if cursor.rowcount > 0:
+            project_deleted_count = cursor.rowcount
+
+            if project_deleted_count > 0:
                 self.conn.commit()
-                logger.info(f"Profil de projet '{project_name}' supprimé de la base.")
+                logger.info(f"Profil de projet '{project_name}' supprimé avec succès.")
                 return True
             else:
+                # Si le projet n'existait pas, on annule la suppression des noeuds
+                self.conn.rollback()
                 logger.warning(f"Profil de projet '{project_name}' non trouvé pour suppression.")
                 return False
+
         except Exception as e:
+            self.conn.rollback()
             logger.error(f"Erreur lors de la suppression du profil de projet '{project_name}': {str(e)}")
             return False
 
@@ -1178,4 +1210,163 @@ class Database:
         except Exception as e:
             logger.error(f"Erreur lors de la mise à jour du statut: {str(e)}")
             raise DatabaseError(f"Échec de la mise à jour du statut: {str(e)}")
+
+
+    # =====================================================
+    # MÉTHODES POUR GESTION DES RÉFÉRENCES DE NOEUDS DGRAPH
+    # =====================================================
+
+    def add_node_reference(self, project_name, dgraph_uid, cluster_uid, label_uid):
+        """
+        Ajoute une référence de noeud Dgraph dans la base de données locale.
+
+        Args:
+            project_name (str): Nom du projet auquel le noeud est associé.
+            dgraph_uid (str): UID du noeud Dgraph.
+            cluster_uid (str): UID du cluster parent.
+            label_uid (str): UID du label associé.
+
+        Returns:
+            int: ID de la référence locale créée.
+        """
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute('''
+                           INSERT INTO graph_nodes (project_name, dgraph_uid, cluster_uid, label_uid, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?)
+                           ''', (project_name, dgraph_uid, cluster_uid, label_uid, now, now))
+            self.conn.commit()
+            node_id = cursor.lastrowid
+            logger.debug(f"Référence de noeud Dgraph ajoutée pour UID {dgraph_uid} au projet {project_name}, ID local: {node_id}")
+            return node_id
+        except Exception as e:
+            logger.error(f"Erreur lors de l'ajout de la référence de noeud {dgraph_uid}: {str(e)}")
+            raise DatabaseError(f"Échec de l'ajout de la référence de noeud: {str(e)}")
+
+    def update_node_reference(self, dgraph_uid, new_cluster_uid=None, new_label_uid=None):
+        """
+        Met à jour la référence d'un noeud Dgraph.
+
+        Args:
+            dgraph_uid (str): UID du noeud à mettre à jour.
+            new_cluster_uid (str, optional): Nouvel UID du cluster.
+            new_label_uid (str, optional): Nouvel UID du label.
+
+        Returns:
+            bool: True si la mise à jour est réussie, False sinon.
+        """
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            updates = []
+            params = []
+
+            if new_cluster_uid is not None:
+                updates.append("cluster_uid = ?")
+                params.append(new_cluster_uid)
+            
+            if new_label_uid is not None:
+                updates.append("label_uid = ?")
+                params.append(new_label_uid)
+
+            if not updates:
+                logger.warning("Aucune mise à jour spécifiée pour le noeud {dgraph_uid}")
+                return False
+
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(dgraph_uid)
+
+            query = f"UPDATE graph_nodes SET {', '.join(updates)} WHERE dgraph_uid = ?"
+            
+            cursor.execute(query, tuple(params))
+            self.conn.commit()
+            logger.info(f"Référence du noeud {dgraph_uid} mise à jour.")
+            return True
+        except Exception as e:
+            logger.error(f"Erreur lors de la mise à jour de la référence du noeud {dgraph_uid}: {str(e)}")
+            return False
+
+    def delete_node_reference(self, dgraph_uid):
+        """
+        Supprime la référence d'un noeud Dgraph.
+
+        Args:
+            dgraph_uid (str): UID du noeud à supprimer.
+
+        Returns:
+            bool: True si la suppression est réussie, False sinon.
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('DELETE FROM graph_nodes WHERE dgraph_uid = ?', (dgraph_uid,))
+            if cursor.rowcount > 0:
+                self.conn.commit()
+                logger.info(f"Référence du noeud {dgraph_uid} supprimée.")
+                return True
+            else:
+                logger.warning(f"Référence du noeud {dgraph_uid} non trouvée pour suppression.")
+                return False
+        except Exception as e:
+            logger.error(f"Erreur lors de la suppression de la référence du noeud {dgraph_uid}: {str(e)}")
+            return False
+
+    def get_nodes_by_cluster(self, cluster_uid):
+        """
+        Récupère toutes les références de noeuds pour un cluster donné.
+
+        Args:
+            cluster_uid (str): UID du cluster.
+
+        Returns:
+            list: Liste de dictionnaires représentant les références de noeuds.
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM graph_nodes WHERE cluster_uid = ?", (cluster_uid,))
+            results = cursor.fetchall()
+            return [dict(row) for row in results]
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des noeuds pour le cluster {cluster_uid}: {str(e)}")
+            return []
+
+    def get_nodes_by_label(self, label_uid):
+        """
+        Récupère toutes les références de noeuds pour un label donné.
+
+        Args:
+            label_uid (str): UID du label.
+
+        Returns:
+            list: Liste de dictionnaires représentant les références de noeuds.
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM graph_nodes WHERE label_uid = ?", (label_uid,))
+            results = cursor.fetchall()
+            return [dict(row) for row in results]
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des noeuds pour le label {label_uid}: {str(e)}")
+            return []
+
+    def get_node_reference(self, dgraph_uid):
+        """
+        Récupère une référence de noeud spécifique par son UID Dgraph.
+
+        Args:
+            dgraph_uid (str): UID du noeud Dgraph.
+
+        Returns:
+            dict: Dictionnaire représentant la référence du noeud, ou None si non trouvé.
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM graph_nodes WHERE dgraph_uid = ?", (dgraph_uid,))
+            result = cursor.fetchone()
+            return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération de la référence du noeud {dgraph_uid}: {str(e)}")
+            return None
 

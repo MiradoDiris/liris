@@ -2,16 +2,21 @@
 # -*- coding: utf-8 -*-
 
 """
-Liris/ui/widgets/tabs/node_creation_widget.py
-Widget pour la création de nœuds dans l'ontologie.
+Liris/ui/widgets/tabs/relation_import_widget.py
+Widget pour la création des arêtes de relation d'import dans l'ontologie.
 """
 
 import os
 import uuid  # Pour générer des UUIDs pour les nœuds de fonction
+import re  # Pour l'extraction des fonctions (si nécessaire, bien que l'IA le fasse)
 import time  # Pour les délais dans l'automatisation du navigateur
 import pyperclip  # Pour la gestion du presse-papiers
 import json  # Pour json.dumps dans les scripts JS
 import traceback  # Pour les traces d'erreurs détaillées
+import ast
+
+from datetime import datetime
+from typing import List, Dict
 
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import (
@@ -176,35 +181,29 @@ class ResultsDialog(QtWidgets.QDialog):
         )
 
 
-class NodeCreationWidget(QtWidgets.QWidget):
-    """
-    Widget pour la création de nœuds (clusters/labels) dans l'ontologie.
-    """
+# --- Classe principale pour l'importation de relations ---
 
+
+class RelationImportWidget(QtWidgets.QWidget):
     def __init__(self, config_provider, conductor, parent=None):
         super().__init__(parent)
         self.config_provider = config_provider
         self.conductor = conductor
         self.current_project_files = []  # Pour stocker les fichiers (labels de type 'file') du projet sélectionné
-        self.platforms = {}  # Pour stocker les profils des plateformes IA disponibles
+        self.platforms = {}  # Pour stocker les plateformes disponibles
 
-        # Initialiser le générateur de sélecteurs universel
+        ## Initialisation du générateur de sélecteurs universel
         self.selector_generator = UniversalSelectorGenerator()
 
         self._init_ui()
         self._populate_project_selection()  # Remplir la sélection de projets au démarrage
-        self._populate_platform_selection()  # Remplir la sélection des plateformes IA au démarrage
+        self._populate_platform_selection()  # Remplir la sélection de plateformes au démarrage
 
     def _init_ui(self):
         """Initialise l'interface utilisateur du widget de création de nœuds."""
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
-
-        # # Titre de l'onglet
-        # title_label = QtWidgets.QLabel("Gestion des Nœuds d'Ontologie")
-        # title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #333333;")
-        # main_layout.addWidget(title_label)
 
         # Section de sélection de projet
         project_selection_group = QtWidgets.QGroupBox("Sélection du Projet")
@@ -585,82 +584,187 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 item_text = f"{file_info['name']} (Catégories: {categories_str if categories_str else 'N/A'})"
                 self.file_list_widget.addItem(item_text)
 
-    # def extract_imports_from_code(self, code: str) -> List[str]:
-    #     """
-    #     Extrait les modules importés dans un fichier Python donné (sans duplication).
-    #     """
-    #     modules = set()
-    #     try:
-    #         tree = ast.parse(code)
-    #         for node in ast.walk(tree):
-    #             if isinstance(node, ast.Import):
-    #                 modules.update(alias.name.split(".")[0] for alias in node.names)
-    #             elif isinstance(node, ast.ImportFrom) and node.module:
-    #                 modules.add(node.module.split(".")[0])
-    #     except Exception as e:
-    #         print(f"[Erreur AST] {e}")
-    #     return list(modules)
+    def extract_module_name(self, import_path: str) -> str:
+        """
+        Extrait le nom du fichier ou module à partir du chemin d'import.
+        """
+        clean = import_path.strip().replace("\\", "/")
+        self._debug_log(f"Extraction du nom du module à partir du chemin: {clean}")
+        name = clean.split("/")[-1]
+        self._debug_log(f"Nom extrait: {name}")
+        if "." in name:
+            name = name.split(".")[0]
+            self._debug_log(f"Nom sans extension: {name}")
+        return name
 
-    # def match_imports_to_files(
-    #     self, imports: List[str], project_files: List[Dict]
-    # ) -> Dict[str, str]:
-    #     """
-    #     Associe chaque module importé à l'ID du fichier correspondant dans le projet.
-    #     Retourne un dict: {nom_module: id_du_fichier}
-    #     """
-    #     matched = {}
-    #     for imp in imports:
-    #         for file_info in project_files:
-    #             file_name = file_info.get("name", "")
-    #             base_name = os.path.splitext(file_name)[0]
-    #             if base_name == imp:
-    #                 matched[imp] = file_info["id"]
-    #                 break
-    #     return matched
+    def extract_imports_from_code(self, file_name: str, code: str) -> List[str]:
+        """
+        Extrait les modules importés dans un fichier, selon son langage détecté dynamiquement.
+        """
+        ext = file_name.lower().split(".")[-1]
+        self._debug_log(f"Extrait les modules importés dans {file_name} ({ext})")
 
-    # def generate_import_edges_for_file(
-    #     self, file_info: Dict, project_files: List[Dict], user_id: str
-    # ) -> List[Dict]:
-    #     """
-    #     Génère les arêtes de type 'IMPORTS' à partir des imports dans file_info['full_path']
-    #     """
-    #     edges = []
-    #     file_path = file_info.get("full_path")
-    #     source_id = file_info.get("id")
+        self._debug_log(
+            f"Code extrait: {code[:100]}..."
+        )  # Affiche les 100 premiers caractères du code
+        modules = set()
 
-    #     if not file_path or not os.path.exists(file_path):
-    #         print(f"[Erreur] Fichier introuvable: {file_path}")
-    #         return []
+        try:
+            if ext == "py":
+                tree = ast.parse(code)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            modules.add(self.extract_module_name(alias.name))
+                    elif isinstance(node, ast.ImportFrom) and node.module:
+                        modules.add(self.extract_module_name(node.module))
 
-    #     try:
-    #         with open(file_path, "r", encoding="utf-8") as f:
-    #             code = f.read()
-    #     except Exception as e:
-    #         print(f"[Erreur lecture] {file_path} : {e}")
-    #         return []
+            elif ext in ["js", "ts", "jsx", "tsx", "mjs", "cjs"]:
+                # Ce pattern est plus robuste et gère les chemins de fichiers absolus (ex: C:/...)
+                pattern = re.compile(
+                    r"""
+                    (?:
+                        ^\s*import\s+(?:['"][^'"]+['"]|[\S\s]+?from)\s*|   # Imports statiques
+                        \bimport\s*\(|                                      # Imports dynamiques
+                        \brequire\s*\(                                       # Appels require()
+                    )
+                    (['"`])                                               # Capture le délimiteur ('", ou `)
+                    (
+                        (?:[a-zA-Z]:)?[/\\].*?|                               # Match les chemins absolus (C:/...) et relatifs (./...)
+                        .*?                                                   # Match les noms de modules simples
+                    )
+                    \1
+                    """,
+                    re.VERBOSE | re.MULTILINE,
+                )
 
-    #     imports = self.extract_imports_from_code(code)
-    #     matched = self.match_imports_to_files(imports, project_files)
+                matches = pattern.findall(code)
+                self._debug_log(f"Matches: {matches}")
 
-    #     timestamp = datetime.utcnow().isoformat()
+                for match in matches:
+                    # Le match est un tuple (délimiteur, module_path)
+                    module_path = match[1]
+                    if module_path:
+                        self._debug_log(
+                            f"Module trouvé ici e : {module_path} dans {file_name}"
+                        )
+                        modules.add(self.extract_module_name(module_path))
+                        self._debug_log(f"Module extrait: {modules} dans {file_name}")
 
-    #     for module_name, target_id in matched.items():
-    #         edge = {
-    #             "dgraph.type": "Edge",
-    #             "Edge.id": str(uuid.uuid4()),
-    #             "Edge.source": source_id,
-    #             "Edge.target": target_id,
-    #             "Edge.type": "IMPORTS",
-    #             "Edge.label": "imports",
-    #             "Edge.weight": 1.0,
-    #             "Edge.userID": user_id,
-    #             "Edge.createdAt": timestamp,
-    #             "Edge.updatedAt": timestamp,
-    #             "Edge.metadata": None,  # ou tu peux ajouter un objet JSON si nécessaire
-    #         }
-    #         edges.append(edge)
+            elif ext == "java":
+                for line in code.splitlines():
+                    line = line.strip()
+                    if line.startswith("import "):
+                        try:
+                            imported = line.split()[1].rstrip(";")
+                            modules.add(self.extract_module_name(imported))
+                        except (IndexError, AttributeError, ValueError):
+                            continue
 
-    #     return edges
+            elif ext == "php":
+                pattern_use = re.compile(r"^\s*use\s+([^;]+);", re.MULTILINE)
+                matches = pattern_use.findall(code)
+                for imp in matches:
+                    modules.add(self.extract_module_name(imp))
+
+            elif ext == "go":
+                in_block = False
+                for line in code.splitlines():
+                    line = line.strip()
+                    if line.startswith("import ("):
+                        in_block = True
+                        continue
+                    if in_block and line == ")":
+                        in_block = False
+                        continue
+                    if in_block or line.startswith("import"):
+                        match = re.search(r"\"([^\"]+)\"", line)
+                        if match:
+                            modules.add(self.extract_module_name(match.group(1)))
+
+        except Exception as e:
+            print(f"[Erreur extraction import] {e}")
+
+        return list(modules)
+
+    def match_imports_to_files(
+        self, imports: List[str], project_files: List[Dict]
+    ) -> Dict[str, str]:
+        """
+        Associe chaque module importé à l'ID du fichier correspondant dans le projet.
+        Retourne un dict: {nom_module: id_du_fichier}
+        """
+        matched = {}
+        for imp in imports:
+            for file_info in project_files:
+                file_name = file_info.get("name", "")
+                base_name = os.path.splitext(file_name)[0]
+                self._debug_log(
+                    f"Comparaison: base_name='{base_name.lower()}' avec import='{imp.lower()}'"
+                )
+                if base_name.lower() == imp.lower():
+                    self._debug_log(f"ID du fichier correspondant: {file_info['id']}")
+                    matched[imp] = file_info["id"]
+                    self._debug_log(f"Imports matchés: {matched[imp]} pour {imp}")
+                    break
+
+        return matched
+
+    def generate_import_edges_for_file(
+        self, file_info: Dict, project_files: List[Dict], user_id: str
+    ) -> List[Dict]:
+        """
+        Génère les arêtes de type 'IMPORTS' à partir des imports dans file_info['full_path']
+        """
+        edges = []
+        file_path = file_info.get("full_path")
+        source_id = file_info.get("id")
+
+        if not file_path or not os.path.exists(file_path):
+            print(f"[Erreur] Fichier introuvable: {file_path}")
+            return []
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                code = f.read()
+        except Exception as e:
+            print(f"[Erreur lecture] {file_path} : {e}")
+            return []
+
+        imports = self.extract_imports_from_code(file_info.get("name", ""), code)
+        matched = self.match_imports_to_files(imports, project_files)
+
+        timestamp = datetime.utcnow().isoformat()
+
+        for module_name, target_id in matched.items():
+            # Recherche des nœuds correspondant au module importé
+            target_nodes = self.conductor.database.get_nodes_by_label(target_id)
+            source_id_node = self.conductor.database.get_nodes_by_label(source_id)
+
+            if not target_nodes:
+                print(
+                    f"[Avertissement] Aucun nœud trouvé pour le module: {module_name}"
+                )
+                continue
+
+            edge = {
+                "dgraph.type": "Edge",
+                "Edge.id": str(uuid.uuid4()),
+                "Edge.source": source_id_node[0]["dgraph_uid"],
+                "Edge.target": target_nodes[0][
+                    "dgraph_uid"
+                ],  # On prend le premier nœud correspondant
+                "Edge.type": "IMPORTS",
+                "Edge.label": "imports",
+                "Edge.weight": 1.0,
+                "Edge.userID": user_id,
+                "Edge.createdAt": timestamp,
+                "Edge.updatedAt": timestamp,
+                "Edge.metadata": None,
+            }
+            edges.append(edge)
+
+        return edges
 
     def _on_proceed_creation(self):
         """
@@ -729,6 +833,7 @@ class NodeCreationWidget(QtWidgets.QWidget):
             return
 
         generated_mutations_results = []  # Pour stocker les résultats de chaque fichier
+        all_import_edges = []  # Pour stocker toutes les arêtes d'import générées
 
         for file_info in selected_files_info:
             file_name = file_info.get("name")
@@ -745,35 +850,12 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 self._debug_log(
                     f"❌ Le chemin du fichier '{file_name}' est invalide ou le fichier n'existe pas: {file_path}"
                 )
-                continue
-
-            if not file_label_id or not file_cluster_id:
-                self._debug_log(
-                    f"❌ Informations manquantes pour le fichier '{file_name}': label_id ou cluster_id est manquant."
+                generated_mutations_results.append(
+                    {
+                        "file_name": file_name,
+                        "mutation_code": f"Erreur: Fichier introuvable ou chemin invalide: {file_path}",
+                    }
                 )
-                continue
-
-            # Vérifier si un nœud de description existe déjà pour ce label
-            try:
-                existing_nodes = self.conductor.database.get_nodes_by_label(
-                    file_label_id
-                )
-                if existing_nodes:
-                    self._debug_log(
-                        f"ℹ️ Un nœud de description pour le label '{file_name}' (ID: {file_label_id}) existe déjà. "
-                        f"Aucune nouvelle création ne sera effectuée."
-                    )
-                    QtWidgets.QMessageBox.information(
-                        self,
-                        "Nœud Existant",
-                        f"Le nœud de description pour '{file_name}' existe déjà et ne sera pas recréé.",
-                    )
-                    continue  # Passer au fichier suivant
-            except Exception as e:
-                self._debug_log(
-                    f"❌ Erreur lors de la vérification des nœuds existants pour le label '{file_label_id}': {e}"
-                )
-                # Optionnel : décider si on continue ou pas en cas d'erreur de base de données
                 continue
 
             # 2. Lire le contenu du fichier
@@ -784,72 +866,43 @@ class NodeCreationWidget(QtWidgets.QWidget):
                 self._debug_log(f"Contenu du fichier '{file_name}' lu avec succès.")
             except Exception as e:
                 self._debug_log(f"❌ Impossible de lire le fichier '{file_name}': {e}")
+                generated_mutations_results.append(
+                    {
+                        "file_name": file_name,
+                        "mutation_code": f"Erreur de lecture du fichier: {e}",
+                    }
+                )
                 continue
 
-            # =================================================================
-            # NOUVELLE LOGIQUE : PRÉ-GÉNÉRATION DU UID POUR LE SCRIPT (DESCRIPTION)
-            # =================================================================
-            self._debug_log(f"Pré-génération du UID pour le script {file_name}...")
-            script_uid = str(uuid.uuid4())
+            # Générer les arêtes d'import à partir du contenu lu
+            import_edges = self.generate_import_edges_for_file(
+                file_info=file_info,
+                project_files=self.current_project_files,
+                user_id="47ea051e-8cce-4bee-bfe8-76489dd98b60",
+            )
 
-            try:
-                # RÉCUPÉRER LE NOM DU PROJET ACTUEL DEPUIS LE COMBOBOX
-                current_project_name = self.project_combo.currentText()
-                if (
-                    not current_project_name
-                    or current_project_name == "Sélectionner un projet..."
-                ):
-                    self._debug_log(
-                        "  - ❌ Erreur: Aucun projet valide n'est sélectionné pour enregistrer la référence du noeud."
-                    )
-                    continue
+            all_import_edges.extend(import_edges)
 
-                self.conductor.database.add_node_reference(
-                    project_name=current_project_name,
-                    dgraph_uid=script_uid,
-                    cluster_uid=file_cluster_id,
-                    label_uid=file_label_id,
-                )
-                self._debug_log(
-                    f"  - UID {script_uid} pour le script '{file_name}' enregistré dans SQLite."
-                )
-            except Exception as e:
-                self._debug_log(
-                    f"  - ❌ Erreur lors de l'enregistrement de l'UID pour le script '{file_name}': {e}"
-                )
-                # Si l'enregistrement échoue, il est préférable de ne pas continuer
-                # car le prompt de l'IA ne sera pas correct.
-                continue
+            print(
+                f"DEBUG: Arêtes d'import générées pour {file_name}: {len(import_edges)} arêtes trouvées. {all_import_edges}"
+            )
 
-            # Préparer l'injection dans le prompt
-            uids_for_prompt = f"\n\nUtilisez impérativement l'ID suivant pour le noeud SCRIPT (description) :\n- ID du script '{file_name}' : '{script_uid}'\n\n"
-            # =================================================================
+            # Créer une chaîne de caractères à partir de la liste d'arêtes
+            import_edges_str = ""
+            if all_import_edges:
+                import_edges_str += "\n\nPour chaque arête d'import ci-dessous, veuillez l'inclure dans le script de mutation :\n"
+                for edge in all_import_edges:
+                    import_edges_str += f"- Edge.source: {edge.get('Edge.source')}, Edge.target: {edge.get('Edge.target')}, Edge.type: {edge.get('Edge.type')}\n"
+                import_edges_str += "\n"
 
             # 4. Construire le prompt pour l'IA
             print(
                 f"--- Construction du prompt pour {file_name} voici le contenu du fichier {file_content} ---"
             )
             prompt_template = """
-Étant donné le script de code suivant, décomposez toutes ses fonctions. Pour chaque fonction, créez un script de mutation Dgraph (en utilisant la syntaxe du client pydgraph) pour ajouter :
-1. Un nœud 'Node' représentant le script parent
-2. Des nœuds 'Node' pour chaque fonction
-3. Des arêtes 'Edge' reliant le script aux fonctions
-4. Des arêtes 'Edge' pour les relations d'appel entre fonctions (quand une fonction A appelle une fonction B)
+Étant donné le script de code suivant, décomposez toutes ses fonctions. Votre tâche est de générer UNIQUEMENT le code de mutation pour les relations d'import (arêtes de type "IMPORTS") entre fichiers. (en utilisant la syntaxe du client pydgraph) pour ajouter :
+1. Des arêtes 'Edge' pour les imports (IMPORTS)
 
-
-Le schéma Dgraph est :
-type Node {{
-    id: String! @id
-    title: String @index(fulltext, term)
-    content: String
-    clusterIds: [String] @index(hash)
-    labelIds: [String] @index(hash)
-    properties: [Property]
-    userID: String @index(term)
-    createdAt: String
-    updatedAt: String
-    metadata: Metadata
-}}
 
 type Edge {{
     id: String! @id
@@ -864,46 +917,10 @@ type Edge {{
     metadata: Metadata
 }}
 
-Pour le nœud SCRIPT (parent) :
-- 'id': **UTILISEZ L'ID FOURNI CI-DESSOUS**
-- 'title': Nom du fichier ('{file_name}')
-- 'content': Description du script (générée par l'IA)
-- 'labelIds': ['{file_label_id}']
-- 'clusterIds': ['{file_cluster_id}']
-- 'userID': "47ea051e-8cce-4bee-bfe8-76489dd98b60"
-- 'createdAt'/'updatedAt': Horodatage ISO
-
-Pour chaque nœud FONCTION (enfant) :
-- 'id': UUID unique
-- 'title': Nom de la fonction
-- 'content': Code complet de la fonction
-- 'labelIds': [] (vide)
-- 'clusterIds': ['{file_cluster_id}']
-- 'userID': Même que le script
-- 'createdAt'/'updatedAt': Même que le script
-
-{uids_for_prompt_placeholder}
-
-Pour chaque arête SCRIPT → FONCTION :
-- 'id': UUID unique
-- 'source': ID du nœud script
-- 'target': ID du nœud fonction
-- 'type': "CONTAINS"
-- 'label': "contains"
-- 'weight': 1.0
-- 'userID': Même que les nœuds
-- 'createdAt'/'updatedAt': Même que les nœuds
-
-Pour les arêtes entre les fonctions (au sein du même script) :
-- Créez des arêtes de type "CALLS" ou "USES" entre les fonctions qui interagissent.
-- Analysez le code pour déterminer si une fonction en appelle une autre ou utilise une variable/classe d'une autre fonction.
-- **`Edge.type`** : "CALLS" si une fonction appelle directement une autre fonction, ou "USES" si elle utilise une variable ou une classe d'une autre.
-- **`Edge.label`** : Une description sémantique de la relation. Par exemple, "calls function `nom_de_la_fonction`", "uses class `nom_de_la_classe`". L'objectif est de rendre la relation explicite.
-- **`Edge.source`** : L'ID de la fonction appelante ou utilisatrice.
-- **`Edge.target`** : L'ID de la fonction appelée ou utilisée.
-- **`Edge.weight`** : 1.0
-- Les autres champs (`id`, `userID`, `createdAt`, `updatedAt`) doivent être gérés de la même manière que pour les autres arêtes.
-
+```import pydgraph
+{import_edges_placeholder}
+```
+Et si il n'y a rien dans import pydgraph, répondez "Aucune arête d'import à créer."
 
 Voici le script à analyser :
 ```code
@@ -918,7 +935,7 @@ Assurez-vous que le script de mutation est complet et exécutable, y compris les
                 file_label_id=file_label_id,
                 file_cluster_id=file_cluster_id,
                 file_name=file_name,
-                uids_for_prompt_placeholder=uids_for_prompt,
+                import_edges_placeholder=import_edges_str,
             )
 
             self._debug_log(f"--- Envoi du prompt pour {file_name} aux IAs ---")
