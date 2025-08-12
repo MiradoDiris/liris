@@ -8,8 +8,8 @@ Liris/ui/main_window.py - MODIFIÉ pour ouvrir ProjectConfigOnlyWidget
 import os
 import json
 from datetime import datetime
-from PyQt5 import QtWidgets, QtCore, QtGui
-from PyQt5.QtWidgets import QMainWindow, QApplication, QMessageBox, QFileDialog, QDialog
+from PyQt5 import QtWidgets, QtGui
+from PyQt5.QtWidgets import QMainWindow, QMessageBox, QFileDialog
 from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
 
 from PyQt5.QtCore import QRectF, QPropertyAnimation, pyqtProperty
@@ -22,6 +22,7 @@ from ui.widgets.dataset_table import DatasetTable
 from ui.widgets.prompt_list import PromptList
 from ui.widgets.language_selector import LanguageSelector
 from ui.widgets.dataset_generation import DatasetGenerationWidget
+from ui.widgets.dataset_generator_widget import DatasetGeneratorWidget
 from ui.widgets.platform_config_widget import PlatformConfigWidget
 
 # Importer le nouveau widget ProjectConfigOnlyWidget
@@ -59,7 +60,7 @@ class GlassSwitch(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(140, 44)
+        self.setFixedSize(120, 44)
         self._checked = False
         self._x_pos = 4.0
         self.animation = QPropertyAnimation(self, b"pos_anim", self)
@@ -67,7 +68,7 @@ class GlassSwitch(QtWidgets.QWidget):
 
         # Couleurs (tu peux les remplacer par Theme.* si tu veux)
         self.bg_dev = QColor("#e7e3fb")  # fond quand Dev (clair)
-        self.bg_data = QColor("#283655")  # fond quand Data (foncé)
+        self.bg_data = QColor("#A23B2D")  # fond quand Data (foncé)
         self.handle_color = QColor(255, 255, 255, 230)  # poignée blanche
         self.font = QFont("Segoe UI", 10, QFont.Bold)
 
@@ -199,7 +200,8 @@ class MainWindow(QMainWindow):
         self.annotation_form = AnnotationForm()
         self.dataset_table = DatasetTable()
         self.prompt_list = PromptList()
-        self.dataset_generation = DatasetGenerationWidget()
+        # Créer le widget de génération de dataset (change)
+        self.dataset_generation = DatasetGeneratorWidget()
 
         # Barres de progression
         self.progress_bar = QtWidgets.QProgressBar()
