@@ -18,6 +18,27 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
 
         self.data = {"context": []}  # Structure de données interne
         self.conductor = conductor
+        # Accéder à l'instance de la base de données via le conductor
+        self.database = None
+        if not self.database:
+            logger.error(
+                "Database instance not available from conductor. ProjectConfigWidget cannot function correctly."
+            )
+            # Vous pouvez choisir de désactiver des fonctionnalités ou de lancer une erreur ici
+            # Pour l'instant, le logger suffit.
+
+        # Stocke tous les profils de projet chargés : {nom_projet : données_profil}
+        self.project_profiles = {}
+        # Le nom du projet actuellement sélectionné
+        self.current_project_name = None
+        # Les données complètes du profil pour le projet actuellement sélectionné (copie pour modification)
+        self.current_project_profile_data = None
+
+        # Index pour les labels racines/parents/enfants sélectionnés pour les mises à jour dynamiques
+        self.current_root_label_index = -1
+        self.current_parent_label_index = -1
+        self.current_child_label_index = -1
+
         self.current_platform = None
 
         if self.conductor:
@@ -29,6 +50,15 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
 
         self._init_ui()
 
+
+    def set_database(self, database):
+        """Définir la base de données pour accéder aux projets et aux plateformes."""
+        self.database = database
+        if self.database:
+            logger.info("Base de données définie pour DatasetGenerationWidget")
+        else:
+            logger.error("Aucune base de données fournie au DatasetGenerationWidget")
+            
     def set_conductor(self, conductor):
         """Définir le conducteur pour le contrôle du navigateur et des entrées."""
         self.conductor = conductor
@@ -117,12 +147,6 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
         project_selection_group.setObjectName("project_selection_group")
         project_selection_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         project_selection_layout = QtWidgets.QHBoxLayout(project_selection_group)
-        project_selection_layout.addStretch()  # Ajout pour centrage horizontal
-
-        self.project_combo = QtWidgets.QComboBox()
-        self.project_combo.setStyleSheet(PlatformConfigStyle.get_input_style())
-        self.project_combo.currentIndexChanged.connect(self._on_project_selected)
-        project_selection_layout.addWidget(self.project_combo)
 
         self.add_project_button = QtWidgets.QPushButton(
             tr("dataset_project_config.new_project_button")
@@ -392,6 +416,20 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
             right_column_container, 13
         )  # Facteur d'étirement de 17 pour la colonne de droite (environ 85%)
 
+        # --- Boutons Enregistrer et Exporter (en bas de la fenêtre, centré) ---
+        save_export_layout = QtWidgets.QHBoxLayout()
+        save_export_layout.addStretch()
+
+        self.save_button = QtWidgets.QPushButton(
+            "💾 " + tr("project_config.save_button")
+        )
+        self.save_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.save_button.clicked.connect(self._save_configuration)
+        self.save_button.setEnabled(
+            False
+        )  # Désactivé jusqu'à ce qu'un projet soit sélectionné ou ajouté
+        save_export_layout.addWidget(self.save_button)
+
     def _on_project_selected(self, index):
         """Gestion du changement de projet sélectionné"""
         if index >= 0:
@@ -403,6 +441,73 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
     def _on_add_new_project(self):
         """Gestion de l'ajout d'un nouveau projet"""
         print("[Projet] Création d'un nouveau projet demandée")
+        """Handles adding a new project."""
+        new_project_name, ok = QtWidgets.QInputDialog.getText(
+            self,
+            tr("project_config.new_project_dialog_title"),
+            tr("project_config.new_project_dialog_text"),
+        )
+        # 2. Demander la description du projet
+        new_project_description, ok_desc = QtWidgets.QInputDialog.getMultiLineText(
+            self,
+            tr("project_config.new_project_description_title"),
+            tr("project_config.new_project_description_text"),
+        )
+        if not ok_desc:
+            new_project_description = ""
+
+        if ok and new_project_name and new_project_description and ok_desc:
+            new_project_name = new_project_name.strip()
+            new_project_description = new_project_description.strip()
+            if not new_project_name:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    tr("project_config.invalid_name_title"),
+                    tr("project_config.invalid_name_msg"),
+                )
+                return
+
+            # Vérifier l'existence dans la base de données via database.get_project_profile
+            if self.database and self.database.get_dataset_projet(new_project_name):
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    tr("project_config.project_exists_title"),
+                    tr("project_config.project_exists_msg").format(
+                        project_name=new_project_name
+                    ),
+                )
+                return
+
+            # Créer une nouvelle structure de profil vide avec la nouvelle structure de cluster
+            self.current_project_profile_data = {
+                "nom": new_project_name,
+                "description": new_project_description,
+            }
+            # Pas besoin d'ajouter au cache local ici, _save_configuration le fera
+            # self.project_profiles[new_project_name] = self.current_project_profile_data
+            self.current_project_name = new_project_name
+
+            # Sauvegarder immédiatement le nouveau projet vide dans la base de données
+            self._save_configuration(show_message=False)
+
+            self.save_button.setEnabled(True)
+            self.delete_project_button.setEnabled(True)
+            logger.info(f"Nouveau projet '{new_project_name}' initié et sauvegardé.")
+        else:
+            logger.info("Création du nouveau projet annulée.")
+
+    def _save_configuration(self, show_message=True):
+        """Sauvegarde la configuration actuelle du projet dans la base de données"""
+        if not self.current_project_name:
+            QtWidgets.QMessageBox.warning(
+                self,
+                tr("project_config.no_project_selected_title"),
+                tr("project_config.no_project_selected_msg"),
+            )
+            return
+
+        # Mettre à jour les données du profil actuel
+        self.current_project_profile_data["nom"] = self.project_name_edit.text().strip()
 
     def _on_delete_project(self):
         """Gestion de la suppression d'un projet"""

@@ -823,6 +823,7 @@ class MainWindow(QMainWindow):
 
         self.dataset_generation.set_conductor(self.conductor)
         self.dataset_generation.set_platforms(platforms)
+        self.dataset_generation.set_database(self.database)
 
         # self.annotation_form.set_conductor(self.conductor)
         # self.annotation_form.set_platforms(platforms)

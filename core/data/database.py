@@ -1584,13 +1584,13 @@ class Database:
     # MÉTHODES POUR GESTION DES  DATASETS_PROJECTS
     # =====================================================
 
-    def save_dataset_projet(self, nom, description):
+    def save_dataset_projet(self, name, description):
         try:
-            logger.debug(f"Sauvegarde projet dataset: {nom}")
+            logger.debug(f"Sauvegarde projet dataset: {name}")
             cursor = self.conn.cursor()
             now = datetime.now().isoformat()
 
-            cursor.execute("SELECT id FROM dataset_project WHERE nom = ?", (nom,))
+            cursor.execute("SELECT id FROM dataset_project WHERE name = ?", (name,))
             existing = cursor.fetchone()
 
             if existing:
@@ -1598,30 +1598,30 @@ class Database:
                     """
                     UPDATE dataset_project
                     SET description = ?, updated_at = ?
-                    WHERE nom = ?
+                    WHERE name = ?
                 """,
-                    (description, now, nom),
+                    (description, now, name),
                 )
-                logger.info(f"Dataset projet {nom} mis à jour")
+                logger.info(f"Dataset projet {name} mis à jour")
             else:
                 cursor.execute(
                     """
-                    INSERT INTO dataset_project (nom, description, created_at, updated_at)
+                    INSERT INTO dataset_project (name, description, created_at, updated_at)
                     VALUES (?, ?, ?, ?)
                 """,
-                    (nom, description, now, now),
+                    (name, description, now, now),
                 )
-                logger.info(f"Nouveau projet de dataset {nom} créé")
+                logger.info(f"Nouveau projet de dataset {name} créé")
 
             self.conn.commit()
             return True
         except Exception as e:
-            logger.error(f"Erreur sauvegarde projet de dataset {nom}: {str(e)}")
+            logger.error(f"Erreur sauvegarde projet de dataset {name}: {str(e)}")
             return False
 
-    def get_dataset_projet(self, nom):
+    def get_dataset_projet(self, name):
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM dataset_project WHERE nom = ?", (nom,))
+        cursor.execute("SELECT * FROM dataset_project WHERE name = ?", (name,))
         return cursor.fetchone()
 
     def delete_dataset_project(self, project_id):
