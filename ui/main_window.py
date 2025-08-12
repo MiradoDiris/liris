@@ -460,7 +460,7 @@ class MainWindow(QMainWindow):
         ai_menu.addAction(compare_action)
 
         # NOUVEAU: Menu Turing
-        turing_menu = menubar.addMenu("Turing")  # Texte "Turing" directement
+        turing_menu = menubar.addMenu("Config")  # Texte "Turing" directement
 
         # Action pour "Configuration projets dev"
         config_projects_dev_action = QtWidgets.QAction(
