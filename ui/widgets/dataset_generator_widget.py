@@ -50,7 +50,6 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
 
         self._init_ui()
 
-
     def set_database(self, database):
         """Définir la base de données pour accéder aux projets et aux plateformes."""
         self.database = database
@@ -58,7 +57,7 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
             logger.info("Base de données définie pour DatasetGenerationWidget")
         else:
             logger.error("Aucune base de données fournie au DatasetGenerationWidget")
-            
+
     def set_conductor(self, conductor):
         """Définir le conducteur pour le contrôle du navigateur et des entrées."""
         self.conductor = conductor
@@ -131,8 +130,6 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
 
         # --- Colonne de gauche (Sélection et Détails du Projet) ---
         left_column_layout = QtWidgets.QVBoxLayout()
-        left_column_layout.setSpacing(15)
-        left_column_layout.addStretch()  # Ajout pour centrage vertical
 
         explanation = QtWidgets.QLabel(tr("dataset_project_config.explanation"))
         explanation.setStyleSheet(PlatformConfigStyle.get_explanation_style())
@@ -421,7 +418,7 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
         save_export_layout.addStretch()
 
         self.save_button = QtWidgets.QPushButton(
-            "💾 " + tr("project_config.save_button")
+            "💾 " + tr("dataset_project_config.save_button")
         )
         self.save_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.save_button.clicked.connect(self._save_configuration)
@@ -429,6 +426,11 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
             False
         )  # Désactivé jusqu'à ce qu'un projet soit sélectionné ou ajouté
         save_export_layout.addWidget(self.save_button)
+
+        save_export_layout.addStretch()
+        layout.addLayout(
+            save_export_layout
+        )  # Ajoute le layout des boutons au layout vertical principal
 
     def _on_project_selected(self, index):
         """Gestion du changement de projet sélectionné"""

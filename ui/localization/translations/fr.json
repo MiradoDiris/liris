@@ -279,7 +279,7 @@
         "add_typologie_button": "Nouvelle Typologie",
         "edit_typologie_button": "Modifier Typologie",
         "delete_typologie_button": "Supprimer Typologie",
-        "hierarchy_group": "Hiérarchie du contexte (Racine -> Parent -> Enfant)",
+        "hierarchy_group": "Taxionomie du contexte (Racine -> Parent -> Enfant)",
         "root_labels_list_group": "Labels Racines du Projet :",
         "root_labels_list_label": "Labels Racines :",
         "add_root_button": "Ajouter Racine",
@@ -294,7 +294,7 @@
         "no_root_selected_title": "Aucun label racine sélectionné",
         "no_root_selected_msg": "Veuillez d'abord sélectionner un label racine.",
         "no_project_selected_msg_add_root": "Veuillez d'abord sélectionner ou créer un projet pour ajouter un label racine.",
-
+        "save_button": "Enregistrer la Configuration du Projet",
 
         "add_parent_dialog_title": "Ajouter un label parent",
         "add_parent_dialog_text": "Saisir le nom du nouveau label parent :",
