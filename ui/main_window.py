@@ -5,14 +5,15 @@
 Liris/ui/main_window.py - MODIFIÉ pour ouvrir ProjectConfigOnlyWidget
 """
 
-import sys
 import os
-import traceback
 import json
 from datetime import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtWidgets import QMainWindow, QApplication, QMessageBox, QFileDialog, QDialog
-from PyQt5.QtCore import Qt, QSettings, QTimer
+from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
+
+from PyQt5.QtCore import QRectF, QPropertyAnimation, pyqtProperty
+from PyQt5.QtGui import QPainter, QColor, QFont
 
 from ui.widgets.brainstorming_panel import BrainstormingPanel
 from ui.widgets.coding_panel import CodingPanel
@@ -22,14 +23,20 @@ from ui.widgets.prompt_list import PromptList
 from ui.widgets.language_selector import LanguageSelector
 from ui.widgets.dataset_generation import DatasetGenerationWidget
 from ui.widgets.platform_config_widget import PlatformConfigWidget
+
 # Importer le nouveau widget ProjectConfigOnlyWidget
-from ui.widgets.project_config_only_widget import ProjectConfigOnlyWidget # <-- NOUVEL IMPORT
+from ui.widgets.project_config_only_widget import (
+    ProjectConfigOnlyWidget,
+)  # <-- NOUVEL IMPORT
+
 # L'importation de ProjectConfigWidget n'est plus nécessaire ici pour l'ouverture directe,
 # mais elle est toujours utilisée comme onglet interne dans PlatformConfigWidget.
 # Si ProjectConfigWidget n'est plus utilisé nulle part ailleurs que comme onglet interne,
 # cette ligne peut être commentée ou supprimée. Pour l'instant, nous la gardons
 # car le PlatformConfigWidget l'importe et l'utilise.
-from ui.widgets.tabs.project_config_widget import ProjectConfigWidget # Gardez le même chemin pour l'importation
+from ui.widgets.tabs.project_config_widget import (
+    ProjectConfigWidget,
+)  # Gardez le même chemin pour l'importation
 
 from ui.styles.theme import Theme
 from ui.localization.translator import translator, tr
@@ -41,6 +48,97 @@ from core.scheduling.scheduler import AIScheduler
 from config.settings import ConfigProvider
 
 from utils.logger import logger
+
+
+# === Switch Glassmorphism ===
+class GlassSwitch(QtWidgets.QWidget):
+    # Signaux compatibles QCheckBox
+    toggled = pyqtSignal(bool)
+    stateChanged = pyqtSignal(int)  # émet Qt.Checked / Qt.Unchecked
+    clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(140, 44)
+        self._checked = False
+        self._x_pos = 4.0
+        self.animation = QPropertyAnimation(self, b"pos_anim", self)
+        self.animation.setDuration(220)
+
+        # Couleurs (tu peux les remplacer par Theme.* si tu veux)
+        self.bg_dev = QColor("#e7e3fb")  # fond quand Dev (clair)
+        self.bg_data = QColor("#283655")  # fond quand Data (foncé)
+        self.handle_color = QColor(255, 255, 255, 230)  # poignée blanche
+        self.font = QFont("Segoe UI", 10, QFont.Bold)
+
+    # --- API compatible QCheckBox ---
+    def isChecked(self):
+        return bool(self._checked)
+
+    def setChecked(self, checked: bool, animate: bool = True):
+        # si l'état ne change pas, on sort (mais on peut forcer update)
+        if bool(self._checked) == bool(checked):
+            return
+        self._checked = bool(checked)
+        end_pos = 4.0 if not self._checked else (self.width() - self.height() + 4.0)
+        self.animation.stop()
+        self.animation.setStartValue(self._x_pos)
+        self.animation.setEndValue(end_pos)
+        if animate:
+            self.animation.start()
+        else:
+            self._x_pos = end_pos
+            self.update()
+
+        # émettre signaux (comme QCheckBox le ferait)
+        self.toggled.emit(self._checked)
+        self.stateChanged.emit(Qt.Checked if self._checked else Qt.Unchecked)
+
+    # Toggle (appelé par clic)
+    def toggle(self):
+        self.setChecked(not self._checked, animate=True)
+
+    # --- événements ---
+    def mousePressEvent(self, event):
+        self.toggle()
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+    # --- dessin/animation ---
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+
+        # Fond "glass-like" : on mélange couleur + opacité légère
+        bg_color = self.bg_data if self._checked else self.bg_dev
+        p.setPen(Qt.NoPen)
+        p.setBrush(bg_color)
+        p.drawRoundedRect(self.rect(), self.height() / 2, self.height() / 2)
+
+        # Texte centré (on peut jouer sur l'opacité si nécessaire)
+        p.setFont(self.font)
+        # texte clair ou foncé suivant contraste
+        text_color = (
+            QColor(255, 255, 255, 220) if self._checked else QColor(45, 45, 255, 220)
+        )
+        p.setPen(text_color)
+        label = "Data" if self._checked else "Dev"
+        p.drawText(self.rect(), Qt.AlignCenter, label)
+
+        # Poignée (thumb)
+        p.setBrush(self.handle_color)
+        handle_rect = QRectF(self._x_pos, 4.0, self.height() - 8.0, self.height() - 8.0)
+        p.drawEllipse(handle_rect)
+
+    # propriété animable
+    @pyqtProperty(float)
+    def pos_anim(self):
+        return float(self._x_pos)
+
+    @pos_anim.setter
+    def pos_anim(self, x):
+        self._x_pos = float(x)
+        self.update()
 
 
 class MainWindow(QMainWindow):
@@ -68,7 +166,7 @@ class MainWindow(QMainWindow):
         # Initialiser les composants
         self._init_components()
         self._init_ui()
-        self._init_menu() # Le menu sera configuré ici
+        self._init_menu()  # Le menu sera configuré ici
         self._init_statusbar()
         self._init_connections()
 
@@ -82,7 +180,7 @@ class MainWindow(QMainWindow):
         self.config_provider = None
 
         # Stocker la référence à la fenêtre de configuration des projets
-        self.project_config_dialog_instance = None # Initialisé à None
+        self.project_config_dialog_instance = None  # Initialisé à None
 
         # Initialiser le système au démarrage
         QTimer.singleShot(100, self._init_system)
@@ -101,7 +199,7 @@ class MainWindow(QMainWindow):
         self.annotation_form = AnnotationForm()
         self.dataset_table = DatasetTable()
         self.prompt_list = PromptList()
-        self.dataset_generation= DatasetGenerationWidget()
+        self.dataset_generation = DatasetGenerationWidget()
 
         # Barres de progression
         self.progress_bar = QtWidgets.QProgressBar()
@@ -113,10 +211,14 @@ class MainWindow(QMainWindow):
 
         # Widgets d'état
         self.status_label = QtWidgets.QLabel(tr("status.ready"))
-        self.status_label.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; font-weight: bold;")
+        self.status_label.setStyleSheet(
+            f"color: {Theme.PRIMARY_COLOR}; font-weight: bold;"
+        )
 
         self.platform_label = QtWidgets.QLabel(tr("messages.no_platforms"))
-        self.platform_label.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; font-weight: bold;")
+        self.platform_label.setStyleSheet(
+            f"color: {Theme.PRIMARY_COLOR}; font-weight: bold;"
+        )
 
     def _init_ui(self):
         """Configure l'interface utilisateur"""
@@ -147,7 +249,9 @@ class MainWindow(QMainWindow):
         if os.path.exists(logo_path):
             logo_label = QtWidgets.QLabel()
             pixmap = QtGui.QPixmap(logo_path)
-            scaled_pixmap = pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(
+                40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
             logo_label.setPixmap(scaled_pixmap)
             logo_layout.addWidget(logo_label)
 
@@ -165,7 +269,9 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(title_label)
 
         subtitle_label = QtWidgets.QLabel(tr("app_title"))
-        subtitle_label.setObjectName("subtitle_label") # Ajout d'un nom d'objet pour le retrouver plus facilement
+        subtitle_label.setObjectName(
+            "subtitle_label"
+        )  # Ajout d'un nom d'objet pour le retrouver plus facilement
         subtitle_label.setStyleSheet(f"""
             font-size: {Theme.FONT_SIZE_HEADER}px;
             color: {Theme.SECONDARY_COLOR};
@@ -177,21 +283,10 @@ class MainWindow(QMainWindow):
         logo_layout.addLayout(title_layout)
         header_layout.addLayout(logo_layout)
 
-        # Ajout du switch Dev | Data science
-        self.mode_switch = QtWidgets.QCheckBox()
-        self.mode_switch.setChecked(False)  # False = Dev ; True = Data science
-        self.mode_switch.setStyleSheet("QCheckBox::indicator { width: 60px; height: 30px; }")
+        # Ajout du nouveau switch glassmorphism
+        self.mode_switch = GlassSwitch()
+        header_layout.addWidget(self.mode_switch)
 
-        mode_layout = QtWidgets.QHBoxLayout()
-        self.dev_label = QtWidgets.QLabel("Dev")
-        self.data_label = QtWidgets.QLabel("Data science")
-
-        mode_layout.addWidget(self.dev_label)
-        mode_layout.addWidget(self.mode_switch)
-        mode_layout.addWidget(self.data_label)
-        mode_widget = QtWidgets.QWidget()
-        mode_widget.setLayout(mode_layout)
-        header_layout.addWidget(mode_widget)
         header_layout.addStretch()
 
         # Indicateur de statut système dans l'en-tête
@@ -208,7 +303,9 @@ class MainWindow(QMainWindow):
         system_status_layout.addWidget(self.connection_indicator)
 
         self.connection_label = QtWidgets.QLabel("Système en attente")
-        self.connection_label.setStyleSheet(f"color: {Theme.TEXT_COLOR}; margin-left: 5px;")
+        self.connection_label.setStyleSheet(
+            f"color: {Theme.TEXT_COLOR}; margin-left: 5px;"
+        )
         system_status_layout.addWidget(self.connection_label)
 
         header_layout.addWidget(system_status_widget)
@@ -264,10 +361,12 @@ class MainWindow(QMainWindow):
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
         main_layout.addWidget(self.tab_widget)
+
     def set_conductor(self, conductor):
         """Set the conductor for all relevant widgets"""
         self.conductor = conductor
         self.dataset_widget.set_conductor(conductor)
+
     def _on_mode_switched(self):
         """
         Active ou désactive les onglets selon le mode sélectionné (Dev vs Data science).
@@ -276,9 +375,9 @@ class MainWindow(QMainWindow):
             self.current_mode = "data"
             # Supprimer tous les onglets
             self.tab_widget.clear()
-            #self.tab_widget.addTab(self.brainstorming_panel, tr("brainstorming_tab"))
-            #self.tab_widget.addTab(self.annotation_form, tr("annotation_tab"))
-            #self.tab_widget.addTab(self.dataset_table, tr("datasets_tab"))
+            # self.tab_widget.addTab(self.brainstorming_panel, tr("brainstorming_tab"))
+            # self.tab_widget.addTab(self.annotation_form, tr("annotation_tab"))
+            # self.tab_widget.addTab(self.dataset_table, tr("datasets_tab"))
             self.tab_widget.addTab(self.dataset_generation, tr("Generation"))
             self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
             self.tab_widget.setCurrentIndex(0)
@@ -361,10 +460,12 @@ class MainWindow(QMainWindow):
         ai_menu.addAction(compare_action)
 
         # NOUVEAU: Menu Turing
-        turing_menu = menubar.addMenu("Turing") # Texte "Turing" directement
+        turing_menu = menubar.addMenu("Turing")  # Texte "Turing" directement
 
         # Action pour "Configuration projets dev"
-        config_projects_dev_action = QtWidgets.QAction("Configuration projets dev", self)
+        config_projects_dev_action = QtWidgets.QAction(
+            "Configuration projets dev", self
+        )
         config_projects_dev_action.triggered.connect(self._on_show_project_config)
         turing_menu.addAction(config_projects_dev_action)
 
@@ -389,8 +490,8 @@ class MainWindow(QMainWindow):
             tr("file"): 0,
             tr("edit"): 1,
             tr("ai"): 2,
-            "Turing": 3, # Nouvelle position pour le menu Turing
-            tr("help"): 4 # Nouvelle position pour le menu Aide
+            "Turing": 3,  # Nouvelle position pour le menu Turing
+            tr("help"): 4,  # Nouvelle position pour le menu Aide
         }
 
         # Mettre à jour les titres des menus
@@ -402,9 +503,8 @@ class MainWindow(QMainWindow):
                     if title_key == "Turing":
                         action.setText("Turing")
                     else:
-                        action.setText(title_key) # tr() est déjà appliqué par la clé
+                        action.setText(title_key)  # tr() est déjà appliqué par la clé
                     break
-
 
         # Mettre à jour les actions
         self._update_menu_actions()
@@ -436,26 +536,26 @@ class MainWindow(QMainWindow):
                 tr("save"),
                 tr("export"),
                 None,  # Séparateur
-                tr("quit")
+                tr("quit"),
             ],
             1: [  # Edit
                 tr("preferences"),
                 tr("select_language"),
-                tr("refresh")
+                tr("refresh"),
             ],
             2: [  # AI
                 tr("platforms"),
                 tr("test_connection"),
                 None,  # Séparateur
-                tr("compare_results")
+                tr("compare_results"),
             ],
-            3: [ # Turing (nouvel index)
+            3: [  # Turing (nouvel index)
                 "Configuration projets dev"
             ],
             4: [  # Help (nouvel index)
                 tr("about"),
-                tr("documentation")
-            ]
+                tr("documentation"),
+            ],
         }
 
         # Mettre à jour chaque menu
@@ -469,7 +569,10 @@ class MainWindow(QMainWindow):
                         if text is None:  # Séparateur
                             action_index += 1
                             continue
-                        if action_index < len(actions) and not actions[action_index].isSeparator():
+                        if (
+                            action_index < len(actions)
+                            and not actions[action_index].isSeparator()
+                        ):
                             actions[action_index].setText(text)
                         action_index += 1
 
@@ -496,7 +599,9 @@ class MainWindow(QMainWindow):
         """Configure les connexions signal-slot entre widgets"""
         # Connexions du panel de brainstorming
         self.brainstorming_panel.session_started.connect(self._on_brainstorming_started)
-        self.brainstorming_panel.session_completed.connect(self._on_brainstorming_completed)
+        self.brainstorming_panel.session_completed.connect(
+            self._on_brainstorming_completed
+        )
         self.brainstorming_panel.session_failed.connect(self._on_brainstorming_failed)
         self.brainstorming_panel.export_requested.connect(self._on_export_data)
 
@@ -525,12 +630,22 @@ class MainWindow(QMainWindow):
             # Mettre à jour les onglets
             # Note: Si vous modifiez les onglets en fonction du mode, assurez-vous de le gérer ici aussi.
             # Pour l'instant, on suppose que ces traductions sont pour les onglets fixes du mode dev.
-            self.tab_widget.setTabText(self.tab_widget.indexOf(self.coding_panel), tr("coding_tab"))
-            self.tab_widget.setTabText(self.tab_widget.indexOf(self.brainstorming_panel), tr("brainstorming_tab"))
-            self.tab_widget.setTabText(self.tab_widget.indexOf(self.annotation_form), tr("annotation_tab"))
-            self.tab_widget.setTabText(self.tab_widget.indexOf(self.dataset_table), tr("datasets_tab"))
-            self.tab_widget.setTabText(self.tab_widget.indexOf(self.prompt_list), tr("history_tab"))
-
+            self.tab_widget.setTabText(
+                self.tab_widget.indexOf(self.coding_panel), tr("coding_tab")
+            )
+            self.tab_widget.setTabText(
+                self.tab_widget.indexOf(self.brainstorming_panel),
+                tr("brainstorming_tab"),
+            )
+            self.tab_widget.setTabText(
+                self.tab_widget.indexOf(self.annotation_form), tr("annotation_tab")
+            )
+            self.tab_widget.setTabText(
+                self.tab_widget.indexOf(self.dataset_table), tr("datasets_tab")
+            )
+            self.tab_widget.setTabText(
+                self.tab_widget.indexOf(self.prompt_list), tr("history_tab")
+            )
 
             # Mettre à jour les menus (IMPORTANT!)
             self._update_menus()
@@ -554,22 +669,33 @@ class MainWindow(QMainWindow):
     def _notify_language_change(self):
         """Notifie les widgets enfants du changement de langue"""
         # Informer les panneaux principaux
-        for panel in [self.coding_panel, self.brainstorming_panel, self.annotation_form,
-                      self.dataset_table, self.dataset_generation, self.prompt_list]:
-            if hasattr(panel, 'update_language'):
+        for panel in [
+            self.coding_panel,
+            self.brainstorming_panel,
+            self.annotation_form,
+            self.dataset_table,
+            self.dataset_generation,
+            self.prompt_list,
+        ]:
+            if hasattr(panel, "update_language"):
                 panel.update_language()
 
         # Notifier également la fenêtre de configuration des projets si elle est ouverte
-        if self.project_config_dialog_instance and isinstance(self.project_config_dialog_instance, QtWidgets.QDialog):
+        if self.project_config_dialog_instance and isinstance(
+            self.project_config_dialog_instance, QtWidgets.QDialog
+        ):
             # Assumer que le ProjectConfigOnlyWidget interne a une méthode update_language
             # MODIFIÉ: Chercher ProjectConfigOnlyWidget
-            for child in self.project_config_dialog_instance.findChildren(ProjectConfigOnlyWidget):
-                if hasattr(child, 'update_language'):
+            for child in self.project_config_dialog_instance.findChildren(
+                ProjectConfigOnlyWidget
+            ):
+                if hasattr(child, "update_language"):
                     child.update_language()
                 # Si ProjectConfigOnlyWidget a une méthode update_language, l'appeler
-                if isinstance(child, ProjectConfigOnlyWidget) and hasattr(child, 'update_language'):
+                if isinstance(child, ProjectConfigOnlyWidget) and hasattr(
+                    child, "update_language"
+                ):
                     child.update_language()
-
 
     def _restore_settings(self):
         """Restaure les paramètres utilisateur"""
@@ -589,7 +715,9 @@ class MainWindow(QMainWindow):
 
         # Autres paramètres spécifiques aux widgets
         if settings.contains("lastExportPath"):
-            self.last_export_path = settings.value("lastExportPath", os.path.expanduser("~"))
+            self.last_export_path = settings.value(
+                "lastExportPath", os.path.expanduser("~")
+            )
         else:
             self.last_export_path = os.path.expanduser("~")
 
@@ -624,7 +752,7 @@ class MainWindow(QMainWindow):
 
             # Initialiser la base de données
             db_config = self.config_provider.get_database_config()
-            self.database = Database(db_config['path'])  # Passer uniquement le chemin
+            self.database = Database(db_config["path"])  # Passer uniquement le chemin
             self.database.connect()
             self.progress_bar.setValue(40)
 
@@ -637,7 +765,9 @@ class MainWindow(QMainWindow):
             self.progress_bar.setValue(70)
 
             # Initialiser le chef d'orchestre
-            self.conductor = AIConductor(self.config_provider, self.scheduler, self.database)
+            self.conductor = AIConductor(
+                self.config_provider, self.scheduler, self.database
+            )
             self.conductor.initialize()
             self.progress_bar.setValue(90)
 
@@ -662,7 +792,7 @@ class MainWindow(QMainWindow):
                 "Erreur d'initialisation",
                 f"Le système n'a pas pu être initialisé correctement.\n\n"
                 f"Erreur: {str(e)}\n\n"
-                f"Certaines fonctionnalités pourraient ne pas être disponibles."
+                f"Certaines fonctionnalités pourraient ne pas être disponibles.",
             )
 
     def _update_ui_with_system(self):
@@ -672,26 +802,28 @@ class MainWindow(QMainWindow):
 
         # Récupérer les plateformes disponibles
         platforms = self.conductor.get_available_platforms()
-        print(f'platforms: {platforms}')
+        print(f"platforms: {platforms}")
 
         # Mettre à jour l'étiquette de plateforme
         if platforms:
-            self.platform_label.setText(tr("messages.platforms_available", count=len(platforms)))
+            self.platform_label.setText(
+                tr("messages.platforms_available", count=len(platforms))
+            )
         else:
             self.platform_label.setText(tr("messages.no_platforms"))
 
         # Mettre à jour les widgets
         self.coding_panel.set_conductor(self.conductor)
         self.coding_panel.set_platforms(platforms)
-        
+
         self.brainstorming_panel.set_conductor(self.conductor)
         self.brainstorming_panel.set_platforms(platforms)
 
         self.dataset_generation.set_conductor(self.conductor)
         self.dataset_generation.set_platforms(platforms)
 
-        #self.annotation_form.set_conductor(self.conductor)
-        #self.annotation_form.set_platforms(platforms)
+        # self.annotation_form.set_conductor(self.conductor)
+        # self.annotation_form.set_platforms(platforms)
 
         self.dataset_table.set_database(self.database)
         self.dataset_table.set_exporter(self.exporter)
@@ -703,12 +835,15 @@ class MainWindow(QMainWindow):
         self.dataset_table.refresh_list()
 
         # Assurez-vous que project_config_dialog_instance est rafraîchi si déjà ouvert
-        if self.project_config_dialog_instance and isinstance(self.project_config_dialog_instance, QtWidgets.QDialog):
+        if self.project_config_dialog_instance and isinstance(
+            self.project_config_dialog_instance, QtWidgets.QDialog
+        ):
             # MODIFIÉ: Chercher ProjectConfigOnlyWidget
-            for child in self.project_config_dialog_instance.findChildren(ProjectConfigOnlyWidget):
-                if hasattr(child, 'refresh'):
+            for child in self.project_config_dialog_instance.findChildren(
+                ProjectConfigOnlyWidget
+            ):
+                if hasattr(child, "refresh"):
                     child.refresh()
-
 
     def update_status(self, message):
         """
@@ -728,24 +863,24 @@ class MainWindow(QMainWindow):
             status (str): 'connected', 'connecting', 'disconnected', 'error'
         """
         color_map = {
-            'connected': '#4CAF50',
-            'connecting': '#FFC107',
-            'disconnected': '#9E9E9E',
-            'error': '#F44336'
+            "connected": "#4CAF50",
+            "connecting": "#FFC107",
+            "disconnected": "#9E9E9E",
+            "error": "#F44336",
         }
 
         text_map = {
-            'connected': tr("status.system_connected"),
-            'connecting': tr("status.system_connecting"),
-            'disconnected': 'Système déconnecté',
-            'error': tr("status.system_error")
+            "connected": tr("status.system_connected"),
+            "connecting": tr("status.system_connecting"),
+            "disconnected": "Système déconnecté",
+            "error": tr("status.system_error"),
         }
 
         self.connection_indicator.setStyleSheet(f"""
-            background-color: {color_map.get(status, '#9E9E9E')};
+            background-color: {color_map.get(status, "#9E9E9E")};
             border-radius: 6px;
         """)
-        self.connection_label.setText(text_map.get(status, 'État inconnu'))
+        self.connection_label.setText(text_map.get(status, "État inconnu"))
 
     def show_progress(self, value, max_value=100):
         """
@@ -776,11 +911,10 @@ class MainWindow(QMainWindow):
 
         # Actualiser l'onglet actif
         current_widget = self.tab_widget.currentWidget()
-        if hasattr(current_widget, 'refresh_list'):
+        if hasattr(current_widget, "refresh_list"):
             current_widget.refresh_list()
         # Ne pas appeler refresh() sur tous les widgets d'onglets ici, car il pourrait y avoir des side effects.
         # ProjectConfigOnlyWidget est maintenant une fenêtre séparée.
-
 
     def _on_new_file(self):
         """Gère la création d'un nouveau fichier"""
@@ -803,7 +937,7 @@ class MainWindow(QMainWindow):
             self,
             "Ouvrir un fichier",
             self.last_export_path,
-            "Tous les fichiers (*.*);;Fichiers JSON (*.json);;Fichiers CSV (*.csv);;Fichiers texte (*.txt)"
+            "Tous les fichiers (*.*);;Fichiers JSON (*.json);;Fichiers CSV (*.csv);;Fichiers texte (*.txt)",
         )
 
         if not file_path:
@@ -845,23 +979,23 @@ class MainWindow(QMainWindow):
 
         if current_tab == self.coding_panel:
             # Exporter la session de brainstorming actuelle
-            if hasattr(self.coding_panel, 'export_session'):
+            if hasattr(self.coding_panel, "export_session"):
                 self.coding_panel.export_session()
         elif current_tab == self.brainstorming_panel:
             # Exporter la session de brainstorming actuelle
-            if hasattr(self.brainstorming_panel, 'export_session'):
+            if hasattr(self.brainstorming_panel, "export_session"):
                 self.brainstorming_panel.export_session()
         elif current_tab == self.annotation_form:
             # Exporter les annotations
-            if hasattr(self.annotation_form, 'export_annotations'):
+            if hasattr(self.annotation_form, "export_annotations"):
                 self.annotation_form.export_annotations()
         elif current_tab == self.dataset_table:
             # Exporter le dataset sélectionné
-            if hasattr(self.dataset_table, 'export_dataset'):
+            if hasattr(self.dataset_table, "export_dataset"):
                 self.dataset_table.export_dataset()
         elif current_tab == self.prompt_list:
             # Exporter l'historique des prompts
-            if hasattr(self.prompt_list, 'export_history'):
+            if hasattr(self.prompt_list, "export_history"):
                 self.prompt_list.export_history()
 
     def _on_settings(self):
@@ -870,7 +1004,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Préférences",
-            "La boîte de dialogue des préférences sera implémentée dans une prochaine version."
+            "La boîte de dialogue des préférences sera implémentée dans une prochaine version.",
         )
 
     def _on_refresh(self):
@@ -878,16 +1012,20 @@ class MainWindow(QMainWindow):
         # Actualiser l'onglet actif
         current_tab = self.tab_widget.currentWidget()
 
-        if hasattr(current_tab, 'refresh_list'):
+        if hasattr(current_tab, "refresh_list"):
             current_tab.refresh_list()
-        elif hasattr(current_tab, 'refresh'):
+        elif hasattr(current_tab, "refresh"):
             current_tab.refresh()
 
         # Actualiser également la fenêtre ProjectConfigOnlyWidget si elle est ouverte
-        if self.project_config_dialog_instance and isinstance(self.project_config_dialog_instance, QtWidgets.QDialog):
+        if self.project_config_dialog_instance and isinstance(
+            self.project_config_dialog_instance, QtWidgets.QDialog
+        ):
             # MODIFIÉ: Chercher ProjectConfigOnlyWidget
-            for child in self.project_config_dialog_instance.findChildren(ProjectConfigOnlyWidget):
-                if hasattr(child, 'refresh'):
+            for child in self.project_config_dialog_instance.findChildren(
+                ProjectConfigOnlyWidget
+            ):
+                if hasattr(child, "refresh"):
                     child.refresh()
 
         self.update_status("Données actualisées")
@@ -898,14 +1036,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Configuration des plateformes",
-                "Le système n'est pas encore initialisé."
+                "Le système n'est pas encore initialisé.",
             )
             return
 
         try:
             # Créer et afficher le widget de configuration
             self.platform_config_dialog = QtWidgets.QDialog(self)
-            self.platform_config_dialog.setWindowTitle("Configuration des Plateformes d'IA")
+            self.platform_config_dialog.setWindowTitle(
+                "Configuration des Plateformes d'IA"
+            )
             self.platform_config_dialog.setMinimumSize(1200, 800)
             self.platform_config_dialog.setModal(True)
 
@@ -915,28 +1055,34 @@ class MainWindow(QMainWindow):
 
             # Créer le widget de configuration avec les bonnes dépendances
             platform_config_widget = PlatformConfigWidget(
-                self.config_provider,
-                self.conductor,
-                parent=self.platform_config_dialog
+                self.config_provider, self.conductor, parent=self.platform_config_dialog
             )
 
             # Ajouter au layout
             dialog_layout.addWidget(platform_config_widget)
 
             # Connecter les signaux
-            platform_config_widget.platform_added.connect(self._on_platform_config_changed)
-            platform_config_widget.platform_updated.connect(self._on_platform_config_changed)
-            platform_config_widget.platform_deleted.connect(self._on_platform_config_changed)
+            platform_config_widget.platform_added.connect(
+                self._on_platform_config_changed
+            )
+            platform_config_widget.platform_updated.connect(
+                self._on_platform_config_changed
+            )
+            platform_config_widget.platform_deleted.connect(
+                self._on_platform_config_changed
+            )
 
             # Afficher la boîte de dialogue
             self.platform_config_dialog.exec_()
 
         except Exception as e:
-            logger.error(f"Erreur lors de l'ouverture de la configuration des plateformes: {str(e)}")
+            logger.error(
+                f"Erreur lors de l'ouverture de la configuration des plateformes: {str(e)}"
+            )
             QMessageBox.critical(
                 self,
                 "Erreur",
-                f"Impossible d'ouvrir la configuration des plateformes:\n\n{str(e)}"
+                f"Impossible d'ouvrir la configuration des plateformes:\n\n{str(e)}",
             )
 
     def _on_platform_config_changed(self, platform_name):
@@ -953,18 +1099,26 @@ class MainWindow(QMainWindow):
 
                 # Mettre à jour l'étiquette
                 if platforms:
-                    self.platform_label.setText(tr("messages.platforms_available", count=len(platforms)))
+                    self.platform_label.setText(
+                        tr("messages.platforms_available", count=len(platforms))
+                    )
                 else:
                     self.platform_label.setText(tr("messages.no_platforms"))
 
                 # Mettre à jour les widgets qui utilisent les plateformes
-                self.coding_panel.set_conductor(self.conductor) # S'assurer que le conducteur est à jour
+                self.coding_panel.set_conductor(
+                    self.conductor
+                )  # S'assurer que le conducteur est à jour
                 self.coding_panel.set_platforms(platforms)
 
-                self.brainstorming_panel.set_conductor(self.conductor) # S'assurer que le conducteur est à jour
+                self.brainstorming_panel.set_conductor(
+                    self.conductor
+                )  # S'assurer que le conducteur est à jour
                 self.brainstorming_panel.set_platforms(platforms)
 
-                self.annotation_form.set_conductor(self.conductor) # S'assurer que le conducteur est à jour
+                self.annotation_form.set_conductor(
+                    self.conductor
+                )  # S'assurer que le conducteur est à jour
                 self.annotation_form.set_platforms(platforms)
 
             logger.info(f"Configuration des plateformes mise à jour: {platform_name}")
@@ -972,7 +1126,6 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             logger.error(f"Erreur lors de la mise à jour des plateformes: {str(e)}")
-
 
     def _on_show_project_config(self):
         """
@@ -982,7 +1135,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Configuration des projets",
-                "Le système n'est pas encore initialisé."
+                "Le système n'est pas encore initialisé.",
             )
             return
 
@@ -990,18 +1143,26 @@ class MainWindow(QMainWindow):
             # Vérifier si une instance de la boîte de dialogue existe déjà
             if not self.project_config_dialog_instance:
                 self.project_config_dialog_instance = QtWidgets.QDialog(self)
-                self.project_config_dialog_instance.setWindowTitle("Configuration des Projets de Développement (Turing)")
-                self.project_config_dialog_instance.setMinimumSize(1000, 700) # Taille adaptée à la hiérarchie
-                self.project_config_dialog_instance.setModal(False) # Pas modal pour permettre d'autres interactions si souhaité, ou True si modal préféré
+                self.project_config_dialog_instance.setWindowTitle(
+                    "Configuration des Projets de Développement (Turing)"
+                )
+                self.project_config_dialog_instance.setMinimumSize(
+                    1000, 700
+                )  # Taille adaptée à la hiérarchie
+                self.project_config_dialog_instance.setModal(
+                    False
+                )  # Pas modal pour permettre d'autres interactions si souhaité, ou True si modal préféré
 
-                dialog_layout = QtWidgets.QVBoxLayout(self.project_config_dialog_instance)
+                dialog_layout = QtWidgets.QVBoxLayout(
+                    self.project_config_dialog_instance
+                )
                 dialog_layout.setContentsMargins(0, 0, 0, 0)
 
                 # MODIFIÉ: Instancier ProjectConfigOnlyWidget au lieu de ProjectConfigWidget
                 project_config_widget = ProjectConfigOnlyWidget(
                     self.config_provider,
                     self.conductor,
-                    parent=self.project_config_dialog_instance # Parent est la QDialog
+                    parent=self.project_config_dialog_instance,  # Parent est la QDialog
                 )
                 dialog_layout.addWidget(project_config_widget)
 
@@ -1010,12 +1171,16 @@ class MainWindow(QMainWindow):
                 # project_config_widget.project_profile_deleted.connect(self._on_project_profile_changed)
 
                 # Connexion pour réinitialiser l'instance de dialogue lorsque fermée
-                self.project_config_dialog_instance.finished.connect(self._on_project_config_dialog_closed)
+                self.project_config_dialog_instance.finished.connect(
+                    self._on_project_config_dialog_closed
+                )
 
             # Toujours rafraîchir le contenu avant d'afficher si l'instance existe déjà
             # MODIFIÉ: Chercher ProjectConfigOnlyWidget
-            for child in self.project_config_dialog_instance.findChildren(ProjectConfigOnlyWidget):
-                if hasattr(child, 'refresh'):
+            for child in self.project_config_dialog_instance.findChildren(
+                ProjectConfigOnlyWidget
+            ):
+                if hasattr(child, "refresh"):
                     child.refresh()
 
             # Afficher la boîte de dialogue (ou la ramener au premier plan si déjà ouverte)
@@ -1024,11 +1189,13 @@ class MainWindow(QMainWindow):
             self.project_config_dialog_instance.activateWindow()
 
         except Exception as e:
-            logger.error(f"Erreur lors de l'ouverture de la configuration des projets: {str(e)}")
+            logger.error(
+                f"Erreur lors de l'ouverture de la configuration des projets: {str(e)}"
+            )
             QMessageBox.critical(
                 self,
                 "Erreur",
-                f"Impossible d'ouvrir la configuration des projets:\n\n{str(e)}"
+                f"Impossible d'ouvrir la configuration des projets:\n\n{str(e)}",
             )
 
     def _on_project_config_changed(self, project_name):
@@ -1042,7 +1209,6 @@ class MainWindow(QMainWindow):
         # Ici, vous pourriez déclencher une rechargement des données pour le système de retrieval de Turing
         # Exemple: self.conductor.reload_project_contexts()
 
-
     def _on_project_config_dialog_closed(self, result):
         """
         Gère la fermeture de la boîte de dialogue ProjectConfigOnlyWidget.
@@ -1051,14 +1217,11 @@ class MainWindow(QMainWindow):
         self.project_config_dialog_instance = None
         logger.info("Fenêtre de configuration des projets fermée.")
 
-
     def _on_test_ai(self):
         """Teste la connexion avec les IA"""
         if not self.conductor:
             QMessageBox.warning(
-                self,
-                "Test de connexion",
-                "Le système n'est pas encore initialisé."
+                self, "Test de connexion", "Le système n'est pas encore initialisé."
             )
             return
 
@@ -1069,17 +1232,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Test de connexion",
-                "Aucune plateforme d'IA n'est actuellement disponible."
+                "Aucune plateforme d'IA n'est actuellement disponible.",
             )
             return
 
         # Afficher une boîte de dialogue de progression
         progress_dialog = QtWidgets.QProgressDialog(
-            "Test des plateformes d'IA en cours...",
-            "Annuler",
-            0,
-            len(platforms),
-            self
+            "Test des plateformes d'IA en cours...", "Annuler", 0, len(platforms), self
         )
         progress_dialog.setWindowModality(Qt.WindowModal)
         progress_dialog.setWindowTitle("Test de connexion")
@@ -1098,7 +1257,9 @@ class MainWindow(QMainWindow):
 
             try:
                 # Prompt de test simple
-                test_prompt = "Ceci est un test de connexion. Veuillez répondre avec 'OK'."
+                test_prompt = (
+                    "Ceci est un test de connexion. Veuillez répondre avec 'OK'."
+                )
 
                 # Envoyer le prompt
                 result = self.conductor.send_prompt(
@@ -1106,10 +1267,10 @@ class MainWindow(QMainWindow):
                 )
 
                 # Vérifier le résultat
-                if result and 'result' in result and 'response' in result['result']:
-                    response = result['result']['response']
+                if result and "result" in result and "response" in result["result"]:
+                    response = result["result"]["response"]
 
-                    if 'OK' in response:
+                    if "OK" in response:
                         results[platform] = True
                     else:
                         results[platform] = False
@@ -1136,25 +1297,19 @@ class MainWindow(QMainWindow):
 
         # Afficher le message
         if all_ok:
-            QMessageBox.information(
-                self,
-                "Test de connexion",
-                message
-            )
+            QMessageBox.information(self, "Test de connexion", message)
         else:
             QMessageBox.warning(
                 self,
                 "Test de connexion",
-                message + "\n\nCertaines plateformes n'ont pas répondu correctement."
+                message + "\n\nCertaines plateformes n'ont pas répondu correctement.",
             )
 
     def _on_compare_ai(self):
         """Compare les résultats de différentes IA"""
         if not self.conductor:
             QMessageBox.warning(
-                self,
-                "Comparaison",
-                "Le système n'est pas encore initialisé."
+                self, "Comparaison", "Le système n'est pas encore initialisé."
             )
             return
 
@@ -1165,7 +1320,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Comparaison",
-                "Au moins deux plateformes d'IA sont nécessaires pour effectuer une comparaison."
+                "Au moins deux plateformes d'IA sont nécessaires pour effectuer une comparaison.",
             )
             return
 
@@ -1174,7 +1329,7 @@ class MainWindow(QMainWindow):
             self,
             "Comparaison d'IA",
             "Entrez un prompt à comparer entre les différentes plateformes:",
-            ""
+            "",
         )
 
         if not ok or not prompt:
@@ -1182,11 +1337,7 @@ class MainWindow(QMainWindow):
 
         # Afficher une boîte de dialogue de progression
         progress_dialog = QtWidgets.QProgressDialog(
-            "Comparaison des plateformes d'IA en cours...",
-            "Annuler",
-            0,
-            100,
-            self
+            "Comparaison des plateformes d'IA en cours...", "Annuler", 0, 100, self
         )
         progress_dialog.setWindowModality(Qt.WindowModal)
         progress_dialog.setWindowTitle("Comparaison")
@@ -1200,10 +1351,7 @@ class MainWindow(QMainWindow):
 
             # Exécuter la comparaison
             results = self.conductor.compare_responses(
-                prompt,
-                platforms=platforms,
-                mode="standard",
-                timeout=60
+                prompt, platforms=platforms, mode="standard", timeout=60
             )
 
             # Mettre à jour la progression
@@ -1217,7 +1365,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(
                     self,
                     "Comparaison",
-                    "Aucun résultat n'a été obtenu lors de la comparaison."
+                    "Aucun résultat n'a été obtenu lors de la comparaison.",
                 )
                 return
 
@@ -1250,17 +1398,19 @@ class MainWindow(QMainWindow):
                 result_layout = QtWidgets.QVBoxLayout(result_widget)
 
                 # État du résultat
-                status = result.get('status', 'inconnu')
+                status = result.get("status", "inconnu")
                 status_label = QtWidgets.QLabel(f"<b>État:</b> {status}")
                 result_layout.addWidget(status_label)
 
                 # Durée
-                duration = result.get('duration', 0)
-                duration_label = QtWidgets.QLabel(f"<b>Durée:</b> {duration:.2f} secondes")
+                duration = result.get("duration", 0)
+                duration_label = QtWidgets.QLabel(
+                    f"<b>Durée:</b> {duration:.2f} secondes"
+                )
                 result_layout.addWidget(duration_label)
 
                 # Nombre de jetons
-                tokens = result.get('token_count', 0)
+                tokens = result.get("token_count", 0)
                 tokens_label = QtWidgets.QLabel(f"<b>Jetons:</b> {tokens}")
                 result_layout.addWidget(tokens_label)
 
@@ -1270,11 +1420,15 @@ class MainWindow(QMainWindow):
 
                 response_text = QtWidgets.QTextEdit()
 
-                if status == 'completed' and 'result' in result and 'response' in result['result']:
-                    response = result['result']['response']
+                if (
+                    status == "completed"
+                    and "result" in result
+                    and "response" in result["result"]
+                ):
+                    response = result["result"]["response"]
                     response_text.setPlainText(response)
                 else:
-                    error = result.get('error', 'Pas de réponse')
+                    error = result.get("error", "Pas de réponse")
                     response_text.setPlainText(f"Erreur: {error}")
 
                 response_text.setReadOnly(True)
@@ -1291,7 +1445,9 @@ class MainWindow(QMainWindow):
 
             # Connexions
             button_box.rejected.connect(dialog.reject)
-            button_box.accepted.connect(lambda: self._save_comparison_results(prompt, results))
+            button_box.accepted.connect(
+                lambda: self._save_comparison_results(prompt, results)
+            )
 
             # Afficher la boîte de dialogue
             dialog.exec_()
@@ -1306,7 +1462,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self,
                 "Erreur de comparaison",
-                f"Une erreur est survenue lors de la comparaison:\n\n{str(e)}"
+                f"Une erreur est survenue lors de la comparaison:\n\n{str(e)}",
             )
 
     def _save_comparison_results(self, prompt, results):
@@ -1321,8 +1477,11 @@ class MainWindow(QMainWindow):
         file_path, file_filter = QFileDialog.getSaveFileName(
             self,
             "Enregistrer les résultats",
-            os.path.join(self.last_export_path, f"comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"),
-            "Fichiers texte (*.txt);;Fichiers JSON (*.json);;Tous les fichiers (*.*)"
+            os.path.join(
+                self.last_export_path,
+                f"comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            ),
+            "Fichiers texte (*.txt);;Fichiers JSON (*.json);;Tous les fichiers (*.*)",
         )
 
         if not file_path:
@@ -1333,36 +1492,36 @@ class MainWindow(QMainWindow):
 
         try:
             # Déterminer le format
-            format_json = file_path.lower().endswith('.json')
+            format_json = file_path.lower().endswith(".json")
 
             if format_json:
                 # Format JSON
                 export_data = {
-                    'prompt': prompt,
-                    'timestamp': datetime.now().isoformat(),
-                    'results': {}
+                    "prompt": prompt,
+                    "timestamp": datetime.now().isoformat(),
+                    "results": {},
                 }
 
                 for platform, result in results.items():
-                    if 'result' in result and 'response' in result['result']:
-                        response = result['result']['response']
+                    if "result" in result and "response" in result["result"]:
+                        response = result["result"]["response"]
                     else:
                         response = None
 
-                    export_data['results'][platform] = {
-                        'status': result.get('status'),
-                        'duration': result.get('duration'),
-                        'token_count': result.get('token_count'),
-                        'response': response,
-                        'error': result.get('error')
+                    export_data["results"][platform] = {
+                        "status": result.get("status"),
+                        "duration": result.get("duration"),
+                        "token_count": result.get("token_count"),
+                        "response": response,
+                        "error": result.get("error"),
                     }
 
                 # Écrire le fichier JSON
-                with open(file_path, 'w', encoding='utf-8') as f:
+                with open(file_path, "w", encoding="utf-8") as f:
                     json.dump(export_data, f, ensure_ascii=False, indent=2)
             else:
                 # Format texte
-                with open(file_path, 'w', encoding='utf-8') as f:
+                with open(file_path, "w", encoding="utf-8") as f:
                     f.write(f"COMPARAISON DES PLATEFORMES D'IA\n")
                     f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
@@ -1376,25 +1535,29 @@ class MainWindow(QMainWindow):
                         f.write(f"{'-' * 80}\n")
 
                         # Statut
-                        status = result.get('status', 'inconnu')
+                        status = result.get("status", "inconnu")
                         f.write(f"État: {status}\n")
 
                         # Durée
-                        duration = result.get('duration', 0)
+                        duration = result.get("duration", 0)
                         f.write(f"Durée: {duration:.2f} secondes\n")
 
                         # Nombre de jetons
-                        tokens = result.get('token_count', 0)
+                        tokens = result.get("token_count", 0)
                         f.write(f"Jetons: {tokens}\n\n")
 
                         # Réponse
                         f.write(f"Réponse:\n")
 
-                        if status == 'completed' and 'result' in result and 'response' in result['result']:
-                            response = result['result']['response']
+                        if (
+                            status == "completed"
+                            and "result" in result
+                            and "response" in result["result"]
+                        ):
+                            response = result["result"]["response"]
                             f.write(response)
                         else:
-                            error = result.get('error', 'Pas de réponse')
+                            error = result.get("error", "Pas de réponse")
                             f.write(f"Erreur: {error}")
 
                         f.write(f"\n{'=' * 80}\n\n")
@@ -1403,7 +1566,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Sauvegarde réussie",
-                f"Les résultats de la comparaison ont été enregistrés dans le fichier:\n{file_path}"
+                f"Les résultats de la comparaison ont été enregistrés dans le fichier:\n{file_path}",
             )
 
         except Exception as e:
@@ -1413,10 +1576,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self,
                 "Erreur d'enregistrement",
-                f"Une erreur est survenue lors de l'enregistrement des résultats:\n\n{str(e)}"
+                f"Une erreur est survenue lors de l'enregistrement des résultats:\n\n{str(e)}",
             )
-
-            
 
     def _on_about(self):
         """Affiche la boîte de dialogue À propos"""
@@ -1431,7 +1592,9 @@ class MainWindow(QMainWindow):
         logo_path = os.path.join("ui", "resources", "icons", "logo.png")
         if os.path.exists(logo_path):
             pixmap = QtGui.QPixmap(logo_path)
-            scaled_pixmap = pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(
+                64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
             logo_label.setPixmap(scaled_pixmap)
         else:
             # Si le logo n'est pas trouvé, afficher le texte
@@ -1469,7 +1632,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Documentation",
-            "La documentation sera implémentée dans une prochaine version."
+            "La documentation sera implémentée dans une prochaine version.",
         )
 
     def _on_brainstorming_started(self, session_id):
@@ -1507,8 +1670,7 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(
             self,
             "Échec du brainstorming",
-            f"La session de brainstorming {session_id} a échoué.\n\n"
-            f"Erreur: {error}"
+            f"La session de brainstorming {session_id} a échoué.\n\nErreur: {error}",
         )
 
     def _on_annotation_started(self, task_id):
@@ -1546,8 +1708,7 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(
             self,
             "Échec de l'annotation",
-            f"La tâche d'annotation {task_id} a échoué.\n\n"
-            f"Erreur: {error}"
+            f"La tâche d'annotation {task_id} a échoué.\n\nErreur: {error}",
         )
 
     def _on_dataset_selected(self, dataset_id):
