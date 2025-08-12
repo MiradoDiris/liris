@@ -15,7 +15,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 
 from utils.logger import logger
 from ui.styles.platform_config_style import PlatformConfigStyle
-from ui.localization.translator import translator, tr
+from ui.localization.translator import tr
 # from config.settings import ConfigProvider # Plus nécessaire, utilisation directe de database
 
 

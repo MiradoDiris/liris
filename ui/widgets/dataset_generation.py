@@ -5,8 +5,6 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt
 import logging
 import json
-import os
-import time
 import math
 from ui.styles.theme import Theme
 import csv
