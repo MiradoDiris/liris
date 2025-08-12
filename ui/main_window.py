@@ -60,7 +60,7 @@ class GlassSwitch(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(120, 44)
+        self.setFixedSize(125, 44)
         self._checked = False
         self._x_pos = 4.0
         self.animation = QPropertyAnimation(self, b"pos_anim", self)
