@@ -29,6 +29,7 @@ from ui.widgets.project_config_only_widget import ProjectConfigOnlyWidget # <-- 
 # car le PlatformConfigWidget l'importe et l'utilise.
 
 from ui.widgets.generation_widget import GenerationWidget
+from ui.widgets.strategy_widget import StrategyWidget 
 from ui.widgets.tabs.project_config_widget import ProjectConfigWidget # Gardez le même chemin pour l'importation
 
 from ui.styles.theme import Theme
@@ -44,6 +45,14 @@ from utils.logger import logger
 
 
 class MainWindow(QMainWindow):
+    def _on_strategy_started(self, platform):
+        """
+        Gère le démarrage d'une stratégie
+        Args:
+            platform (str): Nom de la plateforme
+        """
+        self.update_status(f"Stratégie démarrée sur {platform}")
+        self.show_progress(0, 100)
     """
     Fenêtre principale de l'application d'IA collaborative
     """
@@ -69,11 +78,11 @@ class MainWindow(QMainWindow):
 
         self._init_components()
         self.generation_widget = GenerationWidget()  # <-- initialize before _init_connections
+        self.strategy_widget = StrategyWidget() 
         self._init_ui()
         self._init_menu() # Le menu sera configuré ici
         self._init_statusbar()
         self._init_components()
-        self.generation_widget = GenerationWidget()  # <-- initialize before _init_connections
         self._init_ui()
         self._init_menu() # Le menu sera configuré ici
         self._init_statusbar()
@@ -252,6 +261,7 @@ class MainWindow(QMainWindow):
         # Créer les onglets principaux
         self.tab_widget.addTab(self.coding_panel, tr("coding_tab"))
         self.tab_widget.addTab(self.brainstorming_panel, tr("brainstorming_tab"))
+        self.tab_widget.addTab(self.strategy_widget, tr("strategy_tab")) 
         # self.tab_widget.addTab(self.annotation_form, tr("annotation_tab"))
         # self.tab_widget.addTab(self.dataset_table, tr("datasets_tab"))
         # self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
@@ -277,7 +287,8 @@ class MainWindow(QMainWindow):
             self.tab_widget.addTab(self.brainstorming_panel, tr("brainstorming_tab"))
             self.tab_widget.addTab(self.annotation_form, tr("annotation_tab"))
             self.tab_widget.addTab(self.dataset_table, tr("datasets_tab"))
-            self.tab_widget.addTab(self.generation_widget, "Génération")  # NOUVEL ONGLET
+            self.tab_widget.addTab(self.generation_widget, "Génération")
+            self.tab_widget.addTab(self.strategy_widget, "Stratégie")  # NOUVEL ONGLET
             self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
             self.tab_widget.setCurrentIndex(0)           
         else:
@@ -509,6 +520,12 @@ class MainWindow(QMainWindow):
         self.generation_widget.generation_failed.connect(self._on_generation_failed)
         self.generation_widget.dataset_created.connect(self._on_dataset_created)
 
+                # Connexions du widget de startégie
+        self.strategy_widget.strategy_started.connect(self._on_strategy_started)
+        self.strategy_widget.strategy_completed.connect(self._on_strategy_completed)
+        self.strategy_widget.strategy_failed.connect(self._on_strategy_failed)
+        self.strategy_widget.dataset_created.connect(self._on_dataset_created)
+
         # Connexions de la table de datasets
         self.dataset_table.dataset_selected.connect(self._on_dataset_selected)
         self.dataset_table.dataset_created.connect(self._on_dataset_created)
@@ -535,7 +552,7 @@ class MainWindow(QMainWindow):
             self.tab_widget.setTabText(self.tab_widget.indexOf(self.dataset_table), tr("datasets_tab"))
             self.tab_widget.setTabText(self.tab_widget.indexOf(self.prompt_list), tr("history_tab"))
             self.tab_widget.setTabText(self.tab_widget.indexOf(self.generation_widget), "Génération")
-
+            self.tab_widget.setTabText(self.tab_widget.indexOf(self.strategy_widget), tr("strategy_tab"))
             # Mettre à jour les menus (IMPORTANT!)
             self._update_menus()
             # _update_menu_actions est déjà appelé par _update_menus
@@ -558,7 +575,7 @@ class MainWindow(QMainWindow):
     def _notify_language_change(self):
         """Notifie les widgets enfants du changement de langue"""
         # Informer les panneaux principaux
-        for panel in [self.coding_panel, self.brainstorming_panel, self.annotation_form, self.generation_widget,
+        for panel in [self.coding_panel, self.brainstorming_panel, self.annotation_form, self.generation_widget, self.strategy_widget,
                       self.dataset_table, self.prompt_list]:
             if hasattr(panel, 'update_language'):
                 panel.update_language()
@@ -702,6 +719,9 @@ class MainWindow(QMainWindow):
         self.generation_widget.set_conductor(self.conductor)
         self.generation_widget.set_platforms(platforms)
         self.generation_widget.set_database(self.database)
+        self.strategy_widget.set_conductor(self.conductor)
+        self.strategy_widget.set_platforms(platforms)
+        self.strategy_widget.set_database(self.database) 
 
         # Charger les données initiales
         self.prompt_list.refresh_list()
@@ -914,6 +934,7 @@ class MainWindow(QMainWindow):
             self.platform_config_dialog.setMinimumSize(1200, 800)
             self.platform_config_dialog.setModal(True)
             self.generation_widget.set_conductor(self.conductor)
+            self.strategy_widget.set_conductor(self.conductor)
             #self.generation_widget.set_platforms(platforms)
 
             # Layout pour la boîte de dialogue
@@ -1629,6 +1650,34 @@ class MainWindow(QMainWindow):
         """
         self.update_status(f"Échec de la génération sur {platform}")
         self.hide_progress()    
+
+    def _on_stratégie_started(self, platform):
+        """
+        Gère le démarrage d'une stratégie
+        Args:
+            platform (str): Nom de la plateforme
+        """
+        self.update_status(f"Stratégie démarrée sur {platform}")
+        self.show_progress(0, 100)    
+
+    def _on_strategy_completed(self, platform):
+        """
+        Gère la fin d'une stratégie
+        Args:
+            platform (str): Nom de la plateforme
+        """
+        self.update_status(f"Stratégie terminée sur {platform}")
+        self.hide_progress()
+
+    def _on_strategy_failed(self, platform, error):
+        """
+        Gère l'échec d'une stratégie
+        Args:
+            platform (str): Nom de la plateforme
+            error (str): Message d'erreur
+        """
+        self.update_status(f"Échec de la stratégie sur {platform}")
+        self.hide_progress() 
 
     def closeEvent(self, event):
         """

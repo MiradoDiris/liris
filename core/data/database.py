@@ -192,6 +192,54 @@ class Database:
                                updated_at TEXT NOT NULL
                            )
                            ''')
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS context_clusters
+                (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS context_root_labels
+                (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cluster_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (cluster_id) REFERENCES context_clusters (id) ON DELETE CASCADE
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS context_parents
+                (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    root_label_id INTEGER NOT NULL,
+                    parent_id INTEGER,
+                    name TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (root_label_id) REFERENCES context_root_labels (id) ON DELETE CASCADE,
+                    FOREIGN KEY (parent_id) REFERENCES context_parents (id) ON DELETE CASCADE
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS context_usage
+                (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    context_combination TEXT NOT NULL,
+                    usage_count INTEGER DEFAULT 1,
+                    last_used TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            ''')
 
             self.conn.commit()
             logger.info("Initialisation des tables terminée")
