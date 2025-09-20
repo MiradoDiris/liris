@@ -30,6 +30,10 @@ from ui.widgets.project_config_only_widget import (
     ProjectConfigOnlyWidget,
 )  # <-- NOUVEL IMPORT
 
+# Importer les nouveaux widgets pour Data Science
+from ui.widgets.strategy_widget import StrategyWidget
+from ui.widgets.generation_widget import GenerationWidget
+
 # L'importation de ProjectConfigWidget n'est plus nécessaire ici pour l'ouverture directe,
 # mais elle est toujours utilisée comme onglet interne dans PlatformConfigWidget.
 # Si ProjectConfigWidget n'est plus utilisé nulle part ailleurs que comme onglet interne,
@@ -202,6 +206,10 @@ class MainWindow(QMainWindow):
         self.prompt_list = PromptList()
         # Créer le widget de génération de dataset (change)
         self.dataset_generation = DatasetGeneratorWidget()
+        
+        # Créer les nouveaux widgets pour Data Science
+        self.strategy_widget = StrategyWidget()
+        self.generation_widget = GenerationWidget()
 
         # Barres de progression
         self.progress_bar = QtWidgets.QProgressBar()
@@ -377,11 +385,9 @@ class MainWindow(QMainWindow):
             self.current_mode = "data"
             # Supprimer tous les onglets
             self.tab_widget.clear()
-            # self.tab_widget.addTab(self.brainstorming_panel, tr("brainstorming_tab"))
-            # self.tab_widget.addTab(self.annotation_form, tr("annotation_tab"))
-            # self.tab_widget.addTab(self.dataset_table, tr("datasets_tab"))
-            self.tab_widget.addTab(self.dataset_generation, tr("Generation"))
-            self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
+            # Ajouter les nouveaux onglets pour Data Science
+            self.tab_widget.addTab(self.strategy_widget, "Stratégie")
+            self.tab_widget.addTab(self.generation_widget, "Génération")
             self.tab_widget.setCurrentIndex(0)
         else:
             self.current_mode = "dev"
@@ -832,6 +838,14 @@ class MainWindow(QMainWindow):
         self.dataset_table.set_exporter(self.exporter)
 
         self.prompt_list.set_database(self.database)
+        
+        # Configurer les nouveaux widgets Data Science
+        if hasattr(self, 'strategy_widget'):
+            self.strategy_widget.set_database(self.database.db_path if self.database else None)
+        
+        if hasattr(self, 'generation_widget'):
+            self.generation_widget.set_database(self.database.db_path if self.database else None)
+            self.generation_widget.set_conductor(self.conductor)
 
         # Charger les données initiales
         self.prompt_list.refresh_list()

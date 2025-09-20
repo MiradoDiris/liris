@@ -446,7 +446,7 @@ def main():
             print("4. Ou configurer DISPLAY:")
             print("   export DISPLAY=:0.0")
         
-        logger.critical(f"Erreur d'importation: {str(e)}", exc_info=True)
+        logger.critical(f"Erreur d'importation: {str(e)}")
         sys.exit(1)
 
     except Exception as e:
