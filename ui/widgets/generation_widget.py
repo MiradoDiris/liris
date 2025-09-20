@@ -80,6 +80,10 @@ class GenerationWidget(QWidget):
         self.platforms = []
         self.database = None
         self.current_worker = None
+
+        # Nouveau : paramètres de sortie
+        self.selected_template = "JSON"
+        self.num_batches = 1
         
         # Couleurs du thème (même style que prompt_list.py)
         self.primary_color = "#A23B2D"  # Rouge brique
@@ -256,7 +260,41 @@ class GenerationWidget(QWidget):
         prompt_layout.addWidget(self.prompt_text)
         
         layout.addWidget(prompt_group)
+
+        output_group = QtWidgets.QGroupBox("Configuration de la sortie")
+        output_layout = QVBoxLayout(output_group)
         
+         # Template de dataset
+        template_layout = QHBoxLayout()
+        template_layout.addWidget(QtWidgets.QLabel("Template de dataset :"))
+        self.template_combo = QtWidgets.QComboBox()
+        self.template_combo.addItems(["JSON", "CSV", "Texte brut"])
+        self.template_combo.setCurrentText("JSON")
+        template_layout.addWidget(self.template_combo)
+        template_layout.addStretch()
+        output_layout.addLayout(template_layout)
+
+        # Exemple / aperçu
+        preview_layout = QHBoxLayout()
+        preview_layout.addWidget(QtWidgets.QLabel("Aperçu du jeu de données :"))
+        self.preview_btn = QtWidgets.QPushButton("Générer un aperçu")
+        preview_layout.addWidget(self.preview_btn)
+        preview_layout.addStretch()
+        output_layout.addLayout(preview_layout)
+
+        # Nombre de lots
+        batch_layout = QHBoxLayout()
+        batch_layout.addWidget(QtWidgets.QLabel("Nombre de lots :"))
+        self.batch_spin = QtWidgets.QSpinBox()
+        self.batch_spin.setMinimum(1)
+        self.batch_spin.setMaximum(100)
+        self.batch_spin.setValue(1)
+        batch_layout.addWidget(self.batch_spin)
+        batch_layout.addStretch()
+        output_layout.addLayout(batch_layout)
+
+        layout.addWidget(output_group)
+
         # Boutons d'action
         action_layout = QHBoxLayout()
         
@@ -324,6 +362,7 @@ class GenerationWidget(QWidget):
         self.save_dataset_btn.clicked.connect(self._on_save_dataset)
         self.copy_btn.clicked.connect(self._on_copy_results)
         self.clear_btn.clicked.connect(self._on_clear_results)
+        self.preview_btn.clicked.connect(self._on_preview_clicked)
     
     def _set_context_template(self, template):
         """Définit le template de contexte sélectionné"""
@@ -368,6 +407,10 @@ class GenerationWidget(QWidget):
             QMessageBox.warning(self, "Erreur", "Veuillez entrer un prompt")
             return
         
+        # Récupérer config sortie
+        self.selected_template = self.template_combo.currentText()
+        self.num_batches = self.batch_spin.value()
+        
         # Démarrer la génération
         self._start_generation(platform, context, prompt)
     
@@ -392,6 +435,22 @@ class GenerationWidget(QWidget):
         
         # Émettre le signal de début
         self.generation_started.emit(platform)
+
+    def _on_preview_clicked(self):
+        """Génère un aperçu de dataset (1 lot)"""
+        context = self.context_text.toPlainText().strip()
+        prompt = self.prompt_text.toPlainText().strip()
+        if not context or not prompt:
+            QMessageBox.warning(self, "Erreur", "Veuillez remplir le contexte et le prompt avant l’aperçu")
+            return
+
+        # Pour l’aperçu : simuler une mini-génération
+        sample_text = f"[APERÇU] Template: {self.template_combo.currentText()} • 1 lot\nContexte: {context[:50]}...\nPrompt: {prompt[:50]}..."
+        self.results_text.setPlainText(sample_text)
+        self.info_label.setText("Aperçu généré")
+        self.info_label.setStyleSheet("color: #2196F3; font-weight: bold;")
+        self.copy_btn.setEnabled(True)
+        self.clear_btn.setEnabled(True)
     
     def _on_progress_updated(self, value):
         """Met à jour la barre de progression"""
