@@ -719,8 +719,6 @@ class MainWindow(QMainWindow):
         self.generation_widget.set_conductor(self.conductor)
         self.generation_widget.set_platforms(platforms)
         self.generation_widget.set_database(self.database)
-        self.strategy_widget.set_conductor(self.conductor)
-        self.strategy_widget.set_platforms(platforms)
         self.strategy_widget.set_database(self.database) 
 
         # Charger les données initiales
@@ -934,7 +932,6 @@ class MainWindow(QMainWindow):
             self.platform_config_dialog.setMinimumSize(1200, 800)
             self.platform_config_dialog.setModal(True)
             self.generation_widget.set_conductor(self.conductor)
-            self.strategy_widget.set_conductor(self.conductor)
             #self.generation_widget.set_platforms(platforms)
 
             # Layout pour la boîte de dialogue

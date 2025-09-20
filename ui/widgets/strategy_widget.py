@@ -11,7 +11,22 @@ from datetime import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem
-from PyQt5.QtChart import QChart, QChartView, QPieSeries, QPieSlice
+#from PyQt5.QtChart import QChart, QChartView, QPieSeries, QPieSlice
+
+try:
+    from PyQt5.QtChart import QChart, QChartView, QPieSeries, QPieSlice
+    QT_CHARTS_AVAILABLE = True
+except ImportError:
+    QT_CHARTS_AVAILABLE = False
+    # Créer des classes factices pour éviter les erreurs
+    class QChart:
+        pass
+    class QChartView(QtWidgets.QWidget):
+        pass
+    class QPieSeries:
+        pass
+    class QPieSlice:
+        pass
 
 from ui.localization.translator import tr
 from utils.logger import logger
@@ -115,9 +130,15 @@ class StrategyWidget(QWidget):
         chart_layout = QVBoxLayout(chart_group)
         
         # Création du diagramme circulaire
+        chart_container = QtWidgets.QWidget()
+        chart_layout.addWidget(chart_container)
+        chart_container_layout = QVBoxLayout(chart_container)
+        chart_container_layout.setContentsMargins(0, 0, 0, 0)
+
         self.chart_view = QChartView()
         self.chart_view.setRenderHint(QtGui.QPainter.Antialiasing)
-        chart_layout.addWidget(self.chart_view)
+        chart_container_layout.addWidget(self.chart_view)
+        
         
         left_layout.addWidget(chart_group)
         splitter.addWidget(left_panel)
@@ -303,43 +324,122 @@ class StrategyWidget(QWidget):
     
     def _update_chart(self):
         """Met à jour le diagramme circulaire avec les données actuelles"""
+        print("[DEBUG] _update_chart called")
         if not self.database:
+            print("[DEBUG] No database set for StrategyWidget")
             return
-        
+
+        if not QT_CHARTS_AVAILABLE:
+            print("[DEBUG] QtCharts is not available")
+            no_chart_label = QtWidgets.QLabel(
+                "QtCharts n'est pas disponible.\n\n"
+                "Pour installer QtCharts :\n"
+                "Sur Windows : pip install PyQtChart\n"
+                "Sur Linux : sudo apt-get install python3-pyqt5.qtchart\n"
+                "Sur Mac : brew install pyqt@5 --with-qtchart"
+            )
+            no_chart_label.setAlignment(Qt.AlignCenter)
+            no_chart_label.setStyleSheet("color: red; font-weight: bold;")
+            if hasattr(self, 'chart_view'):
+                layout = self.chart_view.layout()
+                if layout:
+                    for i in reversed(range(layout.count())):
+                        layout.itemAt(i).widget().setParent(None)
+                    layout.addWidget(no_chart_label)
+            return
+
         try:
-            # Récupérer les données des combinaisons de contextes
+            print("[DEBUG] Fetching context_usage data for chart...")
             cursor = self.database.connection.cursor()
             cursor.execute("""
                 SELECT context_combination, COUNT(*) as count 
                 FROM context_usage 
                 GROUP BY context_combination 
                 ORDER BY count DESC
+                LIMIT 10
             """)
-            
             data = cursor.fetchall()
-            
-            # Créer la série de données pour le diagramme
+            print(f"[DEBUG] Data fetched for chart: {data}")
+
+            if not data:
+                print("[DEBUG] No data available for chart.")
+                no_data_label = QtWidgets.QLabel("Aucune donnée de contexte disponible")
+                no_data_label.setAlignment(Qt.AlignCenter)
+                if hasattr(self, 'chart_view'):
+                    layout = self.chart_view.layout()
+                    if layout:
+                        for i in reversed(range(layout.count())):
+                            layout.itemAt(i).widget().setParent(None)
+                        layout.addWidget(no_data_label)
+                return
+
             series = QPieSeries()
             series.setHoleSize(0.35)
-            
             for row in data:
+                print(f"[DEBUG] Adding slice: {row['context_combination']} ({row['count']})")
                 slice = QPieSlice(f"{row['context_combination']} ({row['count']})", row['count'])
                 series.append(slice)
-            
-            # Créer le chart
+
             chart = QChart()
             chart.addSeries(series)
             chart.setTitle("Répartition des Combinaisons de Contextes")
             chart.setAnimationOptions(QChart.SeriesAnimations)
-            
-            # Style du chart
             chart.setBackgroundBrush(QtGui.QBrush(QtGui.QColor(self.background_color)))
             chart.setTitleBrush(QtGui.QBrush(QtGui.QColor(self.primary_color)))
-            
             self.chart_view.setChart(chart)
-            
+            print("[DEBUG] Chart set on chart_view")
+
         except Exception as e:
             logger.error(f"Erreur lors de la mise à jour du diagramme: {str(e)}")
+            print(f"[DEBUG] Exception in _update_chart: {str(e)}")
+            error_label = QtWidgets.QLabel(f"Erreur lors du chargement du diagramme:\n{str(e)}")
+            error_label.setAlignment(Qt.AlignCenter)
+            error_label.setStyleSheet("color: red;")
+            if hasattr(self, 'chart_view'):
+                layout = self.chart_view.layout()
+                if layout:
+                    for i in reversed(range(layout.count())):
+                        layout.itemAt(i).widget().setParent(None)
+                    layout.addWidget(error_label)
+
+    def _check_database_tables(self):
+        """Vérifie que les tables nécessaires existent"""
+        if not self.database:
+            return False
+        
+        try:
+            cursor = self.database.connection.cursor()
+            
+            # Vérifier l'existence des tables
+            tables_to_check = [
+                'context_clusters', 
+                'context_root_labels', 
+                'context_parents',
+                'context_usage'
+            ]
+            
+            for table in tables_to_check:
+                cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+                if not cursor.fetchone():
+                    logger.warning(f"Table {table} n'existe pas")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la vérification des tables: {str(e)}")
+            return False       
+
+    def set_database(self, database):
+        """Définit la base de données"""
+        self.database = database
+        
+        if self._check_database_tables():
+            self._load_context_hierarchy()
+            self._update_chart()
+        else:
+            self.status_label.setText("Tables de contexte manquantes dans la base de données")
+            logger.warning("Tables de contexte manquantes")             
     
     def _add_cluster(self):
         """Ajoute un nouveau cluster"""
