@@ -27,6 +27,8 @@ from ui.widgets.project_config_only_widget import ProjectConfigOnlyWidget # <-- 
 # Si ProjectConfigWidget n'est plus utilisé nulle part ailleurs que comme onglet interne,
 # cette ligne peut être commentée ou supprimée. Pour l'instant, nous la gardons
 # car le PlatformConfigWidget l'importe et l'utilise.
+
+from ui.widgets.generation_widget import GenerationWidget
 from ui.widgets.tabs.project_config_widget import ProjectConfigWidget # Gardez le même chemin pour l'importation
 
 from ui.styles.theme import Theme
@@ -64,7 +66,14 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(Theme.get_global_stylesheet())
 
         # Initialiser les composants
+
         self._init_components()
+        self.generation_widget = GenerationWidget()  # <-- initialize before _init_connections
+        self._init_ui()
+        self._init_menu() # Le menu sera configuré ici
+        self._init_statusbar()
+        self._init_components()
+        self.generation_widget = GenerationWidget()  # <-- initialize before _init_connections
         self._init_ui()
         self._init_menu() # Le menu sera configuré ici
         self._init_statusbar()
@@ -84,11 +93,6 @@ class MainWindow(QMainWindow):
 
         # Initialiser le système au démarrage
         QTimer.singleShot(100, self._init_system)
-
-        # Journaliser le démarrage
-        logger.info("Application démarrée")
-        print("=== FIN - Initialisation de MainWindow ===")
-
         self.current_mode = "dev"
 
     def _init_components(self):
@@ -268,13 +272,14 @@ class MainWindow(QMainWindow):
         """
         if self.mode_switch.isChecked():
             self.current_mode = "data"
-            # Supprimer tous les onglets
+            # Supprimer tous les onglets 
             self.tab_widget.clear()
             self.tab_widget.addTab(self.brainstorming_panel, tr("brainstorming_tab"))
             self.tab_widget.addTab(self.annotation_form, tr("annotation_tab"))
             self.tab_widget.addTab(self.dataset_table, tr("datasets_tab"))
+            self.tab_widget.addTab(self.generation_widget, "Génération")  # NOUVEL ONGLET
             self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
-            self.tab_widget.setCurrentIndex(0)
+            self.tab_widget.setCurrentIndex(0)           
         else:
             self.current_mode = "dev"
             self.tab_widget.clear()
@@ -498,6 +503,12 @@ class MainWindow(QMainWindow):
         self.annotation_form.annotation_completed.connect(self._on_annotation_completed)
         self.annotation_form.annotation_failed.connect(self._on_annotation_failed)
 
+        # Connexions du widget de génération
+        self.generation_widget.generation_started.connect(self._on_generation_started)
+        self.generation_widget.generation_completed.connect(self._on_generation_completed)
+        self.generation_widget.generation_failed.connect(self._on_generation_failed)
+        self.generation_widget.dataset_created.connect(self._on_dataset_created)
+
         # Connexions de la table de datasets
         self.dataset_table.dataset_selected.connect(self._on_dataset_selected)
         self.dataset_table.dataset_created.connect(self._on_dataset_created)
@@ -523,7 +534,7 @@ class MainWindow(QMainWindow):
             self.tab_widget.setTabText(self.tab_widget.indexOf(self.annotation_form), tr("annotation_tab"))
             self.tab_widget.setTabText(self.tab_widget.indexOf(self.dataset_table), tr("datasets_tab"))
             self.tab_widget.setTabText(self.tab_widget.indexOf(self.prompt_list), tr("history_tab"))
-
+            self.tab_widget.setTabText(self.tab_widget.indexOf(self.generation_widget), "Génération")
 
             # Mettre à jour les menus (IMPORTANT!)
             self._update_menus()
@@ -547,7 +558,7 @@ class MainWindow(QMainWindow):
     def _notify_language_change(self):
         """Notifie les widgets enfants du changement de langue"""
         # Informer les panneaux principaux
-        for panel in [self.coding_panel, self.brainstorming_panel, self.annotation_form,
+        for panel in [self.coding_panel, self.brainstorming_panel, self.annotation_form, self.generation_widget,
                       self.dataset_table, self.prompt_list]:
             if hasattr(panel, 'update_language'):
                 panel.update_language()
@@ -687,6 +698,10 @@ class MainWindow(QMainWindow):
         self.dataset_table.set_exporter(self.exporter)
 
         self.prompt_list.set_database(self.database)
+
+        self.generation_widget.set_conductor(self.conductor)
+        self.generation_widget.set_platforms(platforms)
+        self.generation_widget.set_database(self.database)
 
         # Charger les données initiales
         self.prompt_list.refresh_list()
@@ -898,6 +913,8 @@ class MainWindow(QMainWindow):
             self.platform_config_dialog.setWindowTitle("Configuration des Plateformes d'IA")
             self.platform_config_dialog.setMinimumSize(1200, 800)
             self.platform_config_dialog.setModal(True)
+            self.generation_widget.set_conductor(self.conductor)
+            #self.generation_widget.set_platforms(platforms)
 
             # Layout pour la boîte de dialogue
             dialog_layout = QtWidgets.QVBoxLayout(self.platform_config_dialog)
@@ -1584,6 +1601,34 @@ class MainWindow(QMainWindow):
             prompt_id (int): ID du prompt
         """
         self.update_status(f"Prompt {prompt_id} supprimé")
+
+    def _on_generation_started(self, platform):
+        """
+        Gère le démarrage d'une génération
+        Args:
+            platform (str): Nom de la plateforme
+        """
+        self.update_status(f"Génération démarrée sur {platform}")
+        self.show_progress(0, 100)    
+
+    def _on_generation_completed(self, platform):
+        """
+        Gère la fin d'une génération
+        Args:
+            platform (str): Nom de la plateforme
+        """
+        self.update_status(f"Génération terminée sur {platform}")
+        self.hide_progress()
+
+    def _on_generation_failed(self, platform, error):
+        """
+        Gère l'échec d'une génération
+        Args:
+            platform (str): Nom de la plateforme
+            error (str): Message d'erreur
+        """
+        self.update_status(f"Échec de la génération sur {platform}")
+        self.hide_progress()    
 
     def closeEvent(self, event):
         """

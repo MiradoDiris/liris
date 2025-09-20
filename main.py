@@ -103,7 +103,7 @@ def main():
         print(f"\n=== ERREUR CRITIQUE ===")
         print(f"Erreur: {str(e)}")
         traceback.print_exc()
-        logger.critical(f"Erreur critique lors du démarrage: {str(e)}", exc_info=True)
+        logger.critical(f"Erreur critique lors du démarrage: {str(e)}")
         sys.exit(1)
 
 
