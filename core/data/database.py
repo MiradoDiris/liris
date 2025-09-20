@@ -1226,4 +1226,3 @@ class Database:
         except Exception as e:
             logger.error(f"Erreur lors de la mise à jour du statut: {str(e)}")
             raise DatabaseError(f"Échec de la mise à jour du statut: {str(e)}")
-
