@@ -58,21 +58,59 @@ class GenerationWorker(QThread):
             
     def _prepare_prompt(self):
         """Prépare le prompt avec le contexte sélectionné"""
-        context_str = json.dumps(self.context_data, indent=2, ensure_ascii=False)
+        # Construire une représentation structurée du contexte
+        context_info = []
+        
+        # Informations de base du contexte
+        if 'name' in self.context_data:
+            context_info.append(f"Nom du contexte: {self.context_data['name']}")
+        if 'type' in self.context_data:
+            context_info.append(f"Type: {self.context_data['type']}")
+        if 'description' in self.context_data and self.context_data['description']:
+            context_info.append(f"Description: {self.context_data['description']}")
+        
+        # Hiérarchie du contexte
+        if 'hierarchy' in self.context_data and self.context_data['hierarchy']:
+            hierarchy_str = " > ".join([f"{level['type']}: {level['name']}" for level in self.context_data['hierarchy']])
+            context_info.append(f"Hiérarchie: {hierarchy_str}")
+        
+        # Propriétés spécifiques
+        if 'properties' in self.context_data and self.context_data['properties']:
+            context_info.append(f"Propriétés spécifiques: {json.dumps(self.context_data['properties'], ensure_ascii=False)}")
+        
+        context_str = "\n".join(context_info)
+        
+        # Configuration détaillée
+        config_details = []
+        config_details.append(f"Format de sortie: {self.config.get('output_format', 'JSON')}")
+        config_details.append(f"Type de dataset: {self.config.get('dataset_type', 'Standard')}")
+        config_details.append(f"Nombre d'exemples à générer: {self.config.get('examples_per_batch', 10)}")
+        
+        if self.config.get('output_format') == 'JSON':
+            config_details.append("Structure JSON attendue: Utilisez des clés descriptives et une structure cohérente")
+        elif self.config.get('output_format') == 'CSV':
+            config_details.append("Format CSV: Incluez les en-têtes de colonnes et séparez les valeurs par des virgules")
+        
+        config_str = "\n".join(config_details)
         
         full_prompt = f"""
-Contexte de génération:
+CONTEXTE DE GÉNÉRATION:
 {context_str}
 
-Instructions:
+INSTRUCTIONS UTILISATEUR:
 {self.prompt}
 
-Configuration:
-- Format de sortie: {self.config.get('output_format', 'JSON')}
-- Nombre d'exemples par lot: {self.config.get('examples_per_batch', 10)}
-- Type de dataset: {self.config.get('dataset_type', 'Standard')}
+CONFIGURATION TECHNIQUE:
+{config_str}
 
-Veuillez générer un dataset selon ces spécifications.
+CONSIGNES IMPORTANTES:
+1. Respectez strictement le format de sortie demandé ({self.config.get('output_format', 'JSON')})
+2. Générez exactement {self.config.get('examples_per_batch', 10)} exemples
+3. Assurez-vous que chaque exemple est cohérent avec le contexte fourni
+4. Variez les exemples pour couvrir différents aspects du contexte
+5. Maintenez une qualité élevée et une pertinence maximale
+
+Générez maintenant le dataset selon ces spécifications.
 """
         return full_prompt
         
@@ -405,7 +443,7 @@ class GenerationWidget(QWidget):
         conn.close()
         
     def load_available_contexts(self):
-        """Charge les contextes disponibles depuis la stratégie"""
+        """Charge les contextes disponibles depuis la stratégie avec organisation améliorée"""
         self.context_list.clear()
         
         if not self.db_path:
@@ -415,17 +453,45 @@ class GenerationWidget(QWidget):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            cursor.execute("SELECT name, type, description FROM strategy_items")
-            items = cursor.fetchall()
+            # Récupérer tous les éléments avec leur hiérarchie
+            cursor.execute("""
+                SELECT s1.id, s1.name, s1.type, s1.description,
+                       s2.name as parent_name, s2.type as parent_type
+                FROM strategy_items s1
+                LEFT JOIN strategy_items s2 ON s1.parent_id = s2.id
+                ORDER BY s1.type, s1.name
+            """)
             
-            for name, item_type, description in items:
-                display_text = f"[{item_type}] {name}"
-                if description:
-                    display_text += f" - {description[:50]}..."
-                self.context_list.addItem(display_text)
-                
+            items = cursor.fetchall()
             conn.close()
             
+            # Grouper par type pour une meilleure organisation
+            grouped_items = {}
+            for item in items:
+                item_id, name, item_type, description, parent_name, parent_type = item
+                
+                if item_type not in grouped_items:
+                    grouped_items[item_type] = []
+                
+                display_text = f"[{item_type}] {name}"
+                if parent_name:
+                    display_text += f" (sous {parent_name})"
+                if description:
+                    display_text += f" - {description[:50]}..."
+                
+                grouped_items[item_type].append({
+                    "id": item_id,
+                    "display": display_text,
+                    "name": name,
+                    "type": item_type
+                })
+            
+            # Ajouter les éléments groupés à la liste
+            for item_type in ["Cluster", "Racine", "Parent", "Enfant"]:
+                if item_type in grouped_items:
+                    for item in grouped_items[item_type]:
+                        self.context_list.addItem(item["display"])
+                        
         except Exception as e:
             self.log_message(f"Erreur lors du chargement des contextes: {str(e)}")
             
@@ -488,12 +554,63 @@ class GenerationWidget(QWidget):
         
     def _get_selected_context_data(self):
         """Récupère les données du contexte sélectionné"""
-        # Pour l'instant, retourne un contexte simulé
-        # À connecter avec la vraie base de données de stratégie
-        return {
-            "selected_context": self.context_list.currentItem().text() if self.context_list.currentItem() else "",
-            "timestamp": datetime.now().isoformat()
-        }
+        if not self.context_list.currentItem() or not self.db_path:
+            return {
+                "selected_context": "",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        try:
+            # Extraire le nom du contexte depuis le texte affiché
+            display_text = self.context_list.currentItem().text()
+            # Format: "[Type] Nom - Description..."
+            if "] " in display_text:
+                context_name = display_text.split("] ")[1].split(" - ")[0]
+            else:
+                context_name = display_text
+            
+            # Récupérer les données complètes depuis la base de données
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, name, type, description, properties, parent_id 
+                FROM strategy_items 
+                WHERE name = ?
+            """, (context_name,))
+            
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                item_id, name, item_type, description, properties, parent_id = result
+                
+                # Récupérer la hiérarchie complète
+                hierarchy = self._get_context_hierarchy(item_id)
+                
+                return {
+                    "id": item_id,
+                    "name": name,
+                    "type": item_type,
+                    "description": description or "",
+                    "properties": json.loads(properties) if properties else {},
+                    "parent_id": parent_id,
+                    "hierarchy": hierarchy,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "selected_context": display_text,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+        except Exception as e:
+            self.log_message(f"Erreur lors de la récupération du contexte: {str(e)}")
+            return {
+                "selected_context": display_text if self.context_list.currentItem() else "",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
         
     @pyqtSlot(int)
     def update_progress(self, value):
@@ -530,33 +647,90 @@ class GenerationWidget(QWidget):
         
     def generate_preview(self):
         """Génère un aperçu du dataset"""
-        # Simulation d'un aperçu
-        preview_text = """
-Aperçu du dataset qui sera généré:
+        # Validation des entrées
+        if not self.prompt_edit.toPlainText().strip():
+            QMessageBox.warning(self, "Erreur", "Veuillez entrer des instructions de génération")
+            return
+            
+        if self.context_list.currentRow() == -1:
+            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un contexte")
+            return
+        
+        try:
+            # Récupérer les paramètres actuels
+            output_format = self.format_combo.currentText()
+            dataset_type = self.type_combo.currentText()
+            examples_count = self.examples_spin.value()
+            context_data = self._get_selected_context_data()
+            
+            # Générer l'aperçu basé sur le modèle prédéfini
+            template_example = self._apply_template(dataset_type, output_format)
+            
+            # Construire l'aperçu détaillé
+            preview_text = f"""
+📋 APERÇU DU DATASET À GÉNÉRER
 
-Format: JSON
-Type: Conversationnel
-Exemples par lot: 10
+🎯 Configuration:
+• Format de sortie: {output_format}
+• Type de dataset: {dataset_type}
+• Exemples par lot: {examples_count}
+• Nombre de lots: {self.batches_spin.value()}
+• Total d'exemples: {examples_count * self.batches_spin.value()}
 
-Exemple de structure:
-{
-    "conversations": [
-        {
-            "id": 1,
-            "question": "Comment puis-je retourner un produit?",
-            "response": "Vous pouvez retourner votre produit dans les 30 jours...",
-            "context": "Service client - Retours"
-        }
-    ]
-}
+🏷️ Contexte sélectionné:
+• Nom: {context_data.get('name', 'Non défini')}
+• Type: {context_data.get('type', 'Non défini')}
+• Description: {context_data.get('description', 'Aucune description')}
+
+📝 Instructions de génération:
+{self.prompt_edit.toPlainText()[:200]}{'...' if len(self.prompt_edit.toPlainText()) > 200 else ''}
+
+📊 Exemple de structure attendue:
+{template_example}
+
+⚙️ Hiérarchie du contexte:
 """
-        self.preview_text.setText(preview_text)
-        self.log_message("Aperçu généré")
+            
+            # Ajouter la hiérarchie si disponible
+            hierarchy = context_data.get('hierarchy', [])
+            if hierarchy:
+                for i, level in enumerate(hierarchy):
+                    indent = "  " * i
+                    preview_text += f"\n{indent}• {level['type']}: {level['name']}"
+            else:
+                preview_text += "\nAucune hiérarchie disponible"
+            
+            # Ajouter les propriétés du contexte si disponibles
+            properties = context_data.get('properties', {})
+            if properties:
+                preview_text += f"\n\n🔧 Propriétés du contexte:\n{json.dumps(properties, indent=2, ensure_ascii=False)}"
+            
+            self.preview_text.setText(preview_text)
+            self.log_message("Aperçu détaillé généré avec succès")
+            
+            # Activer le bouton d'approbation
+            self.approve_preview_btn.setEnabled(True)
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la génération de l'aperçu: {str(e)}"
+            self.preview_text.setText(error_msg)
+            self.log_message(error_msg)
         
     def approve_and_continue(self):
         """Approuve l'aperçu et continue la génération complète"""
-        self.log_message("Aperçu approuvé, génération complète en cours...")
-        # Ici on pourrait modifier la configuration pour ignorer l'aperçu
+        reply = QMessageBox.question(
+            self, 'Confirmer la génération', 
+            'Êtes-vous satisfait de cet aperçu et souhaitez-vous lancer la génération complète ?'
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.log_message("Aperçu approuvé, lancement de la génération complète...")
+            # Désactiver la case "Générer un aperçu d'abord" pour éviter la redondance
+            self.preview_checkbox.setChecked(False)
+            # Lancer la génération
+            self.start_generation()
+        else:
+            self.log_message("Génération annulée par l'utilisateur")
         
     def view_selected_dataset(self):
         """Affiche le contenu du dataset sélectionné"""
@@ -663,3 +837,207 @@ Exemple de structure:
         # Faire défiler vers le bas
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+
+    def _get_context_hierarchy(self, item_id):
+        """Récupère la hiérarchie complète d'un élément de contexte"""
+        if not self.db_path:
+            return []
+            
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            hierarchy = []
+            current_id = item_id
+            
+            while current_id is not None:
+                cursor.execute("""
+                    SELECT id, name, type, parent_id 
+                    FROM strategy_items 
+                    WHERE id = ?
+                """, (current_id,))
+                
+                result = cursor.fetchone()
+                if result:
+                    item_id, name, item_type, parent_id = result
+                    hierarchy.insert(0, {
+                        "id": item_id,
+                        "name": name,
+                        "type": item_type
+                    })
+                    current_id = parent_id
+                else:
+                    break
+            
+            conn.close()
+            return hierarchy
+            
+        except Exception as e:
+            self.log_message(f"Erreur lors de la récupération de la hiérarchie: {str(e)}")
+            return []
+    
+    def _get_predefined_templates(self):
+        """Retourne les modèles prédéfinis pour les formats de sortie"""
+        templates = {
+            "JSON": {
+                "Conversationnel": {
+                    "structure": {
+                        "conversations": [
+                            {
+                                "id": "int",
+                                "question": "string",
+                                "response": "string",
+                                "context": "string",
+                                "metadata": "object"
+                            }
+                        ]
+                    },
+                    "example": {
+                        "conversations": [
+                            {
+                                "id": 1,
+                                "question": "Comment puis-je retourner un produit?",
+                                "response": "Vous pouvez retourner votre produit dans les 30 jours...",
+                                "context": "Service client - Retours",
+                                "metadata": {"category": "support", "priority": "normal"}
+                            }
+                        ]
+                    }
+                },
+                "Q&A": {
+                    "structure": {
+                        "qa_pairs": [
+                            {
+                                "id": "int",
+                                "question": "string",
+                                "answer": "string",
+                                "category": "string",
+                                "difficulty": "string"
+                            }
+                        ]
+                    },
+                    "example": {
+                        "qa_pairs": [
+                            {
+                                "id": 1,
+                                "question": "Qu'est-ce que l'intelligence artificielle?",
+                                "answer": "L'intelligence artificielle est...",
+                                "category": "Technologie",
+                                "difficulty": "Débutant"
+                            }
+                        ]
+                    }
+                },
+                "Classification": {
+                    "structure": {
+                        "data": [
+                            {
+                                "id": "int",
+                                "text": "string",
+                                "label": "string",
+                                "confidence": "float"
+                            }
+                        ]
+                    },
+                    "example": {
+                        "data": [
+                            {
+                                "id": 1,
+                                "text": "Ce produit est fantastique!",
+                                "label": "positif",
+                                "confidence": 0.95
+                            }
+                        ]
+                    }
+                }
+            },
+            "CSV": {
+                "Standard": {
+                    "headers": ["id", "input", "output", "category"],
+                    "example": "id,input,output,category\n1,\"Question exemple\",\"Réponse exemple\",\"Catégorie\""
+                }
+            }
+        }
+        return templates
+    
+    def _apply_template(self, dataset_type, output_format):
+        """Applique un modèle prédéfini selon le type et format"""
+        templates = self._get_predefined_templates()
+        
+        if output_format in templates and dataset_type in templates[output_format]:
+            template = templates[output_format][dataset_type]
+            
+            if output_format == "JSON":
+                return json.dumps(template["example"], indent=2, ensure_ascii=False)
+            elif output_format == "CSV":
+                return template["example"]
+        
+        return f"Modèle pour {dataset_type} en format {output_format}"
+    
+    def _enhance_load_available_contexts(self):
+        """Version améliorée du chargement des contextes avec filtrage"""
+        self.context_list.clear()
+        
+        if not self.db_path:
+            return
+            
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Récupérer tous les éléments avec leur hiérarchie
+            cursor.execute("""
+                SELECT s1.id, s1.name, s1.type, s1.description,
+                       s2.name as parent_name, s2.type as parent_type
+                FROM strategy_items s1
+                LEFT JOIN strategy_items s2 ON s1.parent_id = s2.id
+                ORDER BY s1.type, s1.name
+            """)
+            
+            items = cursor.fetchall()
+            conn.close()
+            
+            # Grouper par type pour une meilleure organisation
+            grouped_items = {}
+            for item in items:
+                item_id, name, item_type, description, parent_name, parent_type = item
+                
+                if item_type not in grouped_items:
+                    grouped_items[item_type] = []
+                
+                display_text = f"[{item_type}] {name}"
+                if parent_name:
+                    display_text += f" (sous {parent_name})"
+                if description:
+                    display_text += f" - {description[:50]}..."
+                
+                grouped_items[item_type].append({
+                    "id": item_id,
+                    "display": display_text,
+                    "name": name,
+                    "type": item_type
+                })
+            
+            # Ajouter les éléments groupés à la liste
+            for item_type in ["Cluster", "Racine", "Parent", "Enfant"]:
+                if item_type in grouped_items:
+                    for item in grouped_items[item_type]:
+                        self.context_list.addItem(item["display"])
+                        
+        except Exception as e:
+            self.log_message(f"Erreur lors du chargement des contextes: {str(e)}")
+    
+    def get_generation_statistics(self):
+        """Retourne les statistiques de génération"""
+        total_datasets = len(self.generated_datasets)
+        total_tokens = sum(
+            dataset.get('usage', {}).get('tokens', 0) 
+            for dataset in self.generated_datasets
+        )
+        
+        return {
+            "total_datasets": total_datasets,
+            "total_tokens": total_tokens,
+            "average_tokens_per_dataset": total_tokens / total_datasets if total_datasets > 0 else 0,
+            "generation_time": datetime.now().isoformat()
+        }

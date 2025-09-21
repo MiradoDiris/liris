@@ -1,9 +1,10 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QTreeWidget, QTreeWidgetItem, QLineEdit, 
-                             QTextEdit, QGroupBox, QSplitter, QMessageBox, QInputDialog)
+                             QTextEdit, QGroupBox, QSplitter, QMessageBox, QInputDialog, QFileDialog)
 from PyQt5.QtCore import Qt, pyqtSignal
 import sqlite3
 import json
+from datetime import datetime
 
 
 class StrategyWidget(QWidget):
@@ -52,11 +53,67 @@ class StrategyWidget(QWidget):
         
         # Boutons de gestion de l'arbre
         tree_buttons = QHBoxLayout()
-        self.add_cluster_btn = QPushButton("Ajouter Cluster")
-        self.add_root_btn = QPushButton("Ajouter Racine")
-        self.add_parent_btn = QPushButton("Ajouter Parent")
-        self.add_child_btn = QPushButton("Ajouter Enfant")
+        
+        # Boutons avec styles améliorés
+        self.add_cluster_btn = QPushButton("Cluster")
+        self.add_cluster_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B2D;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+        """)
+        
+        self.add_root_btn = QPushButton("Racine")
+        self.add_root_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B2D;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+        """)
+        
+        self.add_parent_btn = QPushButton("Parent")
+        self.add_parent_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B2D;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+        """)
+        
+        self.add_child_btn = QPushButton("Enfant")
+        self.add_child_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B2D;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+        """)
+        
         self.delete_item_btn = QPushButton("Supprimer")
+        self.delete_item_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B2D;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+        """)
         
         tree_buttons.addWidget(self.add_cluster_btn)
         tree_buttons.addWidget(self.add_root_btn)
@@ -131,10 +188,58 @@ class StrategyWidget(QWidget):
         """Crée la barre de boutons en bas"""
         layout = QHBoxLayout()
         
+        # Boutons avec styles améliorés
         self.load_strategy_btn = QPushButton("Charger Stratégie")
+        self.load_strategy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B2D;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+        """)
+        
         self.save_strategy_btn = QPushButton("Sauvegarder Stratégie")
+        self.save_strategy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B2D;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+        """)
+        
         self.export_strategy_btn = QPushButton("Exporter")
+        self.export_strategy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B2D;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+        """)
+        
         self.import_strategy_btn = QPushButton("Importer")
+        self.import_strategy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B2D;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+        """)
         
         layout.addWidget(self.load_strategy_btn)
         layout.addWidget(self.save_strategy_btn)
@@ -200,12 +305,26 @@ class StrategyWidget(QWidget):
     def add_cluster(self):
         """Ajoute un nouveau cluster"""
         name, ok = QInputDialog.getText(self, 'Nouveau Cluster', 'Nom du cluster:')
-        if ok and name:
+        if ok and name.strip():
+            # Vérifier si le nom existe déjà
+            if self._name_exists_at_level(name.strip(), None):
+                QMessageBox.warning(self, "Erreur", f"Un cluster nommé '{name.strip()}' existe déjà")
+                return
+                
             item = QTreeWidgetItem(self.tree_widget)
-            item.setText(0, name)
+            item.setText(0, name.strip())
             item.setText(1, "Cluster")
             item.setText(2, str(self._get_next_id()))
-            item.setData(0, Qt.UserRole, {"type": "cluster", "name": name})
+            item.setData(0, Qt.UserRole, {
+                "type": "cluster", 
+                "name": name.strip(),
+                "description": "",
+                "properties": {}
+            })
+            
+            # Sélectionner le nouvel élément
+            self.tree_widget.setCurrentItem(item)
+            QMessageBox.information(self, "Succès", f"Cluster '{name.strip()}' créé avec succès")
             
     def add_root_label(self):
         """Ajoute un libellé racine"""
@@ -215,13 +334,25 @@ class StrategyWidget(QWidget):
             return
             
         name, ok = QInputDialog.getText(self, 'Nouveau Libellé Racine', 'Nom du libellé:')
-        if ok and name:
+        if ok and name.strip():
+            # Vérifier si le nom existe déjà sous ce cluster
+            if self._name_exists_at_level(name.strip(), current):
+                QMessageBox.warning(self, "Erreur", f"Un libellé racine nommé '{name.strip()}' existe déjà dans ce cluster")
+                return
+                
             item = QTreeWidgetItem(current)
-            item.setText(0, name)
+            item.setText(0, name.strip())
             item.setText(1, "Racine")
             item.setText(2, str(self._get_next_id()))
-            item.setData(0, Qt.UserRole, {"type": "root", "name": name})
+            item.setData(0, Qt.UserRole, {
+                "type": "root", 
+                "name": name.strip(),
+                "description": "",
+                "properties": {}
+            })
             current.setExpanded(True)
+            self.tree_widget.setCurrentItem(item)
+            QMessageBox.information(self, "Succès", f"Libellé racine '{name.strip()}' créé avec succès")
             
     def add_parent(self):
         """Ajoute un élément parent"""
@@ -231,13 +362,25 @@ class StrategyWidget(QWidget):
             return
             
         name, ok = QInputDialog.getText(self, 'Nouveau Parent', 'Nom du parent:')
-        if ok and name:
+        if ok and name.strip():
+            # Vérifier si le nom existe déjà sous cet élément
+            if self._name_exists_at_level(name.strip(), current):
+                QMessageBox.warning(self, "Erreur", f"Un parent nommé '{name.strip()}' existe déjà sous cet élément")
+                return
+                
             item = QTreeWidgetItem(current)
-            item.setText(0, name)
+            item.setText(0, name.strip())
             item.setText(1, "Parent")
             item.setText(2, str(self._get_next_id()))
-            item.setData(0, Qt.UserRole, {"type": "parent", "name": name})
+            item.setData(0, Qt.UserRole, {
+                "type": "parent", 
+                "name": name.strip(),
+                "description": "",
+                "properties": {}
+            })
             current.setExpanded(True)
+            self.tree_widget.setCurrentItem(item)
+            QMessageBox.information(self, "Succès", f"Parent '{name.strip()}' créé avec succès")
             
     def add_child(self):
         """Ajoute un élément enfant"""
@@ -247,13 +390,25 @@ class StrategyWidget(QWidget):
             return
             
         name, ok = QInputDialog.getText(self, 'Nouvel Enfant', 'Nom de l\'enfant:')
-        if ok and name:
+        if ok and name.strip():
+            # Vérifier si le nom existe déjà sous ce parent
+            if self._name_exists_at_level(name.strip(), current):
+                QMessageBox.warning(self, "Erreur", f"Un enfant nommé '{name.strip()}' existe déjà sous ce parent")
+                return
+                
             item = QTreeWidgetItem(current)
-            item.setText(0, name)
+            item.setText(0, name.strip())
             item.setText(1, "Enfant")
             item.setText(2, str(self._get_next_id()))
-            item.setData(0, Qt.UserRole, {"type": "child", "name": name})
+            item.setData(0, Qt.UserRole, {
+                "type": "child", 
+                "name": name.strip(),
+                "description": "",
+                "properties": {}
+            })
             current.setExpanded(True)
+            self.tree_widget.setCurrentItem(item)
+            QMessageBox.information(self, "Succès", f"Enfant '{name.strip()}' créé avec succès")
             
     def delete_item(self):
         """Supprime l'élément sélectionné"""
@@ -261,14 +416,27 @@ class StrategyWidget(QWidget):
         if not current:
             return
             
-        reply = QMessageBox.question(self, 'Confirmer la suppression', 
-                                   f'Êtes-vous sûr de vouloir supprimer "{current.text(0)}" ?')
+        # Vérifier s'il y a des enfants
+        child_count = current.childCount()
+        if child_count > 0:
+            reply = QMessageBox.question(
+                self, 'Confirmer la suppression', 
+                f'L\'élément "{current.text(0)}" contient {child_count} enfant(s). '
+                f'Voulez-vous vraiment le supprimer avec tous ses enfants ?'
+            )
+        else:
+            reply = QMessageBox.question(
+                self, 'Confirmer la suppression', 
+                f'Êtes-vous sûr de vouloir supprimer "{current.text(0)}" ?'
+            )
+            
         if reply == QMessageBox.Yes:
             parent = current.parent()
             if parent:
                 parent.removeChild(current)
             else:
                 self.tree_widget.takeTopLevelItem(self.tree_widget.indexOfTopLevelItem(current))
+            QMessageBox.information(self, "Succès", "Élément supprimé avec succès")
                 
     def on_item_selected(self):
         """Gère la sélection d'un élément dans l'arbre"""
@@ -298,7 +466,16 @@ class StrategyWidget(QWidget):
             return
             
         data = current.data(0, Qt.UserRole) or {}
-        data["name"] = self.name_edit.text()
+        new_name = self.name_edit.text().strip()
+        
+        # Vérifier si le nom a changé et s'il existe déjà
+        if new_name != data.get("name", "") and new_name:
+            parent = current.parent()
+            if self._name_exists_at_level(new_name, parent, exclude_item=current):
+                QMessageBox.warning(self, "Erreur", f"Le nom '{new_name}' existe déjà à ce niveau")
+                return
+        
+        data["name"] = new_name
         data["description"] = self.description_edit.toPlainText()
         
         try:
@@ -420,13 +597,129 @@ class StrategyWidget(QWidget):
             
     def export_strategy(self):
         """Exporte la stratégie vers un fichier JSON"""
-        # À implémenter
-        QMessageBox.information(self, "Info", "Fonction d'export à implémenter")
+        if self.tree_widget.topLevelItemCount() == 0:
+            QMessageBox.warning(self, "Erreur", "Aucune stratégie à exporter")
+            return
+            
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exporter la stratégie", 
+            f"strategie_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            "JSON Files (*.json);;All Files (*)"
+        )
+        
+        if filename:
+            try:
+                strategy_data = self._export_tree_to_dict()
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(strategy_data, f, indent=2, ensure_ascii=False)
+                QMessageBox.information(self, "Succès", f"Stratégie exportée vers {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
         
     def import_strategy(self):
         """Importe une stratégie depuis un fichier JSON"""
-        # À implémenter
-        QMessageBox.information(self, "Info", "Fonction d'import à implémenter")
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Importer une stratégie", "",
+            "JSON Files (*.json);;All Files (*)"
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'r', encoding='utf-8') as f:
+                    strategy_data = json.load(f)
+                
+                # Vérifier la structure des données
+                if not isinstance(strategy_data, dict) or 'items' not in strategy_data:
+                    QMessageBox.warning(self, "Erreur", "Format de fichier invalide")
+                    return
+                
+                # Confirmer l'import
+                reply = QMessageBox.question(
+                    self, 'Confirmer l\'import', 
+                    'Cette action remplacera la stratégie actuelle. Continuer ?'
+                )
+                
+                if reply == QMessageBox.Yes:
+                    self.tree_widget.clear()
+                    self._import_dict_to_tree(strategy_data['items'])
+                    QMessageBox.information(self, "Succès", "Stratégie importée avec succès")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Erreur lors de l'import: {str(e)}")
+    
+    def _export_tree_to_dict(self):
+        """Convertit l'arbre en dictionnaire pour l'export"""
+        strategy_data = {
+            "version": "1.0",
+            "created_at": datetime.now().isoformat(),
+            "items": []
+        }
+        
+        for i in range(self.tree_widget.topLevelItemCount()):
+            item = self.tree_widget.topLevelItem(i)
+            strategy_data["items"].append(self._export_item_to_dict(item))
+            
+        return strategy_data
+    
+    def _export_item_to_dict(self, item):
+        """Convertit un élément de l'arbre en dictionnaire"""
+        data = item.data(0, Qt.UserRole) or {}
+        item_dict = {
+            "name": data.get("name", ""),
+            "type": data.get("type", ""),
+            "description": data.get("description", ""),
+            "properties": data.get("properties", {}),
+            "children": []
+        }
+        
+        # Exporter les enfants récursivement
+        for i in range(item.childCount()):
+            child = item.child(i)
+            item_dict["children"].append(self._export_item_to_dict(child))
+            
+        return item_dict
+    
+    def _import_dict_to_tree(self, items_data, parent_item=None):
+        """Importe les données depuis un dictionnaire vers l'arbre"""
+        for item_data in items_data:
+            if parent_item is None:
+                tree_item = QTreeWidgetItem(self.tree_widget)
+            else:
+                tree_item = QTreeWidgetItem(parent_item)
+                parent_item.setExpanded(True)
+            
+            # Configurer l'élément
+            tree_item.setText(0, item_data.get("name", ""))
+            tree_item.setText(1, item_data.get("type", ""))
+            tree_item.setText(2, str(self._get_next_id()))
+            
+            data = {
+                "name": item_data.get("name", ""),
+                "type": item_data.get("type", ""),
+                "description": item_data.get("description", ""),
+                "properties": item_data.get("properties", {})
+            }
+            tree_item.setData(0, Qt.UserRole, data)
+            
+            # Importer les enfants récursivement
+            if "children" in item_data and item_data["children"]:
+                self._import_dict_to_tree(item_data["children"], tree_item)
+    
+    def _name_exists_at_level(self, name, parent_item, exclude_item=None):
+        """Vérifie si un nom existe déjà au même niveau hiérarchique"""
+        if parent_item is None:
+            # Vérifier au niveau racine
+            for i in range(self.tree_widget.topLevelItemCount()):
+                item = self.tree_widget.topLevelItem(i)
+                if item != exclude_item and item.text(0) == name:
+                    return True
+        else:
+            # Vérifier sous le parent spécifié
+            for i in range(parent_item.childCount()):
+                item = parent_item.child(i)
+                if item != exclude_item and item.text(0) == name:
+                    return True
+        return False
         
     def _get_next_id(self):
         """Génère un ID temporaire pour les nouveaux éléments"""
