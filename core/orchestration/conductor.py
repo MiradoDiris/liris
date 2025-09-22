@@ -1021,20 +1021,18 @@ class AIConductor:
 
     def get_available_platforms(self):
         try:
-            if self.database and hasattr(self.database, 'get_all_platforms'):
-                db_platforms = self.database.get_all_platforms()
-                if db_platforms:
-                    return list(db_platforms.keys())
-
-            profiles = self.database.get_all_platforms()
-            available = []
-            for platform_name in profiles.keys():
-                can_use, _ = self.scheduler.can_use_platform(platform_name)
-                if can_use:
-                    available.append(platform_name)
-
-            return available
-        except Exception:
+            if self.database:
+                all_platforms = self.database.get_all_platforms()
+                if all_platforms:
+                    available = []
+                    for platform_name in all_platforms.keys():
+                        can_use, _ = self.scheduler.can_use_platform(platform_name)
+                        if can_use:
+                            available.append(platform_name)
+                    return available
+            return []
+        except Exception as e:
+            logger.error(f"Error getting available platforms: {e}")
             return []
 
     def shutdown(self):

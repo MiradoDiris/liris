@@ -3,7 +3,6 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QTextEdit, QGroupBox, QSplitter, QMessageBox, QInputDialog, QFileDialog,
                              QDialog, QDialogButtonBox, QCheckBox, QComboBox)
 from PyQt5.QtCore import Qt, pyqtSignal
-import sqlite3
 import json
 from datetime import datetime
 
@@ -56,10 +55,13 @@ class StrategyWidget(QWidget):
     """
     Widget pour l'onglet Stratégie - Gestion des typologies de contextes
     """
+    strategy_saved = pyqtSignal()
+    strategy_loaded = pyqtSignal()
+
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.db_path = None
+        self.database = None
         self.init_ui()
         self.setup_connections()
         
@@ -109,6 +111,11 @@ class StrategyWidget(QWidget):
         # Barre de boutons en bas
         button_layout = self._create_button_bar()
         layout.addLayout(button_layout)
+     
+    def set_database(self, database):
+        """Définit l'objet Database et initialise"""
+        self.database = database
+        self.load_typologies()
         
     def _create_tree_section(self):
         """Crée la section avec l'arbre des typologies"""
@@ -341,79 +348,35 @@ class StrategyWidget(QWidget):
         # Sélection dans l'arbre
         self.tree_widget.itemSelectionChanged.connect(self.on_item_selected)
         
-    def set_database(self, db_path):
-        """Définit le chemin de la base de données"""
-        self.db_path = db_path
-        self.init_database()
-        self.load_typologies()
-        self.load_strategy()
-        
-    def init_database(self):
-        """Initialise les tables de la base de données"""
-        if not self.db_path:
-            return
-            
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Table pour les éléments de stratégie
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS strategy_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                type TEXT NOT NULL,
-                parent_id INTEGER,
-                description TEXT,
-                properties TEXT,
-                typology_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (parent_id) REFERENCES strategy_items (id),
-                FOREIGN KEY (typology_id) REFERENCES context_typologies (id)
-            )
-        ''')
-        
-        # Table pour les typologies de contexte
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS context_typologies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT,
-                is_hierarchical BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-
     def load_typologies(self):
-        """Charge la liste des typologies"""
-        if not self.db_path:
+        """Charge la liste des typologies depuis la base de données"""
+        if not self.database:
             return
             
         self.typology_combo.clear()
         
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, name FROM context_typologies ORDER BY name")
-            typologies = cursor.fetchall()
-            conn.close()
+            typologies = self.database.get_typologies()
             
-            for typology_id, name in typologies:
-                self.typology_combo.addItem(name, typology_id)
+            self.typology_combo.addItem("-- Sélectionnez une typologie --", None)
+            
+            for typology in typologies:
+                display_text = f"{typology['name']} {'(Hiérarchique)' if typology['is_hierarchical'] else ''}"
+                self.typology_combo.addItem(display_text, typology['id'])
                 
         except Exception as e:
             print(f"Erreur lors du chargement des typologies: {str(e)}")
+            self.typology_combo.addItem("-- Erreur de chargement --", None)
             
     def on_typology_changed(self):
         """Gère le changement de typologie sélectionnée"""
         current_typology_id = self.typology_combo.currentData()
         if current_typology_id:
-            self.load_strategy(current_typology_id)
+            self.load_strategy()
             
     def add_typology(self):
         """Ajoute une nouvelle typologie"""
+
         dialog = TypologyDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             name, description, is_hierarchical = dialog.get_data()
@@ -422,22 +385,14 @@ class StrategyWidget(QWidget):
                 return
                 
             try:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO context_typologies (name, description, is_hierarchical) VALUES (?, ?, ?)",
-                    (name, description, is_hierarchical)
-                )
-                conn.commit()
-                conn.close()
-                
+                self.database.add_typology(name, description, is_hierarchical)
                 self.load_typologies()
                 QMessageBox.information(self, "Succès", f"Typologie '{name}' créée avec succès")
                 
-            except sqlite3.IntegrityError:
-                QMessageBox.warning(self, "Erreur", f"Une typologie nommée '{name}' existe déjà")
+            except ValueError as e:
+                QMessageBox.warning(self, "Erreur", str(e))
             except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
+                QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")      
                 
     def edit_typology(self):
         """Modifie une typologie existante"""
@@ -447,37 +402,22 @@ class StrategyWidget(QWidget):
             return
             
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name, description, is_hierarchical FROM context_typologies WHERE id = ?",
-                (current_id,)
-            )
-            result = cursor.fetchone()
-            conn.close()
+            result = self.database.get_typology_details(current_id)
             
             if result:
-                dialog = TypologyDialog(self, result[0], result[1], bool(result[2]))
+                dialog = TypologyDialog(self, result['name'], result['description'], bool(result['is_hierarchical']))
                 if dialog.exec_() == QDialog.Accepted:
                     name, description, is_hierarchical = dialog.get_data()
                     if not name:
                         QMessageBox.warning(self, "Erreur", "Le nom de la typologie est obligatoire")
                         return
                         
-                    conn = sqlite3.connect(self.db_path)
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "UPDATE context_typologies SET name = ?, description = ?, is_hierarchical = ? WHERE id = ?",
-                        (name, description, is_hierarchical, current_id)
-                    )
-                    conn.commit()
-                    conn.close()
-                    
+                    self.database.update_typology(current_id, name, description, is_hierarchical)
                     self.load_typologies()
                     QMessageBox.information(self, "Succès", f"Typologie '{name}' modifiée avec succès")
                     
-        except sqlite3.IntegrityError:
-            QMessageBox.warning(self, "Erreur", f"Une typologie nommée '{name}' existe déjà")
+        except ValueError as e:
+            QMessageBox.warning(self, "Erreur", str(e))
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
             
@@ -488,19 +428,7 @@ class StrategyWidget(QWidget):
             QMessageBox.warning(self, "Erreur", "Aucune typologie sélectionnée")
             return
             
-        # Vérifier si la typologie est utilisée
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM strategy_items WHERE typology_id = ?", (current_id,))
-            count = cursor.fetchone()[0]
-            conn.close()
-            
-            if count > 0:
-                QMessageBox.warning(self, "Erreur", 
-                    "Cette typologie est utilisée par des éléments. Impossible de la supprimer.")
-                return
-                
             typology_name = self.typology_combo.currentText()
             reply = QMessageBox.question(
                 self, "Confirmation", 
@@ -508,23 +436,19 @@ class StrategyWidget(QWidget):
             )
             
             if reply == QMessageBox.Yes:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM context_typologies WHERE id = ?", (current_id,))
-                conn.commit()
-                conn.close()
-                
+                self.database.delete_typology(current_id)
                 self.load_typologies()
                 QMessageBox.information(self, "Succès", "Typologie supprimée avec succès")
                 
+        except ValueError as e:
+            QMessageBox.warning(self, "Erreur", str(e))
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")   
-        
+            
     def add_cluster(self):
         """Ajoute un nouveau cluster"""
         name, ok = QInputDialog.getText(self, 'Nouveau Cluster', 'Nom du cluster:')
         if ok and name.strip():
-            # Vérifier si le nom existe déjà
             if self._name_exists_at_level(name.strip(), None):
                 QMessageBox.warning(self, "Erreur", f"Un cluster nommé '{name.strip()}' existe déjà")
                 return
@@ -540,7 +464,6 @@ class StrategyWidget(QWidget):
                 "properties": {}
             })
             
-            # Sélectionner le nouvel élément
             self.tree_widget.setCurrentItem(item)
             QMessageBox.information(self, "Succès", f"Cluster '{name.strip()}' créé avec succès")
             
@@ -553,7 +476,6 @@ class StrategyWidget(QWidget):
             
         name, ok = QInputDialog.getText(self, 'Nouveau Libellé Racine', 'Nom du libellé:')
         if ok and name.strip():
-            # Vérifier si le nom existe déjà sous ce cluster
             if self._name_exists_at_level(name.strip(), current):
                 QMessageBox.warning(self, "Erreur", f"Un libellé racine nommé '{name.strip()}' existe déjà dans ce cluster")
                 return
@@ -581,7 +503,6 @@ class StrategyWidget(QWidget):
             
         name, ok = QInputDialog.getText(self, 'Nouveau Parent', 'Nom du parent:')
         if ok and name.strip():
-            # Vérifier si le nom existe déjà sous cet élément
             if self._name_exists_at_level(name.strip(), current):
                 QMessageBox.warning(self, "Erreur", f"Un parent nommé '{name.strip()}' existe déjà sous cet élément")
                 return
@@ -609,7 +530,6 @@ class StrategyWidget(QWidget):
             
         name, ok = QInputDialog.getText(self, 'Nouvel Enfant', 'Nom de l\'enfant:')
         if ok and name.strip():
-            # Vérifier si le nom existe déjà sous ce parent
             if self._name_exists_at_level(name.strip(), current):
                 QMessageBox.warning(self, "Erreur", f"Un enfant nommé '{name.strip()}' existe déjà sous ce parent")
                 return
@@ -634,12 +554,11 @@ class StrategyWidget(QWidget):
         if not current:
             return
             
-        # Vérifier s'il y a des enfants
         child_count = current.childCount()
         if child_count > 0:
             reply = QMessageBox.question(
                 self, 'Confirmer la suppression', 
-                f'L\'élément "{current.text(0)}" contient {child_count} enfant(s). '
+                f'L\'élément "{current.text(0)}" contient {child_count} enfant(s). ' 
                 f'Voulez-vous vraiment le supprimer avec tous ses enfants ?'
             )
         else:
@@ -686,7 +605,6 @@ class StrategyWidget(QWidget):
         data = current.data(0, Qt.UserRole) or {}
         new_name = self.name_edit.text().strip()
         
-        # Vérifier si le nom a changé et s'il existe déjà
         if new_name != data.get("name", "") and new_name:
             parent = current.parent()
             if self._name_exists_at_level(new_name, parent, exclude_item=current):
@@ -717,78 +635,71 @@ class StrategyWidget(QWidget):
         
     def save_strategy(self):
         """Sauvegarde la stratégie complète dans la base de données"""
-        if not self.db_path:
+        if not self.database:
             QMessageBox.warning(self, "Erreur", "Aucune base de données configurée")
             return
-            
+        
+        current_typology_id = self.typology_combo.currentData()
+        if not current_typology_id:
+            QMessageBox.warning(self, "Erreur", "Aucune typologie sélectionnée pour la sauvegarde")
+            return
+
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Vider la table existante
-            cursor.execute("DELETE FROM strategy_items")
-            
-            # Sauvegarder tous les éléments
-            self._save_tree_items(cursor, None, self.tree_widget.invisibleRootItem())
-            
-            conn.commit()
-            conn.close()
+            self.database.clear_strategy_items(current_typology_id)
+            self._save_tree_items(None, self.tree_widget.invisibleRootItem(), current_typology_id)
             
             QMessageBox.information(self, "Succès", "Stratégie sauvegardée avec succès")
+            self.strategy_saved.emit()
             
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de la sauvegarde: {str(e)}")
             
-    def _save_tree_items(self, cursor, parent_id, parent_item):
+    def _save_tree_items(self, parent_id, parent_item, typology_id):
         """Sauvegarde récursivement les éléments de l'arbre"""
         for i in range(parent_item.childCount()):
             item = parent_item.child(i)
             data = item.data(0, Qt.UserRole) or {}
             
-            cursor.execute('''
-                INSERT INTO strategy_items (name, type, parent_id, description, properties)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (
+            item_id = self.database.add_strategy_item(
                 data.get("name", ""),
                 data.get("type", ""),
                 parent_id,
                 data.get("description", ""),
-                json.dumps(data.get("properties", {}))
-            ))
+                json.dumps(data.get("properties", {})),
+                typology_id
+            )
             
-            item_id = cursor.lastrowid
             item.setText(2, str(item_id))
             
-            # Sauvegarder les enfants
-            self._save_tree_items(cursor, item_id, item)
+            self._save_tree_items(item_id, item, typology_id)
             
     def load_strategy(self):
         """Charge la stratégie depuis la base de données"""
-        if not self.db_path:
+        if not self.database:
+            return
+
+        current_typology_id = self.typology_combo.currentData()
+        if not current_typology_id:
+            self.tree_widget.clear()
             return
             
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            items = self.database.get_strategy_items(current_typology_id)
             
-            cursor.execute("SELECT * FROM strategy_items ORDER BY id")
-            items = cursor.fetchall()
-            
-            conn.close()
-            
-            # Vider l'arbre
             self.tree_widget.clear()
             
-            # Reconstruire l'arbre
             items_dict = {}
             for item_data in items:
-                item_id, name, item_type, parent_id, description, properties, created_at = item_data
-                
+                item_id = item_data['id']
+                name = item_data['name']
+                item_type = item_data['type']
+                parent_id = item_data['parent_id']
+                description = item_data['description']
+                properties = item_data['properties']
+
                 if parent_id is None:
-                    # Élément racine
                     tree_item = QTreeWidgetItem(self.tree_widget)
                 else:
-                    # Élément enfant
                     parent_tree_item = items_dict.get(parent_id)
                     if parent_tree_item:
                         tree_item = QTreeWidgetItem(parent_tree_item)
@@ -809,6 +720,8 @@ class StrategyWidget(QWidget):
                 tree_item.setData(0, Qt.UserRole, data)
                 
                 items_dict[item_id] = tree_item
+            
+            self.strategy_loaded.emit()
                 
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement: {str(e)}")
@@ -832,7 +745,7 @@ class StrategyWidget(QWidget):
                     json.dump(strategy_data, f, indent=2, ensure_ascii=False)
                 QMessageBox.information(self, "Succès", f"Stratégie exportée vers {filename}")
             except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
+                QMessageBox.critical(self, "Erreur", f"Erreur lors de l\'export: {str(e)}")
         
     def import_strategy(self):
         """Importe une stratégie depuis un fichier JSON"""
@@ -846,14 +759,12 @@ class StrategyWidget(QWidget):
                 with open(filename, 'r', encoding='utf-8') as f:
                     strategy_data = json.load(f)
                 
-                # Vérifier la structure des données
                 if not isinstance(strategy_data, dict) or 'items' not in strategy_data:
                     QMessageBox.warning(self, "Erreur", "Format de fichier invalide")
                     return
                 
-                # Confirmer l'import
                 reply = QMessageBox.question(
-                    self, 'Confirmer l\'import', 
+                    self, 'Confirmer l\'import',
                     'Cette action remplacera la stratégie actuelle. Continuer ?'
                 )
                 
@@ -863,10 +774,10 @@ class StrategyWidget(QWidget):
                     QMessageBox.information(self, "Succès", "Stratégie importée avec succès")
                     
             except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Erreur lors de l'import: {str(e)}")
+                QMessageBox.critical(self, "Erreur", f"Erreur lors de l\'import: {str(e)}")
     
     def _export_tree_to_dict(self):
-        """Convertit l'arbre en dictionnaire pour l'export"""
+        """Convertit l'arbre en dictionnaire pour l\'export"""
         strategy_data = {
             "version": "1.0",
             "created_at": datetime.now().isoformat(),
@@ -880,7 +791,7 @@ class StrategyWidget(QWidget):
         return strategy_data
     
     def _export_item_to_dict(self, item):
-        """Convertit un élément de l'arbre en dictionnaire"""
+        """Convertit un élément de l\'arbre en dictionnaire"""
         data = item.data(0, Qt.UserRole) or {}
         item_dict = {
             "name": data.get("name", ""),
@@ -890,7 +801,6 @@ class StrategyWidget(QWidget):
             "children": []
         }
         
-        # Exporter les enfants récursivement
         for i in range(item.childCount()):
             child = item.child(i)
             item_dict["children"].append(self._export_item_to_dict(child))
@@ -898,7 +808,7 @@ class StrategyWidget(QWidget):
         return item_dict
     
     def _import_dict_to_tree(self, items_data, parent_item=None):
-        """Importe les données depuis un dictionnaire vers l'arbre"""
+        """Importe les données depuis un dictionnaire vers l\'arbre"""
         for item_data in items_data:
             if parent_item is None:
                 tree_item = QTreeWidgetItem(self.tree_widget)
@@ -906,7 +816,6 @@ class StrategyWidget(QWidget):
                 tree_item = QTreeWidgetItem(parent_item)
                 parent_item.setExpanded(True)
             
-            # Configurer l'élément
             tree_item.setText(0, item_data.get("name", ""))
             tree_item.setText(1, item_data.get("type", ""))
             tree_item.setText(2, str(self._get_next_id()))
@@ -919,20 +828,17 @@ class StrategyWidget(QWidget):
             }
             tree_item.setData(0, Qt.UserRole, data)
             
-            # Importer les enfants récursivement
             if "children" in item_data and item_data["children"]:
                 self._import_dict_to_tree(item_data["children"], tree_item)
     
     def _name_exists_at_level(self, name, parent_item, exclude_item=None):
         """Vérifie si un nom existe déjà au même niveau hiérarchique"""
         if parent_item is None:
-            # Vérifier au niveau racine
             for i in range(self.tree_widget.topLevelItemCount()):
                 item = self.tree_widget.topLevelItem(i)
                 if item != exclude_item and item.text(0) == name:
                     return True
         else:
-            # Vérifier sous le parent spécifié
             for i in range(parent_item.childCount()):
                 item = parent_item.child(i)
                 if item != exclude_item and item.text(0) == name:
