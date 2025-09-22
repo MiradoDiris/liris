@@ -1,10 +1,55 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QTreeWidget, QTreeWidgetItem, QLineEdit, 
-                             QTextEdit, QGroupBox, QSplitter, QMessageBox, QInputDialog, QFileDialog)
+                             QTextEdit, QGroupBox, QSplitter, QMessageBox, QInputDialog, QFileDialog,
+                             QDialog, QDialogButtonBox, QCheckBox, QComboBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 import sqlite3
 import json
 from datetime import datetime
+
+class TypologyDialog(QDialog):
+    """Dialogue pour la gestion des typologies"""
+    def __init__(self, parent=None, name="", description="", is_hierarchical=False):
+        super().__init__(parent)
+        self.setWindowTitle("Gestion des Typologies")
+        self.setModal(True)
+        self.setup_ui(name, description, is_hierarchical)
+        
+    def setup_ui(self, name, description, is_hierarchical):
+        layout = QVBoxLayout(self)
+        
+        # Nom
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("Nom:"))
+        self.name_edit = QLineEdit(name)
+        name_layout.addWidget(self.name_edit)
+        layout.addLayout(name_layout)
+        
+        # Description
+        desc_layout = QVBoxLayout()
+        desc_layout.addWidget(QLabel("Description:"))
+        self.desc_edit = QTextEdit(description)
+        self.desc_edit.setMaximumHeight(100)
+        desc_layout.addWidget(self.desc_edit)
+        layout.addLayout(desc_layout)
+        
+        # Hiérarchique
+        self.hierarchical_cb = QCheckBox("Structure hiérarchique (taxonomique)")
+        self.hierarchical_cb.setChecked(is_hierarchical)
+        layout.addWidget(self.hierarchical_cb)
+        
+        # Boutons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def get_data(self):
+        return (
+            self.name_edit.text().strip(),
+            self.desc_edit.toPlainText().strip(),
+            self.hierarchical_cb.isChecked()
+        )
 
 
 class StrategyWidget(QWidget):
@@ -26,6 +71,25 @@ class StrategyWidget(QWidget):
         title_label = QLabel("Gestion des Stratégies et Typologies de Contexte")
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         layout.addWidget(title_label)
+        
+        # Barre de gestion des typologies
+        typology_layout = QHBoxLayout()
+        typology_layout.addWidget(QLabel("Typologie:"))
+        
+        self.typology_combo = QComboBox()
+        self.typology_combo.setMinimumWidth(200)
+        typology_layout.addWidget(self.typology_combo)
+        
+        self.add_typology_btn = QPushButton("Nouvelle")
+        self.edit_typology_btn = QPushButton("Modifier")
+        self.delete_typology_btn = QPushButton("Supprimer")
+        
+        typology_layout.addWidget(self.add_typology_btn)
+        typology_layout.addWidget(self.edit_typology_btn)
+        typology_layout.addWidget(self.delete_typology_btn)
+        typology_layout.addStretch()
+        
+        layout.addLayout(typology_layout)
         
         # Splitter principal
         main_splitter = QSplitter(Qt.Horizontal)
@@ -106,7 +170,7 @@ class StrategyWidget(QWidget):
         self.delete_item_btn = QPushButton("Supprimer")
         self.delete_item_btn.setStyleSheet("""
             QPushButton {
-                background-color: #A23B2D;
+                background-color: #f44336;
                 color: white;
                 border: none;
                 padding: 8px 16px;
@@ -268,6 +332,12 @@ class StrategyWidget(QWidget):
         self.export_strategy_btn.clicked.connect(self.export_strategy)
         self.import_strategy_btn.clicked.connect(self.import_strategy)
         
+        # Connexions des typologies
+        self.add_typology_btn.clicked.connect(self.add_typology)
+        self.edit_typology_btn.clicked.connect(self.edit_typology)
+        self.delete_typology_btn.clicked.connect(self.delete_typology)
+        self.typology_combo.currentIndexChanged.connect(self.on_typology_changed)
+        
         # Sélection dans l'arbre
         self.tree_widget.itemSelectionChanged.connect(self.on_item_selected)
         
@@ -275,6 +345,7 @@ class StrategyWidget(QWidget):
         """Définit le chemin de la base de données"""
         self.db_path = db_path
         self.init_database()
+        self.load_typologies()
         self.load_strategy()
         
     def init_database(self):
@@ -294,13 +365,160 @@ class StrategyWidget(QWidget):
                 parent_id INTEGER,
                 description TEXT,
                 properties TEXT,
+                typology_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (parent_id) REFERENCES strategy_items (id)
+                FOREIGN KEY (parent_id) REFERENCES strategy_items (id),
+                FOREIGN KEY (typology_id) REFERENCES context_typologies (id)
+            )
+        ''')
+        
+        # Table pour les typologies de contexte
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS context_typologies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT,
+                is_hierarchical BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
         conn.commit()
         conn.close()
+
+    def load_typologies(self):
+        """Charge la liste des typologies"""
+        if not self.db_path:
+            return
+            
+        self.typology_combo.clear()
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name FROM context_typologies ORDER BY name")
+            typologies = cursor.fetchall()
+            conn.close()
+            
+            for typology_id, name in typologies:
+                self.typology_combo.addItem(name, typology_id)
+                
+        except Exception as e:
+            print(f"Erreur lors du chargement des typologies: {str(e)}")
+            
+    def on_typology_changed(self):
+        """Gère le changement de typologie sélectionnée"""
+        current_typology_id = self.typology_combo.currentData()
+        if current_typology_id:
+            self.load_strategy(current_typology_id)
+            
+    def add_typology(self):
+        """Ajoute une nouvelle typologie"""
+        dialog = TypologyDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            name, description, is_hierarchical = dialog.get_data()
+            if not name:
+                QMessageBox.warning(self, "Erreur", "Le nom de la typologie est obligatoire")
+                return
+                
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO context_typologies (name, description, is_hierarchical) VALUES (?, ?, ?)",
+                    (name, description, is_hierarchical)
+                )
+                conn.commit()
+                conn.close()
+                
+                self.load_typologies()
+                QMessageBox.information(self, "Succès", f"Typologie '{name}' créée avec succès")
+                
+            except sqlite3.IntegrityError:
+                QMessageBox.warning(self, "Erreur", f"Une typologie nommée '{name}' existe déjà")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
+                
+    def edit_typology(self):
+        """Modifie une typologie existante"""
+        current_id = self.typology_combo.currentData()
+        if not current_id:
+            QMessageBox.warning(self, "Erreur", "Aucune typologie sélectionnée")
+            return
+            
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name, description, is_hierarchical FROM context_typologies WHERE id = ?",
+                (current_id,)
+            )
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                dialog = TypologyDialog(self, result[0], result[1], bool(result[2]))
+                if dialog.exec_() == QDialog.Accepted:
+                    name, description, is_hierarchical = dialog.get_data()
+                    if not name:
+                        QMessageBox.warning(self, "Erreur", "Le nom de la typologie est obligatoire")
+                        return
+                        
+                    conn = sqlite3.connect(self.db_path)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE context_typologies SET name = ?, description = ?, is_hierarchical = ? WHERE id = ?",
+                        (name, description, is_hierarchical, current_id)
+                    )
+                    conn.commit()
+                    conn.close()
+                    
+                    self.load_typologies()
+                    QMessageBox.information(self, "Succès", f"Typologie '{name}' modifiée avec succès")
+                    
+        except sqlite3.IntegrityError:
+            QMessageBox.warning(self, "Erreur", f"Une typologie nommée '{name}' existe déjà")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
+            
+    def delete_typology(self):
+        """Supprime une typologie"""
+        current_id = self.typology_combo.currentData()
+        if not current_id:
+            QMessageBox.warning(self, "Erreur", "Aucune typologie sélectionnée")
+            return
+            
+        # Vérifier si la typologie est utilisée
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM strategy_items WHERE typology_id = ?", (current_id,))
+            count = cursor.fetchone()[0]
+            conn.close()
+            
+            if count > 0:
+                QMessageBox.warning(self, "Erreur", 
+                    "Cette typologie est utilisée par des éléments. Impossible de la supprimer.")
+                return
+                
+            typology_name = self.typology_combo.currentText()
+            reply = QMessageBox.question(
+                self, "Confirmation", 
+                f"Êtes-vous sûr de vouloir supprimer la typologie '{typology_name}' ?"
+            )
+            
+            if reply == QMessageBox.Yes:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM context_typologies WHERE id = ?", (current_id,))
+                conn.commit()
+                conn.close()
+                
+                self.load_typologies()
+                QMessageBox.information(self, "Succès", "Typologie supprimée avec succès")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")   
         
     def add_cluster(self):
         """Ajoute un nouveau cluster"""

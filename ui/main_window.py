@@ -360,7 +360,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.brainstorming_panel, tr("brainstorming_tab"))
         # self.tab_widget.addTab(self.annotation_form, tr("annotation_tab"))
         # self.tab_widget.addTab(self.dataset_table, tr("datasets_tab"))
-        # self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
+        self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
 
         # Configuration des onglets
         self.tab_widget.setTabPosition(QtWidgets.QTabWidget.North)
@@ -388,6 +388,7 @@ class MainWindow(QMainWindow):
             # Ajouter les nouveaux onglets pour Data Science
             self.tab_widget.addTab(self.strategy_widget, "Stratégie")
             self.tab_widget.addTab(self.generation_widget, "Génération")
+            #self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
             self.tab_widget.setCurrentIndex(0)
         else:
             self.current_mode = "dev"
