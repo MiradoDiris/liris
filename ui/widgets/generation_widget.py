@@ -2,24 +2,402 @@
 # -*- coding: utf-8 -*-
 
 """
-Widget de génération de datasets avec système de templates
+Widget de génération de datasets avec système de templates et visualisation avancée de l'avancement
 """
 
 import os
 import json
+import time
+from datetime import datetime
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
                              QLabel, QComboBox, QTextEdit, QPushButton, 
                              QScrollArea, QFrame, QMessageBox, QSplitter,
-                             QTabWidget, QFormLayout, QSpinBox, QCheckBox)
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QTextOption
+                             QTabWidget, QFormLayout, QSpinBox, QCheckBox,
+                             QTableWidget, QTableWidgetItem, QHeaderView,
+                             QProgressBar, QTreeWidget, QTreeWidgetItem,
+                             QToolTip, QApplication, QStyleFactory)
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint
+from PyQt5.QtGui import QFont, QTextOption, QColor, QBrush, QLinearGradient
 
 from ui.styles.platform_config_style import PlatformConfigStyle
 from ui.widgets.template_manager import template_manager
 
+# Import pour la visualisation
+try:
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+    import numpy as np
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+
+try:
+    import pyqtgraph as pg
+    PYQTGRAPH_AVAILABLE = True
+except ImportError:
+    PYQTGRAPH_AVAILABLE = False
+
+
+class HeatmapWidget(QWidget):
+    """Widget de carte thermique pour visualiser l'avancement des combinaisons"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.data_matrix = None
+        self.labels_x = []
+        self.labels_y = []
+        self.init_ui()
+        
+    def init_ui(self):
+        """Initialise l'interface de la carte thermique"""
+        layout = QVBoxLayout(self)
+        
+        # Titre
+        title = QLabel("Carte Thermique des Combinaisons de Stratégies")
+        title.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Zone de visualisation
+        if MATPLOTLIB_AVAILABLE:
+            self.figure = Figure(figsize=(8, 6), dpi=80)
+            self.canvas = FigureCanvas(self.figure)
+            layout.addWidget(self.canvas)
+        else:
+            self.fallback_label = QLabel(
+                "Matplotlib non disponible. Installation recommandée pour la visualisation avancée."
+            )
+            self.fallback_label.setWordWrap(True)
+            layout.addWidget(self.fallback_label)
+        
+        # Légende
+        legend_layout = QHBoxLayout()
+        legend_layout.addWidget(QLabel("Légende:"))
+        
+        colors = [
+            ("Non-traité", QColor(240, 240, 240)),
+            ("En cours", QColor(255, 255, 0)),
+            ("Terminé", QColor(0, 255, 0)),
+            ("Erreur", QColor(255, 0, 0))
+        ]
+        
+        for status, color in colors:
+            color_label = QLabel()
+            color_label.setFixedSize(20, 20)
+            color_label.setStyleSheet(f"background-color: {color.name()}; border: 1px solid black;")
+            legend_layout.addWidget(color_label)
+            legend_layout.addWidget(QLabel(status))
+            legend_layout.addSpacing(10)
+        
+        legend_layout.addStretch()
+        layout.addLayout(legend_layout)
+        
+        # Données d'exemple par défaut
+        self.set_sample_data()
+    
+    def set_sample_data(self):
+        """Définit des données d'exemple pour la démonstration"""
+        # Matrice 5x5 avec différents états
+        self.data_matrix = np.array([
+            [0, 0, 1, 2, 0],
+            [1, 2, 2, 3, 1],
+            [2, 3, 1, 2, 0],
+            [0, 1, 2, 3, 2],
+            [3, 2, 1, 0, 1]
+        ])
+        
+        self.labels_x = [f"Stratégie {i+1}" for i in range(5)]
+        self.labels_y = [f"Batch {i+1}" for i in range(5)]
+        
+        self.update_heatmap()
+    
+    def update_heatmap(self):
+        """Met à jour la carte thermique"""
+        if not MATPLOTLIB_AVAILABLE or self.data_matrix is None:
+            return
+            
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        
+        # Créer la heatmap
+        im = ax.imshow(self.data_matrix, cmap='RdYlGn', interpolation='nearest', vmin=0, vmax=3)
+        
+        # Configurer les axes
+        ax.set_xticks(np.arange(len(self.labels_x)))
+        ax.set_yticks(np.arange(len(self.labels_y)))
+        ax.set_xticklabels(self.labels_x, rotation=45, ha='right')
+        ax.set_yticklabels(self.labels_y)
+        
+        # Ajouter les valeurs dans les cellules
+        for i in range(len(self.labels_y)):
+            for j in range(len(self.labels_x)):
+                text = ax.text(j, i, self.data_matrix[i, j],
+                             ha="center", va="center", color="black" if self.data_matrix[i, j] < 2 else "white")
+        
+        ax.set_title("Avancement des Combinaisons de Stratégies")
+        self.figure.tight_layout()
+        self.canvas.draw()
+    
+    def update_data(self, matrix, x_labels, y_labels):
+        """Met à jour les données de la heatmap"""
+        self.data_matrix = matrix
+        self.labels_x = x_labels
+        self.labels_y = y_labels
+        self.update_heatmap()
+
+
+class BatchProgressWidget(QWidget):
+    """Widget pour afficher la progression par batch"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.batches = {}
+        self.init_ui()
+        self.load_sample_data()
+        
+    def init_ui(self):
+        """Initialise l'interface de progression par batch"""
+        layout = QVBoxLayout(self)
+        
+        # Titre
+        title = QLabel("Progression par Batch")
+        title.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Tableau des batches
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels([
+            "Batch ID", "Statut", "Progression", "Temps écoulé", 
+            "Temps restant", "Détails"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.table)
+    
+    def load_sample_data(self):
+        """Charge des données d'exemple"""
+        sample_batches = {
+            "Batch-001": {"status": "En cours", "progress": 65, "elapsed": "00:15:30", "remaining": "00:08:15"},
+            "Batch-002": {"status": "Terminé", "progress": 100, "elapsed": "00:25:10", "remaining": "00:00:00"},
+            "Batch-003": {"status": "En attente", "progress": 0, "elapsed": "00:00:00", "remaining": "00:30:00"},
+            "Batch-004": {"status": "Erreur", "progress": 45, "elapsed": "00:12:45", "remaining": "N/A"},
+        }
+        
+        for batch_id, data in sample_batches.items():
+            self.add_batch(batch_id, data)
+    
+    def add_batch(self, batch_id, data):
+        """Ajoute ou met à jour un batch"""
+        if batch_id in self.batches:
+            row = self.batches[batch_id]
+        else:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.batches[batch_id] = row
+        
+        # Batch ID
+        self.table.setItem(row, 0, QTableWidgetItem(batch_id))
+        
+        # Statut avec couleur
+        status_item = QTableWidgetItem(data["status"])
+        if data["status"] == "Terminé":
+            status_item.setBackground(QColor(0, 255, 0, 100))
+        elif data["status"] == "En cours":
+            status_item.setBackground(QColor(255, 255, 0, 100))
+        elif data["status"] == "Erreur":
+            status_item.setBackground(QColor(255, 0, 0, 100))
+        self.table.setItem(row, 1, status_item)
+        
+        # Barre de progression
+        progress_widget = QWidget()
+        progress_layout = QHBoxLayout(progress_widget)
+        progress_bar = QProgressBar()
+        progress_bar.setValue(data["progress"])
+        progress_layout.addWidget(progress_bar)
+        progress_layout.setContentsMargins(2, 2, 2, 2)
+        self.table.setCellWidget(row, 2, progress_widget)
+        
+        # Temps écoulé
+        self.table.setItem(row, 3, QTableWidgetItem(data["elapsed"]))
+        
+        # Temps restant
+        self.table.setItem(row, 4, QTableWidgetItem(data["remaining"]))
+        
+        # Détails
+        details_btn = QPushButton("📊")
+        details_btn.setFixedSize(30, 25)
+        details_btn.clicked.connect(lambda: self.show_batch_details(batch_id))
+        details_widget = QWidget()
+        details_layout = QHBoxLayout(details_widget)
+        details_layout.addWidget(details_btn)
+        details_layout.setAlignment(Qt.AlignCenter)
+        details_layout.setContentsMargins(2, 2, 2, 2)
+        self.table.setCellWidget(row, 5, details_widget)
+    
+    def show_batch_details(self, batch_id):
+        """Affiche les détails d'un batch"""
+        QMessageBox.information(self, f"Détails du batch {batch_id}", 
+                              f"Informations détaillées pour le batch {batch_id}")
+
+
+class StatisticsWidget(QWidget):
+    """Widget pour afficher les statistiques en temps réel"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.update_stats)
+        self.update_timer.start(1000)  # Mise à jour chaque seconde
+    
+    def init_ui(self):
+        """Initialise l'interface des statistiques"""
+        layout = QVBoxLayout(self)
+        
+        # Titre
+        title = QLabel("Statistiques en Temps Réel")
+        title.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Grid pour les statistiques
+        stats_grid = QHBoxLayout()
+        
+        # Colonne gauche
+        left_col = QVBoxLayout()
+        self.combinations_label = QLabel("Combinaisons: 0/0")
+        self.success_rate_label = QLabel("Taux de réussite: 0%")
+        left_col.addWidget(self.combinations_label)
+        left_col.addWidget(self.success_rate_label)
+        
+        # Colonne droite
+        right_col = QVBoxLayout()
+        self.throughput_label = QLabel("Débit: 0 datasets/min")
+        self.error_count_label = QLabel("Erreurs: 0")
+        right_col.addWidget(self.throughput_label)
+        right_col.addWidget(self.error_count_label)
+        
+        stats_grid.addLayout(left_col)
+        stats_grid.addLayout(right_col)
+        layout.addLayout(stats_grid)
+        
+        # Graphique de débit (simplifié)
+        if PYQTGRAPH_AVAILABLE:
+            self.throughput_plot = pg.PlotWidget()
+            self.throughput_plot.setBackground('w')
+            self.throughput_plot.setTitle("Débit (datasets/minute)")
+            self.throughput_plot.setLabel('left', 'Datasets/min')
+            self.throughput_plot.setLabel('bottom', 'Temps')
+            self.throughput_data = []
+            layout.addWidget(self.throughput_plot)
+        else:
+            self.fallback_plot_label = QLabel("PyQtGraph non disponible pour les graphiques temps réel")
+            layout.addWidget(self.fallback_plot_label)
+        
+        layout.addStretch()
+    
+    def update_stats(self):
+        """Met à jour les statistiques"""
+        # Données simulées pour la démonstration
+        combinations_total = 100
+        combinations_done = np.random.randint(0, combinations_total)
+        success_rate = np.random.randint(80, 100) if combinations_done > 0 else 0
+        throughput = np.random.randint(1, 10)
+        errors = np.random.randint(0, 5)
+        
+        self.combinations_label.setText(f"Combinaisons: {combinations_done}/{combinations_total}")
+        self.success_rate_label.setText(f"Taux de réussite: {success_rate}%")
+        self.throughput_label.setText(f"Débit: {throughput} datasets/min")
+        self.error_count_label.setText(f"Erreurs: {errors}")
+        
+        # Mettre à jour le graphique de débit
+        if PYQTGRAPH_AVAILABLE:
+            self.throughput_data.append(throughput)
+            if len(self.throughput_data) > 50:
+                self.throughput_data.pop(0)
+            self.throughput_plot.plot(self.throughput_data, clear=True, pen='b')
+
+
+class LogWidget(QWidget):
+    """Widget pour afficher le journal des opérations"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+        self.load_sample_logs()
+    
+    def init_ui(self):
+        """Initialise l'interface du journal"""
+        layout = QVBoxLayout(self)
+        
+        # Barre d'outils
+        toolbar = QHBoxLayout()
+        
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItems(["Tous", "INFO", "WARNING", "ERROR", "DEBUG"])
+        self.filter_combo.currentTextChanged.connect(self.filter_logs)
+        toolbar.addWidget(QLabel("Filtrer:"))
+        toolbar.addWidget(self.filter_combo)
+        
+        self.export_btn = QPushButton("Exporter les logs")
+        self.export_btn.clicked.connect(self.export_logs)
+        toolbar.addWidget(self.export_btn)
+        
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+        
+        # Zone de logs
+        self.log_tree = QTreeWidget()
+        self.log_tree.setHeaderLabels(["Timestamp", "Niveau", "Message"])
+        self.log_tree.setColumnWidth(0, 150)
+        self.log_tree.setColumnWidth(1, 80)
+        layout.addWidget(self.log_tree)
+    
+    def load_sample_logs(self):
+        """Charge des logs d'exemple"""
+        sample_logs = [
+            ("2024-01-15 10:30:15", "INFO", "Démarrage de la génération des datasets"),
+            ("2024-01-15 10:30:16", "INFO", "Batch-001: Génération en cours (0/50)"),
+            ("2024-01-15 10:31:20", "WARNING", "Batch-001: Retard détecté sur la stratégie A"),
+            ("2024-01-15 10:32:45", "ERROR", "Batch-001: Erreur sur la combinaison 25"),
+            ("2024-01-15 10:33:10", "INFO", "Batch-001: Reprise après erreur"),
+            ("2024-01-15 10:35:00", "INFO", "Batch-001: Terminé avec succès (49/50)"),
+        ]
+        
+        for timestamp, level, message in sample_logs:
+            self.add_log(timestamp, level, message)
+    
+    def add_log(self, timestamp, level, message):
+        """Ajoute une entrée de log"""
+        item = QTreeWidgetItem([timestamp, level, message])
+        
+        # Colorer selon le niveau
+        if level == "ERROR":
+            item.setBackground(1, QBrush(QColor(255, 200, 200)))
+        elif level == "WARNING":
+            item.setBackground(1, QBrush(QColor(255, 255, 200)))
+        elif level == "INFO":
+            item.setBackground(1, QBrush(QColor(200, 255, 200)))
+        
+        self.log_tree.addTopLevelItem(item)
+        self.log_tree.scrollToItem(item)
+    
+    def filter_logs(self, level_filter):
+        """Filtre les logs selon le niveau sélectionné"""
+        for i in range(self.log_tree.topLevelItemCount()):
+            item = self.log_tree.topLevelItem(i)
+            if level_filter == "Tous" or item.text(1) == level_filter:
+                item.setHidden(False)
+            else:
+                item.setHidden(True)
+    
+    def export_logs(self):
+        """Exporte les logs vers un fichier"""
+        QMessageBox.information(self, "Export des logs", 
+                              "Fonctionnalité d'export à implémenter")
+
 
 class GenerationWidget(QWidget):
-    """Widget pour la génération de datasets avec templates"""
+    """Widget pour la génération de datasets avec templates et visualisation avancée"""
     
     # Signal émis lorsqu'un dataset est généré
     dataset_generated = pyqtSignal(dict, str)  # dataset, format
@@ -49,26 +427,24 @@ class GenerationWidget(QWidget):
         explanation_label = QLabel(
             "Générez des datasets dans différents formats (JSON, CSV, XML, YAML, Texte) "
             "avec des templates configurables. Configurez les options de formatage et "
-            "prévisualisez le résultat avant export."
+            "prévisualisez le résultat avant export. Visualisez l'avancement en temps réel."
         )
         explanation_label.setStyleSheet(PlatformConfigStyle.get_explanation_style())
         explanation_label.setWordWrap(True)
         main_layout.addWidget(explanation_label)
         
-        # Splitter pour une disposition flexible
-        splitter = QSplitter(Qt.Horizontal)
+        # Onglets principaux
+        self.main_tabs = QTabWidget()
         
-        # Panel de configuration (gauche)
-        config_panel = self.create_config_panel()
-        splitter.addWidget(config_panel)
+        # Onglet 1: Génération avec templates
+        self.template_tab = self.create_template_tab()
+        self.main_tabs.addTab(self.template_tab, "📊 Génération avec Templates")
         
-        # Panel de prévisualisation (droite)
-        preview_panel = self.create_preview_panel()
-        splitter.addWidget(preview_panel)
+        # Onglet 2: Visualisation de l'avancement
+        self.progress_tab = self.create_progress_tab()
+        self.main_tabs.addTab(self.progress_tab, "📈 Visualisation Avancée")
         
-        # Définir les proportions initiales
-        splitter.setSizes([400, 600])
-        main_layout.addWidget(splitter, 1)
+        main_layout.addWidget(self.main_tabs)
         
         # Boutons d'action
         button_layout = QHBoxLayout()
@@ -85,6 +461,56 @@ class GenerationWidget(QWidget):
         
         main_layout.addLayout(button_layout)
         
+    def create_template_tab(self):
+        """Crée l'onglet de génération avec templates"""
+        tab_widget = QWidget()
+        layout = QVBoxLayout(tab_widget)
+        
+        # Splitter pour une disposition flexible
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Panel de configuration (gauche)
+        config_panel = self.create_config_panel()
+        splitter.addWidget(config_panel)
+        
+        # Panel de prévisualisation (droite)
+        preview_panel = self.create_preview_panel()
+        splitter.addWidget(preview_panel)
+        
+        # Définir les proportions initiales
+        splitter.setSizes([400, 600])
+        layout.addWidget(splitter, 1)
+        
+        return tab_widget
+    
+    def create_progress_tab(self):
+        """Crée l'onglet de visualisation avancée de l'avancement"""
+        tab_widget = QWidget()
+        layout = QVBoxLayout(tab_widget)
+        
+        # Sous-onglets pour les différentes visualisations
+        progress_tabs = QTabWidget()
+        
+        # Carte thermique
+        self.heatmap_widget = HeatmapWidget()
+        progress_tabs.addTab(self.heatmap_widget, "🔥 Carte Thermique")
+        
+        # Progression par batch
+        self.batch_progress_widget = BatchProgressWidget()
+        progress_tabs.addTab(self.batch_progress_widget, "📦 Progression par Batch")
+        
+        # Statistiques en temps réel
+        self.stats_widget = StatisticsWidget()
+        progress_tabs.addTab(self.stats_widget, "📊 Statistiques Temps Réel")
+        
+        # Journal des opérations
+        self.log_widget = LogWidget()
+        progress_tabs.addTab(self.log_widget, "📝 Journal des Opérations")
+        
+        layout.addWidget(progress_tabs)
+        
+        return tab_widget
+    
     def create_config_panel(self):
         """Crée le panel de configuration des templates"""
         config_widget = QWidget()
@@ -365,9 +791,17 @@ class GenerationWidget(QWidget):
             # Mettre à jour les statistiques
             self.update_stats(example_content)
             
+            # Ajouter une entrée de log
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.log_widget.add_log(timestamp, "INFO", "Exemple de dataset généré avec succès")
+            
         except Exception as e:
             QMessageBox.critical(self, "Erreur de génération", 
                                f"Erreur lors de la génération de l'exemple:\n{str(e)}")
+            
+            # Ajouter une entrée de log d'erreur
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.log_widget.add_log(timestamp, "ERROR", f"Erreur de génération: {str(e)}")
     
     def update_preview(self):
         """Met à jour la prévisualisation"""
@@ -412,26 +846,37 @@ class GenerationWidget(QWidget):
             # Émettre le signal pour d'autres composants
             self.dataset_generated.emit({"content": self.current_dataset}, self.current_format)
             
+            # Ajouter une entrée de log
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.log_widget.add_log(timestamp, "INFO", f"Dataset exporté au format {self.current_format}")
+            
         except Exception as e:
             QMessageBox.critical(self, "Erreur d'export", 
                                f"Erreur lors de l'export:\n{str(e)}")
+            
+            # Ajouter une entrée de log d'erreur
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.log_widget.add_log(timestamp, "ERROR", f"Erreur d'export: {str(e)}")
     
-    def set_dataset(self, dataset: dict):
-        """Définit le dataset à formater"""
-        self.current_dataset = dataset
-        self.export_btn.setEnabled(True)
-        self.update_preview()
-        self.update_stats(str(dataset))
+    def get_current_config(self):
+        """Retourne la configuration actuelle"""
+        return {
+            "format": self.current_format,
+            "template_config": json.loads(self.template_config_edit.toPlainText()) 
+                              if self.template_config_edit.toPlainText().strip() else {}
+        }
 
 
-# Test de la classe
+# Test de l'interface
 if __name__ == "__main__":
     import sys
     from PyQt5.QtWidgets import QApplication
     
     app = QApplication(sys.argv)
     
-    # Tester le widget
+    # Appliquer un style global
+    app.setStyle(QStyleFactory.create("Fusion"))
+    
     widget = GenerationWidget()
     widget.show()
     
