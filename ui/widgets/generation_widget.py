@@ -8,15 +8,27 @@ Widget de génération de datasets avec système de templates et visualisation a
 import os
 import json
 import time
-from datetime import datetime
+import math
+import threading
+import queue
+import zlib
+import pickle
+from datetime import datetime, timedelta
+from collections import defaultdict, deque
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+import traceback
+
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
                              QLabel, QComboBox, QTextEdit, QPushButton, 
                              QScrollArea, QFrame, QMessageBox, QSplitter,
                              QTabWidget, QFormLayout, QSpinBox, QCheckBox,
                              QTableWidget, QTableWidgetItem, QHeaderView,
                              QProgressBar, QTreeWidget, QTreeWidgetItem,
-                             QToolTip, QApplication, QStyleFactory)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint
+                             QToolTip, QApplication, QStyleFactory,
+                             QDialog, QDialogButtonBox, QListWidget, QListWidgetItem)
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPoint, QThread, QObject, QMutex, QWaitCondition
 from PyQt5.QtGui import QFont, QTextOption, QColor, QBrush, QLinearGradient
 
 from ui.styles.platform_config_style import PlatformConfigStyle
@@ -37,6 +49,778 @@ try:
     PYQTGRAPH_AVAILABLE = True
 except ImportError:
     PYQTGRAPH_AVAILABLE = False
+
+
+class BatchStatus(Enum):
+    """Statuts possibles d'un batch"""
+    PENDING = "En attente"
+    RUNNING = "En cours"
+    COMPLETED = "Terminé"
+    ERROR = "Erreur"
+    PAUSED = "En pause"
+    CANCELLED = "Annulé"
+
+
+@dataclass
+class BatchConfig:
+    """Configuration d'un batch"""
+    batch_id: str
+    strategies: List[Dict[str, Any]]
+    priority: int = 1  # 1-10, 10 étant la plus haute priorité
+    context_similarity: float = 0.0  # Similarité avec d'autres batches (0-1)
+    estimated_duration: float = 0.0  # Estimation en secondes
+    memory_estimate: int = 0  # Estimation mémoire en MB
+
+
+@dataclass
+class BatchResult:
+    """Résultat d'un batch"""
+    batch_id: str
+    status: BatchStatus
+    progress: float = 0.0
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    error_message: Optional[str] = None
+    generated_data: Optional[Dict[str, Any]] = None
+    memory_used: int = 0
+    combinations_processed: int = 0
+    combinations_total: int = 0
+
+
+@dataclass
+class RecoveryState:
+    """État de reprise après erreur"""
+    last_successful_batch: Optional[str] = None
+    failed_batches: List[str] = field(default_factory=list)
+    corrupted_data: List[str] = field(default_factory=list)
+    recovery_point: Optional[datetime] = None
+
+
+class RateLimiter:
+    """Limiteur de débit pour contrôler la génération"""
+    
+    def __init__(self, max_rate: float):
+        self.max_rate = max_rate  # Opérations par seconde
+        self.allowance = max_rate
+        self.last_check = time.time()
+        self.mutex = threading.Lock()
+    
+    def acquire(self) -> bool:
+        """Vérifie si une opération peut être effectuée"""
+        with self.mutex:
+            current = time.time()
+            time_passed = current - self.last_check
+            self.last_check = current
+            
+            self.allowance += time_passed * self.max_rate
+            if self.allowance > self.max_rate:
+                self.allowance = self.max_rate
+            
+            if self.allowance < 1.0:
+                return False
+            
+            self.allowance -= 1.0
+            return True
+    
+    def wait(self):
+        """Attend jusqu'à ce qu'une opération puisse être effectuée"""
+        while not self.acquire():
+            time.sleep(0.01)
+
+
+class ContextSimilarityAnalyzer:
+    """Analyseur de similarité de contexte pour le regroupement des batches"""
+    
+    def __init__(self):
+        self.context_vectors = {}
+        self.similarity_threshold = 0.7
+    
+    def compute_similarity(self, context1: Dict[str, Any], context2: Dict[str, Any]) -> float:
+        """Calcule la similarité entre deux contextes"""
+        # Extraction des caractéristiques communes
+        features1 = self._extract_features(context1)
+        features2 = self._extract_features(context2)
+        
+        # Similarité cosinus simplifiée
+        common_keys = set(features1.keys()) & set(features2.keys())
+        if not common_keys:
+            return 0.0
+        
+        dot_product = sum(features1[k] * features2[k] for k in common_keys)
+        norm1 = math.sqrt(sum(v * v for v in features1.values()))
+        norm2 = math.sqrt(sum(v * v for v in features2.values()))
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        
+        return dot_product / (norm1 * norm2)
+    
+    def _extract_features(self, context: Dict[str, Any]) -> Dict[str, float]:
+        """Extrait les caractéristiques d'un contexte"""
+        features = {}
+        
+        for key, value in context.items():
+            if isinstance(value, (int, float)):
+                features[key] = float(value)
+            elif isinstance(value, str):
+                # Hash simple pour les strings
+                features[key] = float(hash(value) % 1000) / 1000.0
+            elif isinstance(value, bool):
+                features[key] = 1.0 if value else 0.0
+            elif isinstance(value, list):
+                features[key] = len(value)
+            elif isinstance(value, dict):
+                features[key] = len(value)
+        
+        return features
+    
+    def find_similar_batches(self, batch_configs: List[BatchConfig]) -> List[List[BatchConfig]]:
+        """Regroupe les batches par similarité de contexte"""
+        if not batch_configs:
+            return []
+        
+        # Calcul des similarités
+        similarities = []
+        for i, batch1 in enumerate(batch_configs):
+            for j, batch2 in enumerate(batch_configs[i+1:], i+1):
+                similarity = self.compute_similarity(
+                    self._get_batch_context(batch1),
+                    self._get_batch_context(batch2)
+                )
+                if similarity > self.similarity_threshold:
+                    similarities.append((similarity, i, j))
+        
+        # Tri par similarité décroissante
+        similarities.sort(reverse=True)
+        
+        # Regroupement
+        groups = []
+        assigned = set()
+        
+        for similarity, i, j in similarities:
+            if i not in assigned and j not in assigned:
+                groups.append([batch_configs[i], batch_configs[j]])
+                assigned.add(i)
+                assigned.add(j)
+            elif i not in assigned:
+                for group in groups:
+                    if batch_configs[j] in group:
+                        group.append(batch_configs[i])
+                        assigned.add(i)
+                        break
+            elif j not in assigned:
+                for group in groups:
+                    if batch_configs[i] in group:
+                        group.append(batch_configs[j])
+                        assigned.add(j)
+                        break
+        
+        # Ajout des batches non assignés
+        for i, batch in enumerate(batch_configs):
+            if i not in assigned:
+                groups.append([batch])
+        
+        return groups
+    
+    def _get_batch_context(self, batch: BatchConfig) -> Dict[str, Any]:
+        """Extrait le contexte d'un batch"""
+        context = {
+            "strategy_count": len(batch.strategies),
+            "priority": batch.priority,
+            "estimated_duration": batch.estimated_duration,
+        }
+        
+        # Ajouter des caractéristiques des stratégies
+        for i, strategy in enumerate(batch.strategies[:3]):  # Limiter aux 3 premières
+            context[f"strategy_{i}_type"] = strategy.get('type', 'unknown')
+            context[f"strategy_{i}_complexity"] = strategy.get('complexity', 1)
+        
+        return context
+
+
+class MemoryManager:
+    """Gestionnaire de mémoire pour les gros exports"""
+    
+    def __init__(self, max_memory_mb: int = 1024):
+        self.max_memory_mb = max_memory_mb
+        self.current_usage_mb = 0
+        self.mutex = threading.Lock()
+        self.compression_enabled = True
+    
+    def can_allocate(self, estimated_memory_mb: int) -> bool:
+        """Vérifie si la mémoire peut être allouée"""
+        with self.mutex:
+            return (self.current_usage_mb + estimated_memory_mb) <= self.max_memory_mb
+    
+    def allocate(self, memory_mb: int) -> bool:
+        """Alloue de la mémoire"""
+        with self.mutex:
+            if self.can_allocate(memory_mb):
+                self.current_usage_mb += memory_mb
+                return True
+            return False
+    
+    def release(self, memory_mb: int):
+        """Libère de la mémoire"""
+        with self.mutex:
+            self.current_usage_mb = max(0, self.current_usage_mb - memory_mb)
+    
+    def compress_data(self, data: Any) -> bytes:
+        """Compresse les données pour économiser la mémoire"""
+        if not self.compression_enabled:
+            return pickle.dumps(data)
+        
+        try:
+            serialized = pickle.dumps(data)
+            compressed = zlib.compress(serialized, level=zlib.Z_BEST_COMPRESSION)
+            return compressed
+        except Exception:
+            return pickle.dumps(data)
+    
+    def decompress_data(self, compressed_data: bytes) -> Any:
+        """Décompresse les données"""
+        if not self.compression_enabled:
+            return pickle.loads(compressed_data)
+        
+        try:
+            decompressed = zlib.decompress(compressed_data)
+            return pickle.loads(decompressed)
+        except Exception:
+            return pickle.loads(compressed_data)
+
+
+class AdvancedGenerationWorker(QObject):
+    """Worker avancé pour la génération de batches avec gestion fine"""
+    
+    # Signaux
+    batch_started = pyqtSignal(str)
+    batch_progress = pyqtSignal(str, float, str)  # batch_id, progress, status
+    batch_completed = pyqtSignal(str, dict)  # batch_id, result
+    batch_error = pyqtSignal(str, str)  # batch_id, error_message
+    recovery_state_updated = pyqtSignal(dict)  # recovery_state
+    memory_usage_updated = pyqtSignal(int, int)  # current_usage, max_usage
+    throughput_updated = pyqtSignal(float)  # datasets per second
+    
+    def __init__(self):
+        super().__init__()
+        self.batch_configs: Dict[str, BatchConfig] = {}
+        self.batch_results: Dict[str, BatchResult] = {}
+        self.recovery_state = RecoveryState()
+        self.rate_limiter = RateLimiter(10.0)  # 10 ops/sec par défaut
+        self.similarity_analyzer = ContextSimilarityAnalyzer()
+        self.memory_manager = MemoryManager(2048)  # 2GB par défaut
+        
+        self.is_running = False
+        self.is_paused = False
+        self.current_batch_id = None
+        
+        self.thread_pool = []
+        self.max_threads = 4
+        self.task_queue = queue.Queue()
+        self.result_queue = queue.Queue()
+        
+        self.mutex = QMutex()
+        self.condition = QWaitCondition()
+        
+        self.throughput_history = deque(maxlen=100)
+        self.start_time = None
+        
+    def set_batch_configs(self, batch_configs: List[BatchConfig]):
+        """Définit la liste des batches à traiter"""
+        self.batch_configs = {batch.batch_id: batch for batch in batch_configs}
+        self.batch_results.clear()
+        
+        # Initialiser les résultats
+        for batch_id in self.batch_configs.keys():
+            self.batch_results[batch_id] = BatchResult(
+                batch_id=batch_id,
+                status=BatchStatus.PENDING,
+                progress=0.0,
+                combinations_total=len(self.batch_configs[batch_id].strategies)
+            )
+    
+    def set_rate_limit(self, max_rate: float):
+        """Définit la limite de débit"""
+        self.rate_limiter = RateLimiter(max_rate)
+    
+    def set_max_memory(self, max_memory_mb: int):
+        """Définit la mémoire maximale"""
+        self.memory_manager = MemoryManager(max_memory_mb)
+    
+    def start_generation(self):
+        """Démarre la génération"""
+        if self.is_running:
+            return
+        
+        self.is_running = True
+        self.is_paused = False
+        self.start_time = datetime.now()
+        
+        # Nettoyer les données corrompues
+        self._clean_corrupted_data()
+        
+        # Réorganiser les batches par priorité et similarité
+        self._organize_batches()
+        
+        # Démarrer les threads de travail
+        self._start_worker_threads()
+        
+        # Démarrer le thread de gestion
+        self.management_thread = threading.Thread(target=self._management_loop)
+        self.management_thread.daemon = True
+        self.management_thread.start()
+    
+    def pause_generation(self):
+        """Met en pause la génération"""
+        self.is_paused = True
+    
+    def resume_generation(self):
+        """Reprend la génération"""
+        self.is_paused = False
+        with self.mutex:
+            self.condition.wakeAll()
+    
+    def stop_generation(self):
+        """Arrête la génération"""
+        self.is_running = False
+        self.is_paused = False
+        
+        # Sauvegarder l'état de récupération
+        self._save_recovery_state()
+        
+        # Attendre que tous les threads se terminent
+        for thread in self.thread_pool:
+            thread.join(timeout=1.0)
+    
+    def restart_failed_batches(self):
+        """Redémarre les batches en erreur"""
+        failed_batches = [
+            batch_id for batch_id, result in self.batch_results.items()
+            if result.status == BatchStatus.ERROR
+        ]
+        
+        for batch_id in failed_batches:
+            self.batch_results[batch_id] = BatchResult(
+                batch_id=batch_id,
+                status=BatchStatus.PENDING,
+                progress=0.0,
+                combinations_total=len(self.batch_configs[batch_id].strategies)
+            )
+        
+        if not self.is_running:
+            self.start_generation()
+    
+    def _organize_batches(self):
+        """Réorganise les batches par priorité et similarité"""
+        if not self.batch_configs:
+            return
+        
+        # Convertir en liste pour le traitement
+        batch_list = list(self.batch_configs.values())
+        
+        # Trier par priorité (décroissante)
+        batch_list.sort(key=lambda x: x.priority, reverse=True)
+        
+        # Regrouper par similarité
+        similar_groups = self.similarity_analyzer.find_similar_batches(batch_list)
+        
+        # Réorganiser la file de tâches
+        while not self.task_queue.empty():
+            self.task_queue.get()
+        
+        # Ajouter les groupes similaires en premier
+        for group in similar_groups:
+            for batch in group:
+                if self.batch_results[batch.batch_id].status in [BatchStatus.PENDING, BatchStatus.ERROR]:
+                    self.task_queue.put(batch.batch_id)
+    
+    def _start_worker_threads(self):
+        """Démarre les threads de travail"""
+        for i in range(self.max_threads):
+            thread = threading.Thread(target=self._worker_loop)
+            thread.daemon = True
+            thread.start()
+            self.thread_pool.append(thread)
+    
+    def _worker_loop(self):
+        """Boucle de travail pour chaque thread"""
+        while self.is_running:
+            try:
+                # Vérifier la pause
+                if self.is_paused:
+                    with self.mutex:
+                        self.condition.wait(self.mutex)
+                    continue
+                
+                # Récupérer une tâche
+                try:
+                    batch_id = self.task_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                
+                # Traiter le batch
+                self._process_batch(batch_id)
+                
+                self.task_queue.task_done()
+                
+            except Exception as e:
+                print(f"Erreur dans le worker: {e}")
+                time.sleep(0.1)
+    
+    def _management_loop(self):
+        """Boucle de gestion principale"""
+        last_throughput_check = time.time()
+        processed_count = 0
+        
+        while self.is_running:
+            try:
+                # Vérifier la pause
+                if self.is_paused:
+                    time.sleep(0.1)
+                    continue
+                
+                # Traiter les résultats
+                self._process_results()
+                
+                # Mettre à jour le débit
+                current_time = time.time()
+                if current_time - last_throughput_check >= 1.0:
+                    throughput = processed_count / (current_time - last_throughput_check)
+                    self.throughput_history.append(throughput)
+                    self.throughput_updated.emit(throughput)
+                    processed_count = 0
+                    last_throughput_check = current_time
+                
+                # Mettre à jour l'utilisation mémoire
+                self.memory_usage_updated.emit(
+                    self.memory_manager.current_usage_mb,
+                    self.memory_manager.max_memory_mb
+                )
+                
+                # Vérifier l'état d'avancement
+                self._check_progress()
+                
+                time.sleep(0.05)
+                
+            except Exception as e:
+                print(f"Erreur dans la gestion: {e}")
+                time.sleep(0.1)
+    
+    def _process_batch(self, batch_id: str):
+        """Traite un batch individuel"""
+        if batch_id not in self.batch_configs:
+            return
+        
+        batch_config = self.batch_configs[batch_id]
+        batch_result = self.batch_results[batch_id]
+        
+        try:
+            # Mettre à jour le statut
+            batch_result.status = BatchStatus.RUNNING
+            batch_result.start_time = datetime.now()
+            self.batch_started.emit(batch_id)
+            
+            # Vérifier la mémoire
+            if not self.memory_manager.can_allocate(batch_config.memory_estimate):
+                raise MemoryError("Mémoire insuffisante pour le batch")
+            
+            # Allouer la mémoire
+            if not self.memory_manager.allocate(batch_config.memory_estimate):
+                raise MemoryError("Impossible d'allouer la mémoire")
+            
+            # Traiter chaque combinaison de stratégies
+            for i, strategy in enumerate(batch_config.strategies):
+                if not self.is_running or self.is_paused:
+                    break
+                
+                # Appliquer la limitation de débit
+                self.rate_limiter.wait()
+                
+                # Traiter la stratégie
+                result = self._process_strategy(strategy, batch_id, i)
+                
+                # Mettre à jour la progression
+                progress = (i + 1) / len(batch_config.strategies) * 100
+                batch_result.progress = progress
+                batch_result.combinations_processed = i + 1
+                
+                self.batch_progress.emit(batch_id, progress, f"Traitement {i+1}/{len(batch_config.strategies)}")
+                
+                # Ajouter au résultat
+                if batch_result.generated_data is None:
+                    batch_result.generated_data = {}
+                batch_result.generated_data[f"combination_{i}"] = result
+            
+            # Finaliser le batch
+            if self.is_running and not self.is_paused:
+                batch_result.status = BatchStatus.COMPLETED
+                batch_result.end_time = datetime.now()
+                
+                # Compresser les données pour économiser la mémoire
+                if batch_result.generated_data:
+                    compressed_data = self.memory_manager.compress_data(batch_result.generated_data)
+                    batch_result.generated_data = {"compressed": compressed_data}
+                
+                self.batch_completed.emit(batch_id, batch_result.__dict__)
+                
+                # Mettre à jour l'état de récupération
+                self.recovery_state.last_successful_batch = batch_id
+                if batch_id in self.recovery_state.failed_batches:
+                    self.recovery_state.failed_batches.remove(batch_id)
+            
+        except Exception as e:
+            # Gérer l'erreur
+            batch_result.status = BatchStatus.ERROR
+            batch_result.error_message = str(e)
+            batch_result.end_time = datetime.now()
+            
+            self.batch_error.emit(batch_id, str(e))
+            
+            # Marquer comme corrompu si nécessaire
+            if "memoire" in str(e).lower() or "corrompu" in str(e).lower():
+                self.recovery_state.corrupted_data.append(batch_id)
+            
+            self.recovery_state.failed_batches.append(batch_id)
+        
+        finally:
+            # Libérer la mémoire
+            self.memory_manager.release(batch_config.memory_estimate)
+            
+            # Sauvegarder l'état
+            self._save_recovery_state()
+    
+    def _process_strategy(self, strategy: Dict[str, Any], batch_id: str, index: int) -> Dict[str, Any]:
+        """Traite une stratégie individuelle"""
+        # Implémentation simplifiée - à adapter selon les besoins
+        try:
+            # Simulation du traitement
+            time.sleep(0.01 * strategy.get('complexity', 1))
+            
+            # Générer des données d'exemple
+            result = {
+                'strategy_type': strategy.get('type', 'unknown'),
+                'batch_id': batch_id,
+                'combination_index': index,
+                'timestamp': datetime.now().isoformat(),
+                'data': f"Résultat pour la stratégie {strategy.get('type', 'unknown')}",
+                'metadata': {
+                    'processing_time': strategy.get('complexity', 1) * 0.01,
+                    'memory_used': strategy.get('memory_estimate', 10)
+                }
+            }
+            
+            return result
+            
+        except Exception as e:
+            raise Exception(f"Erreur dans la stratégie {index}: {e}")
+    
+    def _process_results(self):
+        """Traite les résultats des batches"""
+        try:
+            while True:
+                # Vérifier les résultats (implémentation simplifiée)
+                # Dans une implémentation réelle, on utiliserait la queue de résultats
+                time.sleep(0.01)
+                break
+        except:
+            pass
+    
+    def _check_progress(self):
+        """Vérifie la progression globale"""
+        total_batches = len(self.batch_configs)
+        if total_batches == 0:
+            return
+        
+        completed_batches = sum(
+            1 for result in self.batch_results.values() 
+            if result.status == BatchStatus.COMPLETED
+        )
+        
+        # Si tous sont terminés, arrêter le worker
+        if completed_batches == total_batches:
+            self.is_running = False
+    
+    def _clean_corrupted_data(self):
+        """Nettoie les données corrompues"""
+        for batch_id in self.recovery_state.corrupted_data[:]:
+            if batch_id in self.batch_results:
+                self.batch_results[batch_id] = BatchResult(
+                    batch_id=batch_id,
+                    status=BatchStatus.PENDING,
+                    progress=0.0,
+                    combinations_total=len(self.batch_configs[batch_id].strategies)
+                )
+                self.recovery_state.corrupted_data.remove(batch_id)
+    
+    def _save_recovery_state(self):
+        """Sauvegarde l'état de récupération"""
+        try:
+            recovery_data = {
+                'last_successful_batch': self.recovery_state.last_successful_batch,
+                'failed_batches': self.recovery_state.failed_batches,
+                'corrupted_data': self.recovery_state.corrupted_data,
+                'recovery_point': datetime.now().isoformat(),
+                'batch_results': {
+                    batch_id: result.__dict__ for batch_id, result in self.batch_results.items()
+                }
+            }
+            
+            # Sauvegarder dans un fichier (simplifié)
+            with open('recovery_state.json', 'w') as f:
+                json.dump(recovery_data, f, indent=2)
+                
+            self.recovery_state_updated.emit(recovery_data)
+            
+        except Exception as e:
+            print(f"Erreur lors de la sauvegarde: {e}")
+    
+    def load_recovery_state(self) -> bool:
+        """Charge l'état de récupération"""
+        try:
+            if not os.path.exists('recovery_state.json'):
+                return False
+            
+            with open('recovery_state.json', 'r') as f:
+                recovery_data = json.load(f)
+            
+            # Restaurer l'état
+            self.recovery_state.last_successful_batch = recovery_data.get('last_successful_batch')
+            self.recovery_state.failed_batches = recovery_data.get('failed_batches', [])
+            self.recovery_state.corrupted_data = recovery_data.get('corrupted_data', [])
+            
+            # Restaurer les résultats des batches
+            batch_results = recovery_data.get('batch_results', {})
+            for batch_id, result_data in batch_results.items():
+                if batch_id in self.batch_results:
+                    self.batch_results[batch_id].__dict__.update(result_data)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Erreur lors du chargement: {e}")
+            return False
+    
+    def get_overall_progress(self) -> float:
+        """Retourne la progression globale"""
+        if not self.batch_results:
+            return 0.0
+        
+        total_combinations = sum(
+            result.combinations_total for result in self.batch_results.values()
+        )
+        processed_combinations = sum(
+            result.combinations_processed for result in self.batch_results.values()
+        )
+        
+        if total_combinations == 0:
+            return 0.0
+        
+        return (processed_combinations / total_combinations) * 100
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Retourne les statistiques de génération"""
+        total_batches = len(self.batch_configs)
+        completed_batches = sum(
+            1 for result in self.batch_results.values() 
+            if result.status == BatchStatus.COMPLETED
+        )
+        failed_batches = sum(
+            1 for result in self.batch_results.values() 
+            if result.status == BatchStatus.ERROR
+        )
+        
+        elapsed_time = 0
+        if self.start_time:
+            elapsed_time = (datetime.now() - self.start_time).total_seconds()
+        
+        throughput = 0
+        if self.throughput_history:
+            throughput = sum(self.throughput_history) / len(self.throughput_history)
+        
+        return {
+            'total_batches': total_batches,
+            'completed_batches': completed_batches,
+            'failed_batches': failed_batches,
+            'success_rate': (completed_batches / total_batches * 100) if total_batches > 0 else 0,
+            'elapsed_time': elapsed_time,
+            'throughput': throughput,
+            'memory_usage': self.memory_manager.current_usage_mb,
+            'memory_limit': self.memory_manager.max_memory_mb
+        }
+
+
+class AdvancedBatchDialog(QDialog):
+    """Dialogue pour la configuration avancée des batches"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Configuration Avancée des Batches")
+        self.setModal(True)
+        self.resize(600, 400)
+        
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialise l'interface utilisateur"""
+        layout = QVBoxLayout(self)
+        
+        # Configuration de la limitation
+        limit_group = QGroupBox("Limitation et Performance")
+        limit_layout = QFormLayout(limit_group)
+        
+        self.rate_limit_spin = QSpinBox()
+        self.rate_limit_spin.setRange(1, 1000)
+        self.rate_limit_spin.setValue(10)
+        self.rate_limit_spin.setSuffix(" ops/sec")
+        limit_layout.addRow("Débit maximum:", self.rate_limit_spin)
+        
+        self.memory_limit_spin = QSpinBox()
+        self.memory_limit_spin.setRange(100, 16384)
+        self.memory_limit_spin.setValue(2048)
+        self.memory_limit_spin.setSuffix(" MB")
+        limit_layout.addRow("Mémoire maximum:", self.memory_limit_spin)
+        
+        self.thread_count_spin = QSpinBox()
+        self.thread_count_spin.setRange(1, 16)
+        self.thread_count_spin.setValue(4)
+        limit_layout.addRow("Nombre de threads:", self.thread_count_spin)
+        
+        layout.addWidget(limit_group)
+        
+        # Options de récupération
+        recovery_group = QGroupBox("Options de Récupération")
+        recovery_layout = QVBoxLayout(recovery_group)
+        
+        self.auto_recovery_check = QCheckBox("Reprise automatique sur erreur")
+        self.auto_recovery_check.setChecked(True)
+        recovery_layout.addWidget(self.auto_recovery_check)
+        
+        self.clean_corrupted_check = QCheckBox("Nettoyage automatique des données corrompues")
+        self.clean_corrupted_check.setChecked(True)
+        recovery_layout.addWidget(self.clean_corrupted_check)
+        
+        self.compression_check = QCheckBox("Compression des données en mémoire")
+        self.compression_check.setChecked(True)
+        recovery_layout.addWidget(self.compression_check)
+        
+        layout.addWidget(recovery_group)
+        
+        # Boutons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+    
+    def get_config(self) -> Dict[str, Any]:
+        """Retourne la configuration"""
+        return {
+            'max_rate': self.rate_limit_spin.value(),
+            'max_memory_mb': self.memory_limit_spin.value(),
+            'max_threads': self.thread_count_spin.value(),
+            'auto_recovery': self.auto_recovery_check.isChecked(),
+            'clean_corrupted': self.clean_corrupted_check.isChecked(),
+            'compression_enabled': self.compression_check.isChecked()
+        }
 
 
 class HeatmapWidget(QWidget):
@@ -406,8 +1190,10 @@ class GenerationWidget(QWidget):
         super().__init__(parent)
         self.current_dataset = None
         self.current_format = "JSON"
+        self.advanced_worker = AdvancedGenerationWorker()
         self.init_ui()
         self.apply_styles()
+        self.connect_advanced_worker()
         
     def init_ui(self):
         """Initialise l'interface utilisateur"""
@@ -857,6 +1643,55 @@ class GenerationWidget(QWidget):
             # Ajouter une entrée de log d'erreur
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.log_widget.add_log(timestamp, "ERROR", f"Erreur d'export: {str(e)}")
+            
+    def connect_advanced_worker(self):
+        """Connecte les signaux du worker avancé"""
+        self.advanced_worker.batch_started.connect(self.on_batch_started)
+        self.advanced_worker.batch_progress.connect(self.on_batch_progress)
+        self.advanced_worker.batch_completed.connect(self.on_batch_completed)
+        self.advanced_worker.batch_error.connect(self.on_batch_error)
+        self.advanced_worker.throughput_updated.connect(self.on_throughput_updated)
+        
+    def on_batch_started(self, batch_id: str):
+        """Slot pour le démarrage d'un batch"""
+        # Mettre à jour l'interface
+        pass
+        
+    def on_batch_progress(self, batch_id: str, progress: float, status: str):
+        """Slot pour la progression d'un batch"""
+        # Mettre à jour l'interface
+        pass
+        
+    def on_batch_completed(self, batch_id: str, result: dict):
+        """Slot pour la completion d'un batch"""
+        # Mettre à jour l'interface
+        pass
+        
+    def on_batch_error(self, batch_id: str, error_message: str):
+        """Slot pour une erreur de batch"""
+        # Mettre à jour l'interface
+        pass
+        
+    def on_throughput_updated(self, throughput: float):
+        """Slot pour la mise à jour du débit"""
+        # Mettre à jour l'interface
+        pass
+        
+    def start_advanced_generation(self):
+        """Démarre la génération avancée"""
+        dialog = AdvancedBatchDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            config = dialog.get_config()
+            
+            # Configurer le worker
+            self.advanced_worker.set_rate_limit(config['max_rate'])
+            self.advanced_worker.set_max_memory(config['max_memory_mb'])
+            
+            # Charger l'état de récupération si disponible
+            self.advanced_worker.load_recovery_state()
+            
+            # Démarrer la génération
+            self.advanced_worker.start_generation()
     
     def get_current_config(self):
         """Retourne la configuration actuelle"""
