@@ -2,16 +2,300 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 from datetime import datetime
+import os
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QTreeWidget, QTreeWidgetItem, QLineEdit, 
                              QTextEdit, QGroupBox, QSplitter, QMessageBox, QInputDialog, QFileDialog,
-                             QDialog, QDialogButtonBox, QCheckBox, QComboBox)
+                             QDialog, QDialogButtonBox, QCheckBox, QComboBox, QListWidget, 
+                             QListWidgetItem, QProgressDialog)
 from PyQt5.QtCore import Qt, pyqtSignal
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 from PyQt5.QtWidgets import QTabWidget
+
+class ExportTemplateDialog(QDialog):
+    """Dialogue pour sélectionner un template d'export"""
+    
+    TEMPLATES = {
+        "complet": {
+            "name": "Export Complet",
+            "description": "Exporte toute la structure avec métadonnées complètes",
+            "include_properties": True,
+            "include_descriptions": True,
+            "include_ids": True
+        },
+        "structure_only": {
+            "name": "Structure Seulement",
+            "description": "Exporte uniquement la hiérarchie des noms",
+            "include_properties": False,
+            "include_descriptions": False,
+            "include_ids": False
+        },
+        "lightweight": {
+            "name": "Léger",
+            "description": "Exporte la structure avec descriptions mais sans propriétés détaillées",
+            "include_properties": False,
+            "include_descriptions": True,
+            "include_ids": False
+        },
+        "backup": {
+            "name": "Sauvegarde",
+            "description": "Exporte tout avec IDs pour restauration exacte",
+            "include_properties": True,
+            "include_descriptions": True,
+            "include_ids": True
+        }
+    }
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Sélection du Template d'Export")
+        self.setModal(True)
+        self.selected_template = "complet"
+        self.setup_ui()
+        
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Description
+        desc_label = QLabel("Choisissez un template d'export prédéfini :")
+        layout.addWidget(desc_label)
+        
+        # Liste des templates
+        self.template_list = QListWidget()
+        for key, template in self.TEMPLATES.items():
+            item = QListWidgetItem(f"{template['name']} - {template['description']}")
+            item.setData(Qt.UserRole, key)
+            self.template_list.addItem(item)
+        
+        self.template_list.itemSelectionChanged.connect(self.on_template_selected)
+        layout.addWidget(self.template_list)
+        
+        # Détails du template sélectionné
+        self.details_label = QLabel("")
+        self.details_label.setWordWrap(True)
+        self.details_label.setStyleSheet("background-color: #f0f0f0; padding: 10px; border-radius: 5px;")
+        layout.addWidget(self.details_label)
+        
+        # Boutons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # Sélection par défaut
+        self.template_list.setCurrentRow(0)
+        
+    def on_template_selected(self):
+        """Met à jour les détails du template sélectionné"""
+        items = self.template_list.selectedItems()
+        if not items:
+            return
+            
+        template_key = items[0].data(Qt.UserRole)
+        template = self.TEMPLATES[template_key]
+        
+        details = f"<b>{template['name']}</b><br/>"
+        details += f"{template['description']}<br/><br/>"
+        details += f"<b>Inclusions :</b><br/>"
+        details += f"• Propriétés : {'Oui' if template['include_properties'] else 'Non'}<br/>"
+        details += f"• Descriptions : {'Oui' if template['include_descriptions'] else 'Non'}<br/>"
+        details += f"• IDs : {'Oui' if template['include_ids'] else 'Non'}"
+        
+        self.details_label.setText(details)
+        self.selected_template = template_key
+        
+    def get_selected_template(self):
+        """Retourne le template sélectionné"""
+        return self.TEMPLATES[self.selected_template]
+
+class ImportConflictDialog(QDialog):
+    """Dialogue pour résoudre les conflits à l'import"""
+    
+    def __init__(self, parent=None, conflicts=None):
+        super().__init__(parent)
+        self.setWindowTitle("Résolution des Conflits d'Import")
+        self.setModal(True)
+        self.conflicts = conflicts or []
+        self.resolutions = {}
+        self.setup_ui()
+        
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Description
+        desc_label = QLabel(f"{len(self.conflicts)} conflit(s) détecté(s). Veuillez choisir comment les résoudre :")
+        layout.addWidget(desc_label)
+        
+        # Liste des conflits
+        self.conflict_list = QListWidget()
+        for conflict in self.conflicts:
+            item = QListWidgetItem(f"{conflict['name']} ({conflict['type']})")
+            item.setData(Qt.UserRole, conflict)
+            self.conflict_list.addItem(item)
+        
+        self.conflict_list.itemSelectionChanged.connect(self.on_conflict_selected)
+        layout.addWidget(self.conflict_list)
+        
+        # Options de résolution
+        resolution_group = QGroupBox("Options de Résolution")
+        resolution_layout = QVBoxLayout(resolution_group)
+        
+        self.rename_rb = QCheckBox("Renommer l'élément importé")
+        self.rename_rb.toggled.connect(self.on_resolution_changed)
+        
+        self.replace_rb = QCheckBox("Remplacer l'élément existant")
+        self.replace_rb.toggled.connect(self.on_resolution_changed)
+        
+        self.skip_rb = QCheckBox("Ignorer cet élément")
+        self.skip_rb.toggled.connect(self.on_resolution_changed)
+        
+        # Champ pour le nouveau nom si renommage
+        self.new_name_layout = QHBoxLayout()
+        self.new_name_layout.addWidget(QLabel("Nouveau nom:"))
+        self.new_name_edit = QLineEdit()
+        self.new_name_layout.addWidget(self.new_name_edit)
+        
+        resolution_layout.addWidget(self.rename_rb)
+        resolution_layout.addWidget(self.replace_rb)
+        resolution_layout.addWidget(self.skip_rb)
+        resolution_layout.addLayout(self.new_name_layout)
+        
+        layout.addWidget(resolution_group)
+        
+        # Boutons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # Initialisation
+        self.new_name_layout.setEnabled(False)
+        if self.conflicts:
+            self.conflict_list.setCurrentRow(0)
+        
+    def on_conflict_selected(self):
+        """Met à jour l'interface quand un conflit est sélectionné"""
+        items = self.conflict_list.selectedItems()
+        if not items:
+            return
+            
+        conflict = items[0].data(Qt.UserRole)
+        self.new_name_edit.setText(conflict['name'])
+        
+        # Restaurer la résolution précédente si elle existe
+        if conflict['name'] in self.resolutions:
+            resolution = self.resolutions[conflict['name']]
+            if resolution == 'rename':
+                self.rename_rb.setChecked(True)
+            elif resolution == 'replace':
+                self.replace_rb.setChecked(True)
+            elif resolution == 'skip':
+                self.skip_rb.setChecked(True)
+        else:
+            # Par défaut, proposer le renommage
+            self.rename_rb.setChecked(True)
+        
+    def on_resolution_changed(self):
+        """Active/désactive le champ de nom selon la sélection"""
+        self.new_name_layout.setEnabled(self.rename_rb.isChecked())
+        
+    def accept(self):
+        """Valide les résolutions avant d'accepter"""
+        if not self.conflicts:
+            super().accept()
+            return
+            
+        # Vérifier que tous les conflits ont une résolution
+        for conflict in self.conflicts:
+            if conflict['name'] not in self.resolutions:
+                QMessageBox.warning(self, "Résolution incomplète", 
+                                  f"Veuillez spécifier une résolution pour '{conflict['name']}'")
+                return
+                
+        super().accept()
+        
+    def get_resolutions(self):
+        """Retourne les résolutions choisies"""
+        return self.resolutions
+        
+    def on_resolution_changed(self):
+        """Met à jour la résolution quand une option est choisie"""
+        items = self.conflict_list.selectedItems()
+        if not items:
+            return
+            
+        conflict = items[0].data(Qt.UserRole)
+        
+        if self.rename_rb.isChecked():
+            self.resolutions[conflict['name']] = 'rename'
+        elif self.replace_rb.isChecked():
+            self.resolutions[conflict['name']] = 'replace'
+        elif self.skip_rb.isChecked():
+            self.resolutions[conflict['name']] = 'skip'
+
+class StrategyValidator:
+    """Classe pour valider les fichiers de stratégie"""
+    
+    @staticmethod
+    def validate_strategy_file(filepath):
+        """Valide un fichier de stratégie"""
+        errors = []
+        warnings = []
+        
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            # Validation de base
+            if not isinstance(data, list):
+                errors.append("Le fichier doit contenir un tableau à la racine")
+                return errors, warnings
+                
+            # Validation récursive
+            StrategyValidator._validate_items(data, errors, warnings)
+            
+        except json.JSONDecodeError as e:
+            errors.append(f"Fichier JSON invalide: {str(e)}")
+        except Exception as e:
+            errors.append(f"Erreur de lecture: {str(e)}")
+            
+        return errors, warnings
+        
+    @staticmethod
+    def _validate_items(items, errors, warnings, level=0):
+        """Valide récursivement les éléments"""
+        for i, item in enumerate(items):
+            if not isinstance(item, dict):
+                errors.append(f"Élément {i} n'est pas un objet JSON")
+                continue
+                
+            # Vérifier les champs obligatoires
+            if 'name' not in item:
+                errors.append(f"Élément {i} manque le champ 'name'")
+            elif not item['name']:
+                errors.append(f"Élément {i} a un nom vide")
+                
+            if 'type' not in item:
+                errors.append(f"Élément {i} manque le champ 'type'")
+            elif item['type'] not in ['cluster', 'root', 'parent', 'child']:
+                warnings.append(f"Élément {i} a un type non standard: {item['type']}")
+                
+            # Vérifier les champs optionnels
+            if 'description' in item and not isinstance(item['description'], str):
+                warnings.append(f"Élément {i} a une description de type incorrect")
+                
+            if 'properties' in item and not isinstance(item['properties'], dict):
+                errors.append(f"Élément {i} a des propriétés de type incorrect")
+                
+            # Validation récursive des enfants
+            if 'children' in item:
+                if not isinstance(item['children'], list):
+                    errors.append(f"Élément {i} a un champ 'children' de type incorrect")
+                else:
+                    StrategyValidator._validate_items(item['children'], errors, warnings, level + 1)
 
 class TypologyDialog(QDialog):
     """Dialogue pour la gestion des typologies"""
@@ -1044,9 +1328,14 @@ class TypologyManagementTab(QWidget):
             QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement: {str(e)}")
                 
     def export_strategy(self):
-        """Exporte la stratégie vers un fichier JSON"""
+        """Exporte la stratégie vers un fichier JSON avec options avancées"""
         if self.tree_widget.topLevelItemCount() == 0:
             QMessageBox.warning(self, "Erreur", "Aucune stratégie à exporter")
+            return
+            
+        # Dialogue pour choisir le type d'export
+        export_type = self._choose_export_type()
+        if not export_type:
             return
             
         filename, _ = QFileDialog.getSaveFileName(
@@ -1055,7 +1344,14 @@ class TypologyManagementTab(QWidget):
         
         if filename:
             try:
-                strategy_data = self._export_tree_to_json(self.tree_widget.invisibleRootItem())
+                if export_type == "full":
+                    strategy_data = self._export_full_tree()
+                elif export_type == "partial":
+                    strategy_data = self._export_partial_tree()
+                elif export_type == "template":
+                    strategy_data = self._export_with_template()
+                else:
+                    return
                 
                 with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(strategy_data, f, indent=2, ensure_ascii=False)
@@ -1064,50 +1360,304 @@ class TypologyManagementTab(QWidget):
                 
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
-                
-    def _export_tree_to_json(self, root_item):
-        """Exporte récursivement l'arbre en JSON"""
+    
+    def _choose_export_type(self):
+        """Dialogue pour choisir le type d'export"""
+        items = [
+            "Export complet (tout l'arbre)",
+            "Export partiel (sélection seulement)", 
+            "Export avec template"
+        ]
+        
+        item, ok = QInputDialog.getItem(
+            self, "Type d'export", "Choisissez le type d'export:", items, 0, False
+        )
+        
+        if ok:
+            if item == items[0]:
+                return "full"
+            elif item == items[1]:
+                return "partial"
+            elif item == items[2]:
+                return "template"
+        return None
+    
+    def _export_full_tree(self):
+        """Exporte l'arbre complet"""
+        return self._export_tree_to_json(self.tree_widget.invisibleRootItem())
+    
+    def _export_partial_tree(self):
+        """Exporte seulement la partie sélectionnée de l'arbre"""
+        current = self.tree_widget.currentItem()
+        if not current:
+            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un élément à exporter")
+            return None
+            
+        # Demander confirmation
+        reply = QMessageBox.question(
+            self, "Export partiel",
+            f"Exporter l'élément '{current.text(0)}' et tous ses enfants ?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            return self._export_single_item_to_json(current)
+        return None
+    
+    def _export_with_template(self):
+        """Exporte avec un template prédéfini"""
+        dialog = ExportTemplateDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            template = dialog.get_selected_template()
+            return self._export_tree_to_json(
+                self.tree_widget.invisibleRootItem(),
+                template
+            )
+        return None
+    
+    def _export_tree_to_json(self, root_item, template=None):
+        """Exporte récursivement l'arbre en JSON avec template"""
+        if template is None:
+            template = ExportTemplateDialog.TEMPLATES["complet"]
+            
         items = []
         
         for i in range(root_item.childCount()):
             item = root_item.child(i)
-            data = item.data(0, Qt.UserRole) or {}
-            
-            item_data = {
-                "name": data.get("name", ""),
-                "type": data.get("type", ""),
-                "description": data.get("description", ""),
-                "properties": data.get("properties", {}),
-                "children": self._export_tree_to_json(item)
-            }
-            
-            items.append(item_data)
+            items.append(self._export_single_item_to_json(item, template))
             
         return items
+    
+    def _export_single_item_to_json(self, item, template=None):
+        """Exporte un seul élément avec ses enfants"""
+        if template is None:
+            template = ExportTemplateDialog.TEMPLATES["complet"]
+            
+        data = item.data(0, Qt.UserRole) or {}
         
+        item_data = {}
+        
+        # Nom et type toujours inclus
+        item_data["name"] = data.get("name", "")
+        item_data["type"] = data.get("type", "")
+        
+        # Champs conditionnels
+        if template["include_descriptions"]:
+            item_data["description"] = data.get("description", "")
+            
+        if template["include_properties"]:
+            item_data["properties"] = data.get("properties", {})
+            
+        if template["include_ids"]:
+            item_data["id"] = item.text(2)
+        
+        # Enfants
+        children = []
+        for i in range(item.childCount()):
+            child = item.child(i)
+            children.append(self._export_single_item_to_json(child, template))
+            
+        if children:
+            item_data["children"] = children
+            
+        return item_data
+    
     def import_strategy(self):
-        """Importe une stratégie depuis un fichier JSON"""
+        """Importe une stratégie depuis un fichier JSON avec options avancées"""
         filename, _ = QFileDialog.getOpenFileName(
             self, "Importer une stratégie", "", "JSON Files (*.json)"
         )
         
-        if filename:
-            try:
-                with open(filename, 'r', encoding='utf-8') as f:
-                    strategy_data = json.load(f)
+        if not filename:
+            return
+            
+        # Valider le fichier d'abord
+        errors, warnings = StrategyValidator.validate_strategy_file(filename)
+        
+        if errors:
+            error_msg = "Le fichier contient des erreurs :\n\n" + "\n".join(errors)
+            QMessageBox.critical(self, "Erreur de validation", error_msg)
+            return
+            
+        if warnings:
+            warning_msg = "Avertissements :\n\n" + "\n".join(warnings)
+            QMessageBox.warning(self, "Avertissements", warning_msg)
+        
+        # Choisir le mode d'import
+        import_mode = self._choose_import_mode()
+        if not import_mode:
+            return
+            
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                strategy_data = json.load(f)
+                
+            if import_mode == "replace":
+                self._import_replace(strategy_data)
+            elif import_mode == "merge":
+                self._import_merge(strategy_data)
+            elif import_mode == "append":
+                self._import_append(strategy_data)
+                
+            QMessageBox.information(self, "Succès", "Stratégie importée avec succès")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'import: {str(e)}")
+    
+    def _choose_import_mode(self):
+        """Dialogue pour choisir le mode d'import"""
+        items = [
+            "Remplacer (écrase la stratégie actuelle)",
+            "Fusionner (combine avec la stratégie actuelle)",
+            "Ajouter (ajoute à la fin de l'arbre)"
+        ]
+        
+        item, ok = QInputDialog.getItem(
+            self, "Mode d'import", "Choisissez le mode d'import:", items, 0, False
+        )
+        
+        if ok:
+            if item == items[0]:
+                return "replace"
+            elif item == items[1]:
+                return "merge"
+            elif item == items[2]:
+                return "append"
+        return None
+    
+    def _import_replace(self, strategy_data):
+        """Remplace complètement la stratégie actuelle"""
+        self.tree_widget.clear()
+        self._import_tree_from_json(strategy_data, self.tree_widget.invisibleRootItem())
+        self.tree_widget.expandAll()
+    
+    def _import_merge(self, strategy_data):
+        """Fusionne avec la stratégie existante"""
+        conflicts = self._find_import_conflicts(strategy_data)
+        
+        if conflicts:
+            # Résoudre les conflits
+            dialog = ImportConflictDialog(self, conflicts)
+            if dialog.exec_() == QDialog.Accepted:
+                resolutions = dialog.get_resolutions()
+                self._import_with_resolutions(strategy_data, resolutions)
+            else:
+                return  # Annulé par l'utilisateur
+        else:
+            # Pas de conflits, import simple
+            self._import_tree_from_json(strategy_data, self.tree_widget.invisibleRootItem())
+            
+        self.tree_widget.expandAll()
+    
+    def _import_append(self, strategy_data):
+        """Ajoute à la fin de l'arbre existant"""
+        root = self.tree_widget.invisibleRootItem()
+        self._import_tree_from_json(strategy_data, root)
+        self.tree_widget.expandAll()
+    
+    def _find_import_conflicts(self, strategy_data):
+        """Trouve les conflits entre les données importées et l'arbre existant"""
+        conflicts = []
+        existing_names = self._get_all_names(self.tree_widget.invisibleRootItem())
+        
+        def check_conflicts(items, path=""):
+            for item in items:
+                full_path = f"{path}/{item['name']}" if path else item['name']
+                
+                if item['name'] in existing_names:
+                    conflicts.append({
+                        'name': item['name'],
+                        'type': item.get('type', 'unknown'),
+                        'path': full_path
+                    })
+                
+                if 'children' in item:
+                    check_conflicts(item['children'], full_path)
+        
+        check_conflicts(strategy_data)
+        return conflicts
+    
+    def _get_all_names(self, parent_item):
+        """Récupère tous les noms de l'arbre"""
+        names = set()
+        
+        for i in range(parent_item.childCount()):
+            item = parent_item.child(i)
+            names.add(item.text(0))
+            names.update(self._get_all_names(item))
+            
+        return names
+    
+    def _import_with_resolutions(self, strategy_data, resolutions):
+        """Importe avec résolution des conflits"""
+        def import_resolved(items, parent_item):
+            for item_data in items:
+                resolution = resolutions.get(item_data['name'], 'rename')
+                
+                if resolution == 'skip':
+                    continue  # Ignorer cet élément
                     
-                self.tree_widget.clear()
-                self._import_tree_from_json(strategy_data, self.tree_widget.invisibleRootItem())
-                self.tree_widget.expandAll()
+                # Appliquer la résolution
+                if resolution == 'rename':
+                    # Trouver un nom unique
+                    base_name = item_data['name']
+                    new_name = self._find_unique_name(base_name, parent_item)
+                    item_data['name'] = new_name
                 
-                QMessageBox.information(self, "Succès", "Stratégie importée avec succès")
+                # Créer l'élément
+                item = QTreeWidgetItem(parent_item)
+                item.setText(0, item_data['name'])
+                item.setText(1, item_data.get('type', ''))
+                item.setText(2, str(self._get_next_id()))
+                item.setData(0, Qt.UserRole, {
+                    "type": item_data.get('type', ''),
+                    "name": item_data['name'],
+                    "description": item_data.get('description', ''),
+                    "properties": item_data.get('properties', {})
+                })
                 
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Erreur lors de l'import: {str(e)}")
-                
+                # Importer les enfants récursivement
+                if 'children' in item_data:
+                    import_resolved(item_data['children'], item)
+        
+        import_resolved(strategy_data, self.tree_widget.invisibleRootItem())
+    
+    def _find_unique_name(self, base_name, parent_item):
+        """Trouve un nom unique en ajoutant un suffixe numérique"""
+        existing_names = set()
+        
+        if parent_item is None:
+            # Niveau racine
+            for i in range(self.tree_widget.topLevelItemCount()):
+                existing_names.add(self.tree_widget.topLevelItem(i).text(0))
+        else:
+            # Niveau enfant
+            for i in range(parent_item.childCount()):
+                existing_names.add(parent_item.child(i).text(0))
+        
+        if base_name not in existing_names:
+            return base_name
+            
+        # Chercher un nom unique
+        counter = 1
+        while True:
+            new_name = f"{base_name}_{counter}"
+            if new_name not in existing_names:
+                return new_name
+            counter += 1
+    
     def _import_tree_from_json(self, items_data, parent_item):
-        """Importe récursivement l'arbre depuis JSON"""
-        for item_data in items_data:
+        """Importe récursivement l'arbre depuis JSON (version améliorée)"""
+        progress = QProgressDialog("Import en cours...", "Annuler", 0, len(items_data), self)
+        progress.setWindowModality(Qt.WindowModal)
+        
+        for i, item_data in enumerate(items_data):
+            if progress.wasCanceled():
+                break
+                
+            progress.setValue(i)
+            progress.setLabelText(f"Import de {item_data.get('name', 'élément')}...")
+            
             item = QTreeWidgetItem(parent_item)
             item.setText(0, item_data.get("name", ""))
             item.setText(1, item_data.get("type", ""))
@@ -1122,6 +1672,8 @@ class TypologyManagementTab(QWidget):
             children = item_data.get("children", [])
             if children:
                 self._import_tree_from_json(children, item)
+                
+        progress.setValue(len(items_data))
                 
     def _name_exists_at_level(self, name, parent_item, exclude_item=None):
         """Vérifie si un nom existe déjà au même niveau"""
