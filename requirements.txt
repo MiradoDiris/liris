@@ -23,3 +23,6 @@ pyyaml>=5.4.0      # Pour le parsing YAML si utilisé
 
 # Input monitoring
 pynput>=1.7.0
+PyYAML>=6.0
+PyQt5>=5.15.0
+sqlite3
