@@ -73,7 +73,7 @@ class ConfigProvider:
             dict: Configuration de la base de données
         """
         return {
-            'path': os.path.join(os.path.dirname(self.config_dir), "data", "liris.db")
+            "path": os.path.join("data", "liris.db")  # Retourne un string
         }
 
     def get_scheduler_config(self):

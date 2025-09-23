@@ -369,6 +369,18 @@ class MainWindow(QMainWindow):
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
         main_layout.addWidget(self.tab_widget)
+        
+    def setup_connections(self):
+        """Configure les connexions entre les onglets"""
+        # ... vos connexions existantes ...
+        
+        # Connecter le signal de génération à l'onglet d'analyse
+        if hasattr(self, 'generation_tab') and hasattr(self, 'strategy_tab'):
+            # Vérifier si le signal existe dans votre onglet génération
+            if hasattr(self.generation_tab, 'generation_performed'):
+                self.generation_tab.generation_performed.connect(
+                    self.strategy_tab.analysis_tab.on_generation_performed
+                )
 
     def set_conductor(self, conductor):
         """Set the conductor for all relevant widgets"""
@@ -757,12 +769,40 @@ class MainWindow(QMainWindow):
             self.config_provider = ConfigProvider()
             self.progress_bar.setValue(20)
 
-            # Initialiser la base de données
-            db_config = self.config_provider.get_database_config()
-            self.database = Database(db_config["path"])  # L'objet est créé, mais pas de connexion persistante
+            # CRÉATION DE LA BASE DE DONNÉES
+            try:
+                # Get database configuration
+                db_config = self.config_provider.get_database_config()
+                
+                # Handle different types of database configuration
+                if isinstance(db_config, Database):
+                    # If it's already a Database instance, use it directly
+                    self.database = db_config
+                elif hasattr(db_config, 'get_db_path'):
+                    # If it has a get_db_path method, use that
+                    db_path = db_config.get_db_path()
+                    self.database = Database(db_path)
+                elif isinstance(db_config, dict) and 'path' in db_config:
+                    # If it's a dictionary with a path key
+                    db_path = db_config['path']
+                    self.database = Database(db_path)
+                elif isinstance(db_config, str):
+                    # If it's a string path
+                    self.database = Database(db_config)
+                else:
+                    # Fallback to default path
+                    self.database = Database()
+                
+                logger.info(f"Base de données créée: {self.database}")
+                
+            except Exception as e:
+                logger.error(f"Erreur lors de la création de la base de données: {e}")
+                # Fallback to default database
+                self.database = Database()
+            
             self.progress_bar.setValue(40)
-
-            # Initialiser l\'exportateur
+                            
+            # Initialiser l'exportateur
             self.exporter = DataExporter(self.config_provider)
             self.progress_bar.setValue(50)
 
@@ -770,7 +810,7 @@ class MainWindow(QMainWindow):
             self.scheduler = AIScheduler(self.config_provider)
             self.progress_bar.setValue(70)
 
-            # Initialiser le chef d\'orchestre
+            # Initialiser le chef d'orchestre
             self.conductor = AIConductor(
                 self.config_provider, self.scheduler, self.database
             )
@@ -781,71 +821,84 @@ class MainWindow(QMainWindow):
             self._update_ui_with_system()
             self.progress_bar.setValue(100)
 
-            # Terminer l\'initialisation
+            # Terminer l'initialisation
             QTimer.singleShot(500, lambda: self.progress_bar.setVisible(False))
             self.update_status(tr("status.system_initialized"))
             self.update_connection_status("connected")
+            logger.info("Système initialisé avec succès")
 
         except Exception as e:
-            logger.error(f"Erreur lors de l\'initialisation du système: {str(e)}")
+            logger.error(f"Erreur lors de l'initialisation du système: {str(e)}")
             self.progress_bar.setVisible(False)
-            self.update_status("Erreur d\'initialisation")
+            self.update_status("Erreur d'initialisation")
             self.update_connection_status("error")
             QMessageBox.critical(
                 self,
-                "Erreur d\'initialisation",
-                f"Le système n\'a pas pu être initialisé correctement.\n\nErreur: {str(e)}",
+                "Erreur d'initialisation",
+                f"Le système n'a pas pu être initialisé correctement.\n\nErreur: {str(e)}",
             )
 
     def _update_ui_with_system(self):
         """Met à jour l'interface avec les informations du système"""
         if not self.conductor:
+            logger.error("Conductor non initialisé dans _update_ui_with_system")
             return
 
-        platforms = self.conductor.get_available_platforms()
-        if platforms:
-            self.platform_label.setText(tr("messages.platforms_available", count=len(platforms)))
-        else:
-            self.platform_label.setText(tr("messages.no_platforms"))
+        try:
+            platforms = self.conductor.get_available_platforms()
+            if platforms:
+                self.platform_label.setText(tr("messages.platforms_available", count=len(platforms)))
+            else:
+                self.platform_label.setText(tr("messages.no_platforms"))
 
-        # Mettre à jour les widgets avec les dépendances nécessaires
-        self.coding_panel.set_conductor(self.conductor)
-        self.coding_panel.set_platforms(platforms)
-        self.brainstorming_panel.set_conductor(self.conductor)
-        self.brainstorming_panel.set_platforms(platforms)
-        self.dataset_generation.set_conductor(self.conductor)
-        self.dataset_generation.set_platforms(platforms)
-        self.dataset_generation.set_database(self.database)
-        self.dataset_table.set_database(self.database)
-        self.dataset_table.set_exporter(self.exporter)
-        self.prompt_list.set_database(self.database)
+            # Mettre à jour les widgets avec les dépendances nécessaires
+            self.coding_panel.set_conductor(self.conductor)
+            self.coding_panel.set_platforms(platforms)
+            self.brainstorming_panel.set_conductor(self.conductor)
+            self.brainstorming_panel.set_platforms(platforms)
+            
+            # Vérifier si dataset_generation existe avant de l'utiliser
+            if hasattr(self, 'dataset_generation'):
+                self.dataset_generation.set_conductor(self.conductor)
+                self.dataset_generation.set_platforms(platforms)
+                if self.database:
+                    self.dataset_generation.set_database(self.database)
+            
+            if hasattr(self, 'dataset_table') and self.database:
+                self.dataset_table.set_database(self.database)
+                if hasattr(self, 'exporter'):
+                    self.dataset_table.set_exporter(self.exporter)
+            
+            if hasattr(self, 'prompt_list') and self.database:
+                self.prompt_list.set_database(self.database)
 
-        # Configurer les nouveaux widgets Data Science
-        if hasattr(self, 'strategy_widget'):
-            if self.database:
-                self.strategy_widget.set_database(self.database)
-            self.strategy_widget.strategy_saved.connect(self._on_strategy_saved)
-            self.strategy_widget.strategy_loaded.connect(self._on_strategy_loaded)
-        
-        if hasattr(self, 'generation_widget'):
-            if self.database:
-                self.generation_widget.set_database(self.database)
-            self.generation_widget.set_conductor(self.conductor)
+            # Configurer les nouveaux widgets pour Data Science
+            if hasattr(self, 'strategy_widget'):
+                if self.database:
+                    self.strategy_widget.set_database(self.database)
+                    logger.info("Base de données configurée pour strategy_widget")
+                else:
+                    logger.warning("Base de données non disponible pour strategy_widget")
+                
+                # Vérifier si le signal existe avant de le connecter
+                if hasattr(self.strategy_widget, 'strategy_saved'):
+                    self.strategy_widget.strategy_saved.connect(self._on_strategy_saved)
+            
+            if hasattr(self, 'generation_widget'):
+                if self.database:
+                    self.generation_widget.set_database(self.database)
+                self.generation_widget.set_conductor(self.conductor)
 
-        # Charger les données initiales
-        self.prompt_list.refresh_list()
-        self.dataset_table.refresh_list()
+            # Charger les données initiales
+            if hasattr(self, 'prompt_list'):
+                self.prompt_list.refresh_list()
+            if hasattr(self, 'dataset_table'):
+                self.dataset_table.refresh_list()
 
-        # Assurez-vous que project_config_dialog_instance est rafraîchi si déjà ouvert
-        if self.project_config_dialog_instance and isinstance(
-            self.project_config_dialog_instance, QtWidgets.QDialog
-        ):
-            # MODIFIÉ: Chercher ProjectConfigOnlyWidget
-            for child in self.project_config_dialog_instance.findChildren(
-                ProjectConfigOnlyWidget
-            ):
-                if hasattr(child, "refresh"):
-                    child.refresh()
+            logger.info("Interface utilisateur mise à jour avec succès")
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la mise à jour de l'interface: {str(e)}")
 
     def _on_strategy_saved(self):
         """Met à jour les widgets après la sauvegarde d\'une stratégie."""
