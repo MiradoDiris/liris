@@ -21,11 +21,11 @@ USER_ID = "47ea051e-8cce-4bee-bfe8-76489dd98b60"
 WORKSPACE_ID = "e8bfa5a1-512d-46e3-a4cc-69aecbb9cad9"
 
 # Configuration des chemins
-LIRIS_BASE_PATH = r"C:/Users/Oracle/Documents/liris"
+LIRIS_BASE_PATH = r"/liris"
 SCRIPTS_PATH = os.path.join(LIRIS_BASE_PATH, "scripts")
 
 # Configuration Gemini
-GEMINI_API_KEY = "AIzaSyDs4JLCHS1kF4see-p2m97d1AlH0Tn9iAs"  # À remplacer par votre clé API
+GEMINI_API_KEY = ""  # À remplacer par votre clé API
 genai.configure(api_key=GEMINI_API_KEY)
 
 
@@ -62,19 +62,19 @@ class ProjectDataLoader:
             sys.modules[module_name] = project_module
             spec.loader.exec_module(project_module)
 
-            # Cas 1 : PROJECT_DATA existe en global
+            # PROJECT_DATA existe en global
             if hasattr(project_module, "PROJECT_DATA"):
                 logger.info(f"Données chargées depuis: {file_path} (global)")
                 return project_module.PROJECT_DATA
 
-            # Cas 2 : PROJECT_DATA défini à l'intérieur (ex: dans main())
+            # PROJECT_DATA défini à l'intérieur (ex: dans main())
             # Lire le fichier et analyser le code
             with open(file_path, 'r', encoding='utf-8') as f:
                 source_code = f.read()
 
             # Chercher PROJECT_DATA dans le code source
 
-            # Méthode 1: Recherche par regex pour extraire la définition complète
+            # Recherche par regex pour extraire la définition complète
             project_data_pattern = r'PROJECT_DATA\s*=\s*\{.*?\n\s*\}'
             match = re.search(project_data_pattern, source_code, re.DOTALL | re.MULTILINE)
 
@@ -100,7 +100,6 @@ class ProjectDataLoader:
                 except Exception as regex_exec_error:
                     logger.warning(f"Erreur lors de l'extraction regex: {regex_exec_error}")
 
-            # Méthode 2: Analyse AST pour trouver PROJECT_DATA
             try:
                 tree = ast.parse(source_code)
 
