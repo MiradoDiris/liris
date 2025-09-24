@@ -209,17 +209,112 @@ class Database:
                                updated_at TEXT NOT NULL
                            )
                            """)
+            # Table des projets de typologie
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS typology_projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            
+            # Table des typologies (appartient à un projet)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS context_typologies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (project_id) REFERENCES typology_projects (id) ON DELETE CASCADE,
+                    UNIQUE(project_id, name)
+                )
+            """)
+            
+            # Table des clusters (appartient à une typologie)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS typology_clusters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    typology_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (typology_id) REFERENCES context_typologies (id) ON DELETE CASCADE,
+                    UNIQUE(typology_id, name)
+                )
+            """)
 
-            # Index pour accélérer les recherches
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_project_name ON graph_nodes (project_name)"
-            )
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_cluster_uid ON graph_nodes (cluster_uid)"
-            )
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_label_uid ON graph_nodes (label_uid)"
-            )
+            # Table des racines (appartient à un cluster)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS typology_roots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cluster_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (cluster_id) REFERENCES typology_clusters (id) ON DELETE CASCADE,
+                    UNIQUE(cluster_id, name)
+                )
+            """)
+            
+            # Table des parents (appartient à une racine)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS typology_parents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    root_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (root_id) REFERENCES typology_roots (id) ON DELETE CASCADE,
+                    UNIQUE(root_id, name)
+                )
+            """)
+            
+            # Table des enfants (appartient à un parent)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS typology_children (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    parent_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (parent_id) REFERENCES typology_parents (id) ON DELETE CASCADE,
+                    UNIQUE(parent_id, name)
+                )
+            """)
+            
+            # Table pour stocker les statistiques des batches/exemples
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS typology_statistics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    typology_id INTEGER NOT NULL,
+                    cluster_name TEXT,
+                    root_name TEXT,
+                    parent_name TEXT,
+                    batch_name TEXT NOT NULL,
+                    examples_count INTEGER DEFAULT 0,
+                    percentage REAL DEFAULT 0.0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (typology_id) REFERENCES context_typologies (id) ON DELETE CASCADE
+                )
+            """)
+            
+             # Index pour optimiser les recherches
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_typology_project ON context_typologies (project_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_cluster_typology ON typology_clusters (typology_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_root_cluster ON typology_roots (cluster_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parent_root ON typology_parents (root_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_child_parent ON typology_children (parent_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_stats_typology ON typology_statistics (typology_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_label_uid ON graph_nodes (label_uid)")
 
             # Création de la table des projets dataset
             cursor.execute("""
@@ -1719,3 +1814,628 @@ class Database:
         except Exception as e:
             logger.error(f"Error deleting label ID {label_id}: {e}")
             return False
+
+        # =====================================================
+        # MÉTHODES POUR GESTION DES TYPOLOGIES DE CONTEXTE
+        # =====================================================
+
+    def create_typology_project(self, name, description=""):
+        """
+        Créer un nouveau projet de typologie
+        
+        Args:
+            name (str): Nom du projet
+            description (str): Description du projet
+            
+        Returns:
+            int: ID du projet créé
+        """
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            cursor.execute(
+                """
+                INSERT INTO typology_projects (name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name, description, now, now)
+            )
+            
+            self.conn.commit()
+            project_id = cursor.lastrowid
+            logger.info(f"Projet de typologie '{name}' créé avec ID: {project_id}")
+            return project_id
+            
+        except sqlite3.IntegrityError:
+            logger.error(f"Un projet avec le nom '{name}' existe déjà")
+            raise DatabaseError(f"Un projet avec le nom '{name}' existe déjà")
+        except Exception as e:
+            logger.error(f"Erreur création projet typologie '{name}': {str(e)}")
+            raise DatabaseError(f"Échec de la création du projet: {str(e)}")
+
+    def get_typology_projects(self):
+        """
+        Récupérer tous les projets de typologie
+        
+        Returns:
+            list: Liste des projets
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM typology_projects ORDER BY name")
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Erreur récupération projets typologie: {str(e)}")
+            return []
+
+    def get_typology_project(self, project_id):
+        """
+        Récupérer un projet de typologie spécifique
+        
+        Args:
+            project_id (int): ID du projet
+            
+        Returns:
+            dict: Données du projet
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM typology_projects WHERE id = ?", (project_id,))
+            result = cursor.fetchone()
+            return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Erreur récupération projet {project_id}: {str(e)}")
+            return None
+
+    def update_typology_project(self, project_id, name=None, description=None):
+        """
+        Mettre à jour un projet de typologie
+        
+        Args:
+            project_id (int): ID du projet
+            name (str): Nouveau nom
+            description (str): Nouvelle description
+            
+        Returns:
+            bool: True si succès
+        """
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            updates = []
+            params = []
+            
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+            
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+            
+            if not updates:
+                return True
+                
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(project_id)
+            
+            query = f"UPDATE typology_projects SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(query, params)
+            self.conn.commit()
+            
+            logger.info(f"Projet {project_id} mis à jour")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur mise à jour projet {project_id}: {str(e)}")
+            return False
+        
+    def update_typology_root(self, root_id, name=None, description=None):
+            """Mettre à jour une racine"""
+            try:
+                cursor = self.conn.cursor()
+                now = datetime.now().isoformat()
+                
+                updates = []
+                params = []
+                
+                if name is not None:
+                    updates.append("name = ?")
+                    params.append(name)
+                
+                if description is not None:
+                    updates.append("description = ?")
+                    params.append(description)
+                
+                if not updates:
+                    return True
+                    
+                updates.append("updated_at = ?")
+                params.append(now)
+                params.append(root_id)
+                
+                query = f"UPDATE typology_roots SET {', '.join(updates)} WHERE id = ?"
+                cursor.execute(query, params)
+                self.conn.commit()
+                return True
+                
+            except Exception as e:
+                logger.error(f"Erreur mise à jour racine {root_id}: {str(e)}")
+                return False
+
+    def delete_typology_root(self, root_id):
+            """Supprimer une racine"""
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM typology_roots WHERE id = ?", (root_id,))
+                self.conn.commit()
+                return True
+                
+            except Exception as e:
+                logger.error(f"Erreur suppression racine {root_id}: {str(e)}")
+                return False
+        
+    def update_typology_cluster(self, cluster_id, name=None, description=None):
+        """Mettre à jour un cluster"""
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            updates = []
+            params = []
+            
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+            
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+            
+            if not updates:
+                return True
+                
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(cluster_id)
+            
+            query = f"UPDATE typology_clusters SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(query, params)
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur mise à jour cluster {cluster_id}: {str(e)}")
+            return False
+
+    def delete_typology_cluster(self, cluster_id):
+        """Supprimer un cluster"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM typology_clusters WHERE id = ?", (cluster_id,))
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur suppression cluster {cluster_id}: {str(e)}")
+            return False
+
+    def update_typology_parent(self, parent_id, name=None, description=None):
+        """Mettre à jour un parent"""
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            updates = []
+            params = []
+            
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+            
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+            
+            if not updates:
+                return True
+                
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(parent_id)
+            
+            query = f"UPDATE typology_parents SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(query, params)
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur mise à jour parent {parent_id}: {str(e)}")
+            return False
+
+    def delete_typology_parent(self, parent_id):
+        """Supprimer un parent"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM typology_parents WHERE id = ?", (parent_id,))
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur suppression parent {parent_id}: {str(e)}")
+            return False
+
+    def delete_typology_project(self, project_id):
+        """
+        Supprimer un projet de typologie et toutes ses données associées
+        
+        Args:
+            project_id (int): ID du projet
+            
+        Returns:
+            bool: True si succès
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM typology_projects WHERE id = ?", (project_id,))
+            self.conn.commit()
+            
+            logger.info(f"Projet {project_id} supprimé")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur suppression projet {project_id}: {str(e)}")
+            return False
+
+    # Méthodes similaires pour les typologies, clusters, racines, parents, enfants...
+
+    def update_typology_child(self, child_id, name=None, description=None):
+        """Mettre à jour un enfant"""
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            updates = []
+            params = []
+            
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+            
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+            
+            if not updates:
+                return True
+                
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(child_id)
+            
+            query = f"UPDATE typology_children SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(query, params)
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur mise à jour enfant {child_id}: {str(e)}")
+            return False
+
+    def delete_typology_child(self, child_id):
+        """Supprimer un enfant"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM typology_children WHERE id = ?", (child_id,))
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur suppression enfant {child_id}: {str(e)}")
+            return False
+
+    def create_context_typology(self, project_id, name, description=""):
+        """Créer une nouvelle typologie de contexte"""
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            cursor.execute(
+                """
+                INSERT INTO context_typologies (project_id, name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (project_id, name, description, now, now)
+            )
+            
+            self.conn.commit()
+            typology_id = cursor.lastrowid
+            logger.info(f"Typologie '{name}' créée avec ID: {typology_id}")
+            return typology_id
+            
+        except sqlite3.IntegrityError:
+            logger.error(f"Une typologie avec le nom '{name}' existe déjà dans ce projet")
+            raise DatabaseError(f"Une typologie avec le nom '{name}' existe déjà dans ce projet")
+        except Exception as e:
+            logger.error(f"Erreur création typologie '{name}': {str(e)}")
+            raise DatabaseError(f"Échec de la création de la typologie: {str(e)}")
+
+    def get_typologies_by_project(self, project_id):
+        """Récupérer toutes les typologies d'un projet"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT * FROM context_typologies WHERE project_id = ? ORDER BY name",
+                (project_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Erreur récupération typologies projet {project_id}: {str(e)}")
+            return []
+
+    def create_typology_cluster(self, typology_id, name, description=""):
+        """Créer un cluster dans une typologie"""
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            cursor.execute(
+                """
+                INSERT INTO typology_clusters (typology_id, name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (typology_id, name, description, now, now)
+            )
+            
+            self.conn.commit()
+            cluster_id = cursor.lastrowid
+            logger.info(f"Cluster '{name}' créé avec ID: {cluster_id}")
+            return cluster_id
+            
+        except Exception as e:
+            logger.error(f"Erreur création cluster '{name}': {str(e)}")
+            raise DatabaseError(f"Échec de la création du cluster: {str(e)}")
+
+    def get_clusters_by_typology(self, typology_id):
+        """Récupérer tous les clusters d'une typologie"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT * FROM typology_clusters WHERE typology_id = ? ORDER BY name",
+                (typology_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Erreur récupération clusters typologie {typology_id}: {str(e)}")
+            return []
+
+    # Méthodes similaires pour roots, parents, children...
+
+    def create_typology_root(self, cluster_id, name, description=""):
+        """Créer une racine dans un cluster"""
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            cursor.execute(
+                """
+                INSERT INTO typology_roots (cluster_id, name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (cluster_id, name, description, now, now)
+            )
+            
+            self.conn.commit()
+            root_id = cursor.lastrowid
+            return root_id
+            
+        except Exception as e:
+            logger.error(f"Erreur création racine '{name}': {str(e)}")
+            raise DatabaseError(f"Échec de la création de la racine: {str(e)}")
+
+    def get_roots_by_cluster(self, cluster_id):
+        """Récupérer toutes les racines d'un cluster"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT * FROM typology_roots WHERE cluster_id = ? ORDER BY name",
+                (cluster_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Erreur récupération racines cluster {cluster_id}: {str(e)}")
+            return []
+
+    def create_typology_parent(self, root_id, name, description=""):
+        """Créer un parent dans une racine"""
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            cursor.execute(
+                """
+                INSERT INTO typology_parents (root_id, name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (root_id, name, description, now, now)
+            )
+            
+            self.conn.commit()
+            parent_id = cursor.lastrowid
+            return parent_id
+            
+        except Exception as e:
+            logger.error(f"Erreur création parent '{name}': {str(e)}")
+            raise DatabaseError(f"Échec de la création du parent: {str(e)}")
+
+    def get_parents_by_root(self, root_id):
+        """Récupérer tous les parents d'une racine"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT * FROM typology_parents WHERE root_id = ? ORDER BY name",
+                (root_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Erreur récupération parents root {root_id}: {str(e)}")
+            return []
+
+    def create_typology_child(self, parent_id, name, description=""):
+        """Créer un enfant dans un parent"""
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            cursor.execute(
+                """
+                INSERT INTO typology_children (parent_id, name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (parent_id, name, description, now, now)
+            )
+            
+            self.conn.commit()
+            child_id = cursor.lastrowid
+            return child_id
+            
+        except Exception as e:
+            logger.error(f"Erreur création enfant '{name}': {str(e)}")
+            raise DatabaseError(f"Échec de la création de l'enfant: {str(e)}")
+
+    def get_children_by_parent(self, parent_id):
+        """Récupérer tous les enfants d'un parent"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT * FROM typology_children WHERE parent_id = ? ORDER BY name",
+                (parent_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Erreur récupération enfants parent {parent_id}: {str(e)}")
+            return []
+
+    def get_complete_typology_structure(self, typology_id):
+        """
+        Récupérer la structure complète d'une typologie avec tous les niveaux hiérarchiques
+        
+        Args:
+            typology_id (int): ID de la typologie
+            
+        Returns:
+            dict: Structure complète de la typologie
+        """
+        try:
+            # Récupérer la typologie de base
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM context_typologies WHERE id = ?", (typology_id,))
+            typology = dict(cursor.fetchone())
+            
+            # Récupérer les clusters
+            clusters = []
+            cursor.execute("SELECT * FROM typology_clusters WHERE typology_id = ?", (typology_id,))
+            for cluster_row in cursor.fetchall():
+                cluster = dict(cluster_row)
+                
+                # Récupérer les racines pour ce cluster
+                roots = []
+                cursor.execute("SELECT * FROM typology_roots WHERE cluster_id = ?", (cluster['id'],))
+                for root_row in cursor.fetchall():
+                    root = dict(root_row)
+                    
+                    # Récupérer les parents pour cette racine
+                    parents = []
+                    cursor.execute("SELECT * FROM typology_parents WHERE root_id = ?", (root['id'],))
+                    for parent_row in cursor.fetchall():
+                        parent = dict(parent_row)
+                        
+                        # Récupérer les enfants pour ce parent
+                        children = []
+                        cursor.execute("SELECT * FROM typology_children WHERE parent_id = ?", (parent['id'],))
+                        for child_row in cursor.fetchall():
+                            children.append(dict(child_row))
+                        
+                        parent['children'] = children
+                        parents.append(parent)
+                    
+                    root['parents'] = parents
+                    roots.append(root)
+                
+                cluster['roots'] = roots
+                clusters.append(cluster)
+            
+            typology['clusters'] = clusters
+            return typology
+            
+        except Exception as e:
+            logger.error(f"Erreur récupération structure typologie {typology_id}: {str(e)}")
+            return None
+
+    def save_typology_statistics(self, typology_id, statistics_data):
+        """
+        Sauvegarder les statistiques pour une typologie
+        
+        Args:
+            typology_id (int): ID de la typologie
+            statistics_data (list): Liste des données statistiques
+        """
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            
+            # Supprimer les anciennes statistiques
+            cursor.execute("DELETE FROM typology_statistics WHERE typology_id = ?", (typology_id,))
+            
+            # Insérer les nouvelles statistiques
+            for stat in statistics_data:
+                cursor.execute(
+                    """
+                    INSERT INTO typology_statistics 
+                    (typology_id, cluster_name, root_name, parent_name, batch_name, examples_count, percentage, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        typology_id,
+                        stat.get('cluster'),
+                        stat.get('root'),
+                        stat.get('parent'),
+                        stat.get('name'),
+                        stat.get('examples', 0),
+                        stat.get('percentage', 0.0),
+                        now,
+                        now
+                    )
+                )
+            
+            self.conn.commit()
+            logger.info(f"Statistiques sauvegardées pour typologie {typology_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde statistiques typologie {typology_id}: {str(e)}")
+            return False
+
+    def get_typology_statistics(self, typology_id):
+        """
+        Récupérer les statistiques d'une typologie
+        
+        Args:
+            typology_id (int): ID de la typologie
+            
+        Returns:
+            list: Liste des statistiques
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "SELECT * FROM typology_statistics WHERE typology_id = ? ORDER BY batch_name",
+                (typology_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Erreur récupération statistiques typologie {typology_id}: {str(e)}")
+            return []

@@ -6,7 +6,11 @@ from PyQt5.QtCore import Qt, pyqtSignal
 import logging
 import json
 import math
+from core.data.database import Database
 from ui.styles.theme import Theme
+from core.data.database import Database
+from datetime import datetime
+import sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -353,29 +357,99 @@ class ProjectTypologyTab(QtWidgets.QWidget):
         return '#%02x%02x%02x' % darkened
     
     def refresh(self):
-        """Rafraîchir les données affichées"""
-        if self.strategy_widget:
+        """Rafraîchir les données affichées depuis la DB"""
+        if self.strategy_widget and self.strategy_widget.current_project:
             # Mettre à jour les informations du projet
-            self.project_name_label.setText(self.strategy_widget.strategy_data.get('project_name', 'Aucun projet'))
+            project = self.strategy_widget.current_project
+            self.project_name_label.setText(project.get('name', 'Aucun projet'))
             
-            # Compter les éléments
-            typologies_count = len(self.strategy_widget.strategy_data.get('typologies', []))
-            clusters_count = sum(len(typology.get('clusters', [])) 
-                               for typology in self.strategy_widget.strategy_data.get('typologies', []))
-            
-            self.typologies_count_label.setText(str(typologies_count))
-            self.clusters_count_label.setText(str(clusters_count))
-            self.examples_count_label.setText("1000")  # Valeur d'exemple
+            # Compter les éléments depuis la DB
+            if self.strategy_widget.typologies:
+                typologies_count = len(self.strategy_widget.typologies)
+                
+                # Compter les clusters, racines, etc.
+                clusters_count = 0
+                examples_count = 0
+                
+                for typology in self.strategy_widget.typologies:
+                    if 'clusters' in typology:
+                        clusters_count += len(typology['clusters'])
+                        # Compter les exemples depuis les statistiques
+                        if hasattr(self.strategy_widget, 'statistics'):
+                            examples_count = sum(stat['examples_count'] for stat in self.strategy_widget.statistics)
+                
+                self.typologies_count_label.setText(str(typologies_count))
+                self.clusters_count_label.setText(str(clusters_count))
+                self.examples_count_label.setText(str(examples_count))
             
             # Mettre à jour la liste des typologies
             self.typology_combo.blockSignals(True)
             self.typology_combo.clear()
-            for typology in self.strategy_widget.strategy_data.get('typologies', []):
-                self.typology_combo.addItem(typology.get('name', 'Sans nom'))
+            
+            if self.strategy_widget.typologies:
+                for typology in self.strategy_widget.typologies:
+                    self.typology_combo.addItem(typology.get('name', 'Sans nom'))
+            
             self.typology_combo.blockSignals(False)
             
             # Mettre à jour l'arbre de structure
             self._refresh_structure_tree()
+
+    def _refresh_structure_tree(self):
+        """Rafraîchir l'arbre de structure avec les données de la DB"""
+        self.structure_tree.clear()
+        
+        if (self.strategy_widget.current_typology and 
+            'clusters' in self.strategy_widget.current_typology):
+            
+            typology = self.strategy_widget.current_typology
+            
+            # Créer l'item racine pour la typologie
+            typology_item = QtWidgets.QTreeWidgetItem([
+                typology.get('name', 'Sans nom'), 
+                'Typologie', 
+                ''
+            ])
+            self.structure_tree.addTopLevelItem(typology_item)
+            
+            # Ajouter les clusters
+            for cluster in typology.get('clusters', []):
+                cluster_item = QtWidgets.QTreeWidgetItem([
+                    cluster.get('name', 'Sans nom'), 
+                    'Cluster', 
+                    '0 exemples'  # À adapter avec les vraies statistiques
+                ])
+                typology_item.addChild(cluster_item)
+                
+                # Ajouter les racines
+                for root in cluster.get('roots', []):
+                    root_item = QtWidgets.QTreeWidgetItem([
+                        root.get('name', 'Sans nom'), 
+                        'Racine', 
+                        '0 exemples'
+                    ])
+                    cluster_item.addChild(root_item)
+                    
+                    # Ajouter les parents
+                    for parent in root.get('parents', []):
+                        parent_item = QtWidgets.QTreeWidgetItem([
+                            parent.get('name', 'Sans nom'), 
+                            'Parent', 
+                            '0 exemples'
+                        ])
+                        root_item.addChild(parent_item)
+                        
+                        # Ajouter les enfants
+                        for child in parent.get('children', []):
+                            child_item = QtWidgets.QTreeWidgetItem([
+                                child.get('name', 'Sans nom'), 
+                                'Enfant', 
+                                '0 exemples'
+                            ])
+                            parent_item.addChild(child_item)
+            
+            # Développer tout l'arbre
+            self.structure_tree.expandAll()
     
     def _refresh_structure_tree(self):
         """Rafraîchir l'arbre de structure"""
@@ -418,14 +492,32 @@ class ProjectTypologyTab(QtWidgets.QWidget):
         if not typology_name:
             return
             
-        for i, typology in enumerate(self.strategy_widget.strategy_data.get('typologies', [])):
-            if typology.get('name') == typology_name:
-                self.strategy_widget.current_typology_index = i
-                self.typology_desc_text.blockSignals(True)
-                self.typology_desc_text.setText(typology.get('description', ''))
-                self.typology_desc_text.blockSignals(False)
-                self._refresh_structure_tree()
-                break
+        # Trouver l'ID de la typologie sélectionnée
+        index = self.typology_combo.currentIndex()
+        typology_id = self.typology_combo.itemData(index)
+        
+        if typology_id:
+            self.current_typology_id = typology_id
+            self._load_typology_data()
+            self.refresh_ui()
+
+    def _create_typology(self):
+        """Créer une nouvelle typologie"""
+        if not self.current_project_id:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un projet")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(self, "Nouvelle typologie", "Nom de la typologie:")
+        if ok and name:
+            try:
+                typology_id = self.db.create_context_typology(self.current_project_id, name)
+                self.current_typology_id = typology_id
+                self._load_project_data()  # Recharger pour avoir la nouvelle typologie
+                self.refresh_ui()
+                QtWidgets.QMessageBox.information(self, "Succès", "Typologie créée avec succès!")
+                
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
     
     def _on_typology_desc_changed(self):
         """Gérer le changement de description"""
@@ -462,12 +554,7 @@ class ProjectTypologyTab(QtWidgets.QWidget):
     def set_hierarchy_selection(self, cluster, root, parent):
         """Définir la sélection hiérarchique depuis l'extérieur"""
         # Cette méthode peut être utilisée pour synchroniser la sélection
-        pass
-    
-    def _create_typology(self):
-        """Créer une nouvelle typologie"""
-        self.strategy_widget._create_typology()
-        self.refresh()
+        pass  
     
     def _export_structure(self):
         """Exporter la structure hiérarchique"""
@@ -496,13 +583,35 @@ class StrategyWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         
+        # Initialiser la connexion à la base de données
+        self.db = Database()
+        
+        # Initialiser les mappings
+        self.cluster_list_map = {}
+        self.root_list_map = {}
+        self.parent_list_map = {}
+        self.child_list_map = {}
+        
+        # Structure de données pour les typologies (maintenant stockée en DB)
+        self.current_project_id = None
+        self.current_typology_id = None
+        self.current_cluster_id = None
+        self.current_root_id = None
+        self.current_parent_id = None
+        
         # Structure de données pour les typologies
         self.strategy_data = {
             'project_name': '',
             'typologies': []
         }
         
-        # Indices de sélection actuels
+         # AJOUTER CES ATTRIBUTS MANQUANTS :
+        self.current_project = None
+        self.typologies = []
+        self.current_typology = None
+        self.statistics = []
+        
+        # Indices de sélection (pour la compatibilité avec le code existant)
         self.current_typology_index = -1
         self.current_cluster_index = -1
         self.current_root_index = -1
@@ -510,7 +619,8 @@ class StrategyWidget(QtWidgets.QWidget):
         self.current_child_index = -1
         
         self._init_ui()
-        self._load_default_data()
+        self._load_projects_from_db()
+            
 
     def _init_ui(self):
         """Initialiser l'interface utilisateur"""
@@ -551,6 +661,192 @@ class StrategyWidget(QtWidgets.QWidget):
         # Ajouter les conteneurs gauche et droit au layout principal
         main_layout.addWidget(left_container, 1)  # 1/3 de l'espace
         main_layout.addWidget(right_container, 2)  # 2/3 de l'espace
+        
+    def _load_projects_from_db(self):
+        """Charger les projets depuis la base de données"""
+        try:
+            projects = self.db.get_typology_projects()
+            if not projects:
+                # Créer un projet par défaut si aucun n'existe
+                self._create_default_project()
+            else:
+                # Charger le premier projet
+                self.current_project_id = projects[0]['id']
+                self._load_project_data()
+                
+        except Exception as e:
+            logger.error(f"Erreur lors du chargement des projets: {str(e)}")
+            self._create_default_project()
+            
+    def _create_default_project(self):
+        """Créer un projet par défaut"""
+        try:
+            project_id = self.db.create_typology_project(
+                "Projet de démonstration", 
+                "Projet de démonstration pour les typologies de contexte"
+            )
+            self.current_project_id = project_id
+            
+            # Créer une typologie par défaut
+            typology_id = self.db.create_context_typology(
+                project_id,
+                "Typologie principale",
+                "Typologie principale pour le projet de démonstration"
+            )
+            
+            # Créer la structure hiérarchique par défaut
+            self._create_default_typology_structure(typology_id)
+            self._load_project_data()
+            
+        except Exception as e:
+            logger.error(f"Erreur création projet par défaut: {str(e)}")
+
+    def _create_default_typology_structure(self, typology_id):
+        """Créer la structure hiérarchique par défaut"""
+        # Cluster Débutant
+        cluster1_id = self.db.create_typology_cluster(typology_id, "Débutant")
+        root1_id = self.db.create_typology_root(cluster1_id, "Compétences de base")
+        parent1_id = self.db.create_typology_parent(root1_id, "Connaissances fondamentales")
+        self.db.create_typology_child(parent1_id, "Théorie")
+        self.db.create_typology_child(parent1_id, "Définitions")
+        self.db.create_typology_child(parent1_id, "Concepts de base")
+
+        # Cluster Intermédiaire
+        cluster2_id = self.db.create_typology_cluster(typology_id, "Intermédiaire")
+        root2_id = self.db.create_typology_root(cluster2_id, "Compétences avancées")
+        parent2_id = self.db.create_typology_parent(root2_id, "Applications pratiques")
+        self.db.create_typology_child(parent2_id, "Exercices")
+        self.db.create_typology_child(parent2_id, "Cas pratiques")
+        self.db.create_typology_child(parent2_id, "Projets simples")
+
+        # Cluster Avancé
+        cluster3_id = self.db.create_typology_cluster(typology_id, "Avancé")
+        root3_id = self.db.create_typology_root(cluster3_id, "Expertise spécialisée")
+        parent3_id = self.db.create_typology_parent(root3_id, "Optimisation et recherche")
+        self.db.create_typology_child(parent3_id, "Recherche avancée")
+        self.db.create_typology_child(parent3_id, "Optimisation")
+        self.db.create_typology_child(parent3_id, "Innovation")
+
+        # Sauvegarder des statistiques d'exemple
+        statistics = [
+            {'cluster': 'Débutant', 'root': 'Compétences de base', 'parent': 'Connaissances fondamentales', 
+             'name': 'Batch 1', 'examples': 250, 'percentage': 25.0},
+            {'cluster': 'Intermédiaire', 'root': 'Compétences avancées', 'parent': 'Applications pratiques', 
+             'name': 'Batch 2', 'examples': 350, 'percentage': 35.0},
+            {'cluster': 'Avancé', 'root': 'Expertise spécialisée', 'parent': 'Optimisation et recherche', 
+             'name': 'Batch 3', 'examples': 400, 'percentage': 40.0}
+        ]
+        self.db.save_typology_statistics(typology_id, statistics)
+        
+    def _load_project_data(self):
+        """Charger les données du projet actuel depuis la DB"""
+        if not self.current_project_id:
+            return
+            
+        try:
+            # Charger le projet
+            self.current_project = self.db.get_typology_project(self.current_project_id)
+            
+            # Charger les typologies du projet
+            self.typologies = self.db.get_typologies_by_project(self.current_project_id)
+            
+            if self.typologies:
+                self.current_typology_id = self.typologies[0]['id']
+                self._load_typology_data()
+                
+        except Exception as e:
+            logger.error(f"Erreur chargement données projet: {str(e)}")
+
+    def _load_typology_data(self):
+        """Charger les données de la typologie actuelle depuis la DB"""
+        if not self.current_typology_id:
+            return
+            
+        try:
+            # Charger la structure complète
+            self.current_typology = self.db.get_complete_typology_structure(self.current_typology_id)
+            
+            # Charger les statistiques
+            self.statistics = self.db.get_typology_statistics(self.current_typology_id)
+            
+        except Exception as e:
+            logger.error(f"Erreur chargement données typologie: {str(e)}")
+
+    def refresh_ui(self):
+        """Rafraîchir l'interface utilisateur avec les données de la DB"""
+        # Mettre à jour la liste des projets
+        self.project_combo.blockSignals(True)
+        self.project_combo.clear()
+        
+        projects = self.db.get_typology_projects()
+        for project in projects:
+            self.project_combo.addItem(project['name'], project['id'])
+        
+        # Sélectionner le projet courant
+        if self.current_project_id:
+            index = self.project_combo.findData(self.current_project_id)
+            if index >= 0:
+                self.project_combo.setCurrentIndex(index)
+        
+        self.project_combo.blockSignals(False)
+        
+        # Mettre à jour le nom du projet
+        if self.current_project:
+            self.project_name_label.setText(self.current_project['name'])
+        else:
+            self.project_name_label.setText("Aucun projet sélectionné")
+        
+        # Mettre à jour la liste des typologies
+        self.typology_combo.blockSignals(True)
+        self.typology_combo.clear()
+        
+        if self.typologies:
+            for typology in self.typologies:
+                self.typology_combo.addItem(typology['name'], typology['id'])
+            
+            # Sélectionner la typologie courante
+            if self.current_typology_id:
+                index = self.typology_combo.findData(self.current_typology_id)
+                if index >= 0:
+                    self.typology_combo.setCurrentIndex(index)
+        
+        self.typology_combo.blockSignals(False)
+        
+        # Mettre à jour les onglets
+        self._refresh_cluster_tab()
+        self._refresh_root_tab()
+        self._refresh_parent_tab()
+        self._refresh_child_tab()
+        
+        # Rafraîchir l'onglet projet et typologie
+        self.project_typology_tab.refresh()
+        
+        # Mettre à jour le camembert avec les statistiques
+        self._update_pie_chart()
+
+    def _update_pie_chart(self):
+        """Mettre à jour le camembert avec les données de la DB"""
+        if hasattr(self, 'statistics') and self.statistics:
+            # Convertir les statistiques en format compatible avec le camembert
+            pie_data = {
+                'total_examples': sum(stat['examples_count'] for stat in self.statistics),
+                'batches': []
+            }
+            
+            for stat in self.statistics:
+                pie_data['batches'].append({
+                    'name': stat['batch_name'],
+                    'cluster': stat['cluster_name'],
+                    'root': stat['root_name'],
+                    'parent': stat['parent_name'],
+                    'examples': stat['examples_count'],
+                    'percentage': stat['percentage']
+                })
+            
+            self.pie_chart.set_data(pie_data)
+        else:
+            # Données par défaut si pas de statistiques
+            self.pie_chart.set_data(self.pie_chart.sample_data)
         
     def _get_group_style(self):
         """Obtenir le style pour les groupes"""
@@ -1110,63 +1406,8 @@ class StrategyWidget(QtWidgets.QWidget):
         return '#%02x%02x%02x' % darkened
 
     def _load_default_data(self):
-        """Charger les données par défaut"""
-        # Données d'exemple
-        self.strategy_data = {
-            'project_name': 'Projet de démonstration',
-            'typologies': [
-                {
-                    'name': 'Typologie principale',
-                    'description': 'Typologie principale pour le projet de démonstration',
-                    'clusters': [
-                        {
-                            'name': 'Débutant',
-                            'roots': [
-                                {
-                                    'name': 'Compétences de base',
-                                    'parents': [
-                                        {
-                                            'name': 'Connaissances fondamentales',
-                                            'children': ['Théorie', 'Définitions', 'Concepts de base']
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        {
-                            'name': 'Intermédiaire',
-                            'roots': [
-                                {
-                                    'name': 'Compétences avancées',
-                                    'parents': [
-                                        {
-                                            'name': 'Applications pratiques',
-                                            'children': ['Exercices', 'Cas pratiques', 'Projets simples']
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        {
-                            'name': 'Avancé',
-                            'roots': [
-                                {
-                                    'name': 'Expertise spécialisée',
-                                    'parents': [
-                                        {
-                                            'name': 'Optimisation et recherche',
-                                            'children': ['Recherche avancée', 'Optimisation', 'Innovation']
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
-        
-        self.refresh_ui()
+        """Charger les données depuis la base de données"""
+        self._load_projects_from_db()
 
     def refresh_ui(self):
         """Rafraîchir l'interface utilisateur"""
@@ -1199,104 +1440,162 @@ class StrategyWidget(QtWidgets.QWidget):
         self.pie_chart.update()
 
     def _refresh_cluster_tab(self):
-        """Rafraîchir l'onglet Clusters"""
+        """Rafraîchir l'onglet Clusters avec les données de la DB"""
         self.cluster_list.clear()
-        if self.current_typology_index != -1:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
+        self.cluster_list_map = {}
+        
+        if self.current_typology and 'clusters' in self.current_typology:
+            for i, cluster in enumerate(self.current_typology['clusters']):
                 self.cluster_list.addItem(cluster['name'])
+                self.cluster_list_map[cluster['name']] = cluster['id']
+                
+                # Mettre à jour l'index si c'est le cluster actuel
+                if self.current_cluster_id == cluster['id']:
+                    self.current_cluster_index = i
 
     def _refresh_root_tab(self):
-        """Rafraîchir l'onglet Racines"""
+        """Rafraîchir l'onglet Racines avec les données de la DB"""
         self.root_cluster_combo.blockSignals(True)
         self.root_cluster_combo.clear()
+        self.root_list.clear()
+        self.root_list_map = {}
         
-        if self.current_typology_index != -1:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                self.root_cluster_combo.addItem(cluster['name'])
+        if self.current_typology and 'clusters' in self.current_typology:
+            for cluster in self.current_typology['clusters']:
+                self.root_cluster_combo.addItem(cluster['name'], cluster['id'])
         
         self.root_cluster_combo.blockSignals(False)
         self._on_root_cluster_changed(self.root_cluster_combo.currentText())
 
     def _refresh_parent_tab(self):
-        """Rafraîchir l'onglet Parents"""
+        """Rafraîchir l'onglet Parents avec les données de la DB"""
         self.parent_cluster_combo.blockSignals(True)
         self.parent_cluster_combo.clear()
+        self.parent_root_combo.clear()
+        self.parent_list.clear()
+        self.parent_list_map = {}
         
-        if self.current_typology_index != -1:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                self.parent_cluster_combo.addItem(cluster['name'])
+        if self.current_typology and 'clusters' in self.current_typology:
+            for cluster in self.current_typology['clusters']:
+                self.parent_cluster_combo.addItem(cluster['name'], cluster['id'])
         
         self.parent_cluster_combo.blockSignals(False)
         self._on_parent_cluster_changed(self.parent_cluster_combo.currentText())
 
     def _refresh_child_tab(self):
-        """Rafraîchir l'onglet Enfants"""
+        """Rafraîchir l'onglet Enfants avec les données de la DB"""
         self.child_cluster_combo.blockSignals(True)
         self.child_cluster_combo.clear()
+        self.child_root_combo.clear()
+        self.child_parent_combo.clear()
+        self.child_list.clear()
+        self.child_list_map = {}
         
-        if self.current_typology_index != -1:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                self.child_cluster_combo.addItem(cluster['name'])
+        if self.current_typology and 'clusters' in self.current_typology:
+            for cluster in self.current_typology['clusters']:
+                self.child_cluster_combo.addItem(cluster['name'], cluster['id'])
         
         self.child_cluster_combo.blockSignals(False)
         self._on_child_cluster_changed(self.child_cluster_combo.currentText())
-
-    # Gestionnaires d'événements pour les onglets
+        
+        # Gestionnaires d'événements pour les onglets
     def _on_project_changed(self, project_name):
         """Gérer le changement de projet"""
-        if project_name:
-            self.strategy_data['project_name'] = project_name
-            self.project_name_label.setText(project_name)
+        if not project_name:
+            return
+        
+        
+        
+        # Trouver l'ID du projet sélectionné
+        index = self.project_combo.currentIndex()
+        project_id = self.project_combo.itemData(index)
+        
+        if project_id:
+            self.current_project_id = project_id
+            self._load_project_data()
+            self.refresh_ui()
 
     def _on_typology_changed(self, typology_name):
         """Gérer le changement de typologie"""
         if not typology_name:
             return
             
-        for i, typology in enumerate(self.strategy_data['typologies']):
-            if typology['name'] == typology_name:
-                self.current_typology_index = i
-                self._refresh_cluster_tab()
-                self._refresh_root_tab()
-                self._refresh_parent_tab()
-                self._refresh_child_tab()
-                break
-
+        # Trouver l'ID de la typologie sélectionnée
+        index = self.typology_combo.currentIndex()
+        typology_id = self.typology_combo.itemData(index)
+        
+        if typology_id:
+            self.current_typology_id = typology_id
+            self._load_typology_data()
+            self.refresh_ui()
+            
+            # Mettre à jour l'index pour la compatibilité
+            for i, typology in enumerate(self.typologies):
+                if typology['id'] == typology_id:
+                    self.current_typology_index = i
+                    break
+            
     def _on_cluster_selected(self, row):
         """Gérer la sélection d'un cluster"""
         self.current_cluster_index = row
+        if row >= 0:
+                item = self.cluster_list.item(row)
+                cluster_name = item.text()
+                self.current_cluster_id = self.cluster_list_map.get(cluster_name)
 
     def _on_root_cluster_changed(self, cluster_name):
         """Gérer le changement de cluster dans l'onglet Racines"""
         self.root_list.clear()
-        if self.current_typology_index != -1 and cluster_name:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == cluster_name:
-                    for root in cluster['roots']:
+        self.root_list_map = {}
+        
+        if not cluster_name:
+            return
+            
+        # Trouver l'ID du cluster sélectionné
+        cluster_id = None
+        for i in range(self.root_cluster_combo.count()):
+            if self.root_cluster_combo.itemText(i) == cluster_name:
+                cluster_id = self.root_cluster_combo.itemData(i)
+                break
+        
+        if cluster_id and self.current_typology:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
                         self.root_list.addItem(root['name'])
+                        self.root_list_map[root['name']] = root['id']
                     break
 
     def _on_root_selected(self, row):
         """Gérer la sélection d'une racine"""
         self.current_root_index = row
+        if row >= 0:
+            item = self.root_list.item(row)
+            root_name = item.text()
+            self.current_root_id = self.root_list_map.get(root_name)
 
     def _on_parent_cluster_changed(self, cluster_name):
         """Gérer le changement de cluster dans l'onglet Parents"""
         self.parent_root_combo.blockSignals(True)
         self.parent_root_combo.clear()
         self.parent_list.clear()
+        self.parent_list_map = {}
         
-        if self.current_typology_index != -1 and cluster_name:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == cluster_name:
-                    for root in cluster['roots']:
-                        self.parent_root_combo.addItem(root['name'])
+        if not cluster_name:
+            return
+            
+        # Trouver l'ID du cluster sélectionné
+        cluster_id = None
+        for i in range(self.parent_cluster_combo.count()):
+            if self.parent_cluster_combo.itemText(i) == cluster_name:
+                cluster_id = self.parent_cluster_combo.itemData(i)
+                break
+        
+        if cluster_id and self.current_typology:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        self.parent_root_combo.addItem(root['name'], root['id'])
                     break
         
         self.parent_root_combo.blockSignals(False)
@@ -1305,18 +1604,56 @@ class StrategyWidget(QtWidgets.QWidget):
     def _on_parent_root_changed(self, root_name):
         """Gérer le changement de racine dans l'onglet Parents"""
         self.parent_list.clear()
-        if (self.current_typology_index != -1 and 
-            self.parent_cluster_combo.currentText() and root_name):
+        self.parent_list_map = {}
+        
+        if not root_name:
+            return
             
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == self.parent_cluster_combo.currentText():
-                    for root in cluster['roots']:
-                        if root['name'] == root_name:
-                            for parent in root['parents']:
+        # Trouver l'ID de la racine sélectionnée
+        root_id = None
+        for i in range(self.parent_root_combo.count()):
+            if self.parent_root_combo.itemText(i) == root_name:
+                root_id = self.parent_root_combo.itemData(i)
+                break
+        
+        cluster_id = self.parent_cluster_combo.currentData()
+        
+        if root_id and cluster_id and self.current_typology:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        if root['id'] == root_id:
+                            for parent in root.get('parents', []):
                                 self.parent_list.addItem(parent['name'])
+                                self.parent_list_map[parent['name']] = parent['id']
                             break
                     break
+
+    def _on_parent_selected(self, row):
+        """Gérer la sélection d'un parent"""
+        self.current_parent_index = row
+        if row >= 0:
+            item = self.parent_list.item(row)
+            parent_name = item.text()
+            self.current_parent_id = self.parent_list_map.get(parent_name)
+
+    def _add_parent(self):
+        """Ajouter un parent"""
+        root_id = self.parent_root_combo.currentData()
+        if not root_id:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner une racine")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(self, "Nouveau parent", "Nom du parent:")
+        if ok and name:
+            try:
+                parent_id = self.db.create_typology_parent(root_id, name)
+                self._load_typology_data()
+                self.refresh_ui()
+                QtWidgets.QMessageBox.information(self, "Succès", "Parent créé avec succès!")
+                
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
 
     def _on_parent_selected(self, row):
         """Gérer la sélection d'un parent"""
@@ -1328,17 +1665,60 @@ class StrategyWidget(QtWidgets.QWidget):
         self.child_root_combo.clear()
         self.child_parent_combo.clear()
         self.child_list.clear()
+        self.child_list_map = {}
         
-        if self.current_typology_index != -1 and cluster_name:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == cluster_name:
-                    for root in cluster['roots']:
-                        self.child_root_combo.addItem(root['name'])
+        if not cluster_name:
+            return
+            
+        # Trouver l'ID du cluster sélectionné
+        cluster_id = None
+        for i in range(self.child_cluster_combo.count()):
+            if self.child_cluster_combo.itemText(i) == cluster_name:
+                cluster_id = self.child_cluster_combo.itemData(i)
+                break
+        
+        if cluster_id and self.current_typology:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        self.child_root_combo.addItem(root['name'], root['id'])
                     break
         
         self.child_root_combo.blockSignals(False)
         self._on_child_root_changed(self.child_root_combo.currentText())
+
+    def _on_child_root_changed(self, root_name):
+        """Gérer le changement de racine dans l'onglet Enfants"""
+        self.child_parent_combo.blockSignals(True)
+        self.child_parent_combo.clear()
+        self.child_list.clear()
+        self.child_list_map = {}
+        
+        if not root_name:
+            return
+            
+        # Trouver l'ID de la racine sélectionnée
+        root_id = None
+        for i in range(self.child_root_combo.count()):
+            if self.child_root_combo.itemText(i) == root_name:
+                root_id = self.child_root_combo.itemData(i)
+                break
+        
+        cluster_id = self.child_cluster_combo.currentData()
+        
+        if root_id and cluster_id and self.current_typology:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        if root['id'] == root_id:
+                            for parent in root.get('parents', []):
+                                self.child_parent_combo.addItem(parent['name'], parent['id'])
+                            break
+                    break
+        
+        self.child_parent_combo.blockSignals(False)
+        self._on_child_parent_changed(self.child_parent_combo.currentText())
+
 
     def _on_child_root_changed(self, root_name):
         """Gérer le changement de racine dans l'onglet Enfants"""
@@ -1365,19 +1745,31 @@ class StrategyWidget(QtWidgets.QWidget):
     def _on_child_parent_changed(self, parent_name):
         """Gérer le changement de parent dans l'onglet Enfants"""
         self.child_list.clear()
-        if (self.current_typology_index != -1 and 
-            self.child_cluster_combo.currentText() and 
-            self.child_root_combo.currentText() and parent_name):
+        self.child_list_map = {}
+        
+        if not parent_name:
+            return
             
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == self.child_cluster_combo.currentText():
-                    for root in cluster['roots']:
-                        if root['name'] == self.child_root_combo.currentText():
-                            for parent in root['parents']:
-                                if parent['name'] == parent_name:
-                                    for child in parent['children']:
-                                        self.child_list.addItem(child)
+        # Trouver l'ID du parent sélectionné
+        parent_id = None
+        for i in range(self.child_parent_combo.count()):
+            if self.child_parent_combo.itemText(i) == parent_name:
+                parent_id = self.child_parent_combo.itemData(i)
+                break
+        
+        root_id = self.child_root_combo.currentData()
+        cluster_id = self.child_cluster_combo.currentData()
+        
+        if parent_id and root_id and cluster_id and self.current_typology:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        if root['id'] == root_id:
+                            for parent in root.get('parents', []):
+                                if parent['id'] == parent_id:
+                                    for child in parent.get('children', []):
+                                        self.child_list.addItem(child['name'])
+                                        self.child_list_map[child['name']] = child['id']
                                     break
                             break
                     break
@@ -1385,60 +1777,154 @@ class StrategyWidget(QtWidgets.QWidget):
     def _on_child_selected(self, row):
         """Gérer la sélection d'un enfant"""
         self.current_child_index = row
+        if row >= 0:
+            item = self.child_list.item(row)
+            child_name = item.text()
+            self.current_child_id = self.child_list_map.get(child_name)
 
-    # Méthodes pour les boutons d'action
     def _create_project(self):
         """Créer un nouveau projet"""
         name, ok = QtWidgets.QInputDialog.getText(self, "Nouveau projet", "Nom du projet:")
         if ok and name:
-            self.strategy_data['project_name'] = name
-            self.refresh_ui()
+            try:
+                project_id = self.db.create_typology_project(name)
+                self.current_project_id = project_id
+                self._load_project_data()
+                self.refresh_ui()
+                QtWidgets.QMessageBox.information(self, "Succès", "Projet créé avec succès!")
+                
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la création du projet: {str(e)}")
 
     def _edit_project(self):
         """Modifier le projet actuel"""
-        name, ok = QtWidgets.QInputDialog.getText(self, "Modifier le projet", "Nom du projet:", 
-                                                 text=self.strategy_data['project_name'])
+        if not self.current_project:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Aucun projet sélectionné")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "Modifier le projet", "Nom du projet:", 
+            text=self.current_project['name']
+        )
+        
         if ok and name:
-            self.strategy_data['project_name'] = name
-            self.refresh_ui()
+            try:
+                success = self.db.update_typology_project(self.current_project_id, name=name)
+                if success:
+                    self._load_project_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Projet modifié avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la modification du projet")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
 
     def _delete_project(self):
         """Supprimer le projet actuel"""
-        reply = QtWidgets.QMessageBox.question(self, "Supprimer le projet", 
-                                              "Êtes-vous sûr de vouloir supprimer ce projet?",
-                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if not self.current_project:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Aucun projet sélectionné")
+            return
+            
+        reply = QtWidgets.QMessageBox.question(
+            self, "Supprimer le projet", 
+            f"Êtes-vous sûr de vouloir supprimer le projet '{self.current_project['name']}'?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        
         if reply == QtWidgets.QMessageBox.Yes:
-            self.strategy_data['project_name'] = ''
-            self.refresh_ui()
+            try:
+                success = self.db.delete_typology_project(self.current_project_id)
+                if success:
+                    # Recharger les projets
+                    projects = self.db.get_typology_projects()
+                    if projects:
+                        self.current_project_id = projects[0]['id']
+                        self._load_project_data()
+                    else:
+                        self.current_project_id = None
+                        self.current_project = None
+                        self.typologies = []
+                    
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Projet supprimé avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la suppression du projet")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")
 
     def _create_typology(self):
         """Créer une nouvelle typologie"""
+        if not self.current_project_id:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un projet")
+            return
+            
         name, ok = QtWidgets.QInputDialog.getText(self, "Nouvelle typologie", "Nom de la typologie:")
         if ok and name:
-            new_typology = {
-                'name': name,
-                'description': '',
-                'clusters': []
-            }
-            self.strategy_data['typologies'].append(new_typology)
-            self.refresh_ui()
+            try:
+                typology_id = self.db.create_context_typology(self.current_project_id, name)
+                self.current_typology_id = typology_id
+                self._load_project_data()  # Recharger pour avoir la nouvelle typologie
+                self.refresh_ui()
+                QtWidgets.QMessageBox.information(self, "Succès", "Typologie créée avec succès!")
+                
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
 
     def _add_cluster(self):
         """Ajouter un cluster"""
-        if self.current_typology_index == -1:
+        if not self.current_typology_id:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner une typologie")
             return
             
         name, ok = QtWidgets.QInputDialog.getText(self, "Nouveau cluster", "Nom du cluster:")
         if ok and name:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            new_cluster = {
-                'name': name,
-                'roots': []
-            }
-            typology['clusters'].append(new_cluster)
-            self.refresh_ui()
+            try:
+                cluster_id = self.db.create_typology_cluster(self.current_typology_id, name)
+                self._load_typology_data()
+                self.refresh_ui()
+                QtWidgets.QMessageBox.information(self, "Succès", "Cluster créé avec succès!")
+                
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
 
+    def _edit_cluster(self):
+        """Modifier un cluster"""
+        if not self.current_cluster_id:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster")
+            return
+            
+        # Trouver le cluster actuel
+        current_cluster = None
+        for cluster in self.current_typology.get('clusters', []):
+            if cluster['id'] == self.current_cluster_id:
+                current_cluster = cluster
+                break
+        
+        if not current_cluster:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Cluster non trouvé")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "Modifier le cluster", "Nom du cluster:", 
+            text=current_cluster['name']
+        )
+        
+        if ok and name:
+            try:
+                # Mettre à jour dans la base de données
+                success = self.db.update_typology_cluster(self.current_cluster_id, name=name)
+                if success:
+                    self._load_typology_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Cluster modifié avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la modification")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
+    
     def _edit_cluster(self):
         """Modifier un cluster"""
         if self.current_cluster_index == -1:
@@ -1456,72 +1942,138 @@ class StrategyWidget(QtWidgets.QWidget):
 
     def _delete_cluster(self):
         """Supprimer un cluster"""
-        if self.current_cluster_index == -1:
+        if not self.current_cluster_id:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster")
             return
             
-        reply = QtWidgets.QMessageBox.question(self, "Supprimer le cluster", 
-                                              "Êtes-vous sûr de vouloir supprimer ce cluster?",
-                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        # Trouver le nom du cluster
+        cluster_name = ""
+        for cluster in self.current_typology.get('clusters', []):
+            if cluster['id'] == self.current_cluster_id:
+                cluster_name = cluster['name']
+                break
+        
+        reply = QtWidgets.QMessageBox.question(
+            self, "Supprimer le cluster", 
+            f"Êtes-vous sûr de vouloir supprimer le cluster '{cluster_name}'?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        
         if reply == QtWidgets.QMessageBox.Yes:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            typology['clusters'].pop(self.current_cluster_index)
-            self.current_cluster_index = -1
-            self.refresh_ui()
+            try:
+                success = self.db.delete_typology_cluster(self.current_cluster_id)
+                if success:
+                    self.current_cluster_id = None
+                    self.current_cluster_index = -1
+                    self._load_typology_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Cluster supprimé avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la suppression")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")
+
 
     def _add_root(self):
         """Ajouter une racine"""
-        if self.root_cluster_combo.currentText() == '':
+        cluster_id = self.root_cluster_combo.currentData()
+        if not cluster_id:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster")
             return
             
         name, ok = QtWidgets.QInputDialog.getText(self, "Nouvelle racine", "Nom de la racine:")
         if ok and name:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == self.root_cluster_combo.currentText():
-                    new_root = {
-                        'name': name,
-                        'parents': []
-                    }
-                    cluster['roots'].append(new_root)
-                    break
-            self.refresh_ui()
+            try:
+                root_id = self.db.create_typology_root(cluster_id, name)
+                self._load_typology_data()
+                self.refresh_ui()
+                QtWidgets.QMessageBox.information(self, "Succès", "Racine créée avec succès!")
+                
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
 
     def _edit_root(self):
         """Modifier une racine"""
-        if self.current_root_index == -1:
+        if not self.current_root_id:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner une racine")
             return
             
-        typology = self.strategy_data['typologies'][self.current_typology_index]
-        for cluster in typology['clusters']:
-            if cluster['name'] == self.root_cluster_combo.currentText():
-                root = cluster['roots'][self.current_root_index]
-                name, ok = QtWidgets.QInputDialog.getText(self, "Modifier la racine", "Nom de la racine:", 
-                                                         text=root['name'])
-                if ok and name:
-                    root['name'] = name
+        # Trouver la racine actuelle
+        current_root = None
+        cluster_id = self.root_cluster_combo.currentData()
+        
+        if self.current_typology and cluster_id:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        if root['id'] == self.current_root_id:
+                            current_root = root
+                            break
+                    break
+        
+        if not current_root:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Racine non trouvée")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "Modifier la racine", "Nom de la racine:", 
+            text=current_root['name']
+        )
+        
+        if ok and name:
+            try:
+                success = self.db.update_typology_root(self.current_root_id, name=name)
+                if success:
+                    self._load_typology_data()
                     self.refresh_ui()
-                break
+                    QtWidgets.QMessageBox.information(self, "Succès", "Racine modifiée avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la modification")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
+
 
     def _delete_root(self):
         """Supprimer une racine"""
-        if self.current_root_index == -1:
+        if not self.current_root_id:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner une racine")
             return
             
-        reply = QtWidgets.QMessageBox.question(self, "Supprimer la racine", 
-                                              "Êtes-vous sûr de vouloir supprimer cette racine?",
-                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        if reply == QtWidgets.QMessageBox.Yes:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == self.root_cluster_combo.currentText():
-                    cluster['roots'].pop(self.current_root_index)
-                    self.current_root_index = -1
-                    self.refresh_ui()
+        # Trouver le nom de la racine
+        root_name = ""
+        cluster_id = self.root_cluster_combo.currentData()
+        
+        if self.current_typology and cluster_id:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        if root['id'] == self.current_root_id:
+                            root_name = root['name']
+                            break
                     break
+        
+        reply = QtWidgets.QMessageBox.question(
+            self, "Supprimer la racine", 
+            f"Êtes-vous sûr de vouloir supprimer la racine '{root_name}'?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                success = self.db.delete_typology_root(self.current_root_id)
+                if success:
+                    self.current_root_id = None
+                    self.current_root_index = -1
+                    self._load_typology_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Racine supprimée avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la suppression")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")
 
     def _add_parent(self):
         """Ajouter un parent"""
@@ -1548,67 +2100,160 @@ class StrategyWidget(QtWidgets.QWidget):
 
     def _edit_parent(self):
         """Modifier un parent"""
-        if self.current_parent_index == -1:
+        if not self.current_parent_id:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un parent")
             return
             
-        typology = self.strategy_data['typologies'][self.current_typology_index]
-        for cluster in typology['clusters']:
-            if cluster['name'] == self.parent_cluster_combo.currentText():
-                for root in cluster['roots']:
-                    if root['name'] == self.parent_root_combo.currentText():
-                        parent = root['parents'][self.current_parent_index]
-                        name, ok = QtWidgets.QInputDialog.getText(self, "Modifier le parent", "Nom du parent:", 
-                                                                 text=parent['name'])
-                        if ok and name:
-                            parent['name'] = name
-                            self.refresh_ui()
-                        break
-                break
+        # Trouver le parent actuel
+        current_parent = None
+        root_id = self.parent_root_combo.currentData()
+        cluster_id = self.parent_cluster_combo.currentData()
+        
+        if self.current_typology and cluster_id and root_id:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        if root['id'] == root_id:
+                            for parent in root.get('parents', []):
+                                if parent['id'] == self.current_parent_id:
+                                    current_parent = parent
+                                    break
+                            break
+                    break
+        
+        if not current_parent:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Parent non trouvé")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "Modifier le parent", "Nom du parent:", 
+            text=current_parent['name']
+        )
+        
+        if ok and name:
+            try:
+                success = self.db.update_typology_parent(self.current_parent_id, name=name)
+                if success:
+                    self._load_typology_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Parent modifié avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la modification")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
 
     def _delete_parent(self):
         """Supprimer un parent"""
-        if self.current_parent_index == -1:
+        if not self.current_parent_id:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un parent")
             return
             
-        reply = QtWidgets.QMessageBox.question(self, "Supprimer le parent", 
-                                              "Êtes-vous sûr de vouloir supprimer ce parent?",
-                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        if reply == QtWidgets.QMessageBox.Yes:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == self.parent_cluster_combo.currentText():
-                    for root in cluster['roots']:
-                        if root['name'] == self.parent_root_combo.currentText():
-                            root['parents'].pop(self.current_parent_index)
-                            self.current_parent_index = -1
-                            self.refresh_ui()
+        # Trouver le nom du parent
+        parent_name = ""
+        root_id = self.parent_root_combo.currentData()
+        cluster_id = self.parent_cluster_combo.currentData()
+        
+        if self.current_typology and cluster_id and root_id:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        if root['id'] == root_id:
+                            for parent in root.get('parents', []):
+                                if parent['id'] == self.current_parent_id:
+                                    parent_name = parent['name']
+                                    break
                             break
                     break
+        
+        reply = QtWidgets.QMessageBox.question(
+            self, "Supprimer le parent", 
+            f"Êtes-vous sûr de vouloir supprimer le parent '{parent_name}'?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                success = self.db.delete_typology_parent(self.current_parent_id)
+                if success:
+                    self.current_parent_id = None
+                    self.current_parent_index = -1
+                    self._load_typology_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Parent supprimé avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la suppression")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")
 
     def _add_child(self):
         """Ajouter un enfant"""
-        if (self.child_cluster_combo.currentText() == '' or 
-            self.child_root_combo.currentText() == '' or 
-            self.child_parent_combo.currentText() == ''):
-            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster, une racine et un parent")
+        parent_id = self.child_parent_combo.currentData()
+        if not parent_id:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un parent")
             return
             
         name, ok = QtWidgets.QInputDialog.getText(self, "Nouvel enfant", "Nom de l'enfant:")
         if ok and name:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == self.child_cluster_combo.currentText():
-                    for root in cluster['roots']:
-                        if root['name'] == self.child_root_combo.currentText():
-                            for parent in root['parents']:
-                                if parent['name'] == self.child_parent_combo.currentText():
-                                    parent['children'].append(name)
+            try:
+                child_id = self.db.create_typology_child(parent_id, name)
+                self._load_typology_data()
+                self.refresh_ui()
+                QtWidgets.QMessageBox.information(self, "Succès", "Enfant créé avec succès!")
+                
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
+
+    def _edit_child(self):
+        """Modifier un enfant"""
+        if not self.current_child_id:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un enfant")
+            return
+            
+        # Trouver l'enfant actuel
+        current_child = None
+        parent_id = self.child_parent_combo.currentData()
+        root_id = self.child_root_combo.currentData()
+        cluster_id = self.child_cluster_combo.currentData()
+        
+        if self.current_typology and cluster_id and root_id and parent_id:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        if root['id'] == root_id:
+                            for parent in root.get('parents', []):
+                                if parent['id'] == parent_id:
+                                    for child in parent.get('children', []):
+                                        if child['id'] == self.current_child_id:
+                                            current_child = child
+                                            break
                                     break
                             break
                     break
-            self.refresh_ui()
+        
+        if not current_child:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Enfant non trouvé")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "Modifier l'enfant", "Nom de l'enfant:", 
+            text=current_child['name']
+        )
+        
+        if ok and name:
+            try:
+                success = self.db.update_typology_child(self.current_child_id, name=name)
+                if success:
+                    self._load_typology_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Enfant modifié avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la modification")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
+
 
     def _edit_child(self):
         """Modifier un enfant"""
@@ -1635,27 +2280,52 @@ class StrategyWidget(QtWidgets.QWidget):
 
     def _delete_child(self):
         """Supprimer un enfant"""
-        if self.current_child_index == -1:
+        if not self.current_child_id:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un enfant")
             return
             
-        reply = QtWidgets.QMessageBox.question(self, "Supprimer l'enfant", 
-                                              "Êtes-vous sûr de vouloir supprimer cet enfant?",
-                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        if reply == QtWidgets.QMessageBox.Yes:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == self.child_cluster_combo.currentText():
-                    for root in cluster['roots']:
-                        if root['name'] == self.child_root_combo.currentText():
-                            for parent in root['parents']:
-                                if parent['name'] == self.child_parent_combo.currentText():
-                                    parent['children'].pop(self.current_child_index)
-                                    self.current_child_index = -1
-                                    self.refresh_ui()
+        # Trouver le nom de l'enfant
+        child_name = ""
+        parent_id = self.child_parent_combo.currentData()
+        root_id = self.child_root_combo.currentData()
+        cluster_id = self.child_cluster_combo.currentData()
+        
+        if self.current_typology and cluster_id and root_id and parent_id:
+            for cluster in self.current_typology.get('clusters', []):
+                if cluster['id'] == cluster_id:
+                    for root in cluster.get('roots', []):
+                        if root['id'] == root_id:
+                            for parent in root.get('parents', []):
+                                if parent['id'] == parent_id:
+                                    for child in parent.get('children', []):
+                                        if child['id'] == self.current_child_id:
+                                            child_name = child['name']
+                                            break
                                     break
                             break
                     break
+        
+        reply = QtWidgets.QMessageBox.question(
+            self, "Supprimer l'enfant", 
+            f"Êtes-vous sûr de vouloir supprimer l'enfant '{child_name}'?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                success = self.db.delete_typology_child(self.current_child_id)
+                if success:
+                    self.current_child_id = None
+                    self.current_child_index = -1
+                    self._load_typology_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Enfant supprimé avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la suppression")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")
+
 
     def _save_strategy(self):
         """Sauvegarder la stratégie"""
