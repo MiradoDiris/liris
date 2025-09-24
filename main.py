@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import List, Optional
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import QSettings
+from PyQt5.QtWebEngineWidgets import QWebEngineView
 
 from ui.localization.translator import translator, tr
 from ui.widgets.language_selector import LanguageSelector

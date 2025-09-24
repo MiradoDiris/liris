@@ -5,15 +5,22 @@
 Liris/ui/main_window.py - MODIFIÉ pour ouvrir ProjectConfigOnlyWidget
 """
 
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+Liris/ui/main_window.py - MODIFIÉ pour ouvrir ProjectConfigOnlyWidget
+"""
+
 import os
 import json
 from datetime import datetime
+
+# IMPORT CRITICAL: QtWebEngineWidgets MUST be imported before QCoreApplication
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtCore import Qt, QCoreApplication, QSettings, QTimer, pyqtSignal, QThread, QRectF, QPropertyAnimation, pyqtProperty
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QFileDialog
-from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
-from PyQt5 import QtWidgets, QtCore
-from PyQt5.QtCore import pyqtSignal, QThread
-from PyQt5.QtCore import QRectF, QPropertyAnimation, pyqtProperty
 from PyQt5.QtGui import QPainter, QColor, QFont
 
 from ui.widgets.brainstorming_panel import BrainstormingPanel
@@ -35,11 +42,8 @@ from ui.widgets.project_config_only_widget import (
 from ui.widgets.strategy_widget import StrategyWidget  # <-- NOUVEL IMPORT
 from ui.widgets.generation_widget import GenerationWidget 
 from ui.widgets.dataset_analytics_widget import DatasetAnalyticsWidget
-# L'importation de ProjectConfigWidget n'est plus nécessaire ici pour l'ouverture directe,
-# mais elle est toujours utilisée comme onglet interne dans PlatformConfigWidget.
-# Si ProjectConfigWidget n'est plus utilisé nulle part ailleurs que comme onglet interne,
-# cette ligne peut être commentée ou supprimée. Pour l'instant, nous la gardons
-# car le PlatformConfigWidget l'importe et l'utilise.
+from ui.widgets.dataset_verification_tab import DatasetVerificationTab
+
 from ui.widgets.tabs.project_config_widget import (
     ProjectConfigWidget,
 )  # Gardez le même chemin pour l'importation
@@ -54,7 +58,6 @@ from core.scheduling.scheduler import AIScheduler
 from config.settings import ConfigProvider
 
 from utils.logger import logger
-
 
 # === Switch Glassmorphism ===
 class GlassSwitch(QtWidgets.QWidget):
@@ -158,7 +161,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(tr("app_title"))
         self.setMinimumSize(1024, 768)
-
+        
         # Définir l'icône avec le fichier .ico
         logo_path = os.path.join("ui", "resources", "icons", "logo.ico")
         if os.path.exists(logo_path):
@@ -171,8 +174,9 @@ class MainWindow(QMainWindow):
 
         # Initialiser les composants
         self._init_components()
-        self._init_ui()
-        self._init_menu()  # Le menu sera configuré ici
+        self._init_ui()  # tab_widget est créé ici
+        self._init_dataset_verification_tab()  # MAINTENANT APRÈS _init_ui()
+        self._init_menu()
         self._init_statusbar()
         self._init_connections()
 
@@ -186,7 +190,7 @@ class MainWindow(QMainWindow):
         self.config_provider = None
 
         # Stocker la référence à la fenêtre de configuration des projets
-        self.project_config_dialog_instance = None  # Initialisé à None
+        self.project_config_dialog_instance = None
 
         # Initialiser le système au démarrage
         QTimer.singleShot(100, self._init_system)
@@ -196,7 +200,7 @@ class MainWindow(QMainWindow):
         print("=== FIN - Initialisation de MainWindow ===")
 
         self.current_mode = "dev"
-
+    
     def _init_components(self):
         """Initialise les composants principaux"""
         print("   - Création des widgets principaux...")
@@ -205,6 +209,7 @@ class MainWindow(QMainWindow):
         self.annotation_form = AnnotationForm()
         self.dataset_table = DatasetTable()
         self.prompt_list = PromptList()
+        self.dataset_verification = DatasetVerificationTab()
         # Créer le widget de génération de dataset (change)
         self.dataset_generation = DatasetGeneratorWidget()
         self.dataset_analytics = DatasetAnalyticsWidget()
@@ -394,7 +399,8 @@ class MainWindow(QMainWindow):
             self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
             self.tab_widget.addTab(self.generation_widget, tr("Generation"))
             self.tab_widget.addTab(self.strategy_widget, tr("Strategie")) 
-            self.tab_widget.addTab(self.dataset_analytics, "📊 Analytics")# NOUVEAU
+            self.tab_widget.addTab(self.dataset_analytics, "📊 Analytics")
+            self.tab_widget.addTab(self.dataset_verification, "🔍 Vérification") # NOUVEAU
             self.tab_widget.setCurrentIndex(0)
         else:
             self.current_mode = "dev"
@@ -590,6 +596,25 @@ class MainWindow(QMainWindow):
                         ):
                             actions[action_index].setText(text)
                         action_index += 1
+                        
+    def _init_dataset_verification_tab(self):
+        """Initialise l'onglet de vérification de dataset"""
+        self.dataset_verification_tab = DatasetVerificationTab()
+        
+        # Ne pas ajouter l'onglet ici - il sera ajouté dynamiquement dans _on_mode_switched()
+        # La connexion des signaux se fera dans _update_ui_with_system()
+        
+        # Connecter les signaux (sera mis à jour plus tard)
+        if hasattr(self, 'conductor') and self.conductor:
+            self.dataset_verification_tab.set_conductor(self.conductor)
+        if hasattr(self, 'database') and self.database:
+            self.dataset_verification_tab.set_database(self.database)
+    
+    def on_platforms_loaded(self, platforms):
+        """Callback lorsque les plateformes sont chargées"""
+        self.platforms = platforms
+        if hasattr(self, 'dataset_verification_tab'):
+            self.dataset_verification_tab.set_platforms(platforms)
 
     def _init_statusbar(self):
         """Configure la barre d'état"""
@@ -846,6 +871,9 @@ class MainWindow(QMainWindow):
 
         self.dataset_table.set_database(self.database)
         self.dataset_table.set_exporter(self.exporter)
+        self.dataset_verification.set_conductor(self.conductor)
+        self.dataset_verification.set_platforms(platforms)
+        self.dataset_verification.set_database(self.database)
 
         self.prompt_list.set_database(self.database)
 
