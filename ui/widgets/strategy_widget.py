@@ -60,33 +60,23 @@ class PieChartWidget(QtWidgets.QWidget):
             ]
         }
         
-        self.setMinimumSize(400, 400)
-        
-    def set_data(self, data):
-        """Définir les données à afficher"""
-        self.data = data
-        self.update()
-        
-    def set_hierarchy_selection(self, cluster=None, root=None, parent=None):
-        """Définir la sélection hiérarchique"""
-        self.selected_cluster = cluster
-        self.selected_root = root
-        self.selected_parent = parent
-        self.update()
+        # Taille minimale augmentée pour éviter le découpage
+        self.setMinimumSize(500, 500)
         
     def paintEvent(self, event):
-        """Dessiner le camembert"""
+        """Dessiner le camembert avec un design amélioré"""
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         
-        # Dimensions
+        # Dimensions avec marges plus importantes
         width = self.width()
         height = self.height()
-        size = min(width, height) - 40
+        margin = 60  # Marge augmentée pour éviter le découpage
+        size = min(width, height) - (margin * 2)
         x = (width - size) / 2
         y = (height - size) / 2
         
-        # Couleurs pour les segments
+        # Couleurs modernes pour les segments
         colors = [
             QtGui.QColor('#FF6B6B'),  # Rouge
             QtGui.QColor('#4ECDC4'),  # Turquoise
@@ -107,102 +97,68 @@ class PieChartWidget(QtWidgets.QWidget):
                 # Calculer l'angle du segment
                 angle = 360 * 16 * (batch['percentage'] / 100)
                 
-                # Dessiner le segment
+                # Dessiner le segment avec bordure
                 painter.setBrush(colors[i % len(colors)])
-                painter.setPen(QtGui.QPen(Qt.black, 2))
+                painter.setPen(QtGui.QPen(Qt.black, 1))
                 painter.drawPie(int(x), int(y), int(size), int(size), int(start_angle), int(angle))
                 
-                # Ajouter une légère surbrillance si sélectionné
+                # Ajouter une surbrillance si sélectionné
                 if (self.selected_cluster and batch['cluster'] == self.selected_cluster and
                     (not self.selected_root or batch['root'] == self.selected_root) and
                     (not self.selected_parent or batch['parent'] == self.selected_parent)):
-                    painter.setBrush(QtGui.QColor(255, 255, 255, 100))
+                    painter.setBrush(QtGui.QColor(255, 255, 255, 80))
+                    painter.setPen(QtGui.QPen(QtGui.QColor(Theme.SECONDARY_COLOR), 3))
                     painter.drawPie(int(x), int(y), int(size), int(size), int(start_angle), int(angle))
                 
                 start_angle += angle
         
-        # Dessiner le trou au centre (donut chart)
-        center_size = size * 0.4
+        # Dessiner le trou au centre (donut chart) plus petit
+        center_size = size * 0.3  # Réduit pour plus d'espace
         center_x = x + (size - center_size) / 2
         center_y = y + (size - center_size) / 2
         painter.setBrush(QtGui.QColor(240, 240, 240))
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(int(center_x), int(center_y), int(center_size), int(center_size))
         
-        # Ajouter les informations au centre
+        # Ajouter les informations au centre avec un meilleur design
         painter.setPen(QtGui.QPen(Qt.black))
-        painter.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+        painter.setFont(QtGui.QFont("Arial", 12, QtGui.QFont.Bold))
         total_text = f"{self.sample_data['total_examples']} exemples"
         painter.drawText(int(center_x), int(center_y), int(center_size), int(center_size), 
                         Qt.AlignCenter, total_text)
         
-        # Légende
+        # Légende avec design amélioré
         self._draw_legend(painter, width, height, colors)
         
     def _draw_legend(self, painter, width, height, colors):
-        """Dessiner la légende"""
+        """Dessiner la légende avec un design amélioré"""
         legend_x = 20
         legend_y = 20
         legend_width = width - 40
-        box_size = 15
-        spacing = 5
+        box_size = 20  # Taille augmentée
+        spacing = 8    # Espacement augmenté
         
-        painter.setFont(QtGui.QFont("Arial", 9))
+        painter.setFont(QtGui.QFont("Arial", 10))  # Police légèrement plus grande
         
         for i, batch in enumerate(self.sample_data['batches']):
-            y_pos = legend_y + i * (box_size + spacing + 5)
+            y_pos = legend_y + i * (box_size + spacing + 8)
             
-            # Carré de couleur
+            # Carré de couleur avec bordure
             painter.setBrush(colors[i % len(colors)])
             painter.setPen(QtGui.QPen(Qt.black, 1))
             painter.drawRect(legend_x, y_pos, box_size, box_size)
             
-            # Texte
+            # Texte avec informations complètes
             text = f"{batch['cluster']} - {batch['root']}: {batch['examples']} exemples ({batch['percentage']}%)"
             painter.setPen(QtGui.QPen(Qt.black))
-            painter.drawText(legend_x + box_size + spacing, y_pos + box_size - 3, text)
+            painter.drawText(legend_x + box_size + spacing, y_pos + box_size - 5, text)
             
-            # Mettre en évidence si sélectionné
+            # Mettre en évidence si sélectionné avec un effet plus visible
             if (self.selected_cluster and batch['cluster'] == self.selected_cluster and
                 (not self.selected_root or batch['root'] == self.selected_root) and
                 (not self.selected_parent or batch['parent'] == self.selected_parent)):
-                painter.setPen(QtGui.QPen(QtGui.QColor(Theme.SECONDARY_COLOR), 2))
-                painter.drawRect(legend_x - 2, y_pos - 2, box_size + 4, box_size + 4)
-    
-    def mousePressEvent(self, event):
-        """Gérer les clics sur le camembert"""
-        if event.button() == Qt.LeftButton:
-            # Calculer la position relative
-            width = self.width()
-            height = self.height()
-            size = min(width, height) - 40
-            x_center = width / 2
-            y_center = height / 2
-            
-            # Coordonnées du clic
-            click_x = event.x() - x_center
-            click_y = event.y() - y_center
-            
-            # Distance du centre
-            distance = math.sqrt(click_x**2 + click_y**2)
-            radius = size / 2
-            
-            # Vérifier si le clic est dans le camembert
-            if distance <= radius:
-                # Calculer l'angle du clic
-                angle = math.degrees(math.atan2(click_y, click_x))
-                if angle < 0:
-                    angle += 360
-                
-                # Trouver le segment correspondant
-                current_angle = 0
-                for i, batch in enumerate(self.sample_data['batches']):
-                    segment_angle = 360 * (batch['percentage'] / 100)
-                    if current_angle <= angle < current_angle + segment_angle:
-                        # Émettre un signal avec les informations du segment
-                        self.segment_clicked.emit(batch)
-                        break
-                    current_angle += segment_angle
+                painter.setPen(QtGui.QPen(QtGui.QColor(Theme.SECONDARY_COLOR), 3))
+                painter.drawRect(legend_x - 3, y_pos - 3, box_size + 6, box_size + 6)
 
 class ProjectTypologyTab(QtWidgets.QWidget):
     """
@@ -451,42 +407,6 @@ class ProjectTypologyTab(QtWidgets.QWidget):
             # Développer tout l'arbre
             self.structure_tree.expandAll()
     
-    def _refresh_structure_tree(self):
-        """Rafraîchir l'arbre de structure"""
-        self.structure_tree.clear()
-        
-        if (self.strategy_widget.current_typology_index != -1 and 
-            self.strategy_widget.current_typology_index < len(self.strategy_widget.strategy_data.get('typologies', []))):
-            
-            typology = self.strategy_widget.strategy_data['typologies'][self.strategy_widget.current_typology_index]
-            
-            # Créer l'item racine pour la typologie
-            typology_item = QtWidgets.QTreeWidgetItem([typology.get('name', 'Sans nom'), 'Typologie', ''])
-            self.structure_tree.addTopLevelItem(typology_item)
-            
-            # Ajouter les clusters
-            for cluster in typology.get('clusters', []):
-                cluster_item = QtWidgets.QTreeWidgetItem([cluster.get('name', 'Sans nom'), 'Cluster', '250 exemples'])
-                typology_item.addChild(cluster_item)
-                
-                # Ajouter les racines
-                for root in cluster.get('roots', []):
-                    root_item = QtWidgets.QTreeWidgetItem([root.get('name', 'Sans nom'), 'Racine', '100 exemples'])
-                    cluster_item.addChild(root_item)
-                    
-                    # Ajouter les parents
-                    for parent in root.get('parents', []):
-                        parent_item = QtWidgets.QTreeWidgetItem([parent.get('name', 'Sans nom'), 'Parent', '50 exemples'])
-                        root_item.addChild(parent_item)
-                        
-                        # Ajouter les enfants
-                        for child in parent.get('children', []):
-                            child_item = QtWidgets.QTreeWidgetItem([child, 'Enfant', '10 exemples'])
-                            parent_item.addChild(child_item)
-            
-            # Développer tout l'arbre
-            self.structure_tree.expandAll()
-    
     def _on_typology_changed(self, typology_name):
         """Gérer le changement de typologie"""
         if not typology_name:
@@ -642,7 +562,7 @@ class StrategyWidget(QtWidgets.QWidget):
         project_details_section = self._create_project_details_section()
         left_layout.addWidget(project_details_section)
 
-        # Section 3: Typologie
+        # Section 3: Typologie avec structure hiérarchique en bas
         typology_section = self._create_typology_section()
         left_layout.addWidget(typology_section)
 
@@ -654,7 +574,7 @@ class StrategyWidget(QtWidgets.QWidget):
         right_layout = QtWidgets.QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Section 4: Gestion des typologies de contexte avec onglets
+        # Section 4: Graphique de répartition
         context_typology_section = self._create_context_typology_section()
         right_layout.addWidget(context_typology_section)
 
@@ -824,6 +744,15 @@ class StrategyWidget(QtWidgets.QWidget):
         # Mettre à jour le camembert avec les statistiques
         self._update_pie_chart()
 
+    def get_current_typology(self):
+        """Retourne la typologie actuelle pour la génération"""
+        return self.current_typology
+
+    def typology_changed(self):
+        """Signal émis quand la typologie change"""
+        # Cette méthode peut être utilisée pour notifier les autres widgets
+        pass    
+
     def _update_pie_chart(self):
         """Mettre à jour le camembert avec les données de la DB"""
         if hasattr(self, 'statistics') and self.statistics:
@@ -972,10 +901,13 @@ class StrategyWidget(QtWidgets.QWidget):
         return group
 
     def _create_typology_section(self):
-        """Créer la section de typologie"""
+        """Créer la section de typologie avec structure hiérarchique en bas"""
         group = QtWidgets.QGroupBox("Section 3: Typologie")
         group.setStyleSheet(self._get_group_style())
-        layout = QtWidgets.QHBoxLayout(group)
+        layout = QtWidgets.QVBoxLayout(group)
+        
+        # Première ligne : Sélection de typologie
+        typology_selection_layout = QtWidgets.QHBoxLayout()
         
         # Liste déroulante des typologies
         self.typology_combo = QtWidgets.QComboBox()
@@ -987,100 +919,178 @@ class StrategyWidget(QtWidgets.QWidget):
         create_typology_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
         create_typology_btn.clicked.connect(self._create_typology)
         
-        layout.addWidget(QtWidgets.QLabel("Typologie:"))
-        layout.addWidget(self.typology_combo, 1)
-        layout.addWidget(create_typology_btn)
+        typology_selection_layout.addWidget(QtWidgets.QLabel("Typologie:"))
+        typology_selection_layout.addWidget(self.typology_combo, 1)
+        typology_selection_layout.addWidget(create_typology_btn)
+        
+        layout.addLayout(typology_selection_layout)
+        
+        # Deuxième partie : Structure hiérarchique
+        hierarchy_group = QtWidgets.QGroupBox("Structure Hiérarchique")
+        hierarchy_group.setStyleSheet(self._get_group_style())
+        hierarchy_layout = QtWidgets.QVBoxLayout(hierarchy_group)
+        
+        # Grille 2x2 pour les composants
+        grid_layout = QtWidgets.QGridLayout()
+        grid_layout.setSpacing(10)
+        
+        # Cluster (en haut à gauche)
+        cluster_group = QtWidgets.QGroupBox("Clusters")
+        cluster_group.setStyleSheet(self._get_component_group_style())
+        cluster_layout = QtWidgets.QVBoxLayout(cluster_group)
+        self.cluster_list = QtWidgets.QListWidget()
+        self.cluster_list.setStyleSheet(self._get_list_style())
+        self.cluster_list.currentRowChanged.connect(self._on_cluster_selected)
+        cluster_layout.addWidget(self.cluster_list)
+        
+        # Boutons cluster
+        cluster_btn_layout = QtWidgets.QHBoxLayout()
+        add_cluster_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_cluster_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        add_cluster_btn.clicked.connect(self._add_cluster)
+        cluster_btn_layout.addWidget(add_cluster_btn)
+        cluster_layout.addLayout(cluster_btn_layout)
+        
+        grid_layout.addWidget(cluster_group, 0, 0)
+        
+        # Racines (en haut à droite)
+        root_group = QtWidgets.QGroupBox("Racines")
+        root_group.setStyleSheet(self._get_component_group_style())
+        root_layout = QtWidgets.QVBoxLayout(root_group)
+        
+        # Sélection du cluster pour les racines
+        root_cluster_layout = QtWidgets.QHBoxLayout()
+        root_cluster_layout.addWidget(QtWidgets.QLabel("Cluster:"))
+        self.root_cluster_combo = QtWidgets.QComboBox()
+        self.root_cluster_combo.currentTextChanged.connect(self._on_root_cluster_changed)
+        root_cluster_layout.addWidget(self.root_cluster_combo, 1)
+        root_layout.addLayout(root_cluster_layout)
+        
+        self.root_list = QtWidgets.QListWidget()
+        self.root_list.setStyleSheet(self._get_list_style())
+        self.root_list.currentRowChanged.connect(self._on_root_selected)
+        root_layout.addWidget(self.root_list)
+        
+        # Boutons racine
+        root_btn_layout = QtWidgets.QHBoxLayout()
+        add_root_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_root_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        add_root_btn.clicked.connect(self._add_root)
+        root_btn_layout.addWidget(add_root_btn)
+        root_layout.addLayout(root_btn_layout)
+        
+        grid_layout.addWidget(root_group, 0, 1)
+        
+        # Parents (en bas à gauche)
+        parent_group = QtWidgets.QGroupBox("Parents")
+        parent_group.setStyleSheet(self._get_component_group_style())
+        parent_layout = QtWidgets.QVBoxLayout(parent_group)
+        
+        # Sélections pour parents
+        parent_selection_layout = QtWidgets.QGridLayout()
+        parent_selection_layout.addWidget(QtWidgets.QLabel("Cluster:"), 0, 0)
+        self.parent_cluster_combo = QtWidgets.QComboBox()
+        self.parent_cluster_combo.currentTextChanged.connect(self._on_parent_cluster_changed)
+        parent_selection_layout.addWidget(self.parent_cluster_combo, 0, 1)
+        
+        parent_selection_layout.addWidget(QtWidgets.QLabel("Racine:"), 1, 0)
+        self.parent_root_combo = QtWidgets.QComboBox()
+        self.parent_root_combo.currentTextChanged.connect(self._on_parent_root_changed)
+        parent_selection_layout.addWidget(self.parent_root_combo, 1, 1)
+        parent_layout.addLayout(parent_selection_layout)
+        
+        self.parent_list = QtWidgets.QListWidget()
+        self.parent_list.setStyleSheet(self._get_list_style())
+        self.parent_list.currentRowChanged.connect(self._on_parent_selected)
+        parent_layout.addWidget(self.parent_list)
+        
+        # Boutons parent
+        parent_btn_layout = QtWidgets.QHBoxLayout()
+        add_parent_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_parent_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        add_parent_btn.clicked.connect(self._add_parent)
+        parent_btn_layout.addWidget(add_parent_btn)
+        parent_layout.addLayout(parent_btn_layout)
+        
+        grid_layout.addWidget(parent_group, 1, 0)
+        
+        # Enfants (en bas à droite)
+        child_group = QtWidgets.QGroupBox("Enfants")
+        child_group.setStyleSheet(self._get_component_group_style())
+        child_layout = QtWidgets.QVBoxLayout(child_group)
+        
+        # Sélections pour enfants
+        child_selection_layout = QtWidgets.QGridLayout()
+        child_selection_layout.addWidget(QtWidgets.QLabel("Cluster:"), 0, 0)
+        self.child_cluster_combo = QtWidgets.QComboBox()
+        self.child_cluster_combo.currentTextChanged.connect(self._on_child_cluster_changed)
+        child_selection_layout.addWidget(self.child_cluster_combo, 0, 1)
+        
+        child_selection_layout.addWidget(QtWidgets.QLabel("Racine:"), 1, 0)
+        self.child_root_combo = QtWidgets.QComboBox()
+        self.child_root_combo.currentTextChanged.connect(self._on_child_root_changed)
+        child_selection_layout.addWidget(self.child_root_combo, 1, 1)
+        
+        child_selection_layout.addWidget(QtWidgets.QLabel("Parent:"), 2, 0)
+        self.child_parent_combo = QtWidgets.QComboBox()
+        self.child_parent_combo.currentTextChanged.connect(self._on_child_parent_changed)
+        child_selection_layout.addWidget(self.child_parent_combo, 2, 1)
+        child_layout.addLayout(child_selection_layout)
+        
+        self.child_list = QtWidgets.QListWidget()
+        self.child_list.setStyleSheet(self._get_list_style())
+        self.child_list.currentRowChanged.connect(self._on_child_selected)
+        child_layout.addWidget(self.child_list)
+        
+        # Boutons enfant
+        child_btn_layout = QtWidgets.QHBoxLayout()
+        add_child_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_child_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        add_child_btn.clicked.connect(self._add_child)
+        child_btn_layout.addWidget(add_child_btn)
+        child_layout.addLayout(child_btn_layout)
+        
+        grid_layout.addWidget(child_group, 1, 1)
+        
+        hierarchy_layout.addLayout(grid_layout)
+        
+        # Bouton de sauvegarde
+        save_btn = QtWidgets.QPushButton("💾 Sauvegarder la stratégie")
+        save_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        save_btn.clicked.connect(self._save_strategy)
+        hierarchy_layout.addWidget(save_btn)
+        
+        layout.addWidget(hierarchy_group)
         
         return group
 
     def _create_context_typology_section(self):
-        """Créer la section de gestion des typologies de contexte avec onglets"""
-        group = QtWidgets.QGroupBox("Section 4: Gestion des typologies de contexte")
+        """Créer la section avec le graphique de répartition"""
+        group = QtWidgets.QGroupBox("Section 4: Répartition du Dataset")
         group.setStyleSheet(self._get_group_style())
         
         main_layout = QtWidgets.QVBoxLayout(group)
         
-        # Widget à onglets
-        self.tab_widget = QtWidgets.QTabWidget()
-        self.tab_widget.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #bdc3c7;
-                border-radius: 8px;
-                background-color: white;
-            }
-            QTabBar::tab {
-                background-color: #ecf0f1;
-                padding: 8px 16px;
-                margin-right: 2px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-            }
-            QTabBar::tab:selected {
-                background-color: %s;
-                color: white;
-            }
-        """ % Theme.SECONDARY_COLOR)
+        # Titre
+        chart_title = QtWidgets.QLabel("Répartition du Dataset par Typologie")
+        chart_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50; margin-bottom: 10px;")
+        main_layout.addWidget(chart_title)
         
-        # Nouvel onglet: Projet et Typologie
-        self.project_typology_tab = ProjectTypologyTab(self)
-        self.tab_widget.addTab(self.project_typology_tab, "📋 Projet & Typologie")
-        
-        # Nouvel onglet: Camembert de répartition
-        self.pie_chart_tab = self._create_pie_chart_tab()
-        self.tab_widget.addTab(self.pie_chart_tab, "📊 Répartition Dataset")
-        
-        # Sous-section 1: Clusters
-        cluster_tab = self._create_cluster_tab()
-        self.tab_widget.addTab(cluster_tab, "📊 Clusters")
-        
-        # Sous-section 2: Racines
-        root_tab = self._create_root_tab()
-        self.tab_widget.addTab(root_tab, "🌳 Racines")
-        
-        # Sous-section 3: Parents
-        parent_tab = self._create_parent_tab()
-        self.tab_widget.addTab(parent_tab, "👨‍👩‍👧 Parents")
-        
-        # Sous-section 4: Enfants
-        child_tab = self._create_child_tab()
-        self.tab_widget.addTab(child_tab, "👶 Enfants")
-        
-        main_layout.addWidget(self.tab_widget)
-        
-        # Bouton de sauvegarde dans la section 4
-        save_btn = QtWidgets.QPushButton("💾 Sauvegarder la stratégie")
-        save_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
-        save_btn.clicked.connect(self._save_strategy)
-        main_layout.addWidget(save_btn)
-        
-        return group
-
-    def _create_pie_chart_tab(self):
-        """Créer l'onglet avec le camembert de répartition (version originale)"""
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-        
-        # Titre et description
-        header_layout = QtWidgets.QVBoxLayout()
-        title_label = QtWidgets.QLabel("Répartition du Dataset par Typologie de Contexte")
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
-        header_layout.addWidget(title_label)
-        
+        # Description
         desc_label = QtWidgets.QLabel(
             "Le camembert montre la répartition des exemples par batch selon la typologie de contexte. "
             "Cliquez sur les éléments de la hiérarchie pour filtrer l'affichage."
         )
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #7f8c8d; margin-bottom: 10px;")
-        header_layout.addWidget(desc_label)
-        
-        layout.addLayout(header_layout)
+        desc_label.setStyleSheet("color: #7f8c8d; margin-bottom: 15px;")
+        main_layout.addWidget(desc_label)
         
         # Conteneur pour le camembert et les contrôles (côte à côte)
         content_layout = QtWidgets.QHBoxLayout()
         
-        # Camembert à GAUCHE
+        # Camembert à GAUCHE (plus d'espace maintenant)
         self.pie_chart = PieChartWidget()
+        self.pie_chart.setMinimumSize(500, 500)
         content_layout.addWidget(self.pie_chart, 2)  # 2/3 de l'espace à gauche
         
         # Contrôles à DROITE
@@ -1092,6 +1102,7 @@ class StrategyWidget(QtWidgets.QWidget):
         
         self.selection_info = QtWidgets.QLabel("Aucune sélection")
         self.selection_info.setWordWrap(True)
+        self.selection_info.setStyleSheet("padding: 10px; background-color: #f8f9fa; border-radius: 4px; min-height: 60px;")
         info_layout.addWidget(self.selection_info)
         
         controls_layout.addWidget(info_group)
@@ -1129,315 +1140,48 @@ class StrategyWidget(QtWidgets.QWidget):
         controls_layout.addStretch()
         
         content_layout.addLayout(controls_layout, 1)  # 1/3 de l'espace à droite
-        layout.addLayout(content_layout)
+        main_layout.addLayout(content_layout)
         
         # Connexions des signaux
-        self.project_typology_tab.hierarchy_selection_changed.connect(self._on_hierarchy_selection_changed)
         self.pie_chart.segment_clicked.connect(self._on_pie_segment_clicked)
         
-        return widget
+        return group
 
-    def _create_cluster_tab(self):
-        """Créer l'onglet Clusters"""
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-        
-        # Liste des clusters
-        self.cluster_list = QtWidgets.QListWidget()
-        self.cluster_list.setStyleSheet(self._get_list_style())
-        self.cluster_list.currentRowChanged.connect(self._on_cluster_selected)
-        layout.addWidget(self.cluster_list)
-        
-        # Boutons d'action
-        btn_layout = QtWidgets.QHBoxLayout()
-        add_cluster_btn = QtWidgets.QPushButton("➕ Ajouter")
-        add_cluster_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
-        add_cluster_btn.clicked.connect(self._add_cluster)
-        
-        edit_cluster_btn = QtWidgets.QPushButton("✏️ Modifier")
-        edit_cluster_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
-        edit_cluster_btn.clicked.connect(self._edit_cluster)
-        
-        delete_cluster_btn = QtWidgets.QPushButton("🗑️ Supprimer")
-        delete_cluster_btn.setStyleSheet(self._get_button_style("#e74c3c"))
-        delete_cluster_btn.clicked.connect(self._delete_cluster)
-        
-        btn_layout.addWidget(add_cluster_btn)
-        btn_layout.addWidget(edit_cluster_btn)
-        btn_layout.addWidget(delete_cluster_btn)
-        layout.addLayout(btn_layout)
-        
-        return widget
-
-    def _create_root_tab(self):
-        """Créer l'onglet Racines"""
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-        
-        # Sélection du cluster
-        cluster_layout = QtWidgets.QHBoxLayout()
-        cluster_layout.addWidget(QtWidgets.QLabel("Cluster:"))
-        self.root_cluster_combo = QtWidgets.QComboBox()
-        self.root_cluster_combo.currentTextChanged.connect(self._on_root_cluster_changed)
-        cluster_layout.addWidget(self.root_cluster_combo, 1)
-        layout.addLayout(cluster_layout)
-        
-        # Liste des racines
-        self.root_list = QtWidgets.QListWidget()
-        self.root_list.setStyleSheet(self._get_list_style())
-        self.root_list.currentRowChanged.connect(self._on_root_selected)
-        layout.addWidget(self.root_list)
-        
-        # Boutons d'action
-        btn_layout = QtWidgets.QHBoxLayout()
-        add_root_btn = QtWidgets.QPushButton("➕ Ajouter")
-        add_root_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
-        add_root_btn.clicked.connect(self._add_root)
-        
-        edit_root_btn = QtWidgets.QPushButton("✏️ Modifier")
-        edit_root_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
-        edit_root_btn.clicked.connect(self._edit_root)
-        
-        delete_root_btn = QtWidgets.QPushButton("🗑️ Supprimer")
-        delete_root_btn.setStyleSheet(self._get_button_style("#e74c3c"))
-        delete_root_btn.clicked.connect(self._delete_root)
-        
-        btn_layout.addWidget(add_root_btn)
-        btn_layout.addWidget(edit_root_btn)
-        btn_layout.addWidget(delete_root_btn)
-        layout.addLayout(btn_layout)
-        
-        return widget
-
-    def _create_parent_tab(self):
-        """Créer l'onglet Parents"""
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-        
-        # Sélection du cluster et racine
-        selection_layout = QtWidgets.QGridLayout()
-        selection_layout.addWidget(QtWidgets.QLabel("Cluster:"), 0, 0)
-        self.parent_cluster_combo = QtWidgets.QComboBox()
-        self.parent_cluster_combo.currentTextChanged.connect(self._on_parent_cluster_changed)
-        selection_layout.addWidget(self.parent_cluster_combo, 0, 1)
-        
-        selection_layout.addWidget(QtWidgets.QLabel("Racine:"), 1, 0)
-        self.parent_root_combo = QtWidgets.QComboBox()
-        self.parent_root_combo.currentTextChanged.connect(self._on_parent_root_changed)
-        selection_layout.addWidget(self.parent_root_combo, 1, 1)
-        layout.addLayout(selection_layout)
-        
-        # Liste des parents
-        self.parent_list = QtWidgets.QListWidget()
-        self.parent_list.setStyleSheet(self._get_list_style())
-        self.parent_list.currentRowChanged.connect(self._on_parent_selected)
-        layout.addWidget(self.parent_list)
-        
-        # Boutons d'action
-        btn_layout = QtWidgets.QHBoxLayout()
-        add_parent_btn = QtWidgets.QPushButton("➕ Ajouter")
-        add_parent_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
-        add_parent_btn.clicked.connect(self._add_parent)
-        
-        edit_parent_btn = QtWidgets.QPushButton("✏️ Modifier")
-        edit_parent_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
-        edit_parent_btn.clicked.connect(self._edit_parent)
-        
-        delete_parent_btn = QtWidgets.QPushButton("🗑️ Supprimer")
-        delete_parent_btn.setStyleSheet(self._get_button_style("#e74c3c"))
-        delete_parent_btn.clicked.connect(self._delete_parent)
-        
-        btn_layout.addWidget(add_parent_btn)
-        btn_layout.addWidget(edit_parent_btn)
-        btn_layout.addWidget(delete_parent_btn)
-        layout.addLayout(btn_layout)
-        
-        return widget
-
-    def _create_child_tab(self):
-        """Créer l'onglet Enfants"""
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-        
-        # Sélection hiérarchique
-        selection_layout = QtWidgets.QGridLayout()
-        selection_layout.addWidget(QtWidgets.QLabel("Cluster:"), 0, 0)
-        self.child_cluster_combo = QtWidgets.QComboBox()
-        self.child_cluster_combo.currentTextChanged.connect(self._on_child_cluster_changed)
-        selection_layout.addWidget(self.child_cluster_combo, 0, 1)
-        
-        selection_layout.addWidget(QtWidgets.QLabel("Racine:"), 1, 0)
-        self.child_root_combo = QtWidgets.QComboBox()
-        self.child_root_combo.currentTextChanged.connect(self._on_child_root_changed)
-        selection_layout.addWidget(self.child_root_combo, 1, 1)
-        
-        selection_layout.addWidget(QtWidgets.QLabel("Parent:"), 2, 0)
-        self.child_parent_combo = QtWidgets.QComboBox()
-        self.child_parent_combo.currentTextChanged.connect(self._on_child_parent_changed)
-        selection_layout.addWidget(self.child_parent_combo, 2, 1)
-        layout.addLayout(selection_layout)
-        
-        # Liste des enfants
-        self.child_list = QtWidgets.QListWidget()
-        self.child_list.setStyleSheet(self._get_list_style())
-        self.child_list.currentRowChanged.connect(self._on_child_selected)
-        layout.addWidget(self.child_list)
-        
-        # Boutons d'action
-        btn_layout = QtWidgets.QHBoxLayout()
-        add_child_btn = QtWidgets.QPushButton("➕ Ajouter")
-        add_child_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
-        add_child_btn.clicked.connect(self._add_child)
-        
-        edit_child_btn = QtWidgets.QPushButton("✏️ Modifier")
-        edit_child_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
-        edit_child_btn.clicked.connect(self._edit_child)
-        
-        delete_child_btn = QtWidgets.QPushButton("🗑️ Supprimer")
-        delete_child_btn.setStyleSheet(self._get_button_style("#e74c3c"))
-        delete_child_btn.clicked.connect(self._delete_child)
-        
-        btn_layout.addWidget(add_child_btn)
-        btn_layout.addWidget(edit_child_btn)
-        btn_layout.addWidget(delete_child_btn)
-        layout.addLayout(btn_layout)
-        
-        return widget
-
-    def _get_group_style(self):
-        """Style pour les groupes"""
+    def _get_component_group_style(self):
+        """Style spécifique pour les groupes de composants"""
         return """
             QGroupBox {
-                border: 1px solid #cccccc;
-                border-radius: 5px;
-                margin-top: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 8px;
+                margin-top: 5px;
                 padding-top: 10px;
-                background-color: #f9f9f9;
+                background-color: white;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 5px 0 5px;
-                color: #333333;
+                color: #2c3e50;
+                font-weight: bold;
             }
         """
 
-    def _get_button_style(self, color):
-        """Style pour les boutons"""
+    def _get_small_button_style(self, color):
+        """Style pour les petits boutons"""
         return f"""
             QPushButton {{
                 background-color: {color};
                 color: white;
                 border: none;
-                padding: 8px 15px;
+                padding: 4px 8px;
+                font-size: 11px;
                 border-radius: 4px;
-                font-weight: bold;
+                min-width: 60px;
             }}
             QPushButton:hover {{
                 background-color: {self._darken_color(color)};
             }}
         """
-
-    def _darken_color(self, color, factor=0.1):
-        """Assombrir une couleur"""
-        try:
-            color = color.lstrip('#')
-            rgb = tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
-            darkened = tuple(int(c * (1 - factor)) for c in rgb)
-            return '#%02x%02x%02x' % darkened
-        except:
-            return color
-
-    def _get_combo_style(self):
-        """Obtenir le style pour les combobox"""
-        return """
-            QComboBox {
-                padding: 5px;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-                background-color: white;
-            }
-            QComboBox:focus {
-                border-color: #3498db;
-            }
-        """
-
-    def _get_list_style(self):
-        """Obtenir le style pour les listes"""
-        return """
-            QListWidget {
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-                background-color: white;
-                padding: 5px;
-            }
-            QListWidget::item {
-                padding: 8px;
-                border-bottom: 1px solid #ecf0f1;
-            }
-            QListWidget::item:selected {
-                background-color: #3498db;
-                color: white;
-            }
-        """
-
-    def _get_button_style(self, color):
-        """Obtenir le style pour les boutons"""
-        return f"""
-            QPushButton {{
-                background-color: {color};
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                font-weight: bold;
-                border-radius: 6px;
-                min-width: 80px;
-            }}
-            QPushButton:hover {{
-                background-color: {self._darken_color(color)};
-            }}
-        """
-
-    def _darken_color(self, color, factor=0.1):
-        """Assombrir une couleur"""
-        color = color.lstrip('#')
-        rgb = tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
-        darkened = tuple(int(c * (1 - factor)) for c in rgb)
-        return '#%02x%02x%02x' % darkened
-
-    def _load_default_data(self):
-        """Charger les données depuis la base de données"""
-        self._load_projects_from_db()
-
-    def refresh_ui(self):
-        """Rafraîchir l'interface utilisateur"""
-        # Mettre à jour la liste des projets
-        self.project_combo.blockSignals(True)
-        self.project_combo.clear()
-        self.project_combo.addItem(self.strategy_data['project_name'])
-        self.project_combo.blockSignals(False)
-        
-        # Mettre à jour le nom du projet
-        self.project_name_label.setText(self.strategy_data['project_name'])
-        
-        # Mettre à jour la liste des typologies
-        self.typology_combo.blockSignals(True)
-        self.typology_combo.clear()
-        for typology in self.strategy_data['typologies']:
-            self.typology_combo.addItem(typology['name'])
-        self.typology_combo.blockSignals(True)
-        
-        # Mettre à jour les onglets
-        self._refresh_cluster_tab()
-        self._refresh_root_tab()
-        self._refresh_parent_tab()
-        self._refresh_child_tab()
-        
-        # Rafraîchir l'onglet projet et typologie
-        self.project_typology_tab.refresh()
-        
-        # Mettre à jour le camembert
-        self.pie_chart.update()
 
     def _refresh_cluster_tab(self):
         """Rafraîchir l'onglet Clusters avec les données de la DB"""
@@ -1503,8 +1247,6 @@ class StrategyWidget(QtWidgets.QWidget):
         """Gérer le changement de projet"""
         if not project_name:
             return
-        
-        
         
         # Trouver l'ID du projet sélectionné
         index = self.project_combo.currentIndex()
@@ -1655,10 +1397,6 @@ class StrategyWidget(QtWidgets.QWidget):
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
 
-    def _on_parent_selected(self, row):
-        """Gérer la sélection d'un parent"""
-        self.current_parent_index = row
-
     def _on_child_cluster_changed(self, cluster_name):
         """Gérer le changement de cluster dans l'onglet Enfants"""
         self.child_root_combo.blockSignals(True)
@@ -1713,29 +1451,6 @@ class StrategyWidget(QtWidgets.QWidget):
                         if root['id'] == root_id:
                             for parent in root.get('parents', []):
                                 self.child_parent_combo.addItem(parent['name'], parent['id'])
-                            break
-                    break
-        
-        self.child_parent_combo.blockSignals(False)
-        self._on_child_parent_changed(self.child_parent_combo.currentText())
-
-
-    def _on_child_root_changed(self, root_name):
-        """Gérer le changement de racine dans l'onglet Enfants"""
-        self.child_parent_combo.blockSignals(True)
-        self.child_parent_combo.clear()
-        self.child_list.clear()
-        
-        if (self.current_typology_index != -1 and 
-            self.child_cluster_combo.currentText() and root_name):
-            
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == self.child_cluster_combo.currentText():
-                    for root in cluster['roots']:
-                        if root['name'] == root_name:
-                            for parent in root['parents']:
-                                self.child_parent_combo.addItem(parent['name'])
                             break
                     break
         
@@ -1924,21 +1639,6 @@ class StrategyWidget(QtWidgets.QWidget):
                     
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
-    
-    def _edit_cluster(self):
-        """Modifier un cluster"""
-        if self.current_cluster_index == -1:
-            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster")
-            return
-            
-        typology = self.strategy_data['typologies'][self.current_typology_index]
-        cluster = typology['clusters'][self.current_cluster_index]
-        
-        name, ok = QtWidgets.QInputDialog.getText(self, "Modifier le cluster", "Nom du cluster:", 
-                                                 text=cluster['name'])
-        if ok and name:
-            cluster['name'] = name
-            self.refresh_ui()
 
     def _delete_cluster(self):
         """Supprimer un cluster"""
@@ -1973,7 +1673,6 @@ class StrategyWidget(QtWidgets.QWidget):
                     
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")
-
 
     def _add_root(self):
         """Ajouter une racine"""
@@ -2034,7 +1733,6 @@ class StrategyWidget(QtWidgets.QWidget):
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
 
-
     def _delete_root(self):
         """Supprimer une racine"""
         if not self.current_root_id:
@@ -2074,29 +1772,6 @@ class StrategyWidget(QtWidgets.QWidget):
                     
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")
-
-    def _add_parent(self):
-        """Ajouter un parent"""
-        if (self.parent_cluster_combo.currentText() == '' or 
-            self.parent_root_combo.currentText() == ''):
-            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster et une racine")
-            return
-            
-        name, ok = QtWidgets.QInputDialog.getText(self, "Nouveau parent", "Nom du parent:")
-        if ok and name:
-            typology = self.strategy_data['typologies'][self.current_typology_index]
-            for cluster in typology['clusters']:
-                if cluster['name'] == self.parent_cluster_combo.currentText():
-                    for root in cluster['roots']:
-                        if root['name'] == self.parent_root_combo.currentText():
-                            new_parent = {
-                                'name': name,
-                                'children': []
-                            }
-                            root['parents'].append(new_parent)
-                            break
-                    break
-            self.refresh_ui()
 
     def _edit_parent(self):
         """Modifier un parent"""
@@ -2254,30 +1929,6 @@ class StrategyWidget(QtWidgets.QWidget):
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
 
-
-    def _edit_child(self):
-        """Modifier un enfant"""
-        if self.current_child_index == -1:
-            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un enfant")
-            return
-            
-        typology = self.strategy_data['typologies'][self.current_typology_index]
-        for cluster in typology['clusters']:
-            if cluster['name'] == self.child_cluster_combo.currentText():
-                for root in cluster['roots']:
-                    if root['name'] == self.child_root_combo.currentText():
-                        for parent in root['parents']:
-                            if parent['name'] == self.child_parent_combo.currentText():
-                                old_name = parent['children'][self.current_child_index]
-                                name, ok = QtWidgets.QInputDialog.getText(self, "Modifier l'enfant", "Nom de l'enfant:", 
-                                                                         text=old_name)
-                                if ok and name:
-                                    parent['children'][self.current_child_index] = name
-                                    self.refresh_ui()
-                                break
-                        break
-                break
-
     def _delete_child(self):
         """Supprimer un enfant"""
         if not self.current_child_id:
@@ -2325,7 +1976,6 @@ class StrategyWidget(QtWidgets.QWidget):
                     
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")
-
 
     def _save_strategy(self):
         """Sauvegarder la stratégie"""
