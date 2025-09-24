@@ -446,7 +446,7 @@ def main():
             print("4. Ou configurer DISPLAY:")
             print("   export DISPLAY=:0.0")
         
-        logger.critical(f"Erreur d'importation: {str(e)}")
+        logger.critical(f"Erreur d'importation: {str(e)}", exc_info=True)
         sys.exit(1)
 
     except Exception as e:
@@ -454,7 +454,7 @@ def main():
         print(f"Erreur: {str(e)}")
         print(f"Type: {type(e).__name__}")
         traceback.print_exc()
-        logger.critical(f"Erreur critique lors du démarrage: {str(e)}")
+        logger.critical(f"Erreur critique lors du démarrage: {str(e)}", exc_info=True)
         sys.exit(1)
 
 

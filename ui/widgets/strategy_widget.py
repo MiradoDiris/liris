@@ -1,1752 +1,1738 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import json
-from datetime import datetime
-import os
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QTreeWidget, QTreeWidgetItem, QLineEdit, 
-                             QTextEdit, QGroupBox, QSplitter, QMessageBox, QInputDialog, QFileDialog,
-                             QDialog, QDialogButtonBox, QCheckBox, QComboBox, QListWidget, 
-                             QListWidgetItem, QProgressDialog)
+from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-from matplotlib.patches import Patch
-from PyQt5.QtWidgets import QTabWidget
+import logging
+import json
+import math
+from ui.styles.theme import Theme
 
-class ExportTemplateDialog(QDialog):
-    """Dialogue pour sélectionner un template d'export"""
+logger = logging.getLogger(__name__)
+
+class PieChartWidget(QtWidgets.QWidget):
+    """
+    Widget pour afficher un camembert de la répartition des données
+    """
     
-    TEMPLATES = {
-        "complet": {
-            "name": "Export Complet",
-            "description": "Exporte toute la structure avec métadonnées complètes",
-            "include_properties": True,
-            "include_descriptions": True,
-            "include_ids": True
-        },
-        "structure_only": {
-            "name": "Structure Seulement",
-            "description": "Exporte uniquement la hiérarchie des noms",
-            "include_properties": False,
-            "include_descriptions": False,
-            "include_ids": False
-        },
-        "lightweight": {
-            "name": "Léger",
-            "description": "Exporte la structure avec descriptions mais sans propriétés détaillées",
-            "include_properties": False,
-            "include_descriptions": True,
-            "include_ids": False
-        },
-        "backup": {
-            "name": "Sauvegarde",
-            "description": "Exporte tout avec IDs pour restauration exacte",
-            "include_properties": True,
-            "include_descriptions": True,
-            "include_ids": True
+    # Déclaration correcte du signal
+    segment_clicked = pyqtSignal(dict)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.data = {}
+        self.selected_cluster = None
+        self.selected_root = None
+        self.selected_parent = None
+        
+        # Données d'exemple pour la démonstration
+        self.sample_data = {
+            'total_examples': 1000,
+            'batches': [
+                {
+                    'name': 'Batch 1',
+                    'cluster': 'Débutant',
+                    'root': 'Compétences de base',
+                    'parent': 'Connaissances fondamentales',
+                    'examples': 250,
+                    'percentage': 25.0
+                },
+                {
+                    'name': 'Batch 2',
+                    'cluster': 'Intermédiaire',
+                    'root': 'Compétences avancées',
+                    'parent': 'Applications pratiques',
+                    'examples': 350,
+                    'percentage': 35.0
+                },
+                {
+                    'name': 'Batch 3',
+                    'cluster': 'Avancé',
+                    'root': 'Expertise spécialisée',
+                    'parent': 'Optimisation et recherche',
+                    'examples': 400,
+                    'percentage': 40.0
+                }
+            ]
         }
-    }
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Sélection du Template d'Export")
-        self.setModal(True)
-        self.selected_template = "complet"
-        self.setup_ui()
         
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
+        self.setMinimumSize(400, 400)
         
-        # Description
-        desc_label = QLabel("Choisissez un template d'export prédéfini :")
-        layout.addWidget(desc_label)
+    def set_data(self, data):
+        """Définir les données à afficher"""
+        self.data = data
+        self.update()
         
-        # Liste des templates
-        self.template_list = QListWidget()
-        for key, template in self.TEMPLATES.items():
-            item = QListWidgetItem(f"{template['name']} - {template['description']}")
-            item.setData(Qt.UserRole, key)
-            self.template_list.addItem(item)
+    def set_hierarchy_selection(self, cluster=None, root=None, parent=None):
+        """Définir la sélection hiérarchique"""
+        self.selected_cluster = cluster
+        self.selected_root = root
+        self.selected_parent = parent
+        self.update()
         
-        self.template_list.itemSelectionChanged.connect(self.on_template_selected)
-        layout.addWidget(self.template_list)
+    def paintEvent(self, event):
+        """Dessiner le camembert"""
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
         
-        # Détails du template sélectionné
-        self.details_label = QLabel("")
-        self.details_label.setWordWrap(True)
-        self.details_label.setStyleSheet("background-color: #f0f0f0; padding: 10px; border-radius: 5px;")
-        layout.addWidget(self.details_label)
+        # Dimensions
+        width = self.width()
+        height = self.height()
+        size = min(width, height) - 40
+        x = (width - size) / 2
+        y = (height - size) / 2
         
-        # Boutons
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+        # Couleurs pour les segments
+        colors = [
+            QtGui.QColor('#FF6B6B'),  # Rouge
+            QtGui.QColor('#4ECDC4'),  # Turquoise
+            QtGui.QColor('#45B7D1'),  # Bleu
+            QtGui.QColor('#96CEB4'),  # Vert
+            QtGui.QColor('#FFEAA7'),  # Jaune
+            QtGui.QColor('#DDA0DD'),  # Violet
+            QtGui.QColor('#98D8C8'),  # Vert clair
+            QtGui.QColor('#F7DC6F'),  # Jaune doré
+        ]
         
-        # Sélection par défaut
-        self.template_list.setCurrentRow(0)
-        
-    def on_template_selected(self):
-        """Met à jour les détails du template sélectionné"""
-        items = self.template_list.selectedItems()
-        if not items:
-            return
+        # Dessiner le camembert
+        if self.sample_data['batches']:
+            total_percentage = sum(batch['percentage'] for batch in self.sample_data['batches'])
+            start_angle = 0
             
-        template_key = items[0].data(Qt.UserRole)
-        template = self.TEMPLATES[template_key]
-        
-        details = f"<b>{template['name']}</b><br/>"
-        details += f"{template['description']}<br/><br/>"
-        details += f"<b>Inclusions :</b><br/>"
-        details += f"• Propriétés : {'Oui' if template['include_properties'] else 'Non'}<br/>"
-        details += f"• Descriptions : {'Oui' if template['include_descriptions'] else 'Non'}<br/>"
-        details += f"• IDs : {'Oui' if template['include_ids'] else 'Non'}"
-        
-        self.details_label.setText(details)
-        self.selected_template = template_key
-        
-    def get_selected_template(self):
-        """Retourne le template sélectionné"""
-        return self.TEMPLATES[self.selected_template]
-
-class ImportConflictDialog(QDialog):
-    """Dialogue pour résoudre les conflits à l'import"""
-    
-    def __init__(self, parent=None, conflicts=None):
-        super().__init__(parent)
-        self.setWindowTitle("Résolution des Conflits d'Import")
-        self.setModal(True)
-        self.conflicts = conflicts or []
-        self.resolutions = {}
-        self.setup_ui()
-        
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-        
-        # Description
-        desc_label = QLabel(f"{len(self.conflicts)} conflit(s) détecté(s). Veuillez choisir comment les résoudre :")
-        layout.addWidget(desc_label)
-        
-        # Liste des conflits
-        self.conflict_list = QListWidget()
-        for conflict in self.conflicts:
-            item = QListWidgetItem(f"{conflict['name']} ({conflict['type']})")
-            item.setData(Qt.UserRole, conflict)
-            self.conflict_list.addItem(item)
-        
-        self.conflict_list.itemSelectionChanged.connect(self.on_conflict_selected)
-        layout.addWidget(self.conflict_list)
-        
-        # Options de résolution
-        resolution_group = QGroupBox("Options de Résolution")
-        resolution_layout = QVBoxLayout(resolution_group)
-        
-        self.rename_rb = QCheckBox("Renommer l'élément importé")
-        self.rename_rb.toggled.connect(self.on_resolution_changed)
-        
-        self.replace_rb = QCheckBox("Remplacer l'élément existant")
-        self.replace_rb.toggled.connect(self.on_resolution_changed)
-        
-        self.skip_rb = QCheckBox("Ignorer cet élément")
-        self.skip_rb.toggled.connect(self.on_resolution_changed)
-        
-        # Champ pour le nouveau nom si renommage
-        self.new_name_layout = QHBoxLayout()
-        self.new_name_layout.addWidget(QLabel("Nouveau nom:"))
-        self.new_name_edit = QLineEdit()
-        self.new_name_layout.addWidget(self.new_name_edit)
-        
-        resolution_layout.addWidget(self.rename_rb)
-        resolution_layout.addWidget(self.replace_rb)
-        resolution_layout.addWidget(self.skip_rb)
-        resolution_layout.addLayout(self.new_name_layout)
-        
-        layout.addWidget(resolution_group)
-        
-        # Boutons
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-        # Initialisation
-        self.new_name_layout.setEnabled(False)
-        if self.conflicts:
-            self.conflict_list.setCurrentRow(0)
-        
-    def on_conflict_selected(self):
-        """Met à jour l'interface quand un conflit est sélectionné"""
-        items = self.conflict_list.selectedItems()
-        if not items:
-            return
-            
-        conflict = items[0].data(Qt.UserRole)
-        self.new_name_edit.setText(conflict['name'])
-        
-        # Restaurer la résolution précédente si elle existe
-        if conflict['name'] in self.resolutions:
-            resolution = self.resolutions[conflict['name']]
-            if resolution == 'rename':
-                self.rename_rb.setChecked(True)
-            elif resolution == 'replace':
-                self.replace_rb.setChecked(True)
-            elif resolution == 'skip':
-                self.skip_rb.setChecked(True)
-        else:
-            # Par défaut, proposer le renommage
-            self.rename_rb.setChecked(True)
-        
-    def on_resolution_changed(self):
-        """Active/désactive le champ de nom selon la sélection"""
-        self.new_name_layout.setEnabled(self.rename_rb.isChecked())
-        
-    def accept(self):
-        """Valide les résolutions avant d'accepter"""
-        if not self.conflicts:
-            super().accept()
-            return
-            
-        # Vérifier que tous les conflits ont une résolution
-        for conflict in self.conflicts:
-            if conflict['name'] not in self.resolutions:
-                QMessageBox.warning(self, "Résolution incomplète", 
-                                  f"Veuillez spécifier une résolution pour '{conflict['name']}'")
-                return
+            for i, batch in enumerate(self.sample_data['batches']):
+                # Calculer l'angle du segment
+                angle = 360 * 16 * (batch['percentage'] / 100)
                 
-        super().accept()
-        
-    def get_resolutions(self):
-        """Retourne les résolutions choisies"""
-        return self.resolutions
-        
-    def on_resolution_changed(self):
-        """Met à jour la résolution quand une option est choisie"""
-        items = self.conflict_list.selectedItems()
-        if not items:
-            return
-            
-        conflict = items[0].data(Qt.UserRole)
-        
-        if self.rename_rb.isChecked():
-            self.resolutions[conflict['name']] = 'rename'
-        elif self.replace_rb.isChecked():
-            self.resolutions[conflict['name']] = 'replace'
-        elif self.skip_rb.isChecked():
-            self.resolutions[conflict['name']] = 'skip'
-
-class StrategyValidator:
-    """Classe pour valider les fichiers de stratégie"""
-    
-    @staticmethod
-    def validate_strategy_file(filepath):
-        """Valide un fichier de stratégie"""
-        errors = []
-        warnings = []
-        
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+                # Dessiner le segment
+                painter.setBrush(colors[i % len(colors)])
+                painter.setPen(QtGui.QPen(Qt.black, 2))
+                painter.drawPie(int(x), int(y), int(size), int(size), int(start_angle), int(angle))
                 
-            # Validation de base
-            if not isinstance(data, list):
-                errors.append("Le fichier doit contenir un tableau à la racine")
-                return errors, warnings
+                # Ajouter une légère surbrillance si sélectionné
+                if (self.selected_cluster and batch['cluster'] == self.selected_cluster and
+                    (not self.selected_root or batch['root'] == self.selected_root) and
+                    (not self.selected_parent or batch['parent'] == self.selected_parent)):
+                    painter.setBrush(QtGui.QColor(255, 255, 255, 100))
+                    painter.drawPie(int(x), int(y), int(size), int(size), int(start_angle), int(angle))
                 
-            # Validation récursive
-            StrategyValidator._validate_items(data, errors, warnings)
-            
-        except json.JSONDecodeError as e:
-            errors.append(f"Fichier JSON invalide: {str(e)}")
-        except Exception as e:
-            errors.append(f"Erreur de lecture: {str(e)}")
-            
-        return errors, warnings
+                start_angle += angle
         
-    @staticmethod
-    def _validate_items(items, errors, warnings, level=0):
-        """Valide récursivement les éléments"""
-        for i, item in enumerate(items):
-            if not isinstance(item, dict):
-                errors.append(f"Élément {i} n'est pas un objet JSON")
-                continue
-                
-            # Vérifier les champs obligatoires
-            if 'name' not in item:
-                errors.append(f"Élément {i} manque le champ 'name'")
-            elif not item['name']:
-                errors.append(f"Élément {i} a un nom vide")
-                
-            if 'type' not in item:
-                errors.append(f"Élément {i} manque le champ 'type'")
-            elif item['type'] not in ['cluster', 'root', 'parent', 'child']:
-                warnings.append(f"Élément {i} a un type non standard: {item['type']}")
-                
-            # Vérifier les champs optionnels
-            if 'description' in item and not isinstance(item['description'], str):
-                warnings.append(f"Élément {i} a une description de type incorrect")
-                
-            if 'properties' in item and not isinstance(item['properties'], dict):
-                errors.append(f"Élément {i} a des propriétés de type incorrect")
-                
-            # Validation récursive des enfants
-            if 'children' in item:
-                if not isinstance(item['children'], list):
-                    errors.append(f"Élément {i} a un champ 'children' de type incorrect")
-                else:
-                    StrategyValidator._validate_items(item['children'], errors, warnings, level + 1)
-
-class TypologyDialog(QDialog):
-    """Dialogue pour la gestion des typologies"""
-    def __init__(self, parent=None, name="", description="", is_hierarchical=False):
-        super().__init__(parent)
-        self.setWindowTitle("Gestion des Typologies")
-        self.setModal(True)
-        self.setup_ui(name, description, is_hierarchical)
+        # Dessiner le trou au centre (donut chart)
+        center_size = size * 0.4
+        center_x = x + (size - center_size) / 2
+        center_y = y + (size - center_size) / 2
+        painter.setBrush(QtGui.QColor(240, 240, 240))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(int(center_x), int(center_y), int(center_size), int(center_size))
         
-    def setup_ui(self, name, description, is_hierarchical):
-        layout = QVBoxLayout(self)
-        
-        # Nom
-        name_layout = QHBoxLayout()
-        name_layout.addWidget(QLabel("Nom:"))
-        self.name_edit = QLineEdit(name)
-        name_layout.addWidget(self.name_edit)
-        layout.addLayout(name_layout)
-        
-        # Description
-        desc_layout = QVBoxLayout()
-        desc_layout.addWidget(QLabel("Description:"))
-        self.desc_edit = QTextEdit(description)
-        self.desc_edit.setMaximumHeight(100)
-        desc_layout.addWidget(self.desc_edit)
-        layout.addLayout(desc_layout)
-        
-        # Hiérarchique
-        self.hierarchical_cb = QCheckBox("Structure hiérarchique (taxonomique)")
-        self.hierarchical_cb.setChecked(is_hierarchical)
-        layout.addWidget(self.hierarchical_cb)
-        
-        # Boutons
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-    def get_data(self):
-        return (
-            self.name_edit.text().strip(),
-            self.desc_edit.toPlainText().strip(),
-            self.hierarchical_cb.isChecked()
-        )
-
-class CombinationChartWidget(QWidget):
-    """Widget pour le diagramme de représentativité des combinaisons"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.database = None
-        self.init_ui()
-        
-    def set_database(self, database):
-        """Définit l'objet Database"""
-        self.database = database
-        self.update_combination_chart()
-        
-    def init_ui(self):
-        """Initialise l'interface utilisateur"""
-        layout = QVBoxLayout(self)
-        
-        # Contrôles
-        controls_layout = QHBoxLayout()
-        
-        self.refresh_btn = QPushButton("🔄 Actualiser")
-        self.refresh_btn.clicked.connect(self.update_combination_chart)
-        self.refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-        """)
-        controls_layout.addWidget(self.refresh_btn)
-        
-        controls_layout.addStretch()
-        
-        self.auto_refresh_cb = QCheckBox("Actualisation automatique")
-        self.auto_refresh_cb.setChecked(True)
-        controls_layout.addWidget(self.auto_refresh_cb)
-        
-        layout.addLayout(controls_layout)
-        
-        # Figure matplotlib
-        self.figure = Figure(figsize=(10, 6), dpi=100)
-        self.canvas = FigureCanvas(self.figure)
-        layout.addWidget(self.canvas)
-        
-        # Légende interactive
-        self.legend_label = QLabel("💡 Cliquez sur une légende pour filtrer (fonctionnalité à venir)")
-        self.legend_label.setStyleSheet("font-style: italic; color: #666; padding: 5px;")
-        layout.addWidget(self.legend_label)
-        
-        # Message si aucune donnée
-        self.no_data_label = QLabel("📊 Aucune donnée disponible - Effectuez des générations dans l'onglet 'Génération' d'abord")
-        self.no_data_label.setStyleSheet("color: #999; font-size: 12px; background-color: #f5f5f5; padding: 20px;")
-        self.no_data_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.no_data_label)
-        self.no_data_label.hide()
-        
-    def calculate_combinations_metrics(self):
-        """Calcule les métriques des combinaisons depuis l'historique"""
-        if not self.database:
-            return None
-            
-        try:
-            # Récupérer l'historique des générations
-            history = self.database.get_generation_history()
-            
-            if not history:
-                return None
-                
-            # Compter les occurrences de chaque combinaison
-            combination_counts = {}
-            total_generations = 0
-            
-            for generation in history:
-                # Extraire la combinaison de contextes
-                context_combination = self.extract_combination_from_generation(generation)
-                if context_combination:
-                    combination_key = str(sorted(context_combination))
-                    combination_counts[combination_key] = combination_counts.get(combination_key, 0) + 1
-                    total_generations += 1
-            
-            # Calculer les pourcentages
-            combinations_data = []
-            for combination_key, count in combination_counts.items():
-                percentage = (count / total_generations) * 100 if total_generations > 0 else 0
-                combinations_data.append({
-                    'combination': eval(combination_key),
-                    'count': count,
-                    'percentage': percentage,
-                    'label': self.format_combination_label(eval(combination_key))
-                })
-            
-            # Trier par pourcentage décroissant
-            combinations_data.sort(key=lambda x: x['percentage'], reverse=True)
-            
-            return {
-                'combinations': combinations_data,
-                'total_generations': total_generations,
-                'unique_combinations': len(combinations_data)
-            }
-            
-        except Exception as e:
-            print(f"Erreur calcul métriques: {str(e)}")
-            return None
-    
-    def extract_combination_from_generation(self, generation):
-        """Extrait la combinaison de contextes d'une génération"""
-        # À adapter selon votre structure de données
-        if 'context_combination' in generation:
-            return generation['context_combination']
-        elif 'contexts' in generation:
-            return generation['contexts']
-        elif 'combination' in generation:
-            return generation['combination']
-        else:
-            return []
-    
-    def format_combination_label(self, combination):
-        """Formate l'étiquette pour une combinaison"""
-        if not combination:
-            return "Aucun contexte"
-        return " + ".join(str(ctx) for ctx in combination)
-    
-    def update_combination_chart(self):
-        """Met à jour le diagramme avec les données actuelles"""
-        metrics = self.calculate_combinations_metrics()
-        
-        # Masquer/afficher le message "aucune donnée"
-        if not metrics or not metrics['combinations']:
-            self.no_data_label.show()
-            self.canvas.hide()
-            self.legend_label.hide()
-            return
-        else:
-            self.no_data_label.hide()
-            self.canvas.show()
-            self.legend_label.show()
-        
-        # Préparer les données pour le graphique
-        labels = [item['label'] for item in metrics['combinations']]
-        percentages = [item['percentage'] for item in metrics['combinations']]
-        counts = [item['count'] for item in metrics['combinations']]
-        
-        # Créer le diagramme
-        self.figure.clear()
-        ax = self.figure.add_subplot(111)
-        
-        # Couleurs pour le diagramme
-        colors = plt.cm.Set3(np.linspace(0, 1, len(labels)))
-        
-        # Diagramme en barres
-        bars = ax.bar(labels, percentages, color=colors, alpha=0.7)
-        
-        # Ajouter les valeurs sur les barres
-        for i, (bar, percentage, count) in enumerate(zip(bars, percentages, counts)):
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
-                   f'{percentage:.1f}% ({count})', ha='center', va='bottom', fontsize=9)
-        
-        # Configuration de l'axe
-        ax.set_ylabel('Pourcentage d\'utilisation (%)')
-        ax.set_title(f'Répartition des Combinaisons de Contextes\n'
-                    f'Total: {metrics["total_generations"]} générations | '
-                    f'Combinaisons uniques: {metrics["unique_combinations"]}')
-        
-        # Rotation des labels
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
-        
-        # Ajuster les marges
-        self.figure.tight_layout()
+        # Ajouter les informations au centre
+        painter.setPen(QtGui.QPen(Qt.black))
+        painter.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+        total_text = f"{self.sample_data['total_examples']} exemples"
+        painter.drawText(int(center_x), int(center_y), int(center_size), int(center_size), 
+                        Qt.AlignCenter, total_text)
         
         # Légende
-        legend_elements = [Patch(color=colors[i], label=labels[i]) 
-                          for i in range(len(labels))]
-        ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left')
+        self._draw_legend(painter, width, height, colors)
         
-        # Actualiser le canvas
-        self.canvas.draw()
+    def _draw_legend(self, painter, width, height, colors):
+        """Dessiner la légende"""
+        legend_x = 20
+        legend_y = 20
+        legend_width = width - 40
+        box_size = 15
+        spacing = 5
+        
+        painter.setFont(QtGui.QFont("Arial", 9))
+        
+        for i, batch in enumerate(self.sample_data['batches']):
+            y_pos = legend_y + i * (box_size + spacing + 5)
+            
+            # Carré de couleur
+            painter.setBrush(colors[i % len(colors)])
+            painter.setPen(QtGui.QPen(Qt.black, 1))
+            painter.drawRect(legend_x, y_pos, box_size, box_size)
+            
+            # Texte
+            text = f"{batch['cluster']} - {batch['root']}: {batch['examples']} exemples ({batch['percentage']}%)"
+            painter.setPen(QtGui.QPen(Qt.black))
+            painter.drawText(legend_x + box_size + spacing, y_pos + box_size - 3, text)
+            
+            # Mettre en évidence si sélectionné
+            if (self.selected_cluster and batch['cluster'] == self.selected_cluster and
+                (not self.selected_root or batch['root'] == self.selected_root) and
+                (not self.selected_parent or batch['parent'] == self.selected_parent)):
+                painter.setPen(QtGui.QPen(QtGui.QColor(Theme.SECONDARY_COLOR), 2))
+                painter.drawRect(legend_x - 2, y_pos - 2, box_size + 4, box_size + 4)
     
-    def on_new_generation(self):
-        """Appelé quand une nouvelle génération est effectuée"""
-        if self.auto_refresh_cb.isChecked():
-            self.update_combination_chart()
+    def mousePressEvent(self, event):
+        """Gérer les clics sur le camembert"""
+        if event.button() == Qt.LeftButton:
+            # Calculer la position relative
+            width = self.width()
+            height = self.height()
+            size = min(width, height) - 40
+            x_center = width / 2
+            y_center = height / 2
+            
+            # Coordonnées du clic
+            click_x = event.x() - x_center
+            click_y = event.y() - y_center
+            
+            # Distance du centre
+            distance = math.sqrt(click_x**2 + click_y**2)
+            radius = size / 2
+            
+            # Vérifier si le clic est dans le camembert
+            if distance <= radius:
+                # Calculer l'angle du clic
+                angle = math.degrees(math.atan2(click_y, click_x))
+                if angle < 0:
+                    angle += 360
+                
+                # Trouver le segment correspondant
+                current_angle = 0
+                for i, batch in enumerate(self.sample_data['batches']):
+                    segment_angle = 360 * (batch['percentage'] / 100)
+                    if current_angle <= angle < current_angle + segment_angle:
+                        # Émettre un signal avec les informations du segment
+                        self.segment_clicked.emit(batch)
+                        break
+                    current_angle += segment_angle
 
-class StrategyAnalysisTab(QWidget):
+class ProjectTypologyTab(QtWidgets.QWidget):
     """
-    Deuxième onglet : Diagramme de représentativité des combinaisons
+    Onglet pour la gestion du projet et de la typologie
     """
+    
+    # Déclaration correcte du signal avec des types spécifiques
+    hierarchy_selection_changed = pyqtSignal(str, str, str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.database = None
-        self.init_ui()
+        self.strategy_widget = parent
+        self._init_ui()
         
-    def set_database(self, database):
-        """Définit l'objet Database"""
-        self.database = database
-        self.combination_chart.set_database(database)
+    def _init_ui(self):
+        """Initialiser l'interface utilisateur"""
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-    def init_ui(self):
-        """Initialise l'interface utilisateur"""
-        layout = QVBoxLayout(self)
+        # Section projet
+        project_group = QtWidgets.QGroupBox("Gestion du Projet")
+        project_group.setStyleSheet(self._get_group_style())
+        project_layout = QtWidgets.QVBoxLayout(project_group)
         
-        # Titre
-        title_label = QLabel("Analyse de Représentativité des Combinaisons de Contextes")
-        title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 10px;")
-        layout.addWidget(title_label)
+        # Informations du projet
+        info_layout = QtWidgets.QHBoxLayout()
+        info_layout.addWidget(QtWidgets.QLabel("Nom du projet:"))
+        self.project_name_label = QtWidgets.QLabel("Aucun projet")
+        self.project_name_label.setStyleSheet("font-weight: bold;")
+        info_layout.addWidget(self.project_name_label)
+        info_layout.addStretch()
+        
+        project_layout.addLayout(info_layout)
+        
+        # Statistiques du projet
+        stats_layout = QtWidgets.QGridLayout()
+        stats_layout.addWidget(QtWidgets.QLabel("Typologies définies:"), 0, 0)
+        self.typologies_count_label = QtWidgets.QLabel("0")
+        stats_layout.addWidget(self.typologies_count_label, 0, 1)
+        
+        stats_layout.addWidget(QtWidgets.QLabel("Clusters total:"), 1, 0)
+        self.clusters_count_label = QtWidgets.QLabel("0")
+        stats_layout.addWidget(self.clusters_count_label, 1, 1)
+        
+        stats_layout.addWidget(QtWidgets.QLabel("Exemples total:"), 2, 0)
+        self.examples_count_label = QtWidgets.QLabel("0")
+        stats_layout.addWidget(self.examples_count_label, 2, 1)
+        
+        project_layout.addLayout(stats_layout)
+        
+        layout.addWidget(project_group)
+        
+        # Section typologie actuelle
+        typology_group = QtWidgets.QGroupBox("Typologie Actuelle")
+        typology_group.setStyleSheet(self._get_group_style())
+        typology_layout = QtWidgets.QVBoxLayout(typology_group)
+        
+        # Sélection de typologie
+        selection_layout = QtWidgets.QHBoxLayout()
+        selection_layout.addWidget(QtWidgets.QLabel("Typologie:"))
+        self.typology_combo = QtWidgets.QComboBox()
+        self.typology_combo.currentTextChanged.connect(self._on_typology_changed)
+        selection_layout.addWidget(self.typology_combo, 1)
+        
+        typology_layout.addLayout(selection_layout)
         
         # Description
-        desc_label = QLabel("Diagramme montrant la répartition des combinaisons de contextes utilisées dans l'historique des générations")
-        desc_label.setStyleSheet("color: #666; margin: 5px;")
-        desc_label.setWordWrap(True)
-        layout.addWidget(desc_label)
+        desc_layout = QtWidgets.QVBoxLayout()
+        desc_layout.addWidget(QtWidgets.QLabel("Description:"))
+        self.typology_desc_text = QtWidgets.QTextEdit()
+        self.typology_desc_text.setMaximumHeight(80)
+        self.typology_desc_text.textChanged.connect(self._on_typology_desc_changed)
+        desc_layout.addWidget(self.typology_desc_text)
         
-        # Widget du diagramme
-        self.combination_chart = CombinationChartWidget()
-        layout.addWidget(self.combination_chart)
+        typology_layout.addLayout(desc_layout)
         
-    def on_generation_performed(self):
-        """Notifie qu'une nouvelle génération a été effectuée"""
-        self.combination_chart.on_new_generation()
-
-class TypologyManagementTab(QWidget):
-    """
-    Premier onglet : Gestion des typologies
-    """
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.database = None
-        self.init_ui()
-        self.setup_connections()
+        # Structure hiérarchique
+        structure_layout = QtWidgets.QVBoxLayout()
+        structure_layout.addWidget(QtWidgets.QLabel("Structure hiérarchique:"))
         
-    def init_ui(self):
-        """Initialise l'interface utilisateur"""
-        layout = QVBoxLayout(self)
+        # TreeWidget pour afficher la structure
+        self.structure_tree = QtWidgets.QTreeWidget()
+        self.structure_tree.setHeaderLabels(["Élément", "Type", "Exemples"])
+        self.structure_tree.itemClicked.connect(self._on_structure_item_clicked)
+        structure_layout.addWidget(self.structure_tree)
         
-        # Titre
-        title_label = QLabel("Gestion des Stratégies et Typologies de Contexte")
-        title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 10px;")
-        layout.addWidget(title_label)
+        typology_layout.addLayout(structure_layout)
         
-        # Barre de gestion des typologies
-        typology_layout = QHBoxLayout()
-        typology_layout.addWidget(QLabel("Typologie:"))
+        layout.addWidget(typology_group)
         
-        self.typology_combo = QComboBox()
-        self.typology_combo.setMinimumWidth(200)
-        typology_layout.addWidget(self.typology_combo)
+        # Boutons d'action
+        button_layout = QtWidgets.QHBoxLayout()
         
-        self.add_typology_btn = QPushButton("Nouvelle")
-        self.edit_typology_btn = QPushButton("Modifier")
-        self.delete_typology_btn = QPushButton("Supprimer")
+        new_typology_btn = QtWidgets.QPushButton("Nouvelle Typologie")
+        new_typology_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        new_typology_btn.clicked.connect(self._create_typology)
         
-        typology_layout.addWidget(self.add_typology_btn)
-        typology_layout.addWidget(self.edit_typology_btn)
-        typology_layout.addWidget(self.delete_typology_btn)
-        typology_layout.addStretch()
+        export_btn = QtWidgets.QPushButton("Exporter Structure")
+        export_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        export_btn.clicked.connect(self._export_structure)
         
-        layout.addLayout(typology_layout)
+        button_layout.addWidget(new_typology_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(export_btn)
         
-        # Splitter principal
-        main_splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(main_splitter)
-        
-        # Partie gauche - Arbre des typologies
-        left_widget = self._create_tree_section()
-        main_splitter.addWidget(left_widget)
-        
-        # Partie droite - Détails et édition
-        right_widget = self._create_details_section()
-        main_splitter.addWidget(right_widget)
-        
-        # Définir les proportions
-        main_splitter.setSizes([400, 600])
-        
-        # Barre de boutons en bas
-        button_layout = self._create_button_bar()
         layout.addLayout(button_layout)
-     
-    def set_database(self, database):
-        """Définit l'objet Database et initialise"""
-        print(f"TypologyManagementTab: Database set to {database}")  # Debug
-        self.database = database
-        if database:
-            self.load_typologies()
-        else:
-            print("Warning: Database is None in TypologyManagementTab")
-            
-    def add_typology(self):
-        """Ajoute une nouvelle typologie"""
-        # VÉRIFICATION CRITIQUE ICI
-        if not self.database:
-            QMessageBox.critical(self, "Erreur", "Base de données non initialisée")
-            print("Error: Database is None in add_typology")
-            return
-            
-        dialog = TypologyDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            name, description, is_hierarchical = dialog.get_data()
-            if not name:
-                QMessageBox.warning(self, "Erreur", "Le nom de la typologie est obligatoire")
-                return
-                
-            try:
-                # Ajouter un log pour debug
-                print(f"Attempting to add typology: {name}")
-                self.database.add_typology(name, description, is_hierarchical)
-                self.load_typologies()
-                QMessageBox.information(self, "Succès", f"Typologie '{name}' créée avec succès")
-                
-            except ValueError as e:
-                QMessageBox.warning(self, "Erreur", str(e))
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")
-                print(f"Detailed error: {e}")
-
         
-    def _create_tree_section(self):
-        """Crée la section avec l'arbre des typologies"""
-        widget = QGroupBox("Structure Hiérarchique")
-        layout = QVBoxLayout(widget)
-        
-        # Boutons de gestion de l'arbre
-        tree_buttons = QHBoxLayout()
-        
-        self.add_cluster_btn = QPushButton("Cluster")
-        self.add_cluster_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-        """)
-        
-        self.add_root_btn = QPushButton("Racine")
-        self.add_root_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-        """)
-        
-        self.add_parent_btn = QPushButton("Parent")
-        self.add_parent_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-        """)
-        
-        self.add_child_btn = QPushButton("Enfant")
-        self.add_child_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-        """)
-        
-        self.delete_item_btn = QPushButton("Supprimer")
-        self.delete_item_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-        """)
-        
-        tree_buttons.addWidget(self.add_cluster_btn)
-        tree_buttons.addWidget(self.add_root_btn)
-        tree_buttons.addWidget(self.add_parent_btn)
-        tree_buttons.addWidget(self.add_child_btn)
-        tree_buttons.addWidget(self.delete_item_btn)
-        
-        layout.addLayout(tree_buttons)
-        
-        # Arbre des typologies
-        self.tree_widget = QTreeWidget()
-        self.tree_widget.setHeaderLabels(["Nom", "Type", "ID"])
-        self.tree_widget.setColumnWidth(0, 200)
-        self.tree_widget.setColumnWidth(1, 100)
-        layout.addWidget(self.tree_widget)
-        
-        return widget
-        
-    def _create_details_section(self):
-        """Crée la section des détails et de l'édition"""
-        widget = QGroupBox("Détails et Édition")
-        layout = QVBoxLayout(widget)
-        
-        # Informations de base
-        info_layout = QVBoxLayout()
-        
-        # Nom
-        name_layout = QHBoxLayout()
-        name_layout.addWidget(QLabel("Nom:"))
-        self.name_edit = QLineEdit()
-        name_layout.addWidget(self.name_edit)
-        info_layout.addLayout(name_layout)
-        
-        # Type
-        type_layout = QHBoxLayout()
-        type_layout.addWidget(QLabel("Type:"))
-        self.type_label = QLabel("Aucun élément sélectionné")
-        type_layout.addWidget(self.type_label)
-        info_layout.addLayout(type_layout)
-        
-        # Description
-        desc_layout = QVBoxLayout()
-        desc_layout.addWidget(QLabel("Description:"))
-        self.description_edit = QTextEdit()
-        self.description_edit.setMaximumHeight(100)
-        desc_layout.addWidget(self.description_edit)
-        info_layout.addLayout(desc_layout)
-        
-        layout.addLayout(info_layout)
-        
-        # Propriétés spécifiques
-        properties_group = QGroupBox("Propriétés Spécifiques")
-        properties_layout = QVBoxLayout(properties_group)
-        
-        self.properties_edit = QTextEdit()
-        self.properties_edit.setPlaceholderText("Propriétés JSON spécifiques à ce type d'élément...")
-        properties_layout.addWidget(self.properties_edit)
-        
-        layout.addWidget(properties_group)
-        
-        # Boutons de sauvegarde
-        save_layout = QHBoxLayout()
-        self.save_item_btn = QPushButton("Sauvegarder l'élément")
-        self.reset_item_btn = QPushButton("Réinitialiser")
-        save_layout.addWidget(self.save_item_btn)
-        save_layout.addWidget(self.reset_item_btn)
-        layout.addLayout(save_layout)
-        
-        return widget
-        
-    def _create_button_bar(self):
-        """Crée la barre de boutons en bas"""
-        layout = QHBoxLayout()
-        
-        self.load_strategy_btn = QPushButton("Charger Stratégie")
-        self.load_strategy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 6px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-        """)
-        
-        self.save_strategy_btn = QPushButton("Sauvegarder Stratégie")
-        self.save_strategy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 6px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-        """)
-        
-        self.export_strategy_btn = QPushButton("Exporter")
-        self.export_strategy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 6px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-        """)
-        
-        self.import_strategy_btn = QPushButton("Importer")
-        self.import_strategy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 6px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-        """)
-        
-        layout.addWidget(self.load_strategy_btn)
-        layout.addWidget(self.save_strategy_btn)
-        layout.addWidget(self.export_strategy_btn)
-        layout.addWidget(self.import_strategy_btn)
         layout.addStretch()
         
-        return layout
-        
-    def setup_connections(self):
-        """Configure les connexions des signaux"""
-        # Connexions des boutons de l'arbre
-        self.add_cluster_btn.clicked.connect(self.add_cluster)
-        self.add_root_btn.clicked.connect(self.add_root_label)
-        self.add_parent_btn.clicked.connect(self.add_parent)
-        self.add_child_btn.clicked.connect(self.add_child)
-        self.delete_item_btn.clicked.connect(self.delete_item)
-        
-        # Connexions de l'édition
-        self.save_item_btn.clicked.connect(self.save_current_item)
-        self.reset_item_btn.clicked.connect(self.reset_current_item)
-        
-        # Connexions de la stratégie
-        self.load_strategy_btn.clicked.connect(self.load_strategy)
-        self.save_strategy_btn.clicked.connect(self.save_strategy)
-        self.export_strategy_btn.clicked.connect(self.export_strategy)
-        self.import_strategy_btn.clicked.connect(self.import_strategy)
-        
-        # Connexions des typologies
-        self.add_typology_btn.clicked.connect(self.add_typology)
-        self.edit_typology_btn.clicked.connect(self.edit_typology)
-        self.delete_typology_btn.clicked.connect(self.delete_typology)
-        self.typology_combo.currentIndexChanged.connect(self.on_typology_changed)
-        
-        # Sélection dans l'arbre
-        self.tree_widget.itemSelectionChanged.connect(self.on_item_selected)
-        
-    def load_typologies(self):
-        """Charge la liste des typologies depuis la base de données"""
-        if not self.database:
-            return
+    def _get_group_style(self):
+        """Obtenir le style pour les groupes"""
+        return """
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #bdc3c7;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2c3e50;
+            }
+        """
+    
+    def _get_button_style(self, color):
+        """Obtenir le style pour les boutons"""
+        return f"""
+            QPushButton {{
+                background-color: {color};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 6px;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background-color: {self._darken_color(color)};
+            }}
+        """
+    
+    def _darken_color(self, color, factor=0.1):
+        """Assombrir une couleur"""
+        color = color.lstrip('#')
+        rgb = tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
+        darkened = tuple(int(c * (1 - factor)) for c in rgb)
+        return '#%02x%02x%02x' % darkened
+    
+    def refresh(self):
+        """Rafraîchir les données affichées"""
+        if self.strategy_widget:
+            # Mettre à jour les informations du projet
+            self.project_name_label.setText(self.strategy_widget.strategy_data.get('project_name', 'Aucun projet'))
             
-        self.typology_combo.clear()
+            # Compter les éléments
+            typologies_count = len(self.strategy_widget.strategy_data.get('typologies', []))
+            clusters_count = sum(len(typology.get('clusters', [])) 
+                               for typology in self.strategy_widget.strategy_data.get('typologies', []))
+            
+            self.typologies_count_label.setText(str(typologies_count))
+            self.clusters_count_label.setText(str(clusters_count))
+            self.examples_count_label.setText("1000")  # Valeur d'exemple
+            
+            # Mettre à jour la liste des typologies
+            self.typology_combo.blockSignals(True)
+            self.typology_combo.clear()
+            for typology in self.strategy_widget.strategy_data.get('typologies', []):
+                self.typology_combo.addItem(typology.get('name', 'Sans nom'))
+            self.typology_combo.blockSignals(False)
+            
+            # Mettre à jour l'arbre de structure
+            self._refresh_structure_tree()
+    
+    def _refresh_structure_tree(self):
+        """Rafraîchir l'arbre de structure"""
+        self.structure_tree.clear()
         
-        try:
-            # Use the database object correctly
-            typologies = self.database.get_typologies()
+        if (self.strategy_widget.current_typology_index != -1 and 
+            self.strategy_widget.current_typology_index < len(self.strategy_widget.strategy_data.get('typologies', []))):
             
-            self.typology_combo.addItem("-- Sélectionnez une typologie --", None)
+            typology = self.strategy_widget.strategy_data['typologies'][self.strategy_widget.current_typology_index]
             
-            for typology in typologies:
-                # Handle both tuple and sqlite3.Row objects
-                if isinstance(typology, (tuple, list)) and len(typology) >= 3:
-                    name = typology[1]
-                    is_hierarchical = bool(typology[2])
-                    typology_id = typology[0]
-                elif hasattr(typology, '__getitem__'):
-                    # For sqlite3.Row objects, access by index or column name
-                    try:
-                        # Try to access by column name first
-                        name = typology['name']
-                        is_hierarchical = bool(typology['is_hierarchical'])
-                        typology_id = typology['id']
-                    except (KeyError, IndexError):
-                        # Fall back to index access
-                        name = typology[0] if len(typology) > 0 else 'Unknown'
-                        is_hierarchical = bool(typology[1]) if len(typology) > 1 else False
-                        typology_id = typology[0] if len(typology) > 0 else None
-                else:
-                    continue
+            # Créer l'item racine pour la typologie
+            typology_item = QtWidgets.QTreeWidgetItem([typology.get('name', 'Sans nom'), 'Typologie', ''])
+            self.structure_tree.addTopLevelItem(typology_item)
+            
+            # Ajouter les clusters
+            for cluster in typology.get('clusters', []):
+                cluster_item = QtWidgets.QTreeWidgetItem([cluster.get('name', 'Sans nom'), 'Cluster', '250 exemples'])
+                typology_item.addChild(cluster_item)
+                
+                # Ajouter les racines
+                for root in cluster.get('roots', []):
+                    root_item = QtWidgets.QTreeWidgetItem([root.get('name', 'Sans nom'), 'Racine', '100 exemples'])
+                    cluster_item.addChild(root_item)
                     
-                display_text = f"{name} {'(Hiérarchique)' if is_hierarchical else ''}"
-                self.typology_combo.addItem(display_text, typology_id)
-                
-        except Exception as e:
-            print(f"Erreur lors du chargement des typologies: {str(e)}")
-            self.typology_combo.addItem("-- Erreur de chargement --", None)
-
+                    # Ajouter les parents
+                    for parent in root.get('parents', []):
+                        parent_item = QtWidgets.QTreeWidgetItem([parent.get('name', 'Sans nom'), 'Parent', '50 exemples'])
+                        root_item.addChild(parent_item)
+                        
+                        # Ajouter les enfants
+                        for child in parent.get('children', []):
+                            child_item = QtWidgets.QTreeWidgetItem([child, 'Enfant', '10 exemples'])
+                            parent_item.addChild(child_item)
             
-    def on_typology_changed(self):
-        """Gère le changement de typologie sélectionnée"""
-        current_typology_id = self.typology_combo.currentData()
-        if current_typology_id:
-            self.load_strategy()
-            
-    def add_typology(self):
-        """Ajoute une nouvelle typologie"""
-        dialog = TypologyDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            name, description, is_hierarchical = dialog.get_data()
-            if not name:
-                QMessageBox.warning(self, "Erreur", "Le nom de la typologie est obligatoire")
-                return
-                
-            try:
-                self.database.add_typology(name, description, is_hierarchical)
-                self.load_typologies()
-                QMessageBox.information(self, "Succès", f"Typologie '{name}' créée avec succès")
-                
-            except ValueError as e:
-                QMessageBox.warning(self, "Erreur", str(e))
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Erreur lors de la création: {str(e)}")      
-                
-    def edit_typology(self):
-        """Modifie une typologie existante"""
-        current_id = self.typology_combo.currentData()
-        if not current_id:
-            QMessageBox.warning(self, "Erreur", "Aucune typologie sélectionnée")
-            return
-
-        try:
-            result = self.database.get_typology_details(current_id)
-
-            if result:
-                # Gestion de plusieurs formats de retour
-                if isinstance(result, (tuple, list)) and len(result) >= 3:
-                    name = result[0]
-                    description = result[1]
-                    is_hierarchical = bool(result[2])
-                elif hasattr(result, '__getitem__'):
-                    # For sqlite3.Row objects
-                    try:
-                        name = result['name']
-                        description = result['description']
-                        is_hierarchical = bool(result['is_hierarchical'])
-                    except (KeyError, IndexError):
-                        # Fall back to index access
-                        name = result[0] if len(result) > 0 else ''
-                        description = result[1] if len(result) > 1 else ''
-                        is_hierarchical = bool(result[2]) if len(result) > 2 else False
-                else:
-                    name = ''
-                    description = ''
-                    is_hierarchical = False
-
-                dialog = TypologyDialog(self, name, description, is_hierarchical)
-                if dialog.exec_() == QDialog.Accepted:
-                    name, description, is_hierarchical = dialog.get_data()
-                    if not name:
-                        QMessageBox.warning(self, "Erreur", "Le nom de la typologie est obligatoire")
-                        return
-
-                    self.database.update_typology(current_id, name, description, is_hierarchical)
-                    self.load_typologies()
-                    QMessageBox.information(self, "Succès", f"Typologie '{name}' modifiée avec succès")
-
-        except ValueError as e:
-            QMessageBox.warning(self, "Erreur", str(e))
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
-            
-    def delete_typology(self):
-        """Supprime une typologie"""
-        current_id = self.typology_combo.currentData()
-        if not current_id:
-            QMessageBox.warning(self, "Erreur", "Aucune typologie sélectionnée")
-            return
-            
-        try:
-            typology_name = self.typology_combo.currentText()
-            reply = QMessageBox.question(
-                self, "Confirmation", 
-                f"Êtes-vous sûr de vouloir supprimer la typologie '{typology_name}' ?"
-            )
-            
-            if reply == QMessageBox.Yes:
-                self.database.delete_typology(current_id)
-                self.load_typologies()
-                QMessageBox.information(self, "Succès", "Typologie supprimée avec succès")
-                
-        except ValueError as e:
-            QMessageBox.warning(self, "Erreur", str(e))
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")   
-            
-    def add_cluster(self):
-        """Ajoute un nouveau cluster"""
-        name, ok = QInputDialog.getText(self, 'Nouveau Cluster', 'Nom du cluster:')
-        if ok and name.strip():
-            if self._name_exists_at_level(name.strip(), None):
-                QMessageBox.warning(self, "Erreur", f"Un cluster nommé '{name.strip()}' existe déjà")
-                return
-                
-            item = QTreeWidgetItem(self.tree_widget)
-            item.setText(0, name.strip())
-            item.setText(1, "Cluster")
-            item.setText(2, str(self._get_next_id()))
-            item.setData(0, Qt.UserRole, {
-                "type": "cluster", 
-                "name": name.strip(),
-                "description": "",
-                "properties": {}
-            })
-            
-            self.tree_widget.setCurrentItem(item)
-            QMessageBox.information(self, "Succès", f"Cluster '{name.strip()}' créé avec succès")
-            
-    def add_root_label(self):
-        """Ajoute un libellé racine"""
-        current = self.tree_widget.currentItem()
-        if not current or current.text(1) != "Cluster":
-            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un cluster")
-            return
-            
-        name, ok = QInputDialog.getText(self, 'Nouveau Libellé Racine', 'Nom du libellé:')
-        if ok and name.strip():
-            if self._name_exists_at_level(name.strip(), current):
-                QMessageBox.warning(self, "Erreur", f"Un libellé racine nommé '{name.strip()}' existe déjà dans ce cluster")
-                return
-                
-            item = QTreeWidgetItem(current)
-            item.setText(0, name.strip())
-            item.setText(1, "Racine")
-            item.setText(2, str(self._get_next_id()))
-            item.setData(0, Qt.UserRole, {
-                "type": "root", 
-                "name": name.strip(),
-                "description": "",
-                "properties": {}
-            })
-            current.setExpanded(True)
-            self.tree_widget.setCurrentItem(item)
-            QMessageBox.information(self, "Succès", f"Libellé racine '{name.strip()}' créé avec succès")
-            
-    def add_parent(self):
-        """Ajoute un élément parent"""
-        current = self.tree_widget.currentItem()
-        if not current or current.text(1) not in ["Racine", "Parent"]:
-            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner une racine ou un parent")
-            return
-            
-        name, ok = QInputDialog.getText(self, 'Nouveau Parent', 'Nom du parent:')
-        if ok and name.strip():
-            if self._name_exists_at_level(name.strip(), current):
-                QMessageBox.warning(self, "Erreur", f"Un parent nommé '{name.strip()}' existe déjà sous cet élément")
-                return
-                
-            item = QTreeWidgetItem(current)
-            item.setText(0, name.strip())
-            item.setText(1, "Parent")
-            item.setText(2, str(self._get_next_id()))
-            item.setData(0, Qt.UserRole, {
-                "type": "parent", 
-                "name": name.strip(),
-                "description": "",
-                "properties": {}
-            })
-            current.setExpanded(True)
-            self.tree_widget.setCurrentItem(item)
-            QMessageBox.information(self, "Succès", f"Parent '{name.strip()}' créé avec succès")
-            
-    def add_child(self):
-        """Ajoute un élément enfant"""
-        current = self.tree_widget.currentItem()
-        if not current or current.text(1) != "Parent":
-            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un parent")
-            return
-            
-        name, ok = QInputDialog.getText(self, 'Nouvel Enfant', 'Nom de l\'enfant:')
-        if ok and name.strip():
-            if self._name_exists_at_level(name.strip(), current):
-                QMessageBox.warning(self, "Erreur", f"Un enfant nommé '{name.strip()}' existe déjà sous ce parent")
-                return
-                
-            item = QTreeWidgetItem(current)
-            item.setText(0, name.strip())
-            item.setText(1, "Enfant")
-            item.setText(2, str(self._get_next_id()))
-            item.setData(0, Qt.UserRole, {
-                "type": "child", 
-                "name": name.strip(),
-                "description": "",
-                "properties": {}
-            })
-            current.setExpanded(True)
-            self.tree_widget.setCurrentItem(item)
-            QMessageBox.information(self, "Succès", f"Enfant '{name.strip()}' créé avec succès")
-            
-    def delete_item(self):
-        """Supprime l'élément sélectionné"""
-        current = self.tree_widget.currentItem()
-        if not current:
-            return
-            
-        child_count = current.childCount()
-        if child_count > 0:
-            reply = QMessageBox.question(
-                self, 'Confirmer la suppression', 
-                f'L\'élément "{current.text(0)}" contient {child_count} enfant(s). ' 
-                f'Voulez-vous vraiment le supprimer avec tous ses enfants ?'
-            )
-        else:
-            reply = QMessageBox.question(
-                self, 'Confirmer la suppression', 
-                f'Êtes-vous sûr de vouloir supprimer "{current.text(0)}" ?'
-            )
-            
-        if reply == QMessageBox.Yes:
-            parent = current.parent()
-            if parent:
-                parent.removeChild(current)
-            else:
-                self.tree_widget.takeTopLevelItem(self.tree_widget.indexOfTopLevelItem(current))
-            QMessageBox.information(self, "Succès", "Élément supprimé avec succès")
-                
-    def on_item_selected(self):
-        """Gère la sélection d'un élément dans l'arbre"""
-        current = self.tree_widget.currentItem()
-        if not current:
-            self._clear_details()
-            return
-            
-        data = current.data(0, Qt.UserRole)
-        if data:
-            self.name_edit.setText(data.get("name", ""))
-            self.type_label.setText(data.get("type", ""))
-            self.description_edit.setText(data.get("description", ""))
-            self.properties_edit.setText(json.dumps(data.get("properties", {}), indent=2))
-            
-    def _clear_details(self):
-        """Vide les champs de détails"""
-        self.name_edit.clear()
-        self.type_label.setText("Aucun élément sélectionné")
-        self.description_edit.clear()
-        self.properties_edit.clear()
-        
-    def save_current_item(self):
-        """Sauvegarde l'élément actuellement sélectionné"""
-        current = self.tree_widget.currentItem()
-        if not current:
-            return
-            
-        data = current.data(0, Qt.UserRole) or {}
-        new_name = self.name_edit.text().strip()
-        
-        if new_name != data.get("name", "") and new_name:
-            parent = current.parent()
-            if self._name_exists_at_level(new_name, parent, exclude_item=current):
-                QMessageBox.warning(self, "Erreur", f"Le nom '{new_name}' existe déjà à ce niveau")
-                return
-        
-        data["name"] = new_name
-        data["description"] = self.description_edit.toPlainText()
-        
-        try:
-            properties_text = self.properties_edit.toPlainText()
-            if properties_text.strip():
-                data["properties"] = json.loads(properties_text)
-            else:
-                data["properties"] = {}
-        except json.JSONDecodeError:
-            QMessageBox.warning(self, "Erreur", "Format JSON invalide dans les propriétés")
-            return
-            
-        current.setData(0, Qt.UserRole, data)
-        current.setText(0, data["name"])
-        
-        QMessageBox.information(self, "Succès", "Élément sauvegardé avec succès")
-        
-    def reset_current_item(self):
-        """Réinitialise les champs de l'élément actuel"""
-        self.on_item_selected()
-        
-    def save_strategy(self):
-        """Sauvegarde la stratégie complète dans la base de données"""
-        if not self.database:
-            QMessageBox.warning(self, "Erreur", "Aucune base de données configurée")
-            return
-        
-        current_typology_id = self.typology_combo.currentData()
-        if not current_typology_id:
-            QMessageBox.warning(self, "Erreur", "Aucune typologie sélectionnée pour la sauvegarde")
-            return
-
-        try:
-            self.database.clear_strategy_items(current_typology_id)
-            self._save_tree_items(None, self.tree_widget.invisibleRootItem(), current_typology_id)
-            
-            QMessageBox.information(self, "Succès", "Stratégie sauvegardée avec succès")
-            self.strategy_saved.emit()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors de la sauvegarde: {str(e)}")
-            
-    def _save_tree_items(self, parent_id, parent_item, typology_id):
-        """Sauvegarde récursivement les éléments de l'arbre"""
-        for i in range(parent_item.childCount()):
-            item = parent_item.child(i)
-            data = item.data(0, Qt.UserRole) or {}
-            
-            item_id = self.database.add_strategy_item(
-                data.get("name", ""),
-                data.get("type", ""),
-                parent_id,
-                data.get("description", ""),
-                json.dumps(data.get("properties", {})),
-                typology_id
-            )
-            
-            item.setText(2, str(item_id))
-            
-            self._save_tree_items(item_id, item, typology_id)
-            
-    def load_strategy(self):
-        """Charge une stratégie depuis la base de données"""
-        if not self.database:
-            QMessageBox.warning(self, "Erreur", "Aucune base de données configurée")
-            return
-            
-        current_typology_id = self.typology_combo.currentData()
-        if not current_typology_id:
-            self.tree_widget.clear()
-            return
-
-        try:
-            self.tree_widget.clear()
-            items = self.database.get_strategy_items(current_typology_id)
-            
-            if not items:
-                return
-                
-            item_map = {}
-            root_items = []
-            
-            for item_data in items:
-                # Handle sqlite3.Row objects
-                try:
-                    item_id = item_data['id']
-                    parent_id = item_data['parent_id']
-                    name = item_data['name']
-                    item_type = item_data['type']
-                    description = item_data['description']
-                    properties = item_data['properties']
-                except (KeyError, TypeError):
-                    # Fall back to index access if it's a tuple
-                    if isinstance(item_data, (tuple, list)) and len(item_data) >= 6:
-                        item_id = item_data[0]
-                        name = item_data[1]
-                        item_type = item_data[2]
-                        parent_id = item_data[3]
-                        description = item_data[4]
-                        properties = item_data[5]
-                    else:
-                        continue
-                
-                item = QTreeWidgetItem()
-                item.setText(0, name)
-                item.setText(1, item_type)
-                item.setText(2, str(item_id))
-                item.setData(0, Qt.UserRole, {
-                    "type": item_type,
-                    "name": name,
-                    "description": description,
-                    "properties": json.loads(properties) if properties else {}
-                })
-                
-                item_map[item_id] = item
-                
-                if parent_id is None:
-                    root_items.append(item)
-                else:
-                    parent_item = item_map.get(parent_id)
-                    if parent_item:
-                        parent_item.addChild(item)
-                    else:
-                        root_items.append(item)
-            
-            self.tree_widget.addTopLevelItems(root_items)
-            self.tree_widget.expandAll()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement: {str(e)}")
-                
-    def export_strategy(self):
-        """Exporte la stratégie vers un fichier JSON avec options avancées"""
-        if self.tree_widget.topLevelItemCount() == 0:
-            QMessageBox.warning(self, "Erreur", "Aucune stratégie à exporter")
-            return
-            
-        # Dialogue pour choisir le type d'export
-        export_type = self._choose_export_type()
-        if not export_type:
-            return
-            
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "Exporter la stratégie", "", "JSON Files (*.json)"
-        )
-        
-        if filename:
-            try:
-                if export_type == "full":
-                    strategy_data = self._export_full_tree()
-                elif export_type == "partial":
-                    strategy_data = self._export_partial_tree()
-                elif export_type == "template":
-                    strategy_data = self._export_with_template()
-                else:
-                    return
-                
-                with open(filename, 'w', encoding='utf-8') as f:
-                    json.dump(strategy_data, f, indent=2, ensure_ascii=False)
-                    
-                QMessageBox.information(self, "Succès", "Stratégie exportée avec succès")
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
+            # Développer tout l'arbre
+            self.structure_tree.expandAll()
     
-    def _choose_export_type(self):
-        """Dialogue pour choisir le type d'export"""
-        items = [
-            "Export complet (tout l'arbre)",
-            "Export partiel (sélection seulement)", 
-            "Export avec template"
-        ]
-        
-        item, ok = QInputDialog.getItem(
-            self, "Type d'export", "Choisissez le type d'export:", items, 0, False
-        )
-        
-        if ok:
-            if item == items[0]:
-                return "full"
-            elif item == items[1]:
-                return "partial"
-            elif item == items[2]:
-                return "template"
-        return None
-    
-    def _export_full_tree(self):
-        """Exporte l'arbre complet"""
-        return self._export_tree_to_json(self.tree_widget.invisibleRootItem())
-    
-    def _export_partial_tree(self):
-        """Exporte seulement la partie sélectionnée de l'arbre"""
-        current = self.tree_widget.currentItem()
-        if not current:
-            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un élément à exporter")
-            return None
-            
-        # Demander confirmation
-        reply = QMessageBox.question(
-            self, "Export partiel",
-            f"Exporter l'élément '{current.text(0)}' et tous ses enfants ?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            return self._export_single_item_to_json(current)
-        return None
-    
-    def _export_with_template(self):
-        """Exporte avec un template prédéfini"""
-        dialog = ExportTemplateDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            template = dialog.get_selected_template()
-            return self._export_tree_to_json(
-                self.tree_widget.invisibleRootItem(),
-                template
-            )
-        return None
-    
-    def _export_tree_to_json(self, root_item, template=None):
-        """Exporte récursivement l'arbre en JSON avec template"""
-        if template is None:
-            template = ExportTemplateDialog.TEMPLATES["complet"]
-            
-        items = []
-        
-        for i in range(root_item.childCount()):
-            item = root_item.child(i)
-            items.append(self._export_single_item_to_json(item, template))
-            
-        return items
-    
-    def _export_single_item_to_json(self, item, template=None):
-        """Exporte un seul élément avec ses enfants"""
-        if template is None:
-            template = ExportTemplateDialog.TEMPLATES["complet"]
-            
-        data = item.data(0, Qt.UserRole) or {}
-        
-        item_data = {}
-        
-        # Nom et type toujours inclus
-        item_data["name"] = data.get("name", "")
-        item_data["type"] = data.get("type", "")
-        
-        # Champs conditionnels
-        if template["include_descriptions"]:
-            item_data["description"] = data.get("description", "")
-            
-        if template["include_properties"]:
-            item_data["properties"] = data.get("properties", {})
-            
-        if template["include_ids"]:
-            item_data["id"] = item.text(2)
-        
-        # Enfants
-        children = []
-        for i in range(item.childCount()):
-            child = item.child(i)
-            children.append(self._export_single_item_to_json(child, template))
-            
-        if children:
-            item_data["children"] = children
-            
-        return item_data
-    
-    def import_strategy(self):
-        """Importe une stratégie depuis un fichier JSON avec options avancées"""
-        filename, _ = QFileDialog.getOpenFileName(
-            self, "Importer une stratégie", "", "JSON Files (*.json)"
-        )
-        
-        if not filename:
+    def _on_typology_changed(self, typology_name):
+        """Gérer le changement de typologie"""
+        if not typology_name:
             return
             
-        # Valider le fichier d'abord
-        errors, warnings = StrategyValidator.validate_strategy_file(filename)
-        
-        if errors:
-            error_msg = "Le fichier contient des erreurs :\n\n" + "\n".join(errors)
-            QMessageBox.critical(self, "Erreur de validation", error_msg)
-            return
-            
-        if warnings:
-            warning_msg = "Avertissements :\n\n" + "\n".join(warnings)
-            QMessageBox.warning(self, "Avertissements", warning_msg)
-        
-        # Choisir le mode d'import
-        import_mode = self._choose_import_mode()
-        if not import_mode:
-            return
-            
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                strategy_data = json.load(f)
-                
-            if import_mode == "replace":
-                self._import_replace(strategy_data)
-            elif import_mode == "merge":
-                self._import_merge(strategy_data)
-            elif import_mode == "append":
-                self._import_append(strategy_data)
-                
-            QMessageBox.information(self, "Succès", "Stratégie importée avec succès")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'import: {str(e)}")
-    
-    def _choose_import_mode(self):
-        """Dialogue pour choisir le mode d'import"""
-        items = [
-            "Remplacer (écrase la stratégie actuelle)",
-            "Fusionner (combine avec la stratégie actuelle)",
-            "Ajouter (ajoute à la fin de l'arbre)"
-        ]
-        
-        item, ok = QInputDialog.getItem(
-            self, "Mode d'import", "Choisissez le mode d'import:", items, 0, False
-        )
-        
-        if ok:
-            if item == items[0]:
-                return "replace"
-            elif item == items[1]:
-                return "merge"
-            elif item == items[2]:
-                return "append"
-        return None
-    
-    def _import_replace(self, strategy_data):
-        """Remplace complètement la stratégie actuelle"""
-        self.tree_widget.clear()
-        self._import_tree_from_json(strategy_data, self.tree_widget.invisibleRootItem())
-        self.tree_widget.expandAll()
-    
-    def _import_merge(self, strategy_data):
-        """Fusionne avec la stratégie existante"""
-        conflicts = self._find_import_conflicts(strategy_data)
-        
-        if conflicts:
-            # Résoudre les conflits
-            dialog = ImportConflictDialog(self, conflicts)
-            if dialog.exec_() == QDialog.Accepted:
-                resolutions = dialog.get_resolutions()
-                self._import_with_resolutions(strategy_data, resolutions)
-            else:
-                return  # Annulé par l'utilisateur
-        else:
-            # Pas de conflits, import simple
-            self._import_tree_from_json(strategy_data, self.tree_widget.invisibleRootItem())
-            
-        self.tree_widget.expandAll()
-    
-    def _import_append(self, strategy_data):
-        """Ajoute à la fin de l'arbre existant"""
-        root = self.tree_widget.invisibleRootItem()
-        self._import_tree_from_json(strategy_data, root)
-        self.tree_widget.expandAll()
-    
-    def _find_import_conflicts(self, strategy_data):
-        """Trouve les conflits entre les données importées et l'arbre existant"""
-        conflicts = []
-        existing_names = self._get_all_names(self.tree_widget.invisibleRootItem())
-        
-        def check_conflicts(items, path=""):
-            for item in items:
-                full_path = f"{path}/{item['name']}" if path else item['name']
-                
-                if item['name'] in existing_names:
-                    conflicts.append({
-                        'name': item['name'],
-                        'type': item.get('type', 'unknown'),
-                        'path': full_path
-                    })
-                
-                if 'children' in item:
-                    check_conflicts(item['children'], full_path)
-        
-        check_conflicts(strategy_data)
-        return conflicts
-    
-    def _get_all_names(self, parent_item):
-        """Récupère tous les noms de l'arbre"""
-        names = set()
-        
-        for i in range(parent_item.childCount()):
-            item = parent_item.child(i)
-            names.add(item.text(0))
-            names.update(self._get_all_names(item))
-            
-        return names
-    
-    def _import_with_resolutions(self, strategy_data, resolutions):
-        """Importe avec résolution des conflits"""
-        def import_resolved(items, parent_item):
-            for item_data in items:
-                resolution = resolutions.get(item_data['name'], 'rename')
-                
-                if resolution == 'skip':
-                    continue  # Ignorer cet élément
-                    
-                # Appliquer la résolution
-                if resolution == 'rename':
-                    # Trouver un nom unique
-                    base_name = item_data['name']
-                    new_name = self._find_unique_name(base_name, parent_item)
-                    item_data['name'] = new_name
-                
-                # Créer l'élément
-                item = QTreeWidgetItem(parent_item)
-                item.setText(0, item_data['name'])
-                item.setText(1, item_data.get('type', ''))
-                item.setText(2, str(self._get_next_id()))
-                item.setData(0, Qt.UserRole, {
-                    "type": item_data.get('type', ''),
-                    "name": item_data['name'],
-                    "description": item_data.get('description', ''),
-                    "properties": item_data.get('properties', {})
-                })
-                
-                # Importer les enfants récursivement
-                if 'children' in item_data:
-                    import_resolved(item_data['children'], item)
-        
-        import_resolved(strategy_data, self.tree_widget.invisibleRootItem())
-    
-    def _find_unique_name(self, base_name, parent_item):
-        """Trouve un nom unique en ajoutant un suffixe numérique"""
-        existing_names = set()
-        
-        if parent_item is None:
-            # Niveau racine
-            for i in range(self.tree_widget.topLevelItemCount()):
-                existing_names.add(self.tree_widget.topLevelItem(i).text(0))
-        else:
-            # Niveau enfant
-            for i in range(parent_item.childCount()):
-                existing_names.add(parent_item.child(i).text(0))
-        
-        if base_name not in existing_names:
-            return base_name
-            
-        # Chercher un nom unique
-        counter = 1
-        while True:
-            new_name = f"{base_name}_{counter}"
-            if new_name not in existing_names:
-                return new_name
-            counter += 1
-    
-    def _import_tree_from_json(self, items_data, parent_item):
-        """Importe récursivement l'arbre depuis JSON (version améliorée)"""
-        progress = QProgressDialog("Import en cours...", "Annuler", 0, len(items_data), self)
-        progress.setWindowModality(Qt.WindowModal)
-        
-        for i, item_data in enumerate(items_data):
-            if progress.wasCanceled():
+        for i, typology in enumerate(self.strategy_widget.strategy_data.get('typologies', [])):
+            if typology.get('name') == typology_name:
+                self.strategy_widget.current_typology_index = i
+                self.typology_desc_text.blockSignals(True)
+                self.typology_desc_text.setText(typology.get('description', ''))
+                self.typology_desc_text.blockSignals(False)
+                self._refresh_structure_tree()
                 break
-                
-            progress.setValue(i)
-            progress.setLabelText(f"Import de {item_data.get('name', 'élément')}...")
-            
-            item = QTreeWidgetItem(parent_item)
-            item.setText(0, item_data.get("name", ""))
-            item.setText(1, item_data.get("type", ""))
-            item.setText(2, str(self._get_next_id()))
-            item.setData(0, Qt.UserRole, {
-                "type": item_data.get("type", ""),
-                "name": item_data.get("name", ""),
-                "description": item_data.get("description", ""),
-                "properties": item_data.get("properties", {})
-            })
-            
-            children = item_data.get("children", [])
-            if children:
-                self._import_tree_from_json(children, item)
-                
-        progress.setValue(len(items_data))
-                
-    def _name_exists_at_level(self, name, parent_item, exclude_item=None):
-        """Vérifie si un nom existe déjà au même niveau"""
-        if parent_item is None:
-            items = [self.tree_widget.topLevelItem(i) for i in range(self.tree_widget.topLevelItemCount())]
-        else:
-            items = [parent_item.child(i) for i in range(parent_item.childCount())]
-            
-        for item in items:
-            if item == exclude_item:
-                continue
-            if item.text(0) == name:
-                return True
-        return False
-        
-    def _get_next_id(self):
-        """Génère un ID temporaire pour les nouveaux éléments"""
-        max_id = 0
-        all_items = self._get_all_items(self.tree_widget.invisibleRootItem())
-        for item in all_items:
-            try:
-                item_id = int(item.text(2))
-                max_id = max(max_id, item_id)
-            except ValueError:
-                pass
-        return max_id + 1
-        
-    def _get_all_items(self, parent_item):
-        """Récupère tous les éléments de l'arbre"""
-        items = []
-        for i in range(parent_item.childCount()):
-            item = parent_item.child(i)
-            items.append(item)
-            items.extend(self._get_all_items(item))
-        return items
-
-class StrategyWidget(QWidget):
-    """
-    Widget principal pour la gestion des stratégies et typologies
-    """
     
-    strategy_saved = pyqtSignal()
+    def _on_typology_desc_changed(self):
+        """Gérer le changement de description"""
+        if self.strategy_widget.current_typology_index != -1:
+            typology = self.strategy_widget.strategy_data['typologies'][self.strategy_widget.current_typology_index]
+            typology['description'] = self.typology_desc_text.toPlainText()
+    
+    def _on_structure_item_clicked(self, item, column):
+        """Gérer le clic sur un élément de la structure"""
+        # Émettre un signal pour mettre à jour le camembert
+        element_type = item.text(1)
+        element_name = item.text(0)
+        
+        # Déterminer le niveau hiérarchique
+        cluster = None
+        root = None
+        parent = None
+        
+        if element_type == 'Cluster':
+            cluster = element_name
+        elif element_type == 'Racine':
+            cluster = item.parent().text(0) if item.parent() else None
+            root = element_name
+        elif element_type == 'Parent':
+            root_item = item.parent()
+            if root_item:
+                cluster = root_item.parent().text(0) if root_item.parent() else None
+                root = root_item.text(0)
+            parent = element_name
+        
+        # Émettre le signal de sélection hiérarchique
+        self.hierarchy_selection_changed.emit(cluster, root, parent)
+    
+    def set_hierarchy_selection(self, cluster, root, parent):
+        """Définir la sélection hiérarchique depuis l'extérieur"""
+        # Cette méthode peut être utilisée pour synchroniser la sélection
+        pass
+    
+    def _create_typology(self):
+        """Créer une nouvelle typologie"""
+        self.strategy_widget._create_typology()
+        self.refresh()
+    
+    def _export_structure(self):
+        """Exporter la structure hiérarchique"""
+        try:
+            filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, "Exporter la structure", "", "JSON Files (*.json)"
+            )
+            if filename:
+                if not filename.endswith('.json'):
+                    filename += '.json'
+                
+                # Exporter les données de stratégie
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(self.strategy_widget.strategy_data, f, ensure_ascii=False, indent=2)
+                
+                QtWidgets.QMessageBox.information(self, "Succès", "Structure exportée avec succès!")
+                
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
+
+class StrategyWidget(QtWidgets.QWidget):
+    """
+    Widget pour la gestion des stratégies de typologies de contexte avec structure hiérarchique
+    """
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.database = None
-        self.init_ui()
         
-    def set_database(self, database):
-        """Définit l'objet Database pour tous les onglets"""
-        self.database = database
-        if self.typology_tab:
-            self.typology_tab.set_database(database)
-        if self.analysis_tab:
-            self.analysis_tab.set_database(database)
+        # Structure de données pour les typologies
+        self.strategy_data = {
+            'project_name': '',
+            'typologies': []
+        }
         
-    def init_ui(self):
-        """Initialise l'interface utilisateur"""
-        layout = QVBoxLayout(self)
+        # Indices de sélection actuels
+        self.current_typology_index = -1
+        self.current_cluster_index = -1
+        self.current_root_index = -1
+        self.current_parent_index = -1
+        self.current_child_index = -1
         
-        # Onglets
-        self.tab_widget = QTabWidget()
+        self._init_ui()
+        self._load_default_data()
+
+    def _init_ui(self):
+        """Initialiser l'interface utilisateur"""
+        main_layout = QtWidgets.QHBoxLayout(self)
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+
+        # Conteneur gauche pour les sections 1, 2 et 3
+        left_container = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_container)
+        left_layout.setSpacing(15)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Section 1: Sélection du profil de projet
+        project_section = self._create_project_section()
+        left_layout.addWidget(project_section)
+
+        # Section 2: Détails du projet
+        project_details_section = self._create_project_details_section()
+        left_layout.addWidget(project_details_section)
+
+        # Section 3: Typologie
+        typology_section = self._create_typology_section()
+        left_layout.addWidget(typology_section)
+
+        # Espace flexible pour pousser les sections vers le haut
+        left_layout.addStretch(1)
+
+        # Conteneur droit pour la section 4 (plus large)
+        right_container = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Section 4: Gestion des typologies de contexte avec onglets
+        context_typology_section = self._create_context_typology_section()
+        right_layout.addWidget(context_typology_section)
+
+        # Ajouter les conteneurs gauche et droit au layout principal
+        main_layout.addWidget(left_container, 1)  # 1/3 de l'espace
+        main_layout.addWidget(right_container, 2)  # 2/3 de l'espace
         
-        # Premier onglet - Gestion des typologies
-        self.typology_tab = TypologyManagementTab()
-        self.tab_widget.addTab(self.typology_tab, "Gestion des Typologies")
+    def _get_group_style(self):
+        """Obtenir le style pour les groupes"""
+        return """
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #bdc3c7;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2c3e50;
+            }
+        """
+
+    def _get_combo_style(self):
+        """Obtenir le style pour les combobox"""
+        return """
+            QComboBox {
+                padding: 5px;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QComboBox:focus {
+                border-color: #3498db;
+            }
+        """
+
+    def _get_list_style(self):
+        """Obtenir le style pour les listes"""
+        return """
+            QListWidget {
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: white;
+                padding: 5px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #ecf0f1;
+            }
+            QListWidget::item:selected {
+                background-color: #3498db;
+                color: white;
+            }
+        """
+
+    def _get_button_style(self, color):
+        """Obtenir le style pour les boutons"""
+        return f"""
+            QPushButton {{
+                background-color: {color};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 6px;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background-color: {self._darken_color(color)};
+            }}
+        """
+
+    def _darken_color(self, color, factor=0.1):
+        """Assombrir une couleur"""
+        color = color.lstrip('#')
+        rgb = tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
+        darkened = tuple(int(c * (1 - factor)) for c in rgb)
+        return '#%02x%02x%02x' % darkened
+
+    def _create_project_section(self):
+        """Créer la section de sélection du projet"""
+        group = QtWidgets.QGroupBox("Section 1: Sélection du profil de projet")
+        group.setStyleSheet(self._get_group_style())
+        layout = QtWidgets.QHBoxLayout(group)
         
-        # Deuxième onglet - Analyse de représentativité
-        self.analysis_tab = StrategyAnalysisTab()
-        self.tab_widget.addTab(self.analysis_tab, "Analyse de Représentativité")
+        # Liste déroulante des projets
+        self.project_combo = QtWidgets.QComboBox()
+        self.project_combo.setStyleSheet(self._get_combo_style())
+        self.project_combo.currentTextChanged.connect(self._on_project_changed)
         
-        layout.addWidget(self.tab_widget)
+        # Bouton créer un projet
+        create_project_btn = QtWidgets.QPushButton("➕ Créer un projet")
+        create_project_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        create_project_btn.clicked.connect(self._create_project)
         
-    def on_generation_performed(self):
-        """Notifie qu'une nouvelle génération a été effectuée"""
-        self.analysis_tab.on_generation_performed()
+        layout.addWidget(QtWidgets.QLabel("Projet:"))
+        layout.addWidget(self.project_combo, 1)
+        layout.addWidget(create_project_btn)
+        
+        return group
+
+    def _create_project_details_section(self):
+        """Créer la section des détails du projet"""
+        group = QtWidgets.QGroupBox("Section 2: Détails du projet")
+        group.setStyleSheet(self._get_group_style())
+        layout = QtWidgets.QHBoxLayout(group)
+        
+        # Nom du projet
+        self.project_name_label = QtWidgets.QLabel("Aucun projet sélectionné")
+        self.project_name_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        
+        # Boutons d'action
+        edit_project_btn = QtWidgets.QPushButton("✏️ Modifier")
+        edit_project_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        edit_project_btn.clicked.connect(self._edit_project)
+        
+        delete_project_btn = QtWidgets.QPushButton("🗑️ Supprimer")
+        delete_project_btn.setStyleSheet(self._get_button_style("#e74c3c"))
+        delete_project_btn.clicked.connect(self._delete_project)
+        
+        layout.addWidget(self.project_name_label, 1)
+        layout.addWidget(edit_project_btn)
+        layout.addWidget(delete_project_btn)
+        
+        return group
+
+    def _create_typology_section(self):
+        """Créer la section de typologie"""
+        group = QtWidgets.QGroupBox("Section 3: Typologie")
+        group.setStyleSheet(self._get_group_style())
+        layout = QtWidgets.QHBoxLayout(group)
+        
+        # Liste déroulante des typologies
+        self.typology_combo = QtWidgets.QComboBox()
+        self.typology_combo.setStyleSheet(self._get_combo_style())
+        self.typology_combo.currentTextChanged.connect(self._on_typology_changed)
+        
+        # Bouton créer une typologie
+        create_typology_btn = QtWidgets.QPushButton("➕ Créer une typologie")
+        create_typology_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        create_typology_btn.clicked.connect(self._create_typology)
+        
+        layout.addWidget(QtWidgets.QLabel("Typologie:"))
+        layout.addWidget(self.typology_combo, 1)
+        layout.addWidget(create_typology_btn)
+        
+        return group
+
+    def _create_context_typology_section(self):
+        """Créer la section de gestion des typologies de contexte avec onglets"""
+        group = QtWidgets.QGroupBox("Section 4: Gestion des typologies de contexte")
+        group.setStyleSheet(self._get_group_style())
+        
+        main_layout = QtWidgets.QVBoxLayout(group)
+        
+        # Widget à onglets
+        self.tab_widget = QtWidgets.QTabWidget()
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #bdc3c7;
+                border-radius: 8px;
+                background-color: white;
+            }
+            QTabBar::tab {
+                background-color: #ecf0f1;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: %s;
+                color: white;
+            }
+        """ % Theme.SECONDARY_COLOR)
+        
+        # Nouvel onglet: Projet et Typologie
+        self.project_typology_tab = ProjectTypologyTab(self)
+        self.tab_widget.addTab(self.project_typology_tab, "📋 Projet & Typologie")
+        
+        # Nouvel onglet: Camembert de répartition
+        self.pie_chart_tab = self._create_pie_chart_tab()
+        self.tab_widget.addTab(self.pie_chart_tab, "📊 Répartition Dataset")
+        
+        # Sous-section 1: Clusters
+        cluster_tab = self._create_cluster_tab()
+        self.tab_widget.addTab(cluster_tab, "📊 Clusters")
+        
+        # Sous-section 2: Racines
+        root_tab = self._create_root_tab()
+        self.tab_widget.addTab(root_tab, "🌳 Racines")
+        
+        # Sous-section 3: Parents
+        parent_tab = self._create_parent_tab()
+        self.tab_widget.addTab(parent_tab, "👨‍👩‍👧 Parents")
+        
+        # Sous-section 4: Enfants
+        child_tab = self._create_child_tab()
+        self.tab_widget.addTab(child_tab, "👶 Enfants")
+        
+        main_layout.addWidget(self.tab_widget)
+        
+        # Bouton de sauvegarde dans la section 4
+        save_btn = QtWidgets.QPushButton("💾 Sauvegarder la stratégie")
+        save_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        save_btn.clicked.connect(self._save_strategy)
+        main_layout.addWidget(save_btn)
+        
+        return group
+
+    def _create_pie_chart_tab(self):
+        """Créer l'onglet avec le camembert de répartition (version originale)"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Titre et description
+        header_layout = QtWidgets.QVBoxLayout()
+        title_label = QtWidgets.QLabel("Répartition du Dataset par Typologie de Contexte")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
+        header_layout.addWidget(title_label)
+        
+        desc_label = QtWidgets.QLabel(
+            "Le camembert montre la répartition des exemples par batch selon la typologie de contexte. "
+            "Cliquez sur les éléments de la hiérarchie pour filtrer l'affichage."
+        )
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("color: #7f8c8d; margin-bottom: 10px;")
+        header_layout.addWidget(desc_label)
+        
+        layout.addLayout(header_layout)
+        
+        # Conteneur pour le camembert et les contrôles (côte à côte)
+        content_layout = QtWidgets.QHBoxLayout()
+        
+        # Camembert à GAUCHE
+        self.pie_chart = PieChartWidget()
+        content_layout.addWidget(self.pie_chart, 2)  # 2/3 de l'espace à gauche
+        
+        # Contrôles à DROITE
+        controls_layout = QtWidgets.QVBoxLayout()
+        
+        # Informations de sélection
+        info_group = QtWidgets.QGroupBox("Sélection Actuelle")
+        info_layout = QtWidgets.QVBoxLayout(info_group)
+        
+        self.selection_info = QtWidgets.QLabel("Aucune sélection")
+        self.selection_info.setWordWrap(True)
+        info_layout.addWidget(self.selection_info)
+        
+        controls_layout.addWidget(info_group)
+        
+        # Statistiques
+        stats_group = QtWidgets.QGroupBox("Statistiques")
+        stats_layout = QtWidgets.QGridLayout(stats_group)
+        
+        stats_layout.addWidget(QtWidgets.QLabel("Total dataset:"), 0, 0)
+        self.total_dataset_label = QtWidgets.QLabel("1000 exemples")
+        stats_layout.addWidget(self.total_dataset_label, 0, 1)
+        
+        stats_layout.addWidget(QtWidgets.QLabel("Batches:"), 1, 0)
+        self.batches_count_label = QtWidgets.QLabel("3 batches")
+        stats_layout.addWidget(self.batches_count_label, 1, 1)
+        
+        stats_layout.addWidget(QtWidgets.QLabel("Typologies:"), 2, 0)
+        self.typologies_stats_label = QtWidgets.QLabel("1 typologie")
+        stats_layout.addWidget(self.typologies_stats_label, 2, 1)
+        
+        controls_layout.addWidget(stats_group)
+        
+        # Boutons de contrôle
+        buttons_layout = QtWidgets.QVBoxLayout()
+        
+        reset_btn = QtWidgets.QPushButton("Réinitialiser la vue")
+        reset_btn.clicked.connect(self._reset_pie_chart_view)
+        buttons_layout.addWidget(reset_btn)
+        
+        export_chart_btn = QtWidgets.QPushButton("Exporter le graphique")
+        export_chart_btn.clicked.connect(self._export_pie_chart)
+        buttons_layout.addWidget(export_chart_btn)
+        
+        controls_layout.addLayout(buttons_layout)
+        controls_layout.addStretch()
+        
+        content_layout.addLayout(controls_layout, 1)  # 1/3 de l'espace à droite
+        layout.addLayout(content_layout)
+        
+        # Connexions des signaux
+        self.project_typology_tab.hierarchy_selection_changed.connect(self._on_hierarchy_selection_changed)
+        self.pie_chart.segment_clicked.connect(self._on_pie_segment_clicked)
+        
+        return widget
+
+    def _create_cluster_tab(self):
+        """Créer l'onglet Clusters"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Liste des clusters
+        self.cluster_list = QtWidgets.QListWidget()
+        self.cluster_list.setStyleSheet(self._get_list_style())
+        self.cluster_list.currentRowChanged.connect(self._on_cluster_selected)
+        layout.addWidget(self.cluster_list)
+        
+        # Boutons d'action
+        btn_layout = QtWidgets.QHBoxLayout()
+        add_cluster_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_cluster_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        add_cluster_btn.clicked.connect(self._add_cluster)
+        
+        edit_cluster_btn = QtWidgets.QPushButton("✏️ Modifier")
+        edit_cluster_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        edit_cluster_btn.clicked.connect(self._edit_cluster)
+        
+        delete_cluster_btn = QtWidgets.QPushButton("🗑️ Supprimer")
+        delete_cluster_btn.setStyleSheet(self._get_button_style("#e74c3c"))
+        delete_cluster_btn.clicked.connect(self._delete_cluster)
+        
+        btn_layout.addWidget(add_cluster_btn)
+        btn_layout.addWidget(edit_cluster_btn)
+        btn_layout.addWidget(delete_cluster_btn)
+        layout.addLayout(btn_layout)
+        
+        return widget
+
+    def _create_root_tab(self):
+        """Créer l'onglet Racines"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Sélection du cluster
+        cluster_layout = QtWidgets.QHBoxLayout()
+        cluster_layout.addWidget(QtWidgets.QLabel("Cluster:"))
+        self.root_cluster_combo = QtWidgets.QComboBox()
+        self.root_cluster_combo.currentTextChanged.connect(self._on_root_cluster_changed)
+        cluster_layout.addWidget(self.root_cluster_combo, 1)
+        layout.addLayout(cluster_layout)
+        
+        # Liste des racines
+        self.root_list = QtWidgets.QListWidget()
+        self.root_list.setStyleSheet(self._get_list_style())
+        self.root_list.currentRowChanged.connect(self._on_root_selected)
+        layout.addWidget(self.root_list)
+        
+        # Boutons d'action
+        btn_layout = QtWidgets.QHBoxLayout()
+        add_root_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_root_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        add_root_btn.clicked.connect(self._add_root)
+        
+        edit_root_btn = QtWidgets.QPushButton("✏️ Modifier")
+        edit_root_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        edit_root_btn.clicked.connect(self._edit_root)
+        
+        delete_root_btn = QtWidgets.QPushButton("🗑️ Supprimer")
+        delete_root_btn.setStyleSheet(self._get_button_style("#e74c3c"))
+        delete_root_btn.clicked.connect(self._delete_root)
+        
+        btn_layout.addWidget(add_root_btn)
+        btn_layout.addWidget(edit_root_btn)
+        btn_layout.addWidget(delete_root_btn)
+        layout.addLayout(btn_layout)
+        
+        return widget
+
+    def _create_parent_tab(self):
+        """Créer l'onglet Parents"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Sélection du cluster et racine
+        selection_layout = QtWidgets.QGridLayout()
+        selection_layout.addWidget(QtWidgets.QLabel("Cluster:"), 0, 0)
+        self.parent_cluster_combo = QtWidgets.QComboBox()
+        self.parent_cluster_combo.currentTextChanged.connect(self._on_parent_cluster_changed)
+        selection_layout.addWidget(self.parent_cluster_combo, 0, 1)
+        
+        selection_layout.addWidget(QtWidgets.QLabel("Racine:"), 1, 0)
+        self.parent_root_combo = QtWidgets.QComboBox()
+        self.parent_root_combo.currentTextChanged.connect(self._on_parent_root_changed)
+        selection_layout.addWidget(self.parent_root_combo, 1, 1)
+        layout.addLayout(selection_layout)
+        
+        # Liste des parents
+        self.parent_list = QtWidgets.QListWidget()
+        self.parent_list.setStyleSheet(self._get_list_style())
+        self.parent_list.currentRowChanged.connect(self._on_parent_selected)
+        layout.addWidget(self.parent_list)
+        
+        # Boutons d'action
+        btn_layout = QtWidgets.QHBoxLayout()
+        add_parent_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_parent_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        add_parent_btn.clicked.connect(self._add_parent)
+        
+        edit_parent_btn = QtWidgets.QPushButton("✏️ Modifier")
+        edit_parent_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        edit_parent_btn.clicked.connect(self._edit_parent)
+        
+        delete_parent_btn = QtWidgets.QPushButton("🗑️ Supprimer")
+        delete_parent_btn.setStyleSheet(self._get_button_style("#e74c3c"))
+        delete_parent_btn.clicked.connect(self._delete_parent)
+        
+        btn_layout.addWidget(add_parent_btn)
+        btn_layout.addWidget(edit_parent_btn)
+        btn_layout.addWidget(delete_parent_btn)
+        layout.addLayout(btn_layout)
+        
+        return widget
+
+    def _create_child_tab(self):
+        """Créer l'onglet Enfants"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Sélection hiérarchique
+        selection_layout = QtWidgets.QGridLayout()
+        selection_layout.addWidget(QtWidgets.QLabel("Cluster:"), 0, 0)
+        self.child_cluster_combo = QtWidgets.QComboBox()
+        self.child_cluster_combo.currentTextChanged.connect(self._on_child_cluster_changed)
+        selection_layout.addWidget(self.child_cluster_combo, 0, 1)
+        
+        selection_layout.addWidget(QtWidgets.QLabel("Racine:"), 1, 0)
+        self.child_root_combo = QtWidgets.QComboBox()
+        self.child_root_combo.currentTextChanged.connect(self._on_child_root_changed)
+        selection_layout.addWidget(self.child_root_combo, 1, 1)
+        
+        selection_layout.addWidget(QtWidgets.QLabel("Parent:"), 2, 0)
+        self.child_parent_combo = QtWidgets.QComboBox()
+        self.child_parent_combo.currentTextChanged.connect(self._on_child_parent_changed)
+        selection_layout.addWidget(self.child_parent_combo, 2, 1)
+        layout.addLayout(selection_layout)
+        
+        # Liste des enfants
+        self.child_list = QtWidgets.QListWidget()
+        self.child_list.setStyleSheet(self._get_list_style())
+        self.child_list.currentRowChanged.connect(self._on_child_selected)
+        layout.addWidget(self.child_list)
+        
+        # Boutons d'action
+        btn_layout = QtWidgets.QHBoxLayout()
+        add_child_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_child_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        add_child_btn.clicked.connect(self._add_child)
+        
+        edit_child_btn = QtWidgets.QPushButton("✏️ Modifier")
+        edit_child_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        edit_child_btn.clicked.connect(self._edit_child)
+        
+        delete_child_btn = QtWidgets.QPushButton("🗑️ Supprimer")
+        delete_child_btn.setStyleSheet(self._get_button_style("#e74c3c"))
+        delete_child_btn.clicked.connect(self._delete_child)
+        
+        btn_layout.addWidget(add_child_btn)
+        btn_layout.addWidget(edit_child_btn)
+        btn_layout.addWidget(delete_child_btn)
+        layout.addLayout(btn_layout)
+        
+        return widget
+
+    def _get_group_style(self):
+        """Style pour les groupes"""
+        return """
+            QGroupBox {
+                border: 1px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: #f9f9f9;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #333333;
+            }
+        """
+
+    def _get_button_style(self, color):
+        """Style pour les boutons"""
+        return f"""
+            QPushButton {{
+                background-color: {color};
+                color: white;
+                border: none;
+                padding: 8px 15px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {self._darken_color(color)};
+            }}
+        """
+
+    def _darken_color(self, color, factor=0.1):
+        """Assombrir une couleur"""
+        try:
+            color = color.lstrip('#')
+            rgb = tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
+            darkened = tuple(int(c * (1 - factor)) for c in rgb)
+            return '#%02x%02x%02x' % darkened
+        except:
+            return color
+
+    def _get_combo_style(self):
+        """Obtenir le style pour les combobox"""
+        return """
+            QComboBox {
+                padding: 5px;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QComboBox:focus {
+                border-color: #3498db;
+            }
+        """
+
+    def _get_list_style(self):
+        """Obtenir le style pour les listes"""
+        return """
+            QListWidget {
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: white;
+                padding: 5px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #ecf0f1;
+            }
+            QListWidget::item:selected {
+                background-color: #3498db;
+                color: white;
+            }
+        """
+
+    def _get_button_style(self, color):
+        """Obtenir le style pour les boutons"""
+        return f"""
+            QPushButton {{
+                background-color: {color};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 6px;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background-color: {self._darken_color(color)};
+            }}
+        """
+
+    def _darken_color(self, color, factor=0.1):
+        """Assombrir une couleur"""
+        color = color.lstrip('#')
+        rgb = tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
+        darkened = tuple(int(c * (1 - factor)) for c in rgb)
+        return '#%02x%02x%02x' % darkened
+
+    def _load_default_data(self):
+        """Charger les données par défaut"""
+        # Données d'exemple
+        self.strategy_data = {
+            'project_name': 'Projet de démonstration',
+            'typologies': [
+                {
+                    'name': 'Typologie principale',
+                    'description': 'Typologie principale pour le projet de démonstration',
+                    'clusters': [
+                        {
+                            'name': 'Débutant',
+                            'roots': [
+                                {
+                                    'name': 'Compétences de base',
+                                    'parents': [
+                                        {
+                                            'name': 'Connaissances fondamentales',
+                                            'children': ['Théorie', 'Définitions', 'Concepts de base']
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            'name': 'Intermédiaire',
+                            'roots': [
+                                {
+                                    'name': 'Compétences avancées',
+                                    'parents': [
+                                        {
+                                            'name': 'Applications pratiques',
+                                            'children': ['Exercices', 'Cas pratiques', 'Projets simples']
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            'name': 'Avancé',
+                            'roots': [
+                                {
+                                    'name': 'Expertise spécialisée',
+                                    'parents': [
+                                        {
+                                            'name': 'Optimisation et recherche',
+                                            'children': ['Recherche avancée', 'Optimisation', 'Innovation']
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        
+        self.refresh_ui()
+
+    def refresh_ui(self):
+        """Rafraîchir l'interface utilisateur"""
+        # Mettre à jour la liste des projets
+        self.project_combo.blockSignals(True)
+        self.project_combo.clear()
+        self.project_combo.addItem(self.strategy_data['project_name'])
+        self.project_combo.blockSignals(False)
+        
+        # Mettre à jour le nom du projet
+        self.project_name_label.setText(self.strategy_data['project_name'])
+        
+        # Mettre à jour la liste des typologies
+        self.typology_combo.blockSignals(True)
+        self.typology_combo.clear()
+        for typology in self.strategy_data['typologies']:
+            self.typology_combo.addItem(typology['name'])
+        self.typology_combo.blockSignals(True)
+        
+        # Mettre à jour les onglets
+        self._refresh_cluster_tab()
+        self._refresh_root_tab()
+        self._refresh_parent_tab()
+        self._refresh_child_tab()
+        
+        # Rafraîchir l'onglet projet et typologie
+        self.project_typology_tab.refresh()
+        
+        # Mettre à jour le camembert
+        self.pie_chart.update()
+
+    def _refresh_cluster_tab(self):
+        """Rafraîchir l'onglet Clusters"""
+        self.cluster_list.clear()
+        if self.current_typology_index != -1:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                self.cluster_list.addItem(cluster['name'])
+
+    def _refresh_root_tab(self):
+        """Rafraîchir l'onglet Racines"""
+        self.root_cluster_combo.blockSignals(True)
+        self.root_cluster_combo.clear()
+        
+        if self.current_typology_index != -1:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                self.root_cluster_combo.addItem(cluster['name'])
+        
+        self.root_cluster_combo.blockSignals(False)
+        self._on_root_cluster_changed(self.root_cluster_combo.currentText())
+
+    def _refresh_parent_tab(self):
+        """Rafraîchir l'onglet Parents"""
+        self.parent_cluster_combo.blockSignals(True)
+        self.parent_cluster_combo.clear()
+        
+        if self.current_typology_index != -1:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                self.parent_cluster_combo.addItem(cluster['name'])
+        
+        self.parent_cluster_combo.blockSignals(False)
+        self._on_parent_cluster_changed(self.parent_cluster_combo.currentText())
+
+    def _refresh_child_tab(self):
+        """Rafraîchir l'onglet Enfants"""
+        self.child_cluster_combo.blockSignals(True)
+        self.child_cluster_combo.clear()
+        
+        if self.current_typology_index != -1:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                self.child_cluster_combo.addItem(cluster['name'])
+        
+        self.child_cluster_combo.blockSignals(False)
+        self._on_child_cluster_changed(self.child_cluster_combo.currentText())
+
+    # Gestionnaires d'événements pour les onglets
+    def _on_project_changed(self, project_name):
+        """Gérer le changement de projet"""
+        if project_name:
+            self.strategy_data['project_name'] = project_name
+            self.project_name_label.setText(project_name)
+
+    def _on_typology_changed(self, typology_name):
+        """Gérer le changement de typologie"""
+        if not typology_name:
+            return
+            
+        for i, typology in enumerate(self.strategy_data['typologies']):
+            if typology['name'] == typology_name:
+                self.current_typology_index = i
+                self._refresh_cluster_tab()
+                self._refresh_root_tab()
+                self._refresh_parent_tab()
+                self._refresh_child_tab()
+                break
+
+    def _on_cluster_selected(self, row):
+        """Gérer la sélection d'un cluster"""
+        self.current_cluster_index = row
+
+    def _on_root_cluster_changed(self, cluster_name):
+        """Gérer le changement de cluster dans l'onglet Racines"""
+        self.root_list.clear()
+        if self.current_typology_index != -1 and cluster_name:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == cluster_name:
+                    for root in cluster['roots']:
+                        self.root_list.addItem(root['name'])
+                    break
+
+    def _on_root_selected(self, row):
+        """Gérer la sélection d'une racine"""
+        self.current_root_index = row
+
+    def _on_parent_cluster_changed(self, cluster_name):
+        """Gérer le changement de cluster dans l'onglet Parents"""
+        self.parent_root_combo.blockSignals(True)
+        self.parent_root_combo.clear()
+        self.parent_list.clear()
+        
+        if self.current_typology_index != -1 and cluster_name:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == cluster_name:
+                    for root in cluster['roots']:
+                        self.parent_root_combo.addItem(root['name'])
+                    break
+        
+        self.parent_root_combo.blockSignals(False)
+        self._on_parent_root_changed(self.parent_root_combo.currentText())
+
+    def _on_parent_root_changed(self, root_name):
+        """Gérer le changement de racine dans l'onglet Parents"""
+        self.parent_list.clear()
+        if (self.current_typology_index != -1 and 
+            self.parent_cluster_combo.currentText() and root_name):
+            
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == self.parent_cluster_combo.currentText():
+                    for root in cluster['roots']:
+                        if root['name'] == root_name:
+                            for parent in root['parents']:
+                                self.parent_list.addItem(parent['name'])
+                            break
+                    break
+
+    def _on_parent_selected(self, row):
+        """Gérer la sélection d'un parent"""
+        self.current_parent_index = row
+
+    def _on_child_cluster_changed(self, cluster_name):
+        """Gérer le changement de cluster dans l'onglet Enfants"""
+        self.child_root_combo.blockSignals(True)
+        self.child_root_combo.clear()
+        self.child_parent_combo.clear()
+        self.child_list.clear()
+        
+        if self.current_typology_index != -1 and cluster_name:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == cluster_name:
+                    for root in cluster['roots']:
+                        self.child_root_combo.addItem(root['name'])
+                    break
+        
+        self.child_root_combo.blockSignals(False)
+        self._on_child_root_changed(self.child_root_combo.currentText())
+
+    def _on_child_root_changed(self, root_name):
+        """Gérer le changement de racine dans l'onglet Enfants"""
+        self.child_parent_combo.blockSignals(True)
+        self.child_parent_combo.clear()
+        self.child_list.clear()
+        
+        if (self.current_typology_index != -1 and 
+            self.child_cluster_combo.currentText() and root_name):
+            
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == self.child_cluster_combo.currentText():
+                    for root in cluster['roots']:
+                        if root['name'] == root_name:
+                            for parent in root['parents']:
+                                self.child_parent_combo.addItem(parent['name'])
+                            break
+                    break
+        
+        self.child_parent_combo.blockSignals(False)
+        self._on_child_parent_changed(self.child_parent_combo.currentText())
+
+    def _on_child_parent_changed(self, parent_name):
+        """Gérer le changement de parent dans l'onglet Enfants"""
+        self.child_list.clear()
+        if (self.current_typology_index != -1 and 
+            self.child_cluster_combo.currentText() and 
+            self.child_root_combo.currentText() and parent_name):
+            
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == self.child_cluster_combo.currentText():
+                    for root in cluster['roots']:
+                        if root['name'] == self.child_root_combo.currentText():
+                            for parent in root['parents']:
+                                if parent['name'] == parent_name:
+                                    for child in parent['children']:
+                                        self.child_list.addItem(child)
+                                    break
+                            break
+                    break
+
+    def _on_child_selected(self, row):
+        """Gérer la sélection d'un enfant"""
+        self.current_child_index = row
+
+    # Méthodes pour les boutons d'action
+    def _create_project(self):
+        """Créer un nouveau projet"""
+        name, ok = QtWidgets.QInputDialog.getText(self, "Nouveau projet", "Nom du projet:")
+        if ok and name:
+            self.strategy_data['project_name'] = name
+            self.refresh_ui()
+
+    def _edit_project(self):
+        """Modifier le projet actuel"""
+        name, ok = QtWidgets.QInputDialog.getText(self, "Modifier le projet", "Nom du projet:", 
+                                                 text=self.strategy_data['project_name'])
+        if ok and name:
+            self.strategy_data['project_name'] = name
+            self.refresh_ui()
+
+    def _delete_project(self):
+        """Supprimer le projet actuel"""
+        reply = QtWidgets.QMessageBox.question(self, "Supprimer le projet", 
+                                              "Êtes-vous sûr de vouloir supprimer ce projet?",
+                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply == QtWidgets.QMessageBox.Yes:
+            self.strategy_data['project_name'] = ''
+            self.refresh_ui()
+
+    def _create_typology(self):
+        """Créer une nouvelle typologie"""
+        name, ok = QtWidgets.QInputDialog.getText(self, "Nouvelle typologie", "Nom de la typologie:")
+        if ok and name:
+            new_typology = {
+                'name': name,
+                'description': '',
+                'clusters': []
+            }
+            self.strategy_data['typologies'].append(new_typology)
+            self.refresh_ui()
+
+    def _add_cluster(self):
+        """Ajouter un cluster"""
+        if self.current_typology_index == -1:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner une typologie")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(self, "Nouveau cluster", "Nom du cluster:")
+        if ok and name:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            new_cluster = {
+                'name': name,
+                'roots': []
+            }
+            typology['clusters'].append(new_cluster)
+            self.refresh_ui()
+
+    def _edit_cluster(self):
+        """Modifier un cluster"""
+        if self.current_cluster_index == -1:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster")
+            return
+            
+        typology = self.strategy_data['typologies'][self.current_typology_index]
+        cluster = typology['clusters'][self.current_cluster_index]
+        
+        name, ok = QtWidgets.QInputDialog.getText(self, "Modifier le cluster", "Nom du cluster:", 
+                                                 text=cluster['name'])
+        if ok and name:
+            cluster['name'] = name
+            self.refresh_ui()
+
+    def _delete_cluster(self):
+        """Supprimer un cluster"""
+        if self.current_cluster_index == -1:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster")
+            return
+            
+        reply = QtWidgets.QMessageBox.question(self, "Supprimer le cluster", 
+                                              "Êtes-vous sûr de vouloir supprimer ce cluster?",
+                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply == QtWidgets.QMessageBox.Yes:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            typology['clusters'].pop(self.current_cluster_index)
+            self.current_cluster_index = -1
+            self.refresh_ui()
+
+    def _add_root(self):
+        """Ajouter une racine"""
+        if self.root_cluster_combo.currentText() == '':
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(self, "Nouvelle racine", "Nom de la racine:")
+        if ok and name:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == self.root_cluster_combo.currentText():
+                    new_root = {
+                        'name': name,
+                        'parents': []
+                    }
+                    cluster['roots'].append(new_root)
+                    break
+            self.refresh_ui()
+
+    def _edit_root(self):
+        """Modifier une racine"""
+        if self.current_root_index == -1:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner une racine")
+            return
+            
+        typology = self.strategy_data['typologies'][self.current_typology_index]
+        for cluster in typology['clusters']:
+            if cluster['name'] == self.root_cluster_combo.currentText():
+                root = cluster['roots'][self.current_root_index]
+                name, ok = QtWidgets.QInputDialog.getText(self, "Modifier la racine", "Nom de la racine:", 
+                                                         text=root['name'])
+                if ok and name:
+                    root['name'] = name
+                    self.refresh_ui()
+                break
+
+    def _delete_root(self):
+        """Supprimer une racine"""
+        if self.current_root_index == -1:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner une racine")
+            return
+            
+        reply = QtWidgets.QMessageBox.question(self, "Supprimer la racine", 
+                                              "Êtes-vous sûr de vouloir supprimer cette racine?",
+                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply == QtWidgets.QMessageBox.Yes:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == self.root_cluster_combo.currentText():
+                    cluster['roots'].pop(self.current_root_index)
+                    self.current_root_index = -1
+                    self.refresh_ui()
+                    break
+
+    def _add_parent(self):
+        """Ajouter un parent"""
+        if (self.parent_cluster_combo.currentText() == '' or 
+            self.parent_root_combo.currentText() == ''):
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster et une racine")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(self, "Nouveau parent", "Nom du parent:")
+        if ok and name:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == self.parent_cluster_combo.currentText():
+                    for root in cluster['roots']:
+                        if root['name'] == self.parent_root_combo.currentText():
+                            new_parent = {
+                                'name': name,
+                                'children': []
+                            }
+                            root['parents'].append(new_parent)
+                            break
+                    break
+            self.refresh_ui()
+
+    def _edit_parent(self):
+        """Modifier un parent"""
+        if self.current_parent_index == -1:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un parent")
+            return
+            
+        typology = self.strategy_data['typologies'][self.current_typology_index]
+        for cluster in typology['clusters']:
+            if cluster['name'] == self.parent_cluster_combo.currentText():
+                for root in cluster['roots']:
+                    if root['name'] == self.parent_root_combo.currentText():
+                        parent = root['parents'][self.current_parent_index]
+                        name, ok = QtWidgets.QInputDialog.getText(self, "Modifier le parent", "Nom du parent:", 
+                                                                 text=parent['name'])
+                        if ok and name:
+                            parent['name'] = name
+                            self.refresh_ui()
+                        break
+                break
+
+    def _delete_parent(self):
+        """Supprimer un parent"""
+        if self.current_parent_index == -1:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un parent")
+            return
+            
+        reply = QtWidgets.QMessageBox.question(self, "Supprimer le parent", 
+                                              "Êtes-vous sûr de vouloir supprimer ce parent?",
+                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply == QtWidgets.QMessageBox.Yes:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == self.parent_cluster_combo.currentText():
+                    for root in cluster['roots']:
+                        if root['name'] == self.parent_root_combo.currentText():
+                            root['parents'].pop(self.current_parent_index)
+                            self.current_parent_index = -1
+                            self.refresh_ui()
+                            break
+                    break
+
+    def _add_child(self):
+        """Ajouter un enfant"""
+        if (self.child_cluster_combo.currentText() == '' or 
+            self.child_root_combo.currentText() == '' or 
+            self.child_parent_combo.currentText() == ''):
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un cluster, une racine et un parent")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(self, "Nouvel enfant", "Nom de l'enfant:")
+        if ok and name:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == self.child_cluster_combo.currentText():
+                    for root in cluster['roots']:
+                        if root['name'] == self.child_root_combo.currentText():
+                            for parent in root['parents']:
+                                if parent['name'] == self.child_parent_combo.currentText():
+                                    parent['children'].append(name)
+                                    break
+                            break
+                    break
+            self.refresh_ui()
+
+    def _edit_child(self):
+        """Modifier un enfant"""
+        if self.current_child_index == -1:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un enfant")
+            return
+            
+        typology = self.strategy_data['typologies'][self.current_typology_index]
+        for cluster in typology['clusters']:
+            if cluster['name'] == self.child_cluster_combo.currentText():
+                for root in cluster['roots']:
+                    if root['name'] == self.child_root_combo.currentText():
+                        for parent in root['parents']:
+                            if parent['name'] == self.child_parent_combo.currentText():
+                                old_name = parent['children'][self.current_child_index]
+                                name, ok = QtWidgets.QInputDialog.getText(self, "Modifier l'enfant", "Nom de l'enfant:", 
+                                                                         text=old_name)
+                                if ok and name:
+                                    parent['children'][self.current_child_index] = name
+                                    self.refresh_ui()
+                                break
+                        break
+                break
+
+    def _delete_child(self):
+        """Supprimer un enfant"""
+        if self.current_child_index == -1:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Veuillez d'abord sélectionner un enfant")
+            return
+            
+        reply = QtWidgets.QMessageBox.question(self, "Supprimer l'enfant", 
+                                              "Êtes-vous sûr de vouloir supprimer cet enfant?",
+                                              QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply == QtWidgets.QMessageBox.Yes:
+            typology = self.strategy_data['typologies'][self.current_typology_index]
+            for cluster in typology['clusters']:
+                if cluster['name'] == self.child_cluster_combo.currentText():
+                    for root in cluster['roots']:
+                        if root['name'] == self.child_root_combo.currentText():
+                            for parent in root['parents']:
+                                if parent['name'] == self.child_parent_combo.currentText():
+                                    parent['children'].pop(self.current_child_index)
+                                    self.current_child_index = -1
+                                    self.refresh_ui()
+                                    break
+                            break
+                    break
+
+    def _save_strategy(self):
+        """Sauvegarder la stratégie"""
+        try:
+            filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, "Sauvegarder la stratégie", "", "JSON Files (*.json)"
+            )
+            if filename:
+                if not filename.endswith('.json'):
+                    filename += '.json'
+                
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(self.strategy_data, f, ensure_ascii=False, indent=2)
+                
+                QtWidgets.QMessageBox.information(self, "Succès", "Stratégie sauvegardée avec succès!")
+                
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la sauvegarde: {str(e)}")
+
+    # Méthodes pour le camembert
+    def _on_hierarchy_selection_changed(self, cluster, root, parent):
+        """Gérer le changement de sélection hiérarchique"""
+        # Mettre à jour le camembert
+        self.pie_chart.set_hierarchy_selection(cluster, root, parent)
+        
+        # Mettre à jour les informations de sélection
+        selection_text = ""
+        if cluster:
+            selection_text += f"<b>Cluster:</b> {cluster}<br>"
+        if root:
+            selection_text += f"<b>Racine:</b> {root}<br>"
+        if parent:
+            selection_text += f"<b>Parent:</b> {parent}"
+        
+        if not selection_text:
+            selection_text = "Aucune sélection (vue globale)"
+            
+        self.selection_info.setText(selection_text)
+
+    def _on_pie_segment_clicked(self, batch_data):
+        """Gérer le clic sur un segment du camembert"""
+        # Mettre à jour la sélection hiérarchique
+        self._on_hierarchy_selection_changed(
+            batch_data.get('cluster'), 
+            batch_data.get('root'), 
+            batch_data.get('parent')
+        )
+        
+        # Mettre à jour l'arbre de structure dans l'onglet projet
+        self.project_typology_tab.set_hierarchy_selection(
+            batch_data.get('cluster'), 
+            batch_data.get('root'), 
+            batch_data.get('parent')
+        )
+
+    def _reset_pie_chart_view(self):
+        """Réinitialiser la vue du camembert"""
+        self._on_hierarchy_selection_changed(None, None, None)
+
+    def _export_pie_chart(self):
+        """Exporter le graphique en image"""
+        try:
+            filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, "Exporter le graphique", "", "PNG Files (*.png);;JPEG Files (*.jpg)"
+            )
+            if filename:
+                # Capturer le widget en tant qu'image
+                pixmap = self.pie_chart.grab()
+                pixmap.save(filename)
+                QtWidgets.QMessageBox.information(self, "Succès", "Graphique exporté avec succès!")
+                
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
+
+if __name__ == "__main__":
+    import sys
+    app = QtWidgets.QApplication(sys.argv)
+    widget = StrategyWidget()
+    widget.show()
+    sys.exit(app.exec_())

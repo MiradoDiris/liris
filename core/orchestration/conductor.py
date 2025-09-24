@@ -20,6 +20,7 @@ from datetime import datetime
 from utils.logger import logger
 from utils.exceptions import OrchestrationError, SchedulingError
 from core.orchestration.state_automation import StateBasedAutomation
+from core.orchestration.adapters.gemini_adapter import GeminiAdapter
 
 try:
     import pygetwindow as gw
@@ -456,6 +457,24 @@ class AIConductor:
         self.browser_manager = BrowserManager()
         self.window_manager = WindowManager()
         self.js_executor = JSExecutor(self.keyboard_controller, self.window_manager)
+        
+        # Initialiser les adapteurs pour les plateformes d'IA
+        self.adapters = {}
+        self._init_adapters()
+
+    def _init_adapters(self):
+        """Initialise les adapteurs pour les différentes plateformes d'IA"""
+        try:
+            # Configuration Gemini
+            gemini_config = self.config_provider.get_gemini_config()
+            if gemini_config and gemini_config.get("api_key"):
+                self.adapters["gemini"] = GeminiAdapter(gemini_config)
+                logger.info("✅ Adapteur Gemini initialisé avec succès")
+            else:
+                logger.warning("❌ Configuration Gemini non trouvée ou clé API manquante")
+                
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'initialisation des adapteurs: {str(e)}")
 
     def initialize(self):
         try:
@@ -662,6 +681,10 @@ class AIConductor:
         test_id = f"test_{platform_name}_{int(start_time)}"
 
         try:
+            # Vérifier si c'est une plateforme API comme Gemini
+            if platform_name.lower() == "gemini":
+                return self._test_gemini_platform(test_message, timeout)
+            
             self.window_manager.clear_cache()
 
             config_result = self.validate_platform_config(platform_name)
@@ -738,6 +761,61 @@ class AIConductor:
                 'duration': time.time() - start_time
             }
 
+    def _test_gemini_platform(self, test_message, timeout):
+        """Test spécifique pour la plateforme Gemini"""
+        try:
+            if "gemini" not in self.adapters:
+                return {
+                    'success': False,
+                    'error': 'gemini_not_configured',
+                    'message': "Adapteur Gemini non configuré",
+                    'duration': 0
+                }
+            
+            logger.info("🧪 Test de connexion à Gemini...")
+            
+            # Test de connexion
+            if not self.adapters["gemini"].test_connection():
+                return {
+                    'success': False,
+                    'error': 'gemini_connection_failed',
+                    'message': "Échec de la connexion à Gemini",
+                    'duration': 0
+                }
+            
+            # Test avec un prompt simple
+            result = self.adapters["gemini"].send_prompt(test_message)
+            
+            if result and result.get("status") == "completed":
+                response = result["result"]["response"]
+                return {
+                    'success': True,
+                    'message': "Connexion Gemini réussie",
+                    'response': response,
+                    'duration': 2.0,  # Temps approximatif pour l'API
+                    'metadata': {
+                        'platform': 'gemini',
+                        'response_length': len(response),
+                        'method': 'api_call'
+                    }
+                }
+            else:
+                error = result.get("error", "Erreur inconnue") if result else "Pas de réponse"
+                return {
+                    'success': False,
+                    'error': 'gemini_api_error',
+                    'message': f"Erreur Gemini: {error}",
+                    'duration': 0
+                }
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'error': 'gemini_test_error',
+                'message': f"Erreur lors du test Gemini: {str(e)}",
+                'duration': 0
+            }
+
     def wait_for_ai_response(self, platform_name, max_wait_time):
         js_code = self.js_executor.get_detection_script(platform_name)
         return self.js_executor.execute(js_code, platform_name, max_wait_time)
@@ -771,6 +849,21 @@ class AIConductor:
 
     def validate_platform_config(self, platform_name):
         try:
+            # Pour Gemini, la validation est différente
+            if platform_name.lower() == "gemini":
+                if "gemini" in self.adapters and self.adapters["gemini"].test_connection():
+                    return {
+                        'valid': True,
+                        'message': "Configuration Gemini valide",
+                        'profile': {'platform': 'gemini'}
+                    }
+                else:
+                    return {
+                        'valid': False,
+                        'message': "Gemini non configuré ou connexion échouée",
+                        'profile': None
+                    }
+            
             profile = self.get_platform_profile(platform_name)
             if not profile:
                 return {
@@ -810,6 +903,14 @@ class AIConductor:
 
     def get_platform_profile(self, platform_name):
         try:
+            # Pour Gemini, retourner un profil minimal
+            if platform_name.lower() == "gemini":
+                return {
+                    'platform': 'gemini',
+                    'browser': {'type': 'api'},
+                    'interface_positions': {}
+                }
+            
             profiles = self.config_provider.get_profiles()
             memory_profile = profiles.get(platform_name)
 
@@ -828,6 +929,14 @@ class AIConductor:
 
     def open_browser(self, browser_type, browser_path='', url='', browser_config=None, platform_name=None, fullscreen=False):
         try:
+            # Pour Gemini, pas besoin d'ouvrir un navigateur
+            if platform_name and platform_name.lower() == "gemini":
+                return {
+                    'success': True,
+                    'message': "Gemini: plateforme API, pas de navigateur nécessaire",
+                    'duration': 0
+                }
+                
             if not url:
                 url = "about:blank"
 
@@ -881,6 +990,10 @@ class AIConductor:
             }
 
     def focus_existing_browser(self, browser_config, platform_name=None):
+        # Pour Gemini, pas de focus de navigateur nécessaire
+        if platform_name and platform_name.lower() == "gemini":
+            return
+            
         profile = self.get_platform_profile(platform_name) if platform_name else {}
         window_position = profile.get('window_position')
         
@@ -935,6 +1048,10 @@ class AIConductor:
 
     def run_automation(self, profile, automation_params, timeout, browser_type='chrome'):
         try:
+            # Pour Gemini, utiliser l'adapteur API au lieu de l'automation graphique
+            if profile.get('platform') == 'gemini':
+                return self._run_gemini_automation(automation_params)
+                
             automation_result = None
             automation_start = time.time()
 
@@ -985,6 +1102,46 @@ class AIConductor:
                 'response': ''
             }
 
+    def _run_gemini_automation(self, automation_params):
+        """Exécute l'automation pour Gemini via l'API"""
+        try:
+            if "gemini" not in self.adapters:
+                return {
+                    'success': False,
+                    'message': "Adapteur Gemini non disponible",
+                    'duration': 0,
+                    'response': ''
+                }
+            
+            prompt = automation_params.get('test_text', 'Test message')
+            
+            result = self.adapters["gemini"].send_prompt(prompt)
+            
+            if result and result.get("status") == "completed":
+                response = result["result"]["response"]
+                return {
+                    'success': True,
+                    'message': "Réponse Gemini reçue avec succès",
+                    'duration': 2.0,  # Temps approximatif
+                    'response': response
+                }
+            else:
+                error = result.get("error", "Erreur inconnue") if result else "Pas de réponse"
+                return {
+                    'success': False,
+                    'message': f"Erreur Gemini: {error}",
+                    'duration': 0,
+                    'response': ''
+                }
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f"Erreur automation Gemini: {str(e)}",
+                'duration': 0,
+                'response': ''
+            }
+
     def remember_window_selection(self, platform_name, window, browser_config):
         pass
 
@@ -1021,18 +1178,37 @@ class AIConductor:
 
     def get_available_platforms(self):
         try:
-            if self.database:
-                all_platforms = self.database.get_all_platforms()
-                if all_platforms:
-                    available = []
-                    for platform_name in all_platforms.keys():
+            platforms = []
+            
+            # Ajouter Gemini si configuré
+            if "gemini" in self.adapters and self.adapters["gemini"].test_connection():
+                platforms.append("Gemini")
+                logger.info("✅ Gemini ajouté aux plateformes disponibles")
+            
+            # Ajouter les plateformes existantes de la base de données
+            if self.database and hasattr(self.database, 'get_all_platforms'):
+                db_platforms = self.database.get_all_platforms()
+                if db_platforms:
+                    for platform_name in db_platforms.keys():
                         can_use, _ = self.scheduler.can_use_platform(platform_name)
-                        if can_use:
-                            available.append(platform_name)
-                    return available
-            return []
+                        if can_use and platform_name not in platforms:
+                            platforms.append(platform_name)
+
+            # Ajouter les plateformes des profils
+            profiles = self.config_provider.get_profiles()
+            for platform_name in profiles.keys():
+                can_use, _ = self.scheduler.can_use_platform(platform_name)
+                if can_use and platform_name not in platforms:
+                    platforms.append(platform_name)
+
+            logger.info(f"📋 Plateformes disponibles: {platforms}")
+            return platforms
+            
         except Exception as e:
-            logger.error(f"Error getting available platforms: {e}")
+            logger.error(f"❌ Erreur lors de la récupération des plateformes: {str(e)}")
+            # Retourner au moins Gemini si disponible
+            if "gemini" in self.adapters:
+                return ["Gemini"]
             return []
 
     def shutdown(self):
@@ -1066,6 +1242,10 @@ class AIConductor:
 
     def send_prompt(self, platform, prompt, mode="standard", priority=0, sync=False, timeout=None):
         try:
+            # Vérifier si c'est Gemini
+            if platform.lower() == "gemini":
+                return self._send_gemini_prompt(prompt, timeout)
+            
             can_use, reason = self.scheduler.can_use_platform(platform)
             if not can_use:
                 raise SchedulingError(reason)
@@ -1090,6 +1270,40 @@ class AIConductor:
 
         except Exception as e:
             raise OrchestrationError(f"Send failed: {str(e)}")
+
+    def _send_gemini_prompt(self, prompt, timeout=None):
+        """Envoie un prompt à Gemini via l'API"""
+        try:
+            if "gemini" not in self.adapters:
+                raise OrchestrationError("Adapteur Gemini non configuré")
+            
+            logger.info(f"📤 Envoi du prompt à Gemini: {prompt[:100]}...")
+            
+            result = self.adapters["gemini"].send_prompt(prompt, timeout=timeout or 60)
+            
+            if result and result.get("status") == "completed":
+                response = result["result"]["response"]
+                logger.info("✅ Réponse reçue de Gemini avec succès")
+                
+                return {
+                    'id': self.task_counter + 1,
+                    'status': 'completed',
+                    'result': {
+                        'response': response,
+                        'duration': 2.0,  # Temps approximatif
+                        'metadata': {
+                            'platform': 'gemini',
+                            'response_length': len(response),
+                            'method': 'api_call'
+                        }
+                    }
+                }
+            else:
+                error = result.get("error", "Erreur inconnue") if result else "Pas de réponse"
+                raise OrchestrationError(f"Erreur Gemini: {error}")
+                
+        except Exception as e:
+            raise OrchestrationError(f"Erreur lors de l'envoi à Gemini: {str(e)}")
 
     def detect_platform_elements(self, platform_name, browser_type='Chrome', browser_path='', url='', fullscreen=False):
         return {

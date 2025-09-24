@@ -73,7 +73,7 @@ class ConfigProvider:
             dict: Configuration de la base de données
         """
         return {
-            "path": os.path.join("data", "liris.db")  # Retourne un string
+            'path': os.path.join(os.path.dirname(self.config_dir), "data", "liris.db")
         }
 
     def get_scheduler_config(self):
@@ -136,3 +136,14 @@ class ConfigProvider:
         except Exception as e:
             logger.error(f"Erreur lors de la sauvegarde du profil {name}: {str(e)}")
             return False
+        
+    def get_gemini_config(self):
+        """Retourne la configuration Gemini"""
+        return {
+            "api_key": "AIzaSyAdxvXJ6BeIAwdtR-VyMVOHE0YPeZTkMPU",
+            "model": "gemini-pro",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/models/",
+            "timeout": 60,
+            "max_tokens": 8192,
+            "temperature": 0.7
+        }
