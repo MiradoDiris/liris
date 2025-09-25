@@ -565,6 +565,7 @@ class StrategyWidget(QtWidgets.QWidget):
     """
     Widget pour la gestion des stratégies de typologies de contexte avec structure hiérarchique
     """
+    typology_changed_signal = pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -838,10 +839,7 @@ class StrategyWidget(QtWidgets.QWidget):
         """Retourne la typologie actuelle pour la génération"""
         return self.current_typology
 
-    def typology_changed(self):
-        """Signal émis quand la typologie change"""
-        # Cette méthode peut être utilisée pour notifier les autres widgets
-        pass    
+ 
 
     def _update_pie_chart(self):
         """Mettre à jour le camembert avec les données réelles des typologies"""
@@ -1358,6 +1356,53 @@ class StrategyWidget(QtWidgets.QWidget):
         layout.addWidget(hierarchy_group, 1)  # Facteur d'expansion = 1
         
         return group
+    
+    def get_current_typology_data(self):
+        """Retourne les données de typologie actuelles pour la génération - VERSION CORRIGÉE"""
+        logger.info(f"get_current_typology_data appelé")
+        
+        # Vérifier d'abord si current_typology existe et a des données
+        if hasattr(self, 'current_typology') and self.current_typology:
+            logger.info(f"Typologie trouvée: {self.current_typology.get('name', 'Sans nom')}")
+            logger.info(f"Nombre de clusters: {len(self.current_typology.get('clusters', []))}")
+            
+            # Retourner la structure COMPLÈTE avec tous les clusters
+            return {
+                'name': self.current_typology.get('name', 'Typologie sans nom'),
+                'clusters': self.current_typology.get('clusters', []),
+                'id': self.current_typology.get('id'),
+                'description': self.current_typology.get('description', '')
+            }
+        
+        # Si current_typology n'existe pas, essayer de charger les données
+        elif self.current_typology_id:
+            logger.info(f"Chargement de la typologie ID: {self.current_typology_id}")
+            try:
+                self._load_typology_data()  # Recharger les données
+                if hasattr(self, 'current_typology') and self.current_typology:
+                    return {
+                        'name': self.current_typology.get('name', 'Typologie sans nom'),
+                        'clusters': self.current_typology.get('clusters', []),
+                        'id': self.current_typology.get('id'),
+                        'description': self.current_typology.get('description', '')
+                    }
+            except Exception as e:
+                logger.error(f"Erreur lors du chargement de la typologie: {str(e)}")
+        
+        logger.warning("Aucune typologie disponible - retour structure vide")
+        # Retourner une structure vide mais valide
+        return {
+            'name': 'Aucune typologie',
+            'clusters': [],
+            'id': None,
+            'description': 'Veuillez configurer une stratégie d\'abord'
+        }
+
+    # Ajouter également cette méthode pour une meilleure compatibilité
+    def get_current_typology_clusters(self):
+        """Retourne uniquement les clusters de la typologie actuelle"""
+        typology_data = self.get_current_typology_data()
+        return typology_data.get('clusters', [])
 
     # Ajouter les méthodes manquantes pour la gestion des typologies
     def _edit_typology(self):
@@ -1618,6 +1663,9 @@ class StrategyWidget(QtWidgets.QWidget):
             self.current_typology_id = typology_id
             self._load_typology_data()
             self.refresh_ui()
+            
+            # Émettre le signal de changement de typologie
+            self.typology_changed.emit()  # <-- AJOUTER CETTE LIGNE
             
             # Mettre à jour l'index pour la compatibilité
             for i, typology in enumerate(self.typologies):

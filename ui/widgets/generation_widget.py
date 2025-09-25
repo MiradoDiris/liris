@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
                              QLabel, QComboBox, QTextEdit, QSpinBox, 
                              QPushButton, QProgressBar, QMessageBox,
                              QFileDialog, QCheckBox, QListWidget, QListWidgetItem,
-                             QSplitter)
+                             QSplitter, QTreeWidget, QTreeWidgetItem)
 
 from core.data.database import Database
 from utils.logger import logger
@@ -87,16 +87,69 @@ class GenerationWorker(QThread):
             self.generation_finished.emit(False, f"Erreur: {str(e)}")
     
     def _enrich_prompt(self):
-        """Enrichit le prompt de base avec les contextes sélectionnés"""
+        """Enrichit le prompt de base avec la hiérarchie sélectionnée"""
         enriched = self.base_prompt
         
         if self.contexts:
-            contexts_text = "\n\nContexte(s) à considérer:\n"
+            contexts_text = "\n\n=== STRUCTURE HIÉRARCHIQUE SÉLECTIONNÉE ===\n"
+            
+            # Grouper par cluster
+            clusters_context = {}
             for context in self.contexts:
-                contexts_text += f"- {context}\n"
+                cluster_name = context.get('cluster')
+                if cluster_name not in clusters_context:
+                    clusters_context[cluster_name] = []
+                clusters_context[cluster_name].append(context)
+            
+            for cluster_name, contexts in clusters_context.items():
+                contexts_text += f"\n📊 CLUSTER: {cluster_name}\n"
+                
+                # Organiser les éléments par type
+                roots = set()
+                parents = set()
+                children = set()
+                
+                for context in contexts:
+                    element_type = context.get('type')
+                    element_name = context.get('element_name')
+                    
+                    if element_type == 'cluster':
+                        contexts_text += "  • [Cluster entier sélectionné]\n"
+                    elif element_type == 'root' and element_name:
+                        roots.add(element_name)
+                    elif element_type == 'parent' and element_name:
+                        parents.add(element_name)
+                    elif element_type == 'child' and element_name:
+                        children.add(element_name)
+                
+                if roots:
+                    contexts_text += f"  🌳 Racines: {', '.join(roots)}\n"
+                
+                if parents:
+                    contexts_text += f"  👥 Parents: {', '.join(parents)}\n"
+                
+                if children:
+                    contexts_text += f"  👶 Enfants: {', '.join(children)}\n"
+                
+                contexts_text += "-" * 50 + "\n"
+            
             enriched += contexts_text
             
         return enriched
+    
+    def _format_hierarchical_context(self, context):
+        """Formate un contexte hiérarchique pour l'affichage"""
+        parts = []
+        if context.get('cluster'):
+            parts.append(f"Cluster: {context['cluster']}")
+        if context.get('root'):
+            parts.append(f"Racine: {context['root']}")
+        if context.get('parent'):
+            parts.append(f"Parent: {context['parent']}")
+        if context.get('child'):
+            parts.append(f"Enfant: {context['child']}")
+        
+        return " > ".join(parts)
     
     def _save_results(self, results):
         """Sauvegarde les résultats dans le format sélectionné"""
@@ -141,6 +194,7 @@ class GenerationWidget(QWidget):
         self.database = None
         self.platforms = []
         self.generation_worker = None
+        self.strategy_widget = None  # Référence vers le widget de stratégie
         
         self._init_ui()
         self._init_connections()
@@ -159,57 +213,46 @@ class GenerationWidget(QWidget):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setSpacing(10)
         
-        # Section Typologies de contexte (en haut à gauche)
-        context_group = QGroupBox("Typologies de contexte")
-        context_layout = QVBoxLayout(context_group)
+        # Section Structure hiérarchique (en haut à gauche)
+        hierarchy_group = QGroupBox("Structure hiérarchique des clusters")
+        hierarchy_layout = QVBoxLayout(hierarchy_group)
         
-        # Liste des typologies disponibles
-        self.context_list = QListWidget()
-        self.context_list.setSelectionMode(QListWidget.MultiSelection)
+        # Arbre pour afficher la structure hiérarchique
+        self.hierarchy_tree = QTreeWidget()
+        self.hierarchy_tree.setHeaderLabels(["Élément", "Type", "Statut"])
+        self.hierarchy_tree.setSelectionMode(QTreeWidget.MultiSelection)
+        self.hierarchy_tree.itemClicked.connect(self._on_hierarchy_item_clicked)
         
-        # Typologies prédéfinies
-        predefined_contexts = [
-            "Analyse de sentiment",
-            "Classification de texte", 
-            "Résumé automatique",
-            "Traduction",
-            "Génération de code",
-            "Question-Réponse",
-            "Reconnaissance d'entités",
-            "Correction grammaticale",
-            "Analyse syntaxique",
-            "Détection de spam",
-            "Génération créative",
-            "Analyse de données",
-            "Extraction d'information",
-            "Synthèse de texte",
-            "Évaluation de qualité"
-        ]
+        hierarchy_layout.addWidget(QLabel("Sélectionnez un ou plusieurs éléments hiérarchiques:"))
+        hierarchy_layout.addWidget(self.hierarchy_tree)
         
-        for context in predefined_contexts:
-            item = QListWidgetItem(context)
-            self.context_list.addItem(item)
+        # Informations de sélection
+        self.selection_info = QLabel("Aucun élément sélectionné")
+        self.selection_info.setStyleSheet("padding: 5px; background-color: #f0f0f0; border-radius: 3px;")
+        self.selection_info.setWordWrap(True)
+        hierarchy_layout.addWidget(self.selection_info)
         
-        context_layout.addWidget(QLabel("Sélectionnez une ou plusieurs typologies:"))
-        context_layout.addWidget(self.context_list)
-        
-        left_layout.addWidget(context_group)
+        left_layout.addWidget(hierarchy_group)
         
         # Section Prompt de base (en bas à gauche)
         prompt_group = QGroupBox("Prompt de base")
         prompt_layout = QVBoxLayout(prompt_group)
         
         self.prompt_edit = QTextEdit()
-        self.prompt_edit.setPlaceholderText("Rédigez votre prompt de base ici...\n\nCe prompt sera automatiquement enrichi avec les contextes sélectionnés.")
+        self.prompt_edit.setPlaceholderText(
+            "Rédigez votre prompt de base ici...\n\n"
+            "Ce prompt sera automatiquement enrichi avec les CLUSTERS sélectionnés "
+            "et leur structure hiérarchique complète (racines, parents, enfants)."
+        )
         self.prompt_edit.setMinimumHeight(200)
         
-        prompt_layout.addWidget(QLabel("Prompt de base (sera enrichi par les contextes sélectionnés):"))
+        prompt_layout.addWidget(QLabel("Prompt de base (sera enrichi par la structure sélectionnée):"))
         prompt_layout.addWidget(self.prompt_edit)
         
         left_layout.addWidget(prompt_group)
         
         # Ajuster les proportions de la partie gauche
-        left_layout.setStretchFactor(context_group, 1)
+        left_layout.setStretchFactor(hierarchy_group, 2)
         left_layout.setStretchFactor(prompt_group, 1)
         
         # === PARTIE DROITE ===
@@ -354,14 +397,178 @@ class GenerationWidget(QWidget):
         self.generate_btn.clicked.connect(self._on_generate)
         self.stop_btn.clicked.connect(self._on_stop)
         self.export_btn.clicked.connect(self._on_export)
-        
-        # Connexion pour mettre à jour le statut en temps réel
-        self.context_list.itemSelectionChanged.connect(self._update_selection_status)
     
-    def _update_selection_status(self):
-        """Met à jour le statut de sélection des typologies"""
-        selected_count = len(self.context_list.selectedItems())
-        self.context_list.setToolTip(f"{selected_count} typologie(s) sélectionnée(s)")
+    def _refresh_hierarchy_tree(self):
+        """Rafraîchit l'arbre hiérarchique avec les clusters ET leur structure complète - VERSION CORRIGÉE"""
+        self.hierarchy_tree.clear()
+        
+        # Vérifier d'abord si strategy_widget existe
+        if not self.strategy_widget:
+            logger.warning("StrategyWidget non défini")
+            no_data_item = QTreeWidgetItem(["StrategyWidget non disponible", "Veuillez configurer une stratégie d'abord", ""])
+            self.hierarchy_tree.addTopLevelItem(no_data_item)
+            return
+            
+        # Récupérer les données de typologie via la nouvelle méthode
+        typology = self.strategy_widget.get_current_typology_data()
+        
+        logger.info(f"Typologie reçue: {typology.get('name', 'Inconnue')}")
+        logger.info(f"Nombre de clusters dans typologie: {len(typology.get('clusters', []))}")
+        
+        if not typology or not typology.get('clusters'):
+            logger.warning("Aucune typologie disponible ou typologie vide")
+            # Afficher un message dans l'arbre
+            no_data_item = QTreeWidgetItem(["Aucune typologie chargée", "Veuillez configurer une stratégie d'abord", ""])
+            self.hierarchy_tree.addTopLevelItem(no_data_item)
+            return
+        
+        clusters = typology['clusters']
+        logger.info(f"Chargement de {len(clusters)} clusters dans l'arbre hiérarchique")
+        
+        # Afficher les clusters et leur hiérarchie
+        for cluster in clusters:
+            cluster_name = cluster.get('name', 'Sans nom')
+            cluster_item = QTreeWidgetItem([
+                cluster_name, 
+                'Cluster', 
+                '✓'
+            ])
+            cluster_item.setData(0, QtCore.Qt.UserRole, {
+                'type': 'cluster',
+                'cluster': cluster_name,
+                'cluster_id': cluster.get('id'),
+                'full_cluster_data': cluster
+            })
+            self.hierarchy_tree.addTopLevelItem(cluster_item)
+            
+            # AJOUTER LA STRUCTURE HIÉRARCHIQUE COMPLÈTE
+            roots = cluster.get('roots', [])
+            logger.info(f"Cluster '{cluster_name}' a {len(roots)} racines")
+            
+            for root in roots:
+                root_name = root.get('name', 'Sans nom')
+                root_item = QTreeWidgetItem([
+                    root_name, 
+                    'Racine', 
+                    '✓'
+                ])
+                root_item.setData(0, QtCore.Qt.UserRole, {
+                    'type': 'root',
+                    'cluster': cluster_name,
+                    'root': root_name,
+                    'root_id': root.get('id')
+                })
+                cluster_item.addChild(root_item)
+                
+                # Parents
+                parents = root.get('parents', [])
+                for parent in parents:
+                    parent_name = parent.get('name', 'Sans nom')
+                    parent_item = QTreeWidgetItem([
+                        parent_name, 
+                        'Parent', 
+                        '✓'
+                    ])
+                    parent_item.setData(0, QtCore.Qt.UserRole, {
+                        'type': 'parent',
+                        'cluster': cluster_name,
+                        'root': root_name,
+                        'parent': parent_name,
+                        'parent_id': parent.get('id')
+                    })
+                    root_item.addChild(parent_item)
+                    
+                    # Enfants
+                    children = parent.get('children', [])
+                    for child in children:
+                        child_name = child.get('name', 'Sans nom')
+                        child_item = QTreeWidgetItem([
+                            child_name, 
+                            'Enfant', 
+                            '✓'
+                        ])
+                        child_item.setData(0, QtCore.Qt.UserRole, {
+                            'type': 'child',
+                            'cluster': cluster_name,
+                            'root': root_name,
+                            'parent': parent_name,
+                            'child': child_name,
+                            'child_id': child.get('id')
+                        })
+                        parent_item.addChild(child_item)
+        
+        # Développer tout l'arbre pour montrer la structure
+        self.hierarchy_tree.expandAll()
+        logger.info(f"Arbre hiérarchique rafraîchi avec {len(clusters)} clusters")
+
+    def set_strategy_widget(self, strategy_widget):
+        """Définit la référence vers le widget de stratégie"""
+        self.strategy_widget = strategy_widget
+
+        # Se connecter au signal de changement de typologie (CORRIGÉ)
+        if hasattr(strategy_widget, 'typology_changed_signal'):
+            strategy_widget.typology_changed_signal.connect(self._refresh_hierarchy_tree)
+        
+        self._refresh_hierarchy_tree()
+        
+    def _on_hierarchy_item_clicked(self, item, column):
+        """Gère le clic sur un élément de l'arbre hiérarchique"""
+        selected_items = self.hierarchy_tree.selectedItems()
+        selected_count = len(selected_items)
+        
+        if selected_count == 0:
+            self.selection_info.setText("Aucun élément sélectionné")
+            return
+        
+        # Filtrer et organiser les sélections par cluster
+        cluster_selections = {}
+        
+        for selected_item in selected_items:
+            data = selected_item.data(0, QtCore.Qt.UserRole)
+            if data:
+                cluster_name = data.get('cluster')
+                if cluster_name not in cluster_selections:
+                    cluster_selections[cluster_name] = {
+                        'cluster_data': None,
+                        'roots': set(),
+                        'parents': set(),
+                        'children': set()
+                    }
+                
+                # Organiser par type
+                element_type = data.get('type')
+                element_name = data.get(element_type)  # cluster, root, parent, child
+                
+                if element_type == 'cluster':
+                    cluster_selections[cluster_name]['cluster_data'] = data
+                elif element_type == 'root':
+                    cluster_selections[cluster_name]['roots'].add(element_name)
+                elif element_type == 'parent':
+                    cluster_selections[cluster_name]['parents'].add(element_name)
+                elif element_type == 'child':
+                    cluster_selections[cluster_name]['children'].add(element_name)
+        
+        # Construire le texte d'information
+        selection_text = f"{selected_count} élément(s) sélectionné(s):\n\n"
+        
+        for cluster_name, selections in cluster_selections.items():
+            selection_text += f"📊 **Cluster: {cluster_name}**\n"
+            
+            if selections['cluster_data']:
+                selection_text += "  • Cluster sélectionné\n"
+            
+            if selections['roots']:
+                selection_text += f"  🌳 Racines: {', '.join(selections['roots'])}\n"
+            
+            if selections['parents']:
+                selection_text += f"  👥 Parents: {', '.join(selections['parents'])}\n"
+            
+            if selections['children']:
+                selection_text += f"  👶 Enfants: {', '.join(selections['children'])}\n"
+            
+            selection_text += "\n"
+        
+        self.selection_info.setText(selection_text)
     
     def set_conductor(self, conductor):
         """Définit le conducteur pour les appels API"""
@@ -386,7 +593,7 @@ class GenerationWidget(QWidget):
         self.database = database
     
     def _on_generate(self):
-        """Lance la génération du dataset"""
+        """Lance la génération du dataset basée sur la hiérarchie sélectionnée"""
         if not self.conductor:
             QMessageBox.warning(self, "Erreur", "Conducteur non initialisé")
             return
@@ -401,11 +608,28 @@ class GenerationWidget(QWidget):
             QMessageBox.warning(self, "Erreur", "Veuillez saisir un prompt de base")
             return
         
-        # Récupérer les contextes sélectionnés
-        selected_contexts = [item.text() for item in self.context_list.selectedItems()]
-        if not selected_contexts:
-            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner au moins une typologie de contexte")
+        # Récupérer les éléments sélectionnés et les organiser par cluster
+        selected_items = self.hierarchy_tree.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner au moins un élément")
             return
+        
+        # Organiser les sélections par cluster
+        hierarchical_contexts = []
+        
+        for item in selected_items:
+            data = item.data(0, QtCore.Qt.UserRole)
+            if data:
+                # Créer un contexte structuré pour chaque élément sélectionné
+                context = {
+                    'type': data.get('type'),
+                    'cluster': data.get('cluster'),
+                    'root': data.get('root'),
+                    'parent': data.get('parent'),
+                    'child': data.get('child'),
+                    'element_name': data.get(data.get('type'))  # Nom de l'élément
+                }
+                hierarchical_contexts.append(context)
         
         # Récupérer les paramètres
         platform = self.platform_combo.currentText()
@@ -422,13 +646,13 @@ class GenerationWidget(QWidget):
         self.log_edit.clear()
         self._add_log("=== DÉBUT DE LA GÉNÉRATION ===")
         self._add_log(f"Plateforme: {platform}")
-        self._add_log(f"Typologies: {', '.join(selected_contexts)}")
+        self._add_log(f"Éléments sélectionnés: {len(hierarchical_contexts)}")
         self._add_log(f"Nombre de batches: {num_batches}")
         self._add_log("")
         
         # Lancer le worker de génération
         self.generation_worker = GenerationWorker(
-            self.conductor, platform, base_prompt, selected_contexts, 
+            self.conductor, platform, base_prompt, hierarchical_contexts, 
             num_batches, output_format
         )
         
@@ -437,7 +661,7 @@ class GenerationWidget(QWidget):
         self.generation_worker.generation_finished.connect(self._on_generation_finished)
         
         self.generation_worker.start()
-    
+        
     def _on_stop(self):
         """Arrête la génération en cours"""
         if self.generation_worker and self.generation_worker.isRunning():
@@ -504,6 +728,10 @@ class GenerationWidget(QWidget):
         """Rafraîchit le widget"""
         if self.platform_combo.count() == 0 and self.platforms:
             self.set_platforms(self.platforms)
+        
+        # Rafraîchir l'arbre hiérarchique si le widget de stratégie est disponible
+        if self.strategy_widget:
+            self._refresh_hierarchy_tree()
     
     def update_language(self):
         """Met à jour les textes selon la langue"""

@@ -866,6 +866,8 @@ class MainWindow(QMainWindow):
         self.dataset_generation.set_database(self.database)
         self.dataset_analytics.set_database(self.database)
 
+        self.generation_widget.set_strategy_widget(self.strategy_widget)
+
         # self.annotation_form.set_conductor(self.conductor)
         # self.annotation_form.set_platforms(platforms)
 
