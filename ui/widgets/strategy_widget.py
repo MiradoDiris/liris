@@ -540,6 +540,9 @@ class StrategyWidget(QtWidgets.QWidget):
         
         self._init_ui()
         self._load_projects_from_db()
+
+        # AJOUTER CET APPEL POUR RAFRAÎCHIR L'UI IMMÉDIATEMENT
+        self.refresh_ui()
             
 
     def _init_ui(self):
@@ -562,12 +565,9 @@ class StrategyWidget(QtWidgets.QWidget):
         project_details_section = self._create_project_details_section()
         left_layout.addWidget(project_details_section)
 
-        # Section 3: Typologie avec structure hiérarchique en bas
+        # Section 3: Typologie avec structure hiérarchique
         typology_section = self._create_typology_section()
-        left_layout.addWidget(typology_section)
-
-        # Espace flexible pour pousser les sections vers le haut
-        left_layout.addStretch(1)
+        left_layout.addWidget(typology_section, 1)  # Facteur d'expansion = 1
 
         # Conteneur droit pour la section 4 (plus large)
         right_container = QtWidgets.QWidget()
@@ -576,11 +576,17 @@ class StrategyWidget(QtWidgets.QWidget):
 
         # Section 4: Graphique de répartition
         context_typology_section = self._create_context_typology_section()
-        right_layout.addWidget(context_typology_section)
+        right_layout.addWidget(context_typology_section, 1)  # Facteur d'expansion = 1
+
+        # AJOUTER L'INITIALISATION DE L'ONGLET PROJET/TYPOLOGIE
+        self.project_typology_tab = ProjectTypologyTab(self)
+        # Connecter le signal de changement de sélection hiérarchique
+        self.project_typology_tab.hierarchy_selection_changed.connect(self._on_hierarchy_selection_changed)
 
         # Ajouter les conteneurs gauche et droit au layout principal
         main_layout.addWidget(left_container, 1)  # 1/3 de l'espace
         main_layout.addWidget(right_container, 2)  # 2/3 de l'espace
+
         
     def _load_projects_from_db(self):
         """Charger les projets depuis la base de données"""
@@ -594,6 +600,9 @@ class StrategyWidget(QtWidgets.QWidget):
                 self.current_project_id = projects[0]['id']
                 self._load_project_data()
                 
+            # AJOUTER CET APPEL POUR METTRE À JOUR L'UI
+            self.refresh_ui()  # <-- AJOUTER CETTE LIGNE
+            
         except Exception as e:
             logger.error(f"Erreur lors du chargement des projets: {str(e)}")
             self._create_default_project()
@@ -694,55 +703,70 @@ class StrategyWidget(QtWidgets.QWidget):
 
     def refresh_ui(self):
         """Rafraîchir l'interface utilisateur avec les données de la DB"""
-        # Mettre à jour la liste des projets
-        self.project_combo.blockSignals(True)
-        self.project_combo.clear()
-        
-        projects = self.db.get_typology_projects()
-        for project in projects:
-            self.project_combo.addItem(project['name'], project['id'])
-        
-        # Sélectionner le projet courant
-        if self.current_project_id:
-            index = self.project_combo.findData(self.current_project_id)
-            if index >= 0:
-                self.project_combo.setCurrentIndex(index)
-        
-        self.project_combo.blockSignals(False)
-        
-        # Mettre à jour le nom du projet
-        if self.current_project:
-            self.project_name_label.setText(self.current_project['name'])
-        else:
-            self.project_name_label.setText("Aucun projet sélectionné")
-        
-        # Mettre à jour la liste des typologies
-        self.typology_combo.blockSignals(True)
-        self.typology_combo.clear()
-        
-        if self.typologies:
-            for typology in self.typologies:
-                self.typology_combo.addItem(typology['name'], typology['id'])
+        try:
+            # Mettre à jour la liste des projets
+            self.project_combo.blockSignals(True)
+            self.project_combo.clear()
             
-            # Sélectionner la typologie courante
-            if self.current_typology_id:
-                index = self.typology_combo.findData(self.current_typology_id)
+            projects = self.db.get_typology_projects()
+            for project in projects:
+                self.project_combo.addItem(project['name'], project['id'])
+            
+            # Sélectionner le projet courant s'il existe
+            if self.current_project_id:
+                index = self.project_combo.findData(self.current_project_id)
                 if index >= 0:
-                    self.typology_combo.setCurrentIndex(index)
-        
-        self.typology_combo.blockSignals(False)
-        
-        # Mettre à jour les onglets
-        self._refresh_cluster_tab()
-        self._refresh_root_tab()
-        self._refresh_parent_tab()
-        self._refresh_child_tab()
-        
-        # Rafraîchir l'onglet projet et typologie
-        self.project_typology_tab.refresh()
-        
-        # Mettre à jour le camembert avec les statistiques
-        self._update_pie_chart()
+                    self.project_combo.setCurrentIndex(index)
+                else:
+                    # Si le projet courant n'est pas trouvé, sélectionner le premier
+                    if projects:
+                        self.current_project_id = projects[0]['id']
+                        self.project_combo.setCurrentIndex(0)
+            
+            self.project_combo.blockSignals(False)
+            
+            # Mettre à jour le nom du projet
+            if self.current_project:
+                self.project_name_label.setText(self.current_project['name'])
+            else:
+                self.project_name_label.setText("Aucun projet sélectionné")
+            
+            # Mettre à jour la liste des typologies
+            self.typology_combo.blockSignals(True)
+            self.typology_combo.clear()
+            
+            if self.typologies:
+                for typology in self.typologies:
+                    self.typology_combo.addItem(typology['name'], typology['id'])
+                
+                # Sélectionner la typologie courante
+                if self.current_typology_id:
+                    index = self.typology_combo.findData(self.current_typology_id)
+                    if index >= 0:
+                        self.typology_combo.setCurrentIndex(index)
+                    else:
+                        # Si la typologie courante n'est pas trouvée, sélectionner la première
+                        self.current_typology_id = self.typologies[0]['id']
+                        self.typology_combo.setCurrentIndex(0)
+            
+            self.typology_combo.blockSignals(False)
+            
+            # Mettre à jour les onglets
+            self._refresh_cluster_tab()
+            self._refresh_root_tab()
+            self._refresh_parent_tab()
+            self._refresh_child_tab()
+            
+            # Rafraîchir l'onglet projet et typologie
+            if hasattr(self, 'project_typology_tab'):
+                self.project_typology_tab.refresh()
+            
+            # Mettre à jour le camembert avec les statistiques
+            if hasattr(self, 'pie_chart'):
+                self._update_pie_chart()
+                
+        except Exception as e:
+            logger.error(f"Erreur lors du rafraîchissement de l'interface: {str(e)}")
 
     def get_current_typology(self):
         """Retourne la typologie actuelle pour la génération"""
@@ -901,7 +925,7 @@ class StrategyWidget(QtWidgets.QWidget):
         return group
 
     def _create_typology_section(self):
-        """Créer la section de typologie avec structure hiérarchique en bas"""
+        """Créer la section de typologie avec structure hiérarchique"""
         group = QtWidgets.QGroupBox("Section 3: Typologie")
         group.setStyleSheet(self._get_group_style())
         layout = QtWidgets.QVBoxLayout(group)
@@ -914,41 +938,84 @@ class StrategyWidget(QtWidgets.QWidget):
         self.typology_combo.setStyleSheet(self._get_combo_style())
         self.typology_combo.currentTextChanged.connect(self._on_typology_changed)
         
-        # Bouton créer une typologie
-        create_typology_btn = QtWidgets.QPushButton("➕ Créer une typologie")
-        create_typology_btn.setStyleSheet(self._get_button_style(Theme.SECONDARY_COLOR))
+        # Boutons pour la typologie
+        create_typology_btn = QtWidgets.QPushButton("➕ Créer")
+        create_typology_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
         create_typology_btn.clicked.connect(self._create_typology)
+        
+        edit_typology_btn = QtWidgets.QPushButton("✏️ Modifier")
+        edit_typology_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        edit_typology_btn.clicked.connect(self._edit_typology)
+        
+        delete_typology_btn = QtWidgets.QPushButton("🗑️ Supprimer")
+        delete_typology_btn.setStyleSheet(self._get_small_button_style("#e74c3c"))
+        delete_typology_btn.clicked.connect(self._delete_typology)
         
         typology_selection_layout.addWidget(QtWidgets.QLabel("Typologie:"))
         typology_selection_layout.addWidget(self.typology_combo, 1)
         typology_selection_layout.addWidget(create_typology_btn)
+        typology_selection_layout.addWidget(edit_typology_btn)
+        typology_selection_layout.addWidget(delete_typology_btn)
         
         layout.addLayout(typology_selection_layout)
         
-        # Deuxième partie : Structure hiérarchique
+        # Deuxième partie : Structure hiérarchique (supprimer la hauteur maximale)
         hierarchy_group = QtWidgets.QGroupBox("Structure Hiérarchique")
         hierarchy_group.setStyleSheet(self._get_group_style())
+        # SUPPRIMER: hierarchy_group.setMaximumHeight(400)
         hierarchy_layout = QtWidgets.QVBoxLayout(hierarchy_group)
         
         # Grille 2x2 pour les composants
         grid_layout = QtWidgets.QGridLayout()
-        grid_layout.setSpacing(10)
+        grid_layout.setSpacing(6)
         
         # Cluster (en haut à gauche)
         cluster_group = QtWidgets.QGroupBox("Clusters")
         cluster_group.setStyleSheet(self._get_component_group_style())
         cluster_layout = QtWidgets.QVBoxLayout(cluster_group)
         self.cluster_list = QtWidgets.QListWidget()
-        self.cluster_list.setStyleSheet(self._get_list_style())
+
+        # Style personnalisé pour réduire la hauteur de sélection
+        list_style = f"""
+            {self._get_list_style()}
+            QListWidget::item {{
+                height: 20px;
+                padding: 1px;
+            }}
+            QListWidget::item:selected {{
+                background-color: palette(highlight);
+                height: 20px;
+            }}
+        """
+
+        self.cluster_list.setStyleSheet(list_style)
+
+        # Remplacer la hauteur maximale par une taille minimale
+        self.cluster_list.setMinimumHeight(80)
         self.cluster_list.currentRowChanged.connect(self._on_cluster_selected)
         cluster_layout.addWidget(self.cluster_list)
         
         # Boutons cluster
         cluster_btn_layout = QtWidgets.QHBoxLayout()
-        add_cluster_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_cluster_btn = QtWidgets.QPushButton("➕")
         add_cluster_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        add_cluster_btn.setToolTip("Ajouter un cluster")
         add_cluster_btn.clicked.connect(self._add_cluster)
+        
+        edit_cluster_btn = QtWidgets.QPushButton("✏️")
+        edit_cluster_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        edit_cluster_btn.setToolTip("Modifier le cluster")
+        edit_cluster_btn.clicked.connect(self._edit_cluster)
+        
+        delete_cluster_btn = QtWidgets.QPushButton("🗑️")
+        delete_cluster_btn.setStyleSheet(self._get_small_button_style("#e74c3c"))
+        delete_cluster_btn.setToolTip("Supprimer le cluster")
+        delete_cluster_btn.clicked.connect(self._delete_cluster)
+        
         cluster_btn_layout.addWidget(add_cluster_btn)
+        cluster_btn_layout.addWidget(edit_cluster_btn)
+        cluster_btn_layout.addWidget(delete_cluster_btn)
+        cluster_btn_layout.addStretch()
         cluster_layout.addLayout(cluster_btn_layout)
         
         grid_layout.addWidget(cluster_group, 0, 0)
@@ -962,21 +1029,53 @@ class StrategyWidget(QtWidgets.QWidget):
         root_cluster_layout = QtWidgets.QHBoxLayout()
         root_cluster_layout.addWidget(QtWidgets.QLabel("Cluster:"))
         self.root_cluster_combo = QtWidgets.QComboBox()
+        self.root_cluster_combo.setFixedHeight(30)
         self.root_cluster_combo.currentTextChanged.connect(self._on_root_cluster_changed)
         root_cluster_layout.addWidget(self.root_cluster_combo, 1)
         root_layout.addLayout(root_cluster_layout)
         
         self.root_list = QtWidgets.QListWidget()
-        self.root_list.setStyleSheet(self._get_list_style())
+
+        # Style personnalisé pour réduire la hauteur de sélection
+        list_style = f"""
+            {self._get_list_style()}
+            QListWidget::item {{
+                height: 20px;
+                padding: 1px;
+            }}
+            QListWidget::item:selected {{
+                background-color: palette(highlight);
+                height: 20px;
+            }}
+        """
+
+        self.root_list.setStyleSheet(list_style)
+        # Remplacer la hauteur maximale par une taille minimale
+        self.root_list.setMinimumHeight(60)
         self.root_list.currentRowChanged.connect(self._on_root_selected)
         root_layout.addWidget(self.root_list)
         
         # Boutons racine
         root_btn_layout = QtWidgets.QHBoxLayout()
-        add_root_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_root_btn = QtWidgets.QPushButton("➕")
         add_root_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        add_root_btn.setToolTip("Ajouter une racine")
         add_root_btn.clicked.connect(self._add_root)
+        
+        edit_root_btn = QtWidgets.QPushButton("✏️")
+        edit_root_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        edit_root_btn.setToolTip("Modifier la racine")
+        edit_root_btn.clicked.connect(self._edit_root)
+        
+        delete_root_btn = QtWidgets.QPushButton("🗑️")
+        delete_root_btn.setStyleSheet(self._get_small_button_style("#e74c3c"))
+        delete_root_btn.setToolTip("Supprimer la racine")
+        delete_root_btn.clicked.connect(self._delete_root)
+        
         root_btn_layout.addWidget(add_root_btn)
+        root_btn_layout.addWidget(edit_root_btn)
+        root_btn_layout.addWidget(delete_root_btn)
+        root_btn_layout.addStretch()
         root_layout.addLayout(root_btn_layout)
         
         grid_layout.addWidget(root_group, 0, 1)
@@ -988,28 +1087,63 @@ class StrategyWidget(QtWidgets.QWidget):
         
         # Sélections pour parents
         parent_selection_layout = QtWidgets.QGridLayout()
+        parent_selection_layout.setVerticalSpacing(4)
+        
         parent_selection_layout.addWidget(QtWidgets.QLabel("Cluster:"), 0, 0)
         self.parent_cluster_combo = QtWidgets.QComboBox()
+        self.parent_cluster_combo.setFixedHeight(30)  
         self.parent_cluster_combo.currentTextChanged.connect(self._on_parent_cluster_changed)
         parent_selection_layout.addWidget(self.parent_cluster_combo, 0, 1)
         
         parent_selection_layout.addWidget(QtWidgets.QLabel("Racine:"), 1, 0)
         self.parent_root_combo = QtWidgets.QComboBox()
+        self.parent_root_combo.setFixedHeight(30)
         self.parent_root_combo.currentTextChanged.connect(self._on_parent_root_changed)
         parent_selection_layout.addWidget(self.parent_root_combo, 1, 1)
         parent_layout.addLayout(parent_selection_layout)
         
         self.parent_list = QtWidgets.QListWidget()
-        self.parent_list.setStyleSheet(self._get_list_style())
+
+        # Style personnalisé pour réduire la hauteur de sélection
+        list_style = f"""
+            {self._get_list_style()}
+            QListWidget::item {{
+                height: 20px;
+                padding: 1px;
+            }}
+            QListWidget::item:selected {{
+                background-color: palette(highlight);
+                height: 20px;
+            }}
+        """
+
+        self.parent_list.setStyleSheet(list_style)
+        # Remplacer la hauteur maximale par une taille minimale
+        self.parent_list.setMinimumHeight(30)
         self.parent_list.currentRowChanged.connect(self._on_parent_selected)
         parent_layout.addWidget(self.parent_list)
         
         # Boutons parent
         parent_btn_layout = QtWidgets.QHBoxLayout()
-        add_parent_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_parent_btn = QtWidgets.QPushButton("➕")
         add_parent_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        add_parent_btn.setToolTip("Ajouter un parent")
         add_parent_btn.clicked.connect(self._add_parent)
+        
+        edit_parent_btn = QtWidgets.QPushButton("✏️")
+        edit_parent_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        edit_parent_btn.setToolTip("Modifier le parent")
+        edit_parent_btn.clicked.connect(self._edit_parent)
+        
+        delete_parent_btn = QtWidgets.QPushButton("🗑️")
+        delete_parent_btn.setStyleSheet(self._get_small_button_style("#e74c3c"))
+        delete_parent_btn.setToolTip("Supprimer le parent")
+        delete_parent_btn.clicked.connect(self._delete_parent)
+        
         parent_btn_layout.addWidget(add_parent_btn)
+        parent_btn_layout.addWidget(edit_parent_btn)
+        parent_btn_layout.addWidget(delete_parent_btn)
+        parent_btn_layout.addStretch()
         parent_layout.addLayout(parent_btn_layout)
         
         grid_layout.addWidget(parent_group, 1, 0)
@@ -1021,33 +1155,93 @@ class StrategyWidget(QtWidgets.QWidget):
         
         # Sélections pour enfants
         child_selection_layout = QtWidgets.QGridLayout()
+        child_selection_layout.setVerticalSpacing(4)
+        
+        # Définir un style commun
+        combo_style = "QComboBox { font-size: 8pt; padding: 2px; }"
+
         child_selection_layout.addWidget(QtWidgets.QLabel("Cluster:"), 0, 0)
         self.child_cluster_combo = QtWidgets.QComboBox()
+        self.child_cluster_combo.setFixedHeight(25)
+        self.child_cluster_combo.setStyleSheet(combo_style)
         self.child_cluster_combo.currentTextChanged.connect(self._on_child_cluster_changed)
         child_selection_layout.addWidget(self.child_cluster_combo, 0, 1)
-        
+
         child_selection_layout.addWidget(QtWidgets.QLabel("Racine:"), 1, 0)
         self.child_root_combo = QtWidgets.QComboBox()
+        self.child_root_combo.setFixedHeight(25)
+        self.child_root_combo.setStyleSheet(combo_style)
         self.child_root_combo.currentTextChanged.connect(self._on_child_root_changed)
         child_selection_layout.addWidget(self.child_root_combo, 1, 1)
-        
+
         child_selection_layout.addWidget(QtWidgets.QLabel("Parent:"), 2, 0)
         self.child_parent_combo = QtWidgets.QComboBox()
+        self.child_parent_combo.setFixedHeight(25)
+        self.child_parent_combo.setStyleSheet(combo_style)
         self.child_parent_combo.currentTextChanged.connect(self._on_child_parent_changed)
         child_selection_layout.addWidget(self.child_parent_combo, 2, 1)
         child_layout.addLayout(child_selection_layout)
         
         self.child_list = QtWidgets.QListWidget()
-        self.child_list.setStyleSheet(self._get_list_style())
+
+        # Créer une police plus petite
+        small_font = self.child_list.font()
+        small_font.setPointSize(small_font.pointSize() - 2)  # Réduire de 2 points
+        self.child_list.setFont(small_font)
+
+        # Calculer la hauteur basée sur la nouvelle police
+        font_metrics = self.child_list.fontMetrics()
+        line_height = font_metrics.height() + 2  # Hauteur compacte
+
+        list_style = f"""
+            {self._get_list_style()}
+            QListWidget::item {{
+                height: {line_height}px;
+                padding: 0px;
+                margin: 0px;
+                border: none;
+            }}
+            QListWidget::item:selected {{
+                background-color: palette(highlight);
+                color: palette(highlighted-text);
+                height: {line_height}px;
+                padding: 0px;
+                margin: 0px;
+                border: none;
+            }}
+            QListWidget::item:hover:!selected {{
+                background-color: palette(midlight);
+                height: {line_height}px;
+            }}
+        """
+
+        self.child_list.setStyleSheet(list_style)
+        # Remplacer la hauteur maximale par une taille minimale
+        self.child_list.setMinimumHeight(20)
         self.child_list.currentRowChanged.connect(self._on_child_selected)
         child_layout.addWidget(self.child_list)
         
         # Boutons enfant
         child_btn_layout = QtWidgets.QHBoxLayout()
-        add_child_btn = QtWidgets.QPushButton("➕ Ajouter")
+        add_child_btn = QtWidgets.QPushButton("➕")
         add_child_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        add_child_btn.setToolTip("Ajouter un enfant")
         add_child_btn.clicked.connect(self._add_child)
+        
+        edit_child_btn = QtWidgets.QPushButton("✏️")
+        edit_child_btn.setStyleSheet(self._get_small_button_style(Theme.SECONDARY_COLOR))
+        edit_child_btn.setToolTip("Modifier l'enfant")
+        edit_child_btn.clicked.connect(self._edit_child)
+        
+        delete_child_btn = QtWidgets.QPushButton("🗑️")
+        delete_child_btn.setStyleSheet(self._get_small_button_style("#e74c3c"))
+        delete_child_btn.setToolTip("Supprimer l'enfant")
+        delete_child_btn.clicked.connect(self._delete_child)
+        
         child_btn_layout.addWidget(add_child_btn)
+        child_btn_layout.addWidget(edit_child_btn)
+        child_btn_layout.addWidget(delete_child_btn)
+        child_btn_layout.addStretch()
         child_layout.addLayout(child_btn_layout)
         
         grid_layout.addWidget(child_group, 1, 1)
@@ -1060,9 +1254,60 @@ class StrategyWidget(QtWidgets.QWidget):
         save_btn.clicked.connect(self._save_strategy)
         hierarchy_layout.addWidget(save_btn)
         
-        layout.addWidget(hierarchy_group)
+        layout.addWidget(hierarchy_group, 1)  # Facteur d'expansion = 1
         
         return group
+
+    # Ajouter les méthodes manquantes pour la gestion des typologies
+    def _edit_typology(self):
+        """Modifier la typologie actuelle"""
+        if not self.current_typology:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Aucune typologie sélectionnée")
+            return
+            
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "Modifier la typologie", "Nom de la typologie:", 
+            text=self.current_typology['name']
+        )
+        
+        if ok and name:
+            try:
+                success = self.db.update_context_typology(self.current_typology_id, name=name)
+                if success:
+                    self._load_project_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Typologie modifiée avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la modification de la typologie")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification: {str(e)}")
+
+    def _delete_typology(self):
+        """Supprimer la typologie actuelle"""
+        if not self.current_typology:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Aucune typologie sélectionnée")
+            return
+            
+        reply = QtWidgets.QMessageBox.question(
+            self, "Supprimer la typologie", 
+            f"Êtes-vous sûr de vouloir supprimer la typologie '{self.current_typology['name']}'?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                success = self.db.delete_context_typology(self.current_typology_id)
+                if success:
+                    # Recharger les typologies
+                    self._load_project_data()
+                    self.refresh_ui()
+                    QtWidgets.QMessageBox.information(self, "Succès", "Typologie supprimée avec succès!")
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Erreur", "Erreur lors de la suppression de la typologie")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression: {str(e)}")
 
     def _create_context_typology_section(self):
         """Créer la section avec le graphique de répartition"""
@@ -1088,9 +1333,9 @@ class StrategyWidget(QtWidgets.QWidget):
         # Conteneur pour le camembert et les contrôles (côte à côte)
         content_layout = QtWidgets.QHBoxLayout()
         
-        # Camembert à GAUCHE (plus d'espace maintenant)
+        # Camembert à GAUCHE - maintenant plus flexible en hauteur
         self.pie_chart = PieChartWidget()
-        self.pie_chart.setMinimumSize(500, 500)
+        self.pie_chart.setMinimumSize(400, 400)  # Taille minimale réduite pour plus de flexibilité
         content_layout.addWidget(self.pie_chart, 2)  # 2/3 de l'espace à gauche
         
         # Contrôles à DROITE
@@ -1140,7 +1385,9 @@ class StrategyWidget(QtWidgets.QWidget):
         controls_layout.addStretch()
         
         content_layout.addLayout(controls_layout, 1)  # 1/3 de l'espace à droite
-        main_layout.addLayout(content_layout)
+        
+        # Ajouter le contenu avec un facteur d'expansion
+        main_layout.addLayout(content_layout, 1)
         
         # Connexions des signaux
         self.pie_chart.segment_clicked.connect(self._on_pie_segment_clicked)

@@ -18,6 +18,12 @@ class Theme:
     LIGHT_BACKGROUND = "#FFFFFF"  # Blanc pour la fenêtre principale
     TEXT_COLOR = "#333333"  # Gris foncé
     ACCENT_COLOR = "#E8E0DF"  # Gris clair pour les accents
+    SUCCESS_COLOR = "#4CAF50"
+    WARNING_COLOR = "#FF9800"
+    ERROR_COLOR = "#F44336"
+    DANGER_COLOR = "#F44336"
+    BACKGROUND_COLOR = "#F9F6F6"  # Beige très clair (comme Theme.BACKGROUND_COLOR)
+
 
     # Tailles de police
     FONT_SIZE_TITLE = 28
