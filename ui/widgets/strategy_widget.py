@@ -16,10 +16,9 @@ logger = logging.getLogger(__name__)
 
 class PieChartWidget(QtWidgets.QWidget):
     """
-    Widget pour afficher un camembert de la répartition des données
+    Widget pour afficher un camembert de la répartition des données par typologie
     """
     
-    # Déclaration correcte du signal
     segment_clicked = pyqtSignal(dict)
     
     def __init__(self, parent=None):
@@ -29,49 +28,35 @@ class PieChartWidget(QtWidgets.QWidget):
         self.selected_root = None
         self.selected_parent = None
         
-        # Données d'exemple pour la démonstration
-        self.sample_data = {
-            'total_examples': 1000,
-            'batches': [
-                {
-                    'name': 'Batch 1',
-                    'cluster': 'Débutant',
-                    'root': 'Compétences de base',
-                    'parent': 'Connaissances fondamentales',
-                    'examples': 250,
-                    'percentage': 25.0
-                },
-                {
-                    'name': 'Batch 2',
-                    'cluster': 'Intermédiaire',
-                    'root': 'Compétences avancées',
-                    'parent': 'Applications pratiques',
-                    'examples': 350,
-                    'percentage': 35.0
-                },
-                {
-                    'name': 'Batch 3',
-                    'cluster': 'Avancé',
-                    'root': 'Expertise spécialisée',
-                    'parent': 'Optimisation et recherche',
-                    'examples': 400,
-                    'percentage': 40.0
-                }
-            ]
+        # Données réelles basées sur les typologies
+        self.typology_data = {
+            'total_examples': 0,
+            'batches': []
         }
         
-        # Taille minimale augmentée pour éviter le découpage
         self.setMinimumSize(500, 500)
-        
+    
+    def set_typology_data(self, typology_data):
+        """Définir les données réelles des typologies"""
+        self.typology_data = typology_data
+        self.update()
+    
+    def set_hierarchy_selection(self, cluster, root, parent):
+        """Définir la sélection hiérarchique"""
+        self.selected_cluster = cluster
+        self.selected_root = root
+        self.selected_parent = parent
+        self.update()
+    
     def paintEvent(self, event):
-        """Dessiner le camembert avec un design amélioré"""
+        """Dessiner le camembert avec les données réelles des typologies"""
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         
-        # Dimensions avec marges plus importantes
+        # Dimensions avec marges
         width = self.width()
         height = self.height()
-        margin = 60  # Marge augmentée pour éviter le découpage
+        margin = 60
         size = min(width, height) - (margin * 2)
         x = (width - size) / 2
         y = (height - size) / 2
@@ -88,77 +73,158 @@ class PieChartWidget(QtWidgets.QWidget):
             QtGui.QColor('#F7DC6F'),  # Jaune doré
         ]
         
-        # Dessiner le camembert
-        if self.sample_data['batches']:
-            total_percentage = sum(batch['percentage'] for batch in self.sample_data['batches'])
+        # Filtrer les données selon la sélection hiérarchique
+        filtered_batches = self._filter_batches()
+        
+        # Dessiner le camembert avec les données filtrées
+        if filtered_batches:
+            total_examples = sum(batch['examples'] for batch in filtered_batches)
             start_angle = 0
             
-            for i, batch in enumerate(self.sample_data['batches']):
-                # Calculer l'angle du segment
-                angle = 360 * 16 * (batch['percentage'] / 100)
+            for i, batch in enumerate(filtered_batches):
+                # Calculer le pourcentage
+                percentage = (batch['examples'] / total_examples * 100) if total_examples > 0 else 0
+                angle = 360 * 16 * (percentage / 100)
                 
-                # Dessiner le segment avec bordure
+                # Dessiner le segment
                 painter.setBrush(colors[i % len(colors)])
                 painter.setPen(QtGui.QPen(Qt.black, 1))
                 painter.drawPie(int(x), int(y), int(size), int(size), int(start_angle), int(angle))
                 
-                # Ajouter une surbrillance si sélectionné
-                if (self.selected_cluster and batch['cluster'] == self.selected_cluster and
-                    (not self.selected_root or batch['root'] == self.selected_root) and
-                    (not self.selected_parent or batch['parent'] == self.selected_parent)):
+                # Surbrillance si correspond à la sélection
+                if self._matches_selection(batch):
                     painter.setBrush(QtGui.QColor(255, 255, 255, 80))
                     painter.setPen(QtGui.QPen(QtGui.QColor(Theme.SECONDARY_COLOR), 3))
                     painter.drawPie(int(x), int(y), int(size), int(size), int(start_angle), int(angle))
                 
                 start_angle += angle
         
-        # Dessiner le trou au centre (donut chart) plus petit
-        center_size = size * 0.3  # Réduit pour plus d'espace
+        # Dessiner le trou au centre (donut chart)
+        center_size = size * 0.3
         center_x = x + (size - center_size) / 2
         center_y = y + (size - center_size) / 2
         painter.setBrush(QtGui.QColor(240, 240, 240))
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(int(center_x), int(center_y), int(center_size), int(center_size))
         
-        # Ajouter les informations au centre avec un meilleur design
+        # Informations au centre
         painter.setPen(QtGui.QPen(Qt.black))
         painter.setFont(QtGui.QFont("Arial", 12, QtGui.QFont.Bold))
-        total_text = f"{self.sample_data['total_examples']} exemples"
+        total_text = f"{self.typology_data['total_examples']} exemples"
         painter.drawText(int(center_x), int(center_y), int(center_size), int(center_size), 
                         Qt.AlignCenter, total_text)
         
-        # Légende avec design amélioré
-        self._draw_legend(painter, width, height, colors)
+        # Légende
+        self._draw_legend(painter, width, height, colors, filtered_batches)
         
-    def _draw_legend(self, painter, width, height, colors):
-        """Dessiner la légende avec un design amélioré"""
+    def _filter_batches(self):
+        """Filtrer les batches selon la sélection hiérarchique"""
+        if not self.typology_data or not self.typology_data.get('batches'):
+            return []
+        
+        filtered_batches = []
+        
+        for batch in self.typology_data['batches']:
+            # Vérifier la correspondance avec la sélection
+            cluster_match = not self.selected_cluster or batch.get('cluster') == self.selected_cluster
+            root_match = not self.selected_root or batch.get('root') == self.selected_root
+            parent_match = not self.selected_parent or batch.get('parent') == self.selected_parent
+            
+            if cluster_match and root_match and parent_match:
+                filtered_batches.append(batch)
+        
+        return filtered_batches
+    
+    def _matches_selection(self, batch):
+        """Vérifier si un batch correspond à la sélection actuelle"""
+        if not self.selected_cluster:
+            return False
+            
+        cluster_match = batch.get('cluster') == self.selected_cluster
+        root_match = not self.selected_root or batch.get('root') == self.selected_root
+        parent_match = not self.selected_parent or batch.get('parent') == self.selected_parent
+        
+        return cluster_match and root_match and parent_match
+    
+    def _draw_legend(self, painter, width, height, colors, batches):
+        """Dessiner la légende avec les données réelles"""
         legend_x = 20
         legend_y = 20
         legend_width = width - 40
-        box_size = 20  # Taille augmentée
-        spacing = 8    # Espacement augmenté
+        box_size = 20
+        spacing = 8
         
-        painter.setFont(QtGui.QFont("Arial", 10))  # Police légèrement plus grande
+        painter.setFont(QtGui.QFont("Arial", 10))
         
-        for i, batch in enumerate(self.sample_data['batches']):
+        for i, batch in enumerate(batches):
             y_pos = legend_y + i * (box_size + spacing + 8)
             
-            # Carré de couleur avec bordure
+            # Calculer le pourcentage
+            total_examples = sum(b['examples'] for b in batches)
+            percentage = (batch['examples'] / total_examples * 100) if total_examples > 0 else 0
+            
+            # Carré de couleur
             painter.setBrush(colors[i % len(colors)])
             painter.setPen(QtGui.QPen(Qt.black, 1))
             painter.drawRect(legend_x, y_pos, box_size, box_size)
             
-            # Texte avec informations complètes
-            text = f"{batch['cluster']} - {batch['root']}: {batch['examples']} exemples ({batch['percentage']}%)"
+            # Texte avec informations hiérarchiques
+            hierarchy_text = self._get_hierarchy_text(batch)
+            text = f"{hierarchy_text}: {batch['examples']} exemples ({percentage:.1f}%)"
+            
             painter.setPen(QtGui.QPen(Qt.black))
             painter.drawText(legend_x + box_size + spacing, y_pos + box_size - 5, text)
             
-            # Mettre en évidence si sélectionné avec un effet plus visible
-            if (self.selected_cluster and batch['cluster'] == self.selected_cluster and
-                (not self.selected_root or batch['root'] == self.selected_root) and
-                (not self.selected_parent or batch['parent'] == self.selected_parent)):
+            # Mettre en évidence si sélectionné
+            if self._matches_selection(batch):
                 painter.setPen(QtGui.QPen(QtGui.QColor(Theme.SECONDARY_COLOR), 3))
                 painter.drawRect(legend_x - 3, y_pos - 3, box_size + 6, box_size + 6)
+    
+    def _get_hierarchy_text(self, batch):
+        """Obtenir le texte hiérarchique pour l'affichage"""
+        if batch.get('parent'):
+            return f"{batch['cluster']} > {batch['root']} > {batch['parent']}"
+        elif batch.get('root'):
+            return f"{batch['cluster']} > {batch['root']}"
+        else:
+            return batch.get('cluster', 'Batch')
+    
+    def mousePressEvent(self, event):
+        """Gérer le clic sur le camembert"""
+        if event.button() == Qt.LeftButton:
+            # Calculer la position relative
+            width = self.width()
+            height = self.height()
+            margin = 60
+            size = min(width, height) - (margin * 2)
+            x_center = width / 2
+            y_center = height / 2
+            
+            # Coordonnées du clic
+            click_x = event.pos().x() - x_center
+            click_y = event.pos().y() - y_center
+            
+            # Vérifier si le clic est dans le camembert
+            distance = math.sqrt(click_x**2 + click_y**2)
+            if distance <= size / 2:
+                # Trouver le segment cliqué
+                angle = math.degrees(math.atan2(click_y, click_x)) % 360
+                filtered_batches = self._filter_batches()
+                
+                if filtered_batches:
+                    total_examples = sum(batch['examples'] for batch in filtered_batches)
+                    current_angle = 0
+                    
+                    for batch in filtered_batches:
+                        percentage = (batch['examples'] / total_examples * 100) if total_examples > 0 else 0
+                        segment_angle = 360 * (percentage / 100)
+                        
+                        if current_angle <= angle < current_angle + segment_angle:
+                            # Émettre le signal avec les données du batch
+                            self.segment_clicked.emit(batch)
+                            break
+                        
+                        current_angle += segment_angle
 
 class ProjectTypologyTab(QtWidgets.QWidget):
     """
@@ -778,29 +844,64 @@ class StrategyWidget(QtWidgets.QWidget):
         pass    
 
     def _update_pie_chart(self):
-        """Mettre à jour le camembert avec les données de la DB"""
+        """Mettre à jour le camembert avec les données réelles des typologies"""
         if hasattr(self, 'statistics') and self.statistics:
-            # Convertir les statistiques en format compatible avec le camembert
+            # Calculer le total des exemples
+            total_examples = sum(stat['examples_count'] for stat in self.statistics)
+            
+            # Créer les données pour le camembert
             pie_data = {
-                'total_examples': sum(stat['examples_count'] for stat in self.statistics),
+                'total_examples': total_examples,
                 'batches': []
             }
             
-            for stat in self.statistics:
-                pie_data['batches'].append({
-                    'name': stat['batch_name'],
-                    'cluster': stat['cluster_name'],
-                    'root': stat['root_name'],
-                    'parent': stat['parent_name'],
-                    'examples': stat['examples_count'],
-                    'percentage': stat['percentage']
-                })
+            # Regrouper par combinaison de typologie (cluster + root + parent)
+            typology_combinations = {}
             
-            self.pie_chart.set_data(pie_data)
+            for stat in self.statistics:
+                key = f"{stat['cluster_name']}|{stat['root_name']}|{stat['parent_name']}"
+                if key not in typology_combinations:
+                    typology_combinations[key] = {
+                        'cluster': stat['cluster_name'],
+                        'root': stat['root_name'],
+                        'parent': stat['parent_name'],
+                        'examples': 0,
+                        'batch_name': f"Batch_{len(typology_combinations) + 1}"
+                    }
+                typology_combinations[key]['examples'] += stat['examples_count']
+            
+            # Convertir en liste
+            for combination in typology_combinations.values():
+                pie_data['batches'].append(combination)
+            
+            # Mettre à jour le camembert
+            self.pie_chart.set_typology_data(pie_data)
+            
+            # Mettre à jour les statistiques affichées
+            self._update_statistics_display(pie_data)
         else:
             # Données par défaut si pas de statistiques
-            self.pie_chart.set_data(self.pie_chart.sample_data)
-        
+            default_data = {
+                'total_examples': 0,
+                'batches': []
+            }
+            self.pie_chart.set_typology_data(default_data)
+            self._update_statistics_display(default_data)
+
+    def _update_statistics_display(self, pie_data):
+        """Mettre à jour l'affichage des statistiques"""
+        if pie_data['total_examples'] > 0:
+            self.total_dataset_label.setText(f"{pie_data['total_examples']} exemples")
+            self.batches_count_label.setText(f"{len(pie_data['batches'])} batches")
+            
+            # Compter le nombre de typologies uniques
+            clusters = set(batch['cluster'] for batch in pie_data['batches'])
+            self.typologies_stats_label.setText(f"{len(clusters)} clusters")
+        else:
+            self.total_dataset_label.setText("0 exemples")
+            self.batches_count_label.setText("0 batches")
+            self.typologies_stats_label.setText("0 clusters")
+            
     def _get_group_style(self):
         """Obtenir le style pour les groupes"""
         return """
@@ -2249,57 +2350,80 @@ class StrategyWidget(QtWidgets.QWidget):
         self.pie_chart.set_hierarchy_selection(cluster, root, parent)
         
         # Mettre à jour les informations de sélection
-        selection_text = ""
-        if cluster:
-            selection_text += f"<b>Cluster:</b> {cluster}<br>"
-        if root:
-            selection_text += f"<b>Racine:</b> {root}<br>"
-        if parent:
-            selection_text += f"<b>Parent:</b> {parent}"
-        
-        if not selection_text:
-            selection_text = "Aucune sélection (vue globale)"
-            
+        selection_text = self._get_selection_text(cluster, root, parent)
         self.selection_info.setText(selection_text)
+        
+        # Forcer la mise à jour de l'affichage
+        self.pie_chart.update()
+
+    def _get_selection_text(self, cluster, root, parent):
+        """Obtenir le texte descriptif de la sélection"""
+        if not cluster:
+            return "<b>Vue globale</b><br>Toutes les typologies"
+        
+        text_parts = [f"<b>Cluster:</b> {cluster}"]
+        
+        if root:
+            text_parts.append(f"<b>Racine:</b> {root}")
+        
+        if parent:
+            text_parts.append(f"<b>Parent:</b> {parent}")
+        
+        # Ajouter des informations sur les données affichées
+        filtered_batches = []
+        if hasattr(self, 'statistics') and self.statistics:
+            for stat in self.statistics:
+                cluster_match = not cluster or stat['cluster_name'] == cluster
+                root_match = not root or stat['root_name'] == root
+                parent_match = not parent or stat['parent_name'] == parent
+                
+                if cluster_match and root_match and parent_match:
+                    filtered_batches.append(stat)
+        
+        if filtered_batches:
+            total_examples = sum(batch['examples_count'] for batch in filtered_batches)
+            text_parts.append(f"<br><b>Exemples affichés:</b> {total_examples}")
+        
+        return "<br>".join(text_parts)
 
     def _on_pie_segment_clicked(self, batch_data):
-        """Gérer le clic sur un segment du camembert"""
-        # Mettre à jour la sélection hiérarchique
-        self._on_hierarchy_selection_changed(
-            batch_data.get('cluster'), 
-            batch_data.get('root'), 
-            batch_data.get('parent')
-        )
-        
-        # Mettre à jour l'arbre de structure dans l'onglet projet
-        self.project_typology_tab.set_hierarchy_selection(
-            batch_data.get('cluster'), 
-            batch_data.get('root'), 
-            batch_data.get('parent')
-        )
+            """Gérer le clic sur un segment du camembert"""
+            # Mettre à jour la sélection hiérarchique
+            self._on_hierarchy_selection_changed(
+                batch_data.get('cluster'), 
+                batch_data.get('root'), 
+                batch_data.get('parent')
+            )
+            
+            # Mettre à jour l'arbre de structure dans l'onglet projet
+            self.project_typology_tab.set_hierarchy_selection(
+                batch_data.get('cluster'), 
+                batch_data.get('root'), 
+                batch_data.get('parent')
+            )
 
     def _reset_pie_chart_view(self):
-        """Réinitialiser la vue du camembert"""
-        self._on_hierarchy_selection_changed(None, None, None)
+            """Réinitialiser la vue du camembert"""
+            self._on_hierarchy_selection_changed(None, None, None)
 
     def _export_pie_chart(self):
-        """Exporter le graphique en image"""
-        try:
-            filename, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Exporter le graphique", "", "PNG Files (*.png);;JPEG Files (*.jpg)"
-            )
-            if filename:
-                # Capturer le widget en tant qu'image
-                pixmap = self.pie_chart.grab()
-                pixmap.save(filename)
-                QtWidgets.QMessageBox.information(self, "Succès", "Graphique exporté avec succès!")
-                
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
+            """Exporter le graphique en image"""
+            try:
+                filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+                    self, "Exporter le graphique", "", "PNG Files (*.png);;JPEG Files (*.jpg)"
+                )
+                if filename:
+                    # Capturer le widget en tant qu'image
+                    pixmap = self.pie_chart.grab()
+                    pixmap.save(filename)
+                    QtWidgets.QMessageBox.information(self, "Succès", "Graphique exporté avec succès!")
+                    
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
 
-if __name__ == "__main__":
-    import sys
-    app = QtWidgets.QApplication(sys.argv)
-    widget = StrategyWidget()
-    widget.show()
-    sys.exit(app.exec_())
+            if __name__ == "__main__":
+                import sys
+                app = QtWidgets.QApplication(sys.argv)
+                widget = StrategyWidget()
+                widget.show()
+                sys.exit(app.exec_())
