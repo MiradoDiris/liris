@@ -1,0 +1,3096 @@
+{
+  "data": {
+    "schema": [
+      {
+        "predicate": "AuthData.accessToken",
+        "type": "string"
+      },
+      {
+        "predicate": "AuthData.refreshToken",
+        "type": "string"
+      },
+      {
+        "predicate": "AuthData.user",
+        "type": "uid"
+      },
+      {
+        "predicate": "AuthResponse.data",
+        "type": "uid"
+      },
+      {
+        "predicate": "AuthResponse.error",
+        "type": "string"
+      },
+      {
+        "predicate": "AuthResponse.success",
+        "type": "bool"
+      },
+      {
+        "predicate": "BatchValidationResponse.failureCount",
+        "type": "int"
+      },
+      {
+        "predicate": "BatchValidationResponse.results",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "BatchValidationResponse.successCount",
+        "type": "int"
+      },
+      {
+        "predicate": "BertKeyword.cluster",
+        "type": "string"
+      },
+      {
+        "predicate": "BertKeyword.keyword",
+        "type": "string"
+      },
+      {
+        "predicate": "BertKeyword.label",
+        "type": "string"
+      },
+      {
+        "predicate": "BertKeyword.score",
+        "type": "float"
+      },
+      {
+        "predicate": "BertSuggestion.keywords",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "BertSuggestion.score",
+        "type": "float"
+      },
+      {
+        "predicate": "BertSuggestion.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "BertSuggestion.text",
+        "type": "string"
+      },
+      {
+        "predicate": "BertSuggestionInput.keywords",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "BertSuggestionInput.name",
+        "type": "string"
+      },
+      {
+        "predicate": "BertSuggestionInput.type",
+        "type": "string"
+      },
+      {
+        "predicate": "BertValidationMetadata.lastValidation",
+        "type": "string"
+      },
+      {
+        "predicate": "BertValidationMetadata.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "BertValidationMetadata.suggestions",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "BertValidationMetadataInput.lastValidation",
+        "type": "string"
+      },
+      {
+        "predicate": "BertValidationMetadataInput.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "BertValidationMetadataInput.suggestions",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "BertValidationResult.context",
+        "type": "uid"
+      },
+      {
+        "predicate": "BertValidationResult.id",
+        "type": "string"
+      },
+      {
+        "predicate": "BertValidationResult.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "Chunk.content",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "fulltext",
+          "term"
+        ]
+      },
+      {
+        "predicate": "Chunk.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "Chunk.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "Chunk.node",
+        "type": "uid"
+      },
+      {
+        "predicate": "Chunk.source",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "ChunkMetadata.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "ChunkMetadata.version",
+        "type": "int"
+      },
+      {
+        "predicate": "Cluster.bertKeywords",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "Cluster.createdAt",
+        "type": "string"
+      },
+      {
+        "predicate": "Cluster.description",
+        "type": "string"
+      },
+      {
+        "predicate": "Cluster.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "Cluster.labelIds",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "Cluster.labelRefs",
+        "type": "uid",
+        "reverse": true,
+        "list": true
+      },
+      {
+        "predicate": "Cluster.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "Cluster.name",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact",
+          "term"
+        ]
+      },
+      {
+        "predicate": "Cluster.status",
+        "type": "string"
+      },
+      {
+        "predicate": "Cluster.updatedAt",
+        "type": "string"
+      },
+      {
+        "predicate": "Cluster.userID",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "ClusterDeleteResponse.id",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterDeleteResponse.message",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterDeleteResponse.success",
+        "type": "bool"
+      },
+      {
+        "predicate": "ClusterInfo.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "ClusterInfo.name",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterInput.bertKeywords",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "ClusterInput.description",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterInput.name",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterManagement.clusters",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "ClusterManagement.lastUpdated",
+        "type": "datetime"
+      },
+      {
+        "predicate": "ClusterManagement.version",
+        "type": "int"
+      },
+      {
+        "predicate": "ClusterMetadata.keyword",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterMetadata.lastUsed",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterMetadata.metadata",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterMetadata.name",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact",
+          "term"
+        ]
+      },
+      {
+        "predicate": "ClusterMetadata.status",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterMetadataInput.keyword",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterMetadataInput.lastUsed",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterMetadataInput.metadata",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterMetadataInput.name",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterMetadataInput.status",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterNodeResponse.cluster",
+        "type": "uid"
+      },
+      {
+        "predicate": "ClusterNodeResponse.message",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterNodeResponse.node",
+        "type": "uid"
+      },
+      {
+        "predicate": "ClusterNodeResponse.previousCluster",
+        "type": "uid"
+      },
+      {
+        "predicate": "ClusterNodeResponse.success",
+        "type": "bool"
+      },
+      {
+        "predicate": "ClusterResponse.clusterId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "ClusterResponse.message",
+        "type": "string"
+      },
+      {
+        "predicate": "ClusterResponse.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "ClusterResponse.nodeId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "ClusterResponse.success",
+        "type": "bool"
+      },
+      {
+        "predicate": "CustomSubscription.event",
+        "type": "string"
+      },
+      {
+        "predicate": "CustomSubscription.timestamp",
+        "type": "datetime"
+      },
+      {
+        "predicate": "DateRange.end",
+        "type": "datetime"
+      },
+      {
+        "predicate": "DateRange.start",
+        "type": "datetime"
+      },
+      {
+        "predicate": "Edge.createdAt",
+        "type": "string"
+      },
+      {
+        "predicate": "Edge.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "Edge.label",
+        "type": "string"
+      },
+      {
+        "predicate": "Edge.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "Edge.node",
+        "type": "uid"
+      },
+      {
+        "predicate": "Edge.properties",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "Edge.source",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "Edge.target",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "Edge.type",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "Edge.updatedAt",
+        "type": "string"
+      },
+      {
+        "predicate": "Edge.userID",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "Edge.weight",
+        "type": "float"
+      },
+      {
+        "predicate": "EdgeDeleteResponse.id",
+        "type": "string"
+      },
+      {
+        "predicate": "EdgeDeleteResponse.message",
+        "type": "string"
+      },
+      {
+        "predicate": "EdgeDeleteResponse.success",
+        "type": "bool"
+      },
+      {
+        "predicate": "EdgeInput.label",
+        "type": "string"
+      },
+      {
+        "predicate": "EdgeInput.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "EdgeInput.source",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "EdgeInput.target",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "EdgeInput.type",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "EdgeInput.userID",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "EdgeInput.weight",
+        "type": "float"
+      },
+      {
+        "predicate": "EdgeMetadata.clusterData",
+        "type": "uid"
+      },
+      {
+        "predicate": "EdgeMetadata.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "EdgeMetadata.validations",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "EdgeMetadata.version",
+        "type": "int"
+      },
+      {
+        "predicate": "EdgeMetadataInput.clusterData",
+        "type": "uid"
+      },
+      {
+        "predicate": "EdgeMetadataInput.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "EdgeMetadataInput.validations",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "EdgeMetadataInput.version",
+        "type": "int"
+      },
+      {
+        "predicate": "FilterState.clusters",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "FilterState.dateRange",
+        "type": "uid"
+      },
+      {
+        "predicate": "FilterState.labelIds",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "FilterState.searchQuery",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "GNNValidationResult.context",
+        "type": "uid"
+      },
+      {
+        "predicate": "GNNValidationResult.message",
+        "type": "string"
+      },
+      {
+        "predicate": "GNNValidationResult.nodeId",
+        "type": "string"
+      },
+      {
+        "predicate": "GNNValidationResult.score",
+        "type": "float"
+      },
+      {
+        "predicate": "GNNValidationResult.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "GNNValidationResultInput.nodeId",
+        "type": "string"
+      },
+      {
+        "predicate": "GNNValidationResultInput.score",
+        "type": "float"
+      },
+      {
+        "predicate": "GNNValidationResultInput.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "Label.bertKeywords",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "Label.category",
+        "type": "string"
+      },
+      {
+        "predicate": "Label.children",
+        "type": "uid",
+        "reverse": true,
+        "list": true
+      },
+      {
+        "predicate": "Label.clusterId",
+        "type": "string"
+      },
+      {
+        "predicate": "Label.clusterIds",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "Label.clusterRefs",
+        "type": "uid",
+        "reverse": true,
+        "list": true
+      },
+      {
+        "predicate": "Label.clusters",
+        "type": "uid",
+        "reverse": true,
+        "list": true
+      },
+      {
+        "predicate": "Label.color",
+        "type": "string"
+      },
+      {
+        "predicate": "Label.createdAt",
+        "type": "string"
+      },
+      {
+        "predicate": "Label.description",
+        "type": "string"
+      },
+      {
+        "predicate": "Label.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "Label.level",
+        "type": "int",
+        "index": true,
+        "tokenizer": [
+          "int"
+        ]
+      },
+      {
+        "predicate": "Label.metadata",
+        "type": "string"
+      },
+      {
+        "predicate": "Label.name",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact",
+          "term"
+        ]
+      },
+      {
+        "predicate": "Label.nodeCount",
+        "type": "int",
+        "index": true,
+        "tokenizer": [
+          "int"
+        ]
+      },
+      {
+        "predicate": "Label.nodeRefs",
+        "type": "uid",
+        "reverse": true,
+        "list": true
+      },
+      {
+        "predicate": "Label.parentId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "Label.parents",
+        "type": "uid",
+        "reverse": true,
+        "list": true
+      },
+      {
+        "predicate": "Label.path",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact",
+          "term"
+        ]
+      },
+      {
+        "predicate": "Label.status",
+        "type": "string"
+      },
+      {
+        "predicate": "Label.updatedAt",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelData.hierarchyInfo",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelData.ids",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "LabelData.lastUpdated",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelDeleteResponse.id",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelDeleteResponse.message",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelDeleteResponse.success",
+        "type": "bool"
+      },
+      {
+        "predicate": "LabelInput.bertKeywords",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "LabelInput.category",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelInput.clusterIds",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "LabelInput.description",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelInput.metadata",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelInput.name",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelInput.parentId",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelInput.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "LabelManagement.labelIds",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "LabelManagement.lastUpdated",
+        "type": "datetime"
+      },
+      {
+        "predicate": "LabelManagement.version",
+        "type": "int"
+      },
+      {
+        "predicate": "LabelMoveResponse.id",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelMoveResponse.message",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelMoveResponse.success",
+        "type": "bool"
+      },
+      {
+        "predicate": "LabelRelationship.createdAt",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelRelationship.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "LabelRelationship.metadata",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelRelationship.sourceId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "LabelRelationship.targetId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "LabelRelationship.type",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "LabelRelationship.updatedAt",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelRelationship.weight",
+        "type": "float"
+      },
+      {
+        "predicate": "LabelStats.childCount",
+        "type": "int"
+      },
+      {
+        "predicate": "LabelStats.clusterCount",
+        "type": "int"
+      },
+      {
+        "predicate": "LabelStats.depth",
+        "type": "int"
+      },
+      {
+        "predicate": "LabelStats.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "LabelStats.labelId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "LabelStats.lastUsed",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelStats.nodeCount",
+        "type": "int"
+      },
+      {
+        "predicate": "LabelStats.updatedAt",
+        "type": "string"
+      },
+      {
+        "predicate": "LabelStats.usageCount",
+        "type": "int"
+      },
+      {
+        "predicate": "LoginInput.email",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "LoginInput.password",
+        "type": "string"
+      },
+      {
+        "predicate": "Metadata.createdAt",
+        "type": "string"
+      },
+      {
+        "predicate": "Metadata.data",
+        "type": "string"
+      },
+      {
+        "predicate": "Metadata.id",
+        "type": "string"
+      },
+      {
+        "predicate": "Metadata.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "Metadata.updatedAt",
+        "type": "string"
+      },
+      {
+        "predicate": "Metadata.version",
+        "type": "int"
+      },
+      {
+        "predicate": "MetadataInput.data",
+        "type": "string"
+      },
+      {
+        "predicate": "MetadataInput.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "MetadataInput.version",
+        "type": "int"
+      },
+      {
+        "predicate": "Node.cluster",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact",
+          "term"
+        ]
+      },
+      {
+        "predicate": "Node.clusterIds",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "Node.clusterRefs",
+        "type": "uid",
+        "reverse": true,
+        "list": true
+      },
+      {
+        "predicate": "Node.content",
+        "type": "string"
+      },
+      {
+        "predicate": "Node.createdAt",
+        "type": "string"
+      },
+      {
+        "predicate": "Node.edges",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "Node.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "Node.labelIds",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "Node.labelRefs",
+        "type": "uid",
+        "reverse": true,
+        "list": true
+      },
+      {
+        "predicate": "Node.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "Node.position",
+        "type": "uid"
+      },
+      {
+        "predicate": "Node.properties",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "Node.title",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "fulltext",
+          "term"
+        ]
+      },
+      {
+        "predicate": "Node.updatedAt",
+        "type": "string"
+      },
+      {
+        "predicate": "Node.userID",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "NodeClusterInfo.clusterId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "NodeClusterInfo.content",
+        "type": "string"
+      },
+      {
+        "predicate": "NodeClusterInfo.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "NodeClusterInfo.title",
+        "type": "string"
+      },
+      {
+        "predicate": "NodeClusterResponse.clusterId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "NodeClusterResponse.message",
+        "type": "string"
+      },
+      {
+        "predicate": "NodeClusterResponse.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeClusterResponse.nodeId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "NodeClusterResponse.success",
+        "type": "bool"
+      },
+      {
+        "predicate": "NodeDeleteResponse.id",
+        "type": "string"
+      },
+      {
+        "predicate": "NodeDeleteResponse.message",
+        "type": "string"
+      },
+      {
+        "predicate": "NodeDeleteResponse.success",
+        "type": "bool"
+      },
+      {
+        "predicate": "NodeInput.cluster",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "NodeInput.content",
+        "type": "string"
+      },
+      {
+        "predicate": "NodeInput.labelIds",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "NodeInput.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeInput.position",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeInput.properties",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "NodeInput.title",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "fulltext",
+          "term"
+        ]
+      },
+      {
+        "predicate": "NodeInput.userID",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "NodeMetadata.bertValidation",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeMetadata.clusterData",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeMetadata.gnnValidation",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeMetadata.labelData",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeMetadata.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "NodeMetadata.version",
+        "type": "int"
+      },
+      {
+        "predicate": "NodeMetadataInput.bertValidation",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeMetadataInput.clusterData",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeMetadataInput.gnnValidation",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeMetadataInput.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "NodeMetadataInput.version",
+        "type": "int"
+      },
+      {
+        "predicate": "NodeUpdateInput.cluster",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "NodeUpdateInput.content",
+        "type": "string"
+      },
+      {
+        "predicate": "NodeUpdateInput.labelIds",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "NodeUpdateInput.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeUpdateInput.position",
+        "type": "uid"
+      },
+      {
+        "predicate": "NodeUpdateInput.properties",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "NodeUpdateInput.title",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "fulltext",
+          "term"
+        ]
+      },
+      {
+        "predicate": "NodeUpdateInput.userID",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "term"
+        ]
+      },
+      {
+        "predicate": "Position.x",
+        "type": "float"
+      },
+      {
+        "predicate": "Position.y",
+        "type": "float"
+      },
+      {
+        "predicate": "PositionInput.x",
+        "type": "float"
+      },
+      {
+        "predicate": "PositionInput.y",
+        "type": "float"
+      },
+      {
+        "predicate": "PreviousClusterInfo.clearedFromViewstate",
+        "type": "bool"
+      },
+      {
+        "predicate": "PreviousClusterInfo.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "PreviousClusterInfo.name",
+        "type": "string"
+      },
+      {
+        "predicate": "Property.key",
+        "type": "string"
+      },
+      {
+        "predicate": "Property.value",
+        "type": "string"
+      },
+      {
+        "predicate": "PropertyInput.key",
+        "type": "string"
+      },
+      {
+        "predicate": "PropertyInput.value",
+        "type": "string"
+      },
+      {
+        "predicate": "RegisterInput.email",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "RegisterInput.password",
+        "type": "string"
+      },
+      {
+        "predicate": "RegisterInput.username",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "Transaction.data",
+        "type": "string"
+      },
+      {
+        "predicate": "Transaction.entityId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "Transaction.entityType",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "Transaction.errorDetails",
+        "type": "string"
+      },
+      {
+        "predicate": "Transaction.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "Transaction.metadata",
+        "type": "string"
+      },
+      {
+        "predicate": "Transaction.operation",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "Transaction.result",
+        "type": "string"
+      },
+      {
+        "predicate": "Transaction.stages",
+        "type": "string"
+      },
+      {
+        "predicate": "Transaction.state",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "Transaction.status",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "Transaction.timestamp",
+        "type": "datetime"
+      },
+      {
+        "predicate": "Transaction.userId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ]
+      },
+      {
+        "predicate": "User.createdAt",
+        "type": "string"
+      },
+      {
+        "predicate": "User.email",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "User.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "User.password",
+        "type": "string"
+      },
+      {
+        "predicate": "User.role",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "User.tokenVersion",
+        "type": "int"
+      },
+      {
+        "predicate": "User.updatedAt",
+        "type": "string"
+      },
+      {
+        "predicate": "User.username",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "ValidationContext.batchId",
+        "type": "string"
+      },
+      {
+        "predicate": "ValidationContext.retryCount",
+        "type": "int"
+      },
+      {
+        "predicate": "ValidationContext.source",
+        "type": "string"
+      },
+      {
+        "predicate": "ValidationContext.timestamp",
+        "type": "string"
+      },
+      {
+        "predicate": "ValidationContext.userId",
+        "type": "string"
+      },
+      {
+        "predicate": "ValidationResult.details",
+        "type": "string"
+      },
+      {
+        "predicate": "ValidationResult.errors",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "ValidationResult.isValid",
+        "type": "bool"
+      },
+      {
+        "predicate": "ValidationResultInput.details",
+        "type": "string"
+      },
+      {
+        "predicate": "ValidationResultInput.errors",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "ValidationResultInput.isValid",
+        "type": "bool"
+      },
+      {
+        "predicate": "ViewState.clusters",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "ViewState.edges",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "ViewState.filters",
+        "type": "uid"
+      },
+      {
+        "predicate": "ViewState.labelIds",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "hash"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "ViewState.nodes",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "ViewState.position",
+        "type": "uid"
+      },
+      {
+        "predicate": "ViewState.searchQuery",
+        "type": "string"
+      },
+      {
+        "predicate": "ViewportState.x",
+        "type": "float"
+      },
+      {
+        "predicate": "ViewportState.y",
+        "type": "float"
+      },
+      {
+        "predicate": "ViewportState.zoom",
+        "type": "float"
+      },
+      {
+        "predicate": "Workspace.clusterManagement",
+        "type": "uid"
+      },
+      {
+        "predicate": "Workspace.id",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "Workspace.labelManagement",
+        "type": "uid"
+      },
+      {
+        "predicate": "Workspace.metadata",
+        "type": "uid"
+      },
+      {
+        "predicate": "Workspace.nodes",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "Workspace.ownerId",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "Workspace.viewState",
+        "type": "uid"
+      },
+      {
+        "predicate": "WorkspaceEntities.edges",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "WorkspaceEntities.nodes",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "WorkspaceMetadata.lastModified",
+        "type": "datetime"
+      },
+      {
+        "predicate": "WorkspaceMetadata.version",
+        "type": "int"
+      },
+      {
+        "predicate": "age",
+        "type": "int"
+      },
+      {
+        "predicate": "clusters",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "createdAt",
+        "type": "string"
+      },
+      {
+        "predicate": "dgraph.drop.op",
+        "type": "string"
+      },
+      {
+        "predicate": "dgraph.graphql.p_query",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "sha256"
+        ]
+      },
+      {
+        "predicate": "dgraph.graphql.schema",
+        "type": "string"
+      },
+      {
+        "predicate": "dgraph.graphql.xid",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ],
+        "upsert": true
+      },
+      {
+        "predicate": "dgraph.type",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ],
+        "list": true
+      },
+      {
+        "predicate": "email",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "filters",
+        "type": "uid"
+      },
+      {
+        "predicate": "friend",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "id",
+        "type": "string"
+      },
+      {
+        "predicate": "keyword",
+        "type": "string"
+      },
+      {
+        "predicate": "keywords",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "labelIds",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "lastUsed",
+        "type": "string"
+      },
+      {
+        "predicate": "lastValidation",
+        "type": "string"
+      },
+      {
+        "predicate": "metadata",
+        "type": "string"
+      },
+      {
+        "predicate": "name",
+        "type": "string"
+      },
+      {
+        "predicate": "nodeId",
+        "type": "string"
+      },
+      {
+        "predicate": "nodes",
+        "type": "string",
+        "list": true
+      },
+      {
+        "predicate": "password",
+        "type": "string"
+      },
+      {
+        "predicate": "position",
+        "type": "uid"
+      },
+      {
+        "predicate": "role",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "score",
+        "type": "int"
+      },
+      {
+        "predicate": "searchQuery",
+        "type": "string"
+      },
+      {
+        "predicate": "set",
+        "type": "uid",
+        "list": true
+      },
+      {
+        "predicate": "status",
+        "type": "string"
+      },
+      {
+        "predicate": "timestamp",
+        "type": "string"
+      },
+      {
+        "predicate": "tokenVersion",
+        "type": "int"
+      },
+      {
+        "predicate": "type",
+        "type": "string"
+      },
+      {
+        "predicate": "updatedAt",
+        "type": "string"
+      },
+      {
+        "predicate": "username",
+        "type": "string",
+        "index": true,
+        "tokenizer": [
+          "exact"
+        ]
+      },
+      {
+        "predicate": "x",
+        "type": "int"
+      },
+      {
+        "predicate": "y",
+        "type": "int"
+      },
+      {
+        "predicate": "zoom",
+        "type": "int"
+      }
+    ],
+    "types": [
+      {
+        "fields": [
+          {
+            "name": "AuthData.user"
+          },
+          {
+            "name": "AuthData.accessToken"
+          },
+          {
+            "name": "AuthData.refreshToken"
+          }
+        ],
+        "name": "AuthData"
+      },
+      {
+        "fields": [
+          {
+            "name": "AuthResponse.success"
+          },
+          {
+            "name": "AuthResponse.error"
+          },
+          {
+            "name": "AuthResponse.data"
+          }
+        ],
+        "name": "AuthResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "BatchValidationResponse.successCount"
+          },
+          {
+            "name": "BatchValidationResponse.failureCount"
+          },
+          {
+            "name": "BatchValidationResponse.results"
+          }
+        ],
+        "name": "BatchValidationResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "BertKeyword.keyword"
+          },
+          {
+            "name": "BertKeyword.score"
+          },
+          {
+            "name": "BertKeyword.cluster"
+          },
+          {
+            "name": "BertKeyword.label"
+          }
+        ],
+        "name": "BertKeyword"
+      },
+      {
+        "fields": [
+          {
+            "name": "BertSuggestion.keywords"
+          },
+          {
+            "name": "BertSuggestion.text"
+          },
+          {
+            "name": "BertSuggestion.score"
+          },
+          {
+            "name": "BertSuggestion.status"
+          }
+        ],
+        "name": "BertSuggestion"
+      },
+      {
+        "fields": [
+          {
+            "name": "BertSuggestionInput.name"
+          },
+          {
+            "name": "BertSuggestionInput.type"
+          },
+          {
+            "name": "BertSuggestionInput.keywords"
+          }
+        ],
+        "name": "BertSuggestionInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "BertValidationMetadata.suggestions"
+          },
+          {
+            "name": "BertValidationMetadata.lastValidation"
+          },
+          {
+            "name": "BertValidationMetadata.status"
+          }
+        ],
+        "name": "BertValidationMetadata"
+      },
+      {
+        "fields": [
+          {
+            "name": "BertValidationMetadataInput.suggestions"
+          },
+          {
+            "name": "BertValidationMetadataInput.lastValidation"
+          },
+          {
+            "name": "BertValidationMetadataInput.status"
+          }
+        ],
+        "name": "BertValidationMetadataInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "BertValidationResult.id"
+          },
+          {
+            "name": "BertValidationResult.metadata"
+          },
+          {
+            "name": "BertValidationResult.context"
+          }
+        ],
+        "name": "BertValidationResult"
+      },
+      {
+        "fields": [
+          {
+            "name": "Chunk.id"
+          },
+          {
+            "name": "Chunk.content"
+          },
+          {
+            "name": "Chunk.source"
+          },
+          {
+            "name": "Chunk.node"
+          },
+          {
+            "name": "Chunk.metadata"
+          }
+        ],
+        "name": "Chunk"
+      },
+      {
+        "fields": [
+          {
+            "name": "ChunkMetadata.version"
+          },
+          {
+            "name": "ChunkMetadata.status"
+          }
+        ],
+        "name": "ChunkMetadata"
+      },
+      {
+        "fields": [
+          {
+            "name": "Cluster.id"
+          },
+          {
+            "name": "Cluster.name"
+          },
+          {
+            "name": "Cluster.description"
+          },
+          {
+            "name": "Cluster.bertKeywords"
+          },
+          {
+            "name": "Cluster.labelIds"
+          },
+          {
+            "name": "Cluster.metadata"
+          },
+          {
+            "name": "Cluster.status"
+          },
+          {
+            "name": "Cluster.userID"
+          },
+          {
+            "name": "Cluster.createdAt"
+          },
+          {
+            "name": "Cluster.updatedAt"
+          }
+        ],
+        "name": "Cluster"
+      },
+      {
+        "fields": [
+          {
+            "name": "ClusterDeleteResponse.id"
+          },
+          {
+            "name": "ClusterDeleteResponse.success"
+          },
+          {
+            "name": "ClusterDeleteResponse.message"
+          }
+        ],
+        "name": "ClusterDeleteResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "ClusterInfo.id"
+          },
+          {
+            "name": "ClusterInfo.name"
+          }
+        ],
+        "name": "ClusterInfo"
+      },
+      {
+        "fields": [
+          {
+            "name": "ClusterInput.name"
+          },
+          {
+            "name": "ClusterInput.description"
+          },
+          {
+            "name": "ClusterInput.bertKeywords"
+          }
+        ],
+        "name": "ClusterInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "ClusterManagement.clusters"
+          },
+          {
+            "name": "ClusterManagement.lastUpdated"
+          },
+          {
+            "name": "ClusterManagement.version"
+          }
+        ],
+        "name": "ClusterManagement"
+      },
+      {
+        "fields": [
+          {
+            "name": "ClusterMetadata.keyword"
+          },
+          {
+            "name": "ClusterMetadata.name"
+          },
+          {
+            "name": "ClusterMetadata.status"
+          },
+          {
+            "name": "ClusterMetadata.lastUsed"
+          },
+          {
+            "name": "ClusterMetadata.metadata"
+          }
+        ],
+        "name": "ClusterMetadata"
+      },
+      {
+        "fields": [
+          {
+            "name": "ClusterMetadataInput.keyword"
+          },
+          {
+            "name": "ClusterMetadataInput.name"
+          },
+          {
+            "name": "ClusterMetadataInput.status"
+          },
+          {
+            "name": "ClusterMetadataInput.lastUsed"
+          },
+          {
+            "name": "ClusterMetadataInput.metadata"
+          }
+        ],
+        "name": "ClusterMetadataInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "ClusterNodeResponse.success"
+          },
+          {
+            "name": "ClusterNodeResponse.message"
+          },
+          {
+            "name": "ClusterNodeResponse.node"
+          },
+          {
+            "name": "ClusterNodeResponse.cluster"
+          },
+          {
+            "name": "ClusterNodeResponse.previousCluster"
+          }
+        ],
+        "name": "ClusterNodeResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "ClusterResponse.clusterId"
+          },
+          {
+            "name": "ClusterResponse.nodeId"
+          },
+          {
+            "name": "ClusterResponse.success"
+          },
+          {
+            "name": "ClusterResponse.message"
+          },
+          {
+            "name": "ClusterResponse.metadata"
+          }
+        ],
+        "name": "ClusterResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "CustomSubscription.event"
+          },
+          {
+            "name": "CustomSubscription.timestamp"
+          }
+        ],
+        "name": "CustomSubscription"
+      },
+      {
+        "fields": [
+          {
+            "name": "DateRange.start"
+          },
+          {
+            "name": "DateRange.end"
+          }
+        ],
+        "name": "DateRange"
+      },
+      {
+        "fields": [
+          {
+            "name": "Edge.id"
+          },
+          {
+            "name": "Edge.source"
+          },
+          {
+            "name": "Edge.target"
+          },
+          {
+            "name": "Edge.type"
+          },
+          {
+            "name": "Edge.label"
+          },
+          {
+            "name": "Edge.weight"
+          },
+          {
+            "name": "Edge.userID"
+          },
+          {
+            "name": "Edge.createdAt"
+          },
+          {
+            "name": "Edge.updatedAt"
+          },
+          {
+            "name": "Edge.metadata"
+          }
+        ],
+        "name": "Edge"
+      },
+      {
+        "fields": [
+          {
+            "name": "EdgeDeleteResponse.id"
+          },
+          {
+            "name": "EdgeDeleteResponse.success"
+          },
+          {
+            "name": "EdgeDeleteResponse.message"
+          }
+        ],
+        "name": "EdgeDeleteResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "EdgeInput.source"
+          },
+          {
+            "name": "EdgeInput.target"
+          },
+          {
+            "name": "EdgeInput.type"
+          },
+          {
+            "name": "EdgeInput.label"
+          },
+          {
+            "name": "EdgeInput.weight"
+          },
+          {
+            "name": "EdgeInput.userID"
+          },
+          {
+            "name": "EdgeInput.metadata"
+          }
+        ],
+        "name": "EdgeInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "EdgeMetadata.version"
+          },
+          {
+            "name": "EdgeMetadata.status"
+          },
+          {
+            "name": "EdgeMetadata.validations"
+          },
+          {
+            "name": "EdgeMetadata.clusterData"
+          }
+        ],
+        "name": "EdgeMetadata"
+      },
+      {
+        "fields": [
+          {
+            "name": "EdgeMetadataInput.version"
+          },
+          {
+            "name": "EdgeMetadataInput.status"
+          },
+          {
+            "name": "EdgeMetadataInput.validations"
+          },
+          {
+            "name": "EdgeMetadataInput.clusterData"
+          }
+        ],
+        "name": "EdgeMetadataInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "FilterState.labelIds"
+          },
+          {
+            "name": "FilterState.clusters"
+          },
+          {
+            "name": "FilterState.searchQuery"
+          },
+          {
+            "name": "FilterState.dateRange"
+          }
+        ],
+        "name": "FilterState"
+      },
+      {
+        "fields": [
+          {
+            "name": "GNNValidationResult.nodeId"
+          },
+          {
+            "name": "GNNValidationResult.score"
+          },
+          {
+            "name": "GNNValidationResult.status"
+          },
+          {
+            "name": "GNNValidationResult.message"
+          },
+          {
+            "name": "GNNValidationResult.context"
+          }
+        ],
+        "name": "GNNValidationResult"
+      },
+      {
+        "fields": [
+          {
+            "name": "GNNValidationResultInput.nodeId"
+          },
+          {
+            "name": "GNNValidationResultInput.score"
+          },
+          {
+            "name": "GNNValidationResultInput.status"
+          }
+        ],
+        "name": "GNNValidationResultInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "Label.id"
+          },
+          {
+            "name": "Label.name"
+          },
+          {
+            "name": "Label.parentId"
+          },
+          {
+            "name": "Label.level"
+          },
+          {
+            "name": "Label.path"
+          },
+          {
+            "name": "Label.clusterIds"
+          },
+          {
+            "name": "Label.category"
+          },
+          {
+            "name": "Label.color"
+          },
+          {
+            "name": "Label.description"
+          },
+          {
+            "name": "Label.bertKeywords"
+          },
+          {
+            "name": "Label.metadata"
+          },
+          {
+            "name": "Label.status"
+          },
+          {
+            "name": "Label.nodeCount"
+          },
+          {
+            "name": "Label.nodeRefs"
+          },
+          {
+            "name": "Label.children"
+          },
+          {
+            "name": "Label.clusters"
+          },
+          {
+            "name": "Label.parents"
+          },
+          {
+            "name": "Label.createdAt"
+          },
+          {
+            "name": "Label.updatedAt"
+          }
+        ],
+        "name": "Label"
+      },
+      {
+        "fields": [
+          {
+            "name": "LabelData.ids"
+          },
+          {
+            "name": "LabelData.hierarchyInfo"
+          },
+          {
+            "name": "LabelData.lastUpdated"
+          }
+        ],
+        "name": "LabelData"
+      },
+      {
+        "fields": [
+          {
+            "name": "LabelDeleteResponse.id"
+          },
+          {
+            "name": "LabelDeleteResponse.success"
+          },
+          {
+            "name": "LabelDeleteResponse.message"
+          }
+        ],
+        "name": "LabelDeleteResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "LabelInput.name"
+          },
+          {
+            "name": "LabelInput.parentId"
+          },
+          {
+            "name": "LabelInput.clusterIds"
+          },
+          {
+            "name": "LabelInput.category"
+          },
+          {
+            "name": "LabelInput.description"
+          },
+          {
+            "name": "LabelInput.bertKeywords"
+          },
+          {
+            "name": "LabelInput.metadata"
+          },
+          {
+            "name": "LabelInput.status"
+          }
+        ],
+        "name": "LabelInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "LabelManagement.labelIds"
+          },
+          {
+            "name": "LabelManagement.lastUpdated"
+          },
+          {
+            "name": "LabelManagement.version"
+          }
+        ],
+        "name": "LabelManagement"
+      },
+      {
+        "fields": [
+          {
+            "name": "LabelMoveResponse.id"
+          },
+          {
+            "name": "LabelMoveResponse.success"
+          },
+          {
+            "name": "LabelMoveResponse.message"
+          }
+        ],
+        "name": "LabelMoveResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "LabelRelationship.id"
+          },
+          {
+            "name": "LabelRelationship.sourceId"
+          },
+          {
+            "name": "LabelRelationship.targetId"
+          },
+          {
+            "name": "LabelRelationship.type"
+          },
+          {
+            "name": "LabelRelationship.weight"
+          },
+          {
+            "name": "LabelRelationship.metadata"
+          },
+          {
+            "name": "LabelRelationship.createdAt"
+          },
+          {
+            "name": "LabelRelationship.updatedAt"
+          }
+        ],
+        "name": "LabelRelationship"
+      },
+      {
+        "fields": [
+          {
+            "name": "LabelStats.id"
+          },
+          {
+            "name": "LabelStats.labelId"
+          },
+          {
+            "name": "LabelStats.nodeCount"
+          },
+          {
+            "name": "LabelStats.clusterCount"
+          },
+          {
+            "name": "LabelStats.childCount"
+          },
+          {
+            "name": "LabelStats.depth"
+          },
+          {
+            "name": "LabelStats.lastUsed"
+          },
+          {
+            "name": "LabelStats.usageCount"
+          },
+          {
+            "name": "LabelStats.updatedAt"
+          }
+        ],
+        "name": "LabelStats"
+      },
+      {
+        "fields": [
+          {
+            "name": "LoginInput.email"
+          },
+          {
+            "name": "LoginInput.password"
+          }
+        ],
+        "name": "LoginInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "Metadata.id"
+          },
+          {
+            "name": "Metadata.version"
+          },
+          {
+            "name": "Metadata.status"
+          },
+          {
+            "name": "Metadata.createdAt"
+          },
+          {
+            "name": "Metadata.updatedAt"
+          },
+          {
+            "name": "Metadata.data"
+          }
+        ],
+        "name": "Metadata"
+      },
+      {
+        "fields": [
+          {
+            "name": "MetadataInput.version"
+          },
+          {
+            "name": "MetadataInput.status"
+          },
+          {
+            "name": "MetadataInput.data"
+          }
+        ],
+        "name": "MetadataInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "Node.id"
+          },
+          {
+            "name": "Node.title"
+          },
+          {
+            "name": "Node.content"
+          },
+          {
+            "name": "Node.clusterIds"
+          },
+          {
+            "name": "Node.labelIds"
+          },
+          {
+            "name": "Node.properties"
+          },
+          {
+            "name": "Node.userID"
+          },
+          {
+            "name": "Node.position"
+          },
+          {
+            "name": "Node.createdAt"
+          },
+          {
+            "name": "Node.updatedAt"
+          },
+          {
+            "name": "Node.metadata"
+          }
+        ],
+        "name": "Node"
+      },
+      {
+        "fields": [
+          {
+            "name": "NodeClusterInfo.id"
+          },
+          {
+            "name": "NodeClusterInfo.clusterId"
+          },
+          {
+            "name": "NodeClusterInfo.title"
+          },
+          {
+            "name": "NodeClusterInfo.content"
+          }
+        ],
+        "name": "NodeClusterInfo"
+      },
+      {
+        "fields": [
+          {
+            "name": "NodeClusterResponse.clusterId"
+          },
+          {
+            "name": "NodeClusterResponse.nodeId"
+          },
+          {
+            "name": "NodeClusterResponse.success"
+          },
+          {
+            "name": "NodeClusterResponse.message"
+          },
+          {
+            "name": "NodeClusterResponse.metadata"
+          }
+        ],
+        "name": "NodeClusterResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "NodeDeleteResponse.id"
+          },
+          {
+            "name": "NodeDeleteResponse.success"
+          },
+          {
+            "name": "NodeDeleteResponse.message"
+          }
+        ],
+        "name": "NodeDeleteResponse"
+      },
+      {
+        "fields": [
+          {
+            "name": "NodeInput.title"
+          },
+          {
+            "name": "NodeInput.content"
+          },
+          {
+            "name": "NodeInput.cluster"
+          },
+          {
+            "name": "NodeInput.labelIds"
+          },
+          {
+            "name": "NodeInput.userID"
+          },
+          {
+            "name": "NodeInput.position"
+          },
+          {
+            "name": "NodeInput.properties"
+          },
+          {
+            "name": "NodeInput.metadata"
+          }
+        ],
+        "name": "NodeInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "NodeMetadata.version"
+          },
+          {
+            "name": "NodeMetadata.status"
+          },
+          {
+            "name": "NodeMetadata.bertValidation"
+          },
+          {
+            "name": "NodeMetadata.gnnValidation"
+          },
+          {
+            "name": "NodeMetadata.clusterData"
+          },
+          {
+            "name": "NodeMetadata.labelData"
+          }
+        ],
+        "name": "NodeMetadata"
+      },
+      {
+        "fields": [
+          {
+            "name": "NodeMetadataInput.version"
+          },
+          {
+            "name": "NodeMetadataInput.status"
+          },
+          {
+            "name": "NodeMetadataInput.bertValidation"
+          },
+          {
+            "name": "NodeMetadataInput.gnnValidation"
+          },
+          {
+            "name": "NodeMetadataInput.clusterData"
+          }
+        ],
+        "name": "NodeMetadataInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "NodeUpdateInput.title"
+          },
+          {
+            "name": "NodeUpdateInput.content"
+          },
+          {
+            "name": "NodeUpdateInput.cluster"
+          },
+          {
+            "name": "NodeUpdateInput.labelIds"
+          },
+          {
+            "name": "NodeUpdateInput.userID"
+          },
+          {
+            "name": "NodeUpdateInput.position"
+          },
+          {
+            "name": "NodeUpdateInput.properties"
+          },
+          {
+            "name": "NodeUpdateInput.metadata"
+          }
+        ],
+        "name": "NodeUpdateInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "Position.x"
+          },
+          {
+            "name": "Position.y"
+          }
+        ],
+        "name": "Position"
+      },
+      {
+        "fields": [
+          {
+            "name": "PositionInput.x"
+          },
+          {
+            "name": "PositionInput.y"
+          }
+        ],
+        "name": "PositionInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "PreviousClusterInfo.id"
+          },
+          {
+            "name": "PreviousClusterInfo.name"
+          },
+          {
+            "name": "PreviousClusterInfo.clearedFromViewstate"
+          }
+        ],
+        "name": "PreviousClusterInfo"
+      },
+      {
+        "fields": [
+          {
+            "name": "Property.key"
+          },
+          {
+            "name": "Property.value"
+          }
+        ],
+        "name": "Property"
+      },
+      {
+        "fields": [
+          {
+            "name": "PropertyInput.key"
+          },
+          {
+            "name": "PropertyInput.value"
+          }
+        ],
+        "name": "PropertyInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "RegisterInput.username"
+          },
+          {
+            "name": "RegisterInput.email"
+          },
+          {
+            "name": "RegisterInput.password"
+          }
+        ],
+        "name": "RegisterInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "User.id"
+          },
+          {
+            "name": "User.email"
+          },
+          {
+            "name": "User.username"
+          },
+          {
+            "name": "User.password"
+          },
+          {
+            "name": "User.role"
+          },
+          {
+            "name": "User.createdAt"
+          },
+          {
+            "name": "User.updatedAt"
+          }
+        ],
+        "name": "User"
+      },
+      {
+        "fields": [
+          {
+            "name": "ValidationContext.userId"
+          },
+          {
+            "name": "ValidationContext.timestamp"
+          },
+          {
+            "name": "ValidationContext.source"
+          },
+          {
+            "name": "ValidationContext.batchId"
+          },
+          {
+            "name": "ValidationContext.retryCount"
+          }
+        ],
+        "name": "ValidationContext"
+      },
+      {
+        "fields": [
+          {
+            "name": "ValidationResult.isValid"
+          },
+          {
+            "name": "ValidationResult.errors"
+          },
+          {
+            "name": "ValidationResult.details"
+          }
+        ],
+        "name": "ValidationResult"
+      },
+      {
+        "fields": [
+          {
+            "name": "ValidationResultInput.isValid"
+          },
+          {
+            "name": "ValidationResultInput.errors"
+          },
+          {
+            "name": "ValidationResultInput.details"
+          }
+        ],
+        "name": "ValidationResultInput"
+      },
+      {
+        "fields": [
+          {
+            "name": "ViewState.nodes"
+          },
+          {
+            "name": "ViewState.edges"
+          },
+          {
+            "name": "ViewState.position"
+          },
+          {
+            "name": "ViewState.filters"
+          },
+          {
+            "name": "ViewState.clusters"
+          },
+          {
+            "name": "ViewState.labelIds"
+          }
+        ],
+        "name": "ViewState"
+      },
+      {
+        "fields": [
+          {
+            "name": "ViewportState.x"
+          },
+          {
+            "name": "ViewportState.y"
+          },
+          {
+            "name": "ViewportState.zoom"
+          }
+        ],
+        "name": "ViewportState"
+      },
+      {
+        "fields": [
+          {
+            "name": "Workspace.id"
+          },
+          {
+            "name": "Workspace.ownerId"
+          },
+          {
+            "name": "Workspace.nodes"
+          },
+          {
+            "name": "Workspace.metadata"
+          },
+          {
+            "name": "Workspace.viewState"
+          },
+          {
+            "name": "Workspace.clusterManagement"
+          },
+          {
+            "name": "Workspace.labelManagement"
+          }
+        ],
+        "name": "Workspace"
+      },
+      {
+        "fields": [
+          {
+            "name": "WorkspaceEntities.nodes"
+          },
+          {
+            "name": "WorkspaceEntities.edges"
+          }
+        ],
+        "name": "WorkspaceEntities"
+      },
+      {
+        "fields": [
+          {
+            "name": "WorkspaceMetadata.version"
+          },
+          {
+            "name": "WorkspaceMetadata.lastModified"
+          }
+        ],
+        "name": "WorkspaceMetadata"
+      },
+      {
+        "fields": [
+          {
+            "name": "dgraph.graphql.schema"
+          },
+          {
+            "name": "dgraph.graphql.xid"
+          }
+        ],
+        "name": "dgraph.graphql"
+      },
+      {
+        "fields": [
+          {
+            "name": "dgraph.graphql.p_query"
+          }
+        ],
+        "name": "dgraph.graphql.persisted_query"
+      }
+    ]
+  },
+  "extensions": {
+    "server_latency": {
+      "parsing_ns": 5047,
+      "processing_ns": 218174,
+      "assign_timestamp_ns": 268709,
+      "total_ns": 794597
+    },
+    "txn": {
+      "start_ts": 2865597
+    },
+    "metrics": {
+      "num_uids": {
+        "_total": 0
+      }
+    }
+  }
+}

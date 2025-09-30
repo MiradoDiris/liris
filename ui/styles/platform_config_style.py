@@ -67,9 +67,9 @@ class PlatformConfigStyle:
     @staticmethod
     def get_explanation_style():
         """Style pour les textes d'explication"""
-        return f"""
+        return """
             font-size: 12px;
-            color: #black;
+            color: black;
             padding: 8px;
             background-color: #B3D9FF;
             border-left: 3px solid #66CCFF;
