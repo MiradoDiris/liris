@@ -20,6 +20,7 @@ DGRAPH_ADDR = 'localhost:9080'
 USER_ID = "47ea051e-8cce-4bee-bfe8-76489dd98b60"
 WORKSPACE_ID = "e8bfa5a1-512d-46e3-a4cc-69aecbb9cad9"
 
+# Configuration des chemins
 LIRIS_BASE_PATH = r"C:/Users/Oracle/Documents/liris"
 SCRIPTS_PATH = os.path.join(LIRIS_BASE_PATH, "scripts")
 
