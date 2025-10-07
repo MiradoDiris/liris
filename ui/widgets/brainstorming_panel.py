@@ -41,16 +41,16 @@ class SimpleTestWorker(QThread):
     def start_step(self, step_name):
         self.current_step = step_name
         self.step_start_time = time.time()
-        self.debug_log(f"🚀 DÉBUT de l'étape")
+        self.debug_log("DÉBUT de l'étape")
     
     def end_step(self, success=True):
         duration = time.time() - self.step_start_time
-        status = "✅ SUCCÈS" if success else "❌ ÉCHEC"
+        status = "SUCCÈS" if success else "ÉCHEC"
         self.debug_log(f"{status} - Durée: {duration:.2f}s")
     
     def stop_test(self):
         self.should_stop = True
-        self.debug_log("🛑 ARRÊT DEMANDÉ")
+        self.debug_log("ARRÊT DEMANDÉ")
     
     def _get_platform_submit_method(self):
         """
@@ -77,7 +77,7 @@ class SimpleTestWorker(QThread):
             return 'enter'
             
         except Exception as e:
-            self.debug_log(f"⚠️ Erreur détection méthode envoi: {e}")
+            self.debug_log(f"Erreur détection méthode envoi: {e}")
             return 'enter'  # Fallback sécurisé
     
     def _execute_form_submit(self):
@@ -97,13 +97,13 @@ class SimpleTestWorker(QThread):
             return True
             
         except Exception as e:
-            self.debug_log(f"❌ Erreur envoi: {e}")
+            self.debug_log(f"Erreur envoi: {e}")
             return False
     
     def run(self):
         try:
             start_time = time.time()
-            self.debug_log("🎯 DÉBUT DU TEST COMPLET UNIVERSEL")
+            self.debug_log("DÉBUT DU TEST COMPLET UNIVERSEL")
             
             # ÉTAPE 1: Validation configuration
             self.start_step("VALIDATION_CONFIG")
@@ -122,18 +122,18 @@ class SimpleTestWorker(QThread):
             response_area = extraction_config.get('response_area', {})
             universal_config = response_area.get('universal_config')
             if universal_config:
-                self.debug_log(f"🎯 Configuration universelle détectée pour: {universal_config.get('platform', 'Unknown')}")
+                self.debug_log(f"Configuration universelle détectée pour: {universal_config.get('platform', 'Unknown')}")
             else:
-                self.debug_log("📋 Configuration legacy détectée")
+                self.debug_log("Configuration legacy détectée")
             
             if not window_position or 'x' not in window_position or 'y' not in window_position:
-                self.debug_log("❌ window_position invalide!")
+                self.debug_log("window_position invalide!")
                 self.test_completed.emit(False, "Configuration incomplète: window_position invalide", 0, "")
                 # self.finished.emit()
                 return
                 
             if not prompt_field or 'center_x' not in prompt_field or 'center_y' not in prompt_field:
-                self.debug_log("❌ prompt_field invalide!")
+                self.debug_log("prompt_field invalide!")
                 self.test_completed.emit(False, "Configuration incomplète: prompt_field invalide", 0, "")
                 # self.finished.emit()
                 return
@@ -141,7 +141,7 @@ class SimpleTestWorker(QThread):
             self.end_step(True)
             
             if self.should_stop:
-                self.debug_log("🛑 Arrêt demandé avant début des actions")
+                self.debug_log("Arrêt demandé avant début des actions")
                 return
                 
             # ÉTAPE 2: Clic icône fenêtre
@@ -165,20 +165,20 @@ class SimpleTestWorker(QThread):
                         time.sleep(4)  # Attendre chargement page
                         self.debug_log("URL ouverte avec succès")
                     else:
-                        self.debug_log(f"⚠️ Échec ouverture URL: {result.get('error', 'Erreur inconnue')}")
+                        self.debug_log(f"Échec ouverture URL: {result.get('error', 'Erreur inconnue')}")
                 else:
-                    self.debug_log("⚠️ Aucune URL configurée")
+                    self.debug_log("Aucune URL configurée")
                 
                 self.end_step(True)
             except Exception as e:
-                self.debug_log(f"❌ Erreur clic icône: {e}")
+                self.debug_log(f"Erreur clic icône: {e}")
                 self.end_step(False)
                 self.test_completed.emit(False, f"Erreur clic icône: {str(e)}", 0, "")
                 # self.finished.emit()
                 return
             
             if self.should_stop:
-                self.debug_log("🛑 Arrêt demandé après clic icône")
+                self.debug_log("Arrêt demandé après clic icône")
                 return
             
             # ÉTAPE 3: Clic champ de saisie
@@ -193,14 +193,14 @@ class SimpleTestWorker(QThread):
                 self.debug_log("Clic champ réussi")
                 self.end_step(True)
             except Exception as e:
-                self.debug_log(f"❌ Erreur clic champ: {e}")
+                self.debug_log(f"Erreur clic champ: {e}")
                 self.end_step(False)
                 self.test_completed.emit(False, f"Erreur clic champ: {str(e)}", 0, "")
                 # self.finished.emit()
                 return
             
             if self.should_stop:
-                self.debug_log("🛑 Arrêt demandé après clic champ")
+                self.debug_log("Arrêt demandé après clic champ")
                 return
             
             # ÉTAPE 4: Nettoyage champ
@@ -216,7 +216,7 @@ class SimpleTestWorker(QThread):
                 self.debug_log("Nettoyage champ réussi")
                 self.end_step(True)
             except Exception as e:
-                self.debug_log(f"❌ Erreur nettoyage: {e}")
+                self.debug_log(f"Erreur nettoyage: {e}")
                 self.end_step(False)
                 self.test_completed.emit(False, f"Erreur nettoyage: {str(e)}", 0, "")
                 # self.finished.emit()
@@ -244,14 +244,14 @@ class SimpleTestWorker(QThread):
                 
                 self.end_step(True)
             except Exception as e:
-                self.debug_log(f"❌ Erreur saisie texte: {e}")
+                self.debug_log(f"Erreur saisie texte: {e}")
                 self.end_step(False)
                 self.test_completed.emit(False, f"Erreur saisie: {str(e)}", 0, "")
                 # self.finished.emit()
                 return
             
             if self.should_stop:
-                self.debug_log("🛑 Arrêt demandé après saisie")
+                self.debug_log("Arrêt demandé après saisie")
                 return
             
             # ÉTAPE 6: Envoi formulaire (CORRIGÉ POUR GEMINI)
@@ -267,7 +267,7 @@ class SimpleTestWorker(QThread):
             self.end_step(True)
             
             if self.should_stop:
-                self.debug_log("🛑 Arrêt demandé après envoi")
+                self.debug_log("Arrêt demandé après envoi")
                 return
             
             # ÉTAPE 7: Attente réponse avec DÉTECTION UNIVERSELLE
@@ -276,22 +276,22 @@ class SimpleTestWorker(QThread):
             
             detection_success = False
             try:
-                self.debug_log("🎯 Début détection IA universelle...")
+                self.debug_log("Début détection IA universelle...")
                 detection_success = self._wait_for_ai_completion(detection_config)
                 self.debug_log(f"Résultat détection universelle: {detection_success}")
                 self.conductor.keyboard_controller.press_key('f12')
                 self.end_step(detection_success)
             except Exception as e:
-                self.debug_log(f"❌ Erreur détection universelle: {e}")
+                self.debug_log(f"Erreur détection universelle: {e}")
                 self.end_step(False)
                 logger.warning("Détection timeout - extraction forcée")
             
             if self.should_stop:
-                self.debug_log("🛑 Arrêt demandé après détection")
+                self.debug_log("Arrêt demandé après détection")
                 return
             
             if not detection_success:
-                self.debug_log("⚠️ Détection a échoué, mais continuation vers extraction")
+                self.debug_log("Détection a échoué, mais continuation vers extraction")
             
             # ÉTAPE 8: Extraction réponse avec EXTRACTION UNIVERSELLE
             self.start_step("RESPONSE_EXTRACT")
@@ -299,38 +299,38 @@ class SimpleTestWorker(QThread):
             
             response = ""
             try:
-                self.debug_log("🎯 Début extraction universelle...")
+                self.debug_log("Début extraction universelle...")
                 response = self._extract_response_universal(extraction_config)
                 self.debug_log(f"Extraction universelle terminée - Longueur: {len(response) if response else 0}")
                 
                 if response:
                     self.debug_log(f"Aperçu réponse: '{response[:100]}...'")
                 else:
-                    self.debug_log("❌ Aucune réponse extraite")
+                    self.debug_log("Aucune réponse extraite")
                 
                 self.end_step(bool(response))
             except Exception as e:
-                self.debug_log(f"❌ Erreur extraction universelle: {e}")
+                self.debug_log(f"Erreur extraction universelle: {e}")
                 response = ""
                 self.end_step(False)
             
             # ÉTAPE 9: Finalisation
             duration = time.time() - start_time
-            self.debug_log(f"🏁 TEST UNIVERSEL TERMINÉ - Durée totale: {duration:.2f}s")
+            self.debug_log(f"TEST UNIVERSEL TERMINÉ - Durée totale: {duration:.2f}s")
             
             if response and len(response) > 10:
-                self.debug_log(f"✅ SUCCÈS UNIVERSEL - Réponse extraite: {len(response)} caractères")
+                self.debug_log(f"SUCCÈS UNIVERSEL - Réponse extraite: {len(response)} caractères")
                 self.test_completed.emit(True, f"Test universel réussi en {duration:.1f}s", duration, response)
                 # self.finished.emit()
             else:
-                self.debug_log("❌ ÉCHEC UNIVERSEL - Aucune réponse valide extraite")
+                self.debug_log("ÉCHEC UNIVERSEL - Aucune réponse valide extraite")
                 self.test_completed.emit(False, "Aucune réponse extraite", duration, "")
                 # self.finished.emit()
                 
         except Exception as e:
             duration = time.time() - start_time if 'start_time' in locals() else 0
             error_msg = f"Erreur étape {self.current_step}: {str(e)}"
-            self.debug_log(f"💥 EXCEPTION UNIVERSELLE: {error_msg}")
+            self.debug_log(f"EXCEPTION UNIVERSELLE: {error_msg}")
             logger.error(error_msg, exc_info=True)
             self.test_completed.emit(False, error_msg, duration, "")
             # self.finished.emit()
@@ -339,20 +339,20 @@ class SimpleTestWorker(QThread):
         """VERSION AMÉLIORÉE avec générateur universel"""
         try:
             if not detection_config:
-                self.debug_log("⚠️ Pas de config détection - attente fallback 8s")
+                self.debug_log("Pas de config détection - attente fallback 8s")
                 time.sleep(8)
                 return True
             
             # 🎯 NOUVEAU : Utilisation du générateur universel pour les scripts
             universal_config = detection_config.get('universal_config')
             if universal_config:
-                self.debug_log(f"🎯 Utilisation détection universelle pour {universal_config['platform']}")
+                self.debug_log(f"Utilisation détection universelle pour {universal_config['platform']}")
                 js_code = self.selector_generator.generate_detection_script(universal_config)
-                self.debug_log("📜 Script de détection universel généré")
+                self.debug_log("Script de détection universel généré")
             else:
                 # Fallback vers les scripts spécialisés existants
                 platform_type = detection_config.get('platform_type', '').lower()
-                self.debug_log(f"🔄 Fallback scripts spécialisés pour {platform_type}")
+                self.debug_log(f"Fallback scripts spécialisés pour {platform_type}")
                 if 'chatgpt' in platform_type:
                     js_code = self._get_chatgpt_detection_script()
                 elif 'gemini' in platform_type:
@@ -375,7 +375,7 @@ class SimpleTestWorker(QThread):
             return self._execute_detection_script(js_code)
             
         except Exception as e:
-            self.debug_log(f"❌ Erreur _wait_for_ai_completion: {e}")
+            self.debug_log(f"Erreur _wait_for_ai_completion: {e}")
             logger.error(f"Erreur détection IA: {e}")
             time.sleep(6)
             return False
@@ -614,7 +614,7 @@ class SimpleTestWorker(QThread):
     def _execute_detection_script(self, js_code):
         """Exécute le script de détection et surveille les résultats"""
         try:
-            self.debug_log(f"🖥️ Ouverture console ({self.detected_browser_type})")
+            self.debug_log(f"Ouverture console ({self.detected_browser_type})")
             
             self.conductor.keyboard_controller.press_key('f12')
             # if self.detected_browser_type == 'firefox':
@@ -624,26 +624,26 @@ class SimpleTestWorker(QThread):
             time.sleep(0.5)
             
             if self.should_stop:
-                self.debug_log("🛑 Arrêt pendant ouverture console")
+                self.debug_log("Arrêt pendant ouverture console")
                 return False
             
-            self.debug_log("🔐 Activation du collage")
+            self.debug_log("Activation du collage")
             try:
                 # Type 'allow pasting' to enable pasting in browser console
                 self.conductor.keyboard_controller.type_text("allow pasting")
                 self.conductor.keyboard_controller.press_key('enter')
                 time.sleep(1)  # Wait for browser to process the allow pasting command
-                self.debug_log("✅ Collage autorisé")
+                self.debug_log("Collage autorisé")
             except Exception as e:
-                self.debug_log(f"⚠️ Erreur activation collage: {e}")
+                self.debug_log(f"Erreur activation collage: {e}")
             
-            self.debug_log("🧹 Nettoyage console")
+            self.debug_log("Nettoyage console")
             pyperclip.copy("console.clear();")
             self.conductor.keyboard_controller.hotkey('ctrl', 'v')
             self.conductor.keyboard_controller.press_key('enter')
             time.sleep(0.2)
             
-            self.debug_log("💉 Injection script de détection")
+            self.debug_log("Injection script de détection")
             pyperclip.copy(js_code)
             self.conductor.keyboard_controller.hotkey('ctrl', 'v')
             self.conductor.keyboard_controller.press_key('enter')
@@ -653,7 +653,7 @@ class SimpleTestWorker(QThread):
             waited = 0
             check_interval = 0.5
             
-            self.debug_log(f"👀 Surveillance console (max {max_wait}s, check chaque {check_interval}s)")
+            self.debug_log(f"Surveillance console (max {max_wait}s, check chaque {check_interval}s)")
 
             while waited < max_wait and not self.should_stop:
                 try:
@@ -694,37 +694,37 @@ class SimpleTestWorker(QThread):
                         status = result_content.replace('RESULT:', '').strip()
                         
                         if status == 'success':
-                            self.debug_log(f"✅ Détection réussie après {waited:.1f}s")
-                            logger.info(f"✅ Détection réussie après {waited:.1f}s")
+                            self.debug_log(f"Détection réussie après {waited:.1f}s")
+                            logger.info(f"Détection réussie après {waited:.1f}s")
                             return True
                         elif status == 'running':
                             continue
                         elif status == 'timeout':
-                            self.debug_log(f"⏱️ Détection timeout après {waited:.1f}s")
-                            logger.warning(f"⏱️ Détection timeout après {waited:.1f}s")
+                            self.debug_log(f"Détection timeout après {waited:.1f}s")
+                            logger.warning(f"Détection timeout après {waited:.1f}s")
                             return False
                         else:
-                            self.debug_log(f"❌ Détection erreur: {status}")
-                            logger.error(f"❌ Détection erreur: {status}")
+                            self.debug_log(f"Détection erreur: {status}")
+                            logger.error(f"Détection erreur: {status}")
                             return False
                     
                 except Exception as e:
-                    self.debug_log(f"❌ Erreur vérification statut: {e}")
+                    self.debug_log(f"Erreur vérification statut: {e}")
                 
                 time.sleep(check_interval)
                 waited += check_interval
                 
                 if waited % 2 == 0:
-                    self.debug_log(f"⏳ Attente détection... {waited:.1f}s/{max_wait}s")
+                    self.debug_log(f"Attente détection... {waited:.1f}s/{max_wait}s")
             
             # self.conductor.keyboard_controller.press_key('f12')
-            self.debug_log(f"⏱️ Timeout global détection après {waited:.1f}s")
-            logger.warning(f"⏱️ Timeout global détection après {waited:.1f}s")
+            self.debug_log(f"Timeout global détection après {waited:.1f}s")
+            logger.warning(f"Timeout global détection après {waited:.1f}s")
             return False
             
         except Exception as e:
-            self.debug_log(f"❌ Erreur exécution détection: {e}")
-            logger.error(f"❌ Erreur exécution détection: {e}")
+            self.debug_log(f"Erreur exécution détection: {e}")
+            logger.error(f"Erreur exécution détection: {e}")
             # try:
             #     self.conductor.keyboard_controller.press_key('f12')
             # except:
@@ -734,25 +734,25 @@ class SimpleTestWorker(QThread):
     def _extract_response_universal(self, extraction_config):
         """VERSION UNIVERSELLE avec sélecteurs automatiques"""
         try:
-            self.debug_log("🎯 Début extraction réponse universelle")
+            self.debug_log("Début extraction réponse universelle")
             
             response_area = extraction_config.get('response_area', {})
             
             # 🆕 NOUVEAU : Utiliser la configuration universelle si disponible
             universal_config = response_area.get('universal_config')
             if universal_config:
-                self.debug_log("🎯 Utilisation extraction universelle")
+                self.debug_log("Utilisation extraction universelle")
                 extraction_selectors = universal_config['extraction']
                 primary_selector = extraction_selectors['primary_selector']
                 fallback_selectors = extraction_selectors.get('fallback_selectors', [])
                 cleaning_method = extraction_selectors.get('text_cleaning', 'basic_text_extraction')
                 platform = universal_config.get('platform', 'unknown')
                 
-                self.debug_log(f"🎯 Plateforme: {platform}")
-                self.debug_log(f"🧹 Méthode nettoyage: {cleaning_method}")
+                self.debug_log(f"Plateforme: {platform}")
+                self.debug_log(f"Méthode nettoyage: {cleaning_method}")
             else:
                 # Fallback vers l'ancienne méthode
-                self.debug_log("🔄 Fallback extraction classique")
+                self.debug_log("Fallback extraction classique")
                 platform_config = response_area.get('platform_config', {})
                 primary_selector = platform_config.get('primary_selector', 'p:last-child')
                 fallback_selectors = platform_config.get('fallback_selectors', [])
@@ -781,9 +781,9 @@ class SimpleTestWorker(QThread):
             // Define classes to be excluded from text content
             const excludedClasses = ["pt-3", "pb-3", "can-focus"]; // Add any other classes you want to exclude
 
-            console.log("🎯 Testing universal selectors for " + platform + ":", selectors);
-            console.log("🧹 Cleaning method:", cleaningMethod);
-            console.log("🚫 Excluded classes:", excludedClasses);
+            console.log("Testing universal selectors for " + platform + ":", selectors);
+            console.log("Cleaning method:", cleaningMethod);
+            console.log("Excluded classes:", excludedClasses);
 
             for (let i = 0; i < selectors.length; i++) {{
                 let selector = selectors[i];
@@ -816,7 +816,7 @@ class SimpleTestWorker(QThread):
                         // Clean the text based on the universal method
                         if (cleaningMethod === 'remove_ui_elements') {{
                             // Claude cleaning
-                            text = text.replace(/Send a message\.\.\..*$/gi, '');
+                            text = text.replace(/Send a message\\.{3,}.*$/gi, '');
                             text = text.replace(/Stop generating.*$/gi, '');
                             text = text.replace(/Regenerate.*$/gi, '');
                         }} else if (cleaningMethod === 'preserve_markdown_structure') {{
@@ -847,23 +847,23 @@ class SimpleTestWorker(QThread):
                             !text.includes('document.querySelector') &&
                             !text.includes('Found ') &&
                             !text.includes('elements for selector')) {{
-                            console.log("✅ Valid universal extraction found for " + platform + ", copying...");
+                            console.log("Valid universal extraction found for " + platform + ", copying...");
                             copy(text);
                             break;
                         }} else {{
-                            console.log("❌ Text rejected (contains debug info)");
+                            console.log("Text rejected (contains debug info)");
                         }}
                     }}
                 }} catch (e) {{
-                    console.log("❌ Error with selector " + selector + ":", e);
+                    console.log("Error with selector " + selector + ":", e);
                     continue;
                 }}
             }}
-            console.log("🎯 Universal extraction script completed for " + platform);
+            console.log("Universal extraction script completed for " + platform);
             '''
             return self._execute_extraction_script(js_code)
         except Exception as e:
-            self.debug_log(f"❌ Erreur extraction universelle: {e}")
+            self.debug_log(f"Erreur extraction universelle: {e}")
             logger.error(f"Erreur extraction: {e}")
             # Fallback vers l'ancienne méthode
             return self._extract_response_simple_fallback(extraction_config)
@@ -871,7 +871,7 @@ class SimpleTestWorker(QThread):
     def _execute_extraction_script(self, js_code):
         """Exécute le script d'extraction universel et retourne le résultat"""
         try:
-            self.debug_log("🖥️ Ouverture console pour extraction universelle")
+            self.debug_log("Ouverture console pour extraction universelle")
             # In a real scenario, this would involve keyboard shortcuts to open dev tools
             self.conductor.keyboard_controller.press_key('f12') 
             # if self.detected_browser_type == 'firefox':
@@ -880,19 +880,19 @@ class SimpleTestWorker(QThread):
             # self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'j')
             time.sleep(0.5) 
             if self.should_stop:
-                self.debug_log("🛑 Arrêt pendant ouverture console extraction")
+                self.debug_log("Arrêt pendant ouverture console extraction")
                 return ""
-            self.debug_log("🧹 Nettoyage console pour extraction")
+            self.debug_log("Nettoyage console pour extraction")
             pyperclip.copy("console.clear();")
             self.conductor.keyboard_controller.hotkey('ctrl', 'v')
             self.conductor.keyboard_controller.press_key('enter')
             time.sleep(0.1)
-            self.debug_log("💉 Injection script d'extraction universel")
+            self.debug_log("Injection script d'extraction universel")
             pyperclip.copy(js_code)
             self.conductor.keyboard_controller.hotkey('ctrl', 'v')
             self.conductor.keyboard_controller.press_key('enter')
             time.sleep(0.8)
-            self.debug_log("📋 Lecture résultat extraction universelle")
+            self.debug_log("Lecture résultat extraction universelle")
             result = pyperclip.paste().strip()
             self.debug_log(f"Résultat brut longueur: {len(result)}")
             if result:
@@ -908,15 +908,15 @@ class SimpleTestWorker(QThread):
                     has_excluded = any(keyword in result.lower() for keyword in excluded_keywords)
                     self.debug_log(f"Test exclusion keywords: {has_excluded}")
                     if not has_excluded:
-                        self.debug_log(f"✅ Réponse universelle valide extraite: {len(result)} caractères")
+                        self.debug_log(f"Réponse universelle valide extraite: {len(result)} caractères")
                         return result
                     else:
-                        self.debug_log("❌ Réponse rejetée (contient du code/debug)")
+                        self.debug_log("Réponse rejetée (contient du code/debug)")
                 else:
-                    self.debug_log("❌ Réponse vide")
+                    self.debug_log("Réponse vide")
             return ""
         except Exception as e:
-            self.debug_log(f"❌ Erreur extraction universelle: {e}")
+            self.debug_log(f"Erreur extraction universelle: {e}")
             try:
                 # Attempt to close dev tools if an error occurs
                 self.conductor.keyboard_controller.press_key('f12')
@@ -927,7 +927,7 @@ class SimpleTestWorker(QThread):
     def _extract_response_simple_fallback(self, extraction_config):
         """Ancienne méthode d'extraction en fallback"""
         try:
-            self.debug_log("🔄 Fallback vers extraction simple")
+            self.debug_log("Fallback vers extraction simple")
             response_area = extraction_config.get('response_area', {})
             platform_config = response_area.get('platform_config', {})
             primary_selector = platform_config.get('primary_selector', 'p:last-child')
@@ -951,8 +951,8 @@ class SimpleTestWorker(QThread):
             // Define classes to be excluded from text content
             const excludedClasses = ["pt-3", "pb-3"]; // Add any other classes you want to exclude
 
-            console.log("🔄 Testing fallback selectors:", selectors);
-            console.log("🚫 Excluded classes:", excludedClasses); // Log the excluded classes
+            console.log("Testing fallback selectors:", selectors);
+            console.log("Excluded classes:", excludedClasses); // Log the excluded classes
 
             for (let i = 0; i < selectors.length; i++) {{
                 let selector = selectors[i];
@@ -993,7 +993,7 @@ class SimpleTestWorker(QThread):
             '''
             return self._execute_extraction_script(js_code)
         except Exception as e:
-            self.debug_log(f"❌ Erreur extraction fallback: {e}")
+            self.debug_log(f"Erreur extraction fallback: {e}")
             return ""
 
 
@@ -1096,38 +1096,30 @@ class BrainstormingPanel(QtWidgets.QWidget):
             border: 2px solid {self.primary_color};
         }}
 
-        QListWidget {{
+        QComboBox {{
             border: 1px solid {self.accent_color};
             border-radius: 4px;
+            padding: 8px;
             background-color: white;
-            selection-background-color: {self.primary_color};
-            outline: none;
+            min-width: 200px;
         }}
 
-        QListWidget::item {{
-            padding: 5px;
+        QComboBox:focus {{
+            border: 2px solid {self.primary_color};
         }}
 
-        QListWidget::item:selected {{
-            background-color: {self.primary_color};
-            color: white;
+        QComboBox::drop-down {{
+            border: none;
         }}
 
-        QListWidget::item:hover {{
-            background-color: {self.secondary_color};
-            color: white;
+        QComboBox::down-arrow {{
+            image: none;
+            border-left: 1px solid {self.accent_color};
         }}
 
-        QListWidget::indicator {{
-            width: 16px;
-            height: 16px;
-            border-radius: 3px;
+        QComboBox QAbstractItemView {{
             border: 1px solid {self.accent_color};
-        }}
-
-        QListWidget::indicator:checked {{
-            background-color: {self.primary_color};
-            border: 1px solid {self.primary_color};
+            selection-background-color: {self.primary_color};
         }}
 
         QTabWidget::pane {{
@@ -1235,14 +1227,13 @@ class BrainstormingPanel(QtWidgets.QWidget):
         self.session_name_edit.setMaximumWidth(300)
         session_layout.addRow(tr("brainstorming.name"), self.session_name_edit)
 
-        # Sélection des plateformes
+        # Sélection des plateformes (transformée en liste déroulante QComboBox)
         self.platform_label = QtWidgets.QLabel(tr("brainstorming.platforms"))
         session_layout.addRow(self.platform_label)
 
-        self.platforms_list = QtWidgets.QListWidget()
-        self.platforms_list.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection) # Keep MultiSelection
-        self.platforms_list.setMaximumHeight(120)
-        session_layout.addWidget(self.platforms_list)
+        self.platform_combo = QtWidgets.QComboBox()
+        self.platform_combo.setMaximumHeight(30)
+        session_layout.addWidget(self.platform_combo)
 
         # Champ pour le contexte/problème
         self.context_label = QtWidgets.QLabel(tr("brainstorming.context"))
@@ -1370,12 +1361,9 @@ class BrainstormingPanel(QtWidgets.QWidget):
         """
         self.profiles = profiles
         self.platforms = self.conductor.database.get_all_platforms()
-        self.platforms_list.clear()
+        self.platform_combo.clear()
         for name in self.profiles:
-            item = QtWidgets.QListWidgetItem(name)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled) # Ensure selectable and checkable
-            item.setCheckState(Qt.Unchecked) # Start unchecked
-            self.platforms_list.addItem(item)
+            self.platform_combo.addItem(name, self.profiles[name])  # Text = name, data = profile
         logger.info(f"Loaded {len(profiles)} platform profiles.")
 
     def update_status(self, message, progress=None):
@@ -1391,9 +1379,7 @@ class BrainstormingPanel(QtWidgets.QWidget):
         """Crée une nouvelle session"""
         self.session_name_edit.clear()
         self.context_edit.clear()
-        for i in range(self.platforms_list.count()):
-            item = self.platforms_list.item(i)
-            item.setCheckState(Qt.Unchecked) # Uncheck all for a new session
+        self.platform_combo.setCurrentIndex(0)  # Sélectionne la première plateforme par défaut
         self.clear_results()
         self.current_session_id = None
         self.view_results_button.setEnabled(False)
@@ -1427,25 +1413,21 @@ class BrainstormingPanel(QtWidgets.QWidget):
             )
 
     def _on_start_session(self):
-        """Lance une session de brainstorming en exécutant les tests sur les plateformes sélectionnées."""
+        """Lance une session de brainstorming en exécutant les tests sur la plateforme sélectionnée."""
         if not self.conductor:
             self.update_status(tr("brainstorming.error_no_conductor"), 0)
             logger.error("Conductor not set. Cannot start session.")
             return
 
-        # platforms = self.conductor.
-        selected_platforms = []
-        for i in range(self.platforms_list.count()):
-            item = self.platforms_list.item(i)
-            if item.checkState() == Qt.Checked:
-                platform_name = item.text()
-                if platform_name in self.profiles:
-                    selected_platforms.append((platform_name, self.platforms[platform_name]))
-                else:
-                    logger.warning(f"Profile for platform '{platform_name}' not found.")
-
-        if not selected_platforms:
+        # Récupération de la plateforme sélectionnée via la liste déroulante
+        selected_platform_name = self.platform_combo.currentText()
+        if not selected_platform_name:
             self.update_status(tr("brainstorming.error_no_platform_selected"), 0)
+            return
+
+        platform_profile = self.platform_combo.currentData()
+        if not platform_profile:
+            self.update_status(tr("brainstorming.error_no_platform_profile"), 0)
             return
 
         test_message = self.context_edit.toPlainText().strip()
@@ -1460,67 +1442,53 @@ class BrainstormingPanel(QtWidgets.QWidget):
         self.export_button.setEnabled(False)
 
         self.running_workers = []
-        total_platforms = len(selected_platforms)
-        self.progress_bar.setMaximum(total_platforms * 100) # Each platform has 100 progress points
+        self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
 
-        # Initialize worker index
-        self.current_worker_index = -1
+        logger.info(f"Starting test for platform: {selected_platform_name}")
+        # Determine detected_browser_type. This should ideally come from main app config or profile.
+        # For now, a simple heuristic or default.
+        detected_browser_type = platform_profile.get('browser', {}).get('type', 'chrome') # Default to chrome
 
-        for i, (platform_name, platform_profile) in enumerate(selected_platforms):
-            logger.info(f"Starting test for platform: {platform_name}")
-            # Determine detected_browser_type. This should ideally come from main app config or profile.
-            # For now, a simple heuristic or default.
-            detected_browser_type = platform_profile.get('browser', {}).get('type', 'chrome') # Default to chrome
+        worker = SimpleTestWorker(self.conductor, platform_profile, test_message, detected_browser_type)
+        worker.platform_name = selected_platform_name # Add platform name for easier identification in slots
 
-            worker = SimpleTestWorker(self.conductor, platform_profile, test_message, detected_browser_type)
-            worker.platform_name = platform_name # Add platform name for easier identification in slots
-            worker.platform_index = i # Add index for progress calculation
+        worker.test_completed.connect(self._on_test_completed)
+        worker.step_update.connect(self._on_step_update)
+        worker.debug_info.connect(self._on_debug_info)
+        
+        # Connect test_completed signal to clean up worker
+        worker.finished.connect(self._on_worker_finished) 
 
-            worker.test_completed.connect(self._on_test_completed)
-            worker.step_update.connect(self._on_step_update)
-            worker.debug_info.connect(self._on_debug_info)
-            
-            # Connect test_completed signal to clean up worker
-            worker.finished.connect(self._on_worker_finished) 
+        self.running_workers.append(worker)
+        worker.start()
 
-            self.running_workers.append(worker)
-
-        # Start the first worker
-        self._start_next_worker()
-
-        self.session_started.emit(len(selected_platforms)) # Emit signal with count of platforms
-
-    def _start_next_worker(self):
-        self.current_worker_index += 1
-        if self.current_worker_index < len(self.running_workers):
-            worker = self.running_workers[self.current_worker_index]
-            logger.info(f"Starting test for platform: {worker.platform_name} (Worker {self.current_worker_index + 1}/{len(self.running_workers)})")
-            worker.start()
-        else:
-            logger.info("All test workers have completed.")
-            # Optionally, emit a signal that all sessions are done
-            # self.all_sessions_completed.emit()
+        self.session_started.emit(1) # Emit signal with count of platforms (now single)
 
     def _on_worker_finished(self):
-        print('on worker finished')
-        sender_worker = self.sender() # Get the worker that just finished
-        logger.info(f"Worker for platform {sender_worker.platform_name} finished.")
-        # You might want to disconnect signals here if not automatically handled by Qt's garbage collection
-        # sender_worker.test_completed.disconnect(self._on_test_completed)
-        # sender_worker.step_update.disconnect(self._on_step_update)
-        # sender_worker.debug_info.disconnect(self._on_debug_info)
-        # sender_worker.finished.disconnect(self._on_worker_finished)
+        """Slot appelé quand un SimpleTestWorker a terminé."""
+        sender_worker = self.sender()
+        if sender_worker in self.running_workers:
+            self.running_workers.remove(sender_worker)
+            sender_worker.deleteLater() # Clean up the QThread
 
-        # Start the next worker in sequence
-        self._start_next_worker()
+        self._check_all_workers_finished()
 
-    def _on_step_update(self, platform_name, step_message):
-        logger.debug(f"[{platform_name}] Step: {step_message}")
+    def _on_step_update(self, step_name, message):
+        """Slot pour les mises à jour des étapes du test."""
+        sender_worker = self.sender()
+        platform_name = getattr(sender_worker, 'platform_name', 'Unknown Platform')
+        # We can update a more detailed status label or append to a log view
+        self.update_status(f"[{platform_name}] {message}")
+        # Could also update a specific progress for this platform in a more complex UI
 
-    def _on_debug_info(self, debug_message):
-        logger.debug(f"Debug Info: {debug_message}")
+    def _on_debug_info(self, message):
+        """Slot pour les informations de débogage du test."""
+        sender_worker = self.sender()
+        platform_name = getattr(sender_worker, 'platform_name', 'Unknown Platform')
+        logger.debug(f"[{platform_name} DEBUG] {message}")
+        # Consider adding a debug log area in the UI if needed
 
     def _on_test_completed(self, success, message, duration, response):
         # Handle the completion of an individual test here
@@ -1528,7 +1496,6 @@ class BrainstormingPanel(QtWidgets.QWidget):
 
         sender_worker = self.sender()
         platform_name = getattr(sender_worker, 'platform_name', 'Unknown Platform')
-        platform_index = getattr(sender_worker, 'platform_index', 0)
 
         logger.info(f"Test for {platform_name} completed. Success: {success}, Duration: {duration:.2f}s, Message: {message}")
 
@@ -1549,43 +1516,8 @@ class BrainstormingPanel(QtWidgets.QWidget):
         self.solutions_table.setItem(row_position, 2, QtWidgets.QTableWidgetItem(f"{message} ({duration:.1f}s)"))
         self.solutions_table.setItem(row_position, 3, QtWidgets.QTableWidgetItem(response))
 
-        # Update progress bar based on individual platform completion
-        current_progress = (self.running_workers[self.current_worker_index].platform_index + 1) * 100
-        self.progress_bar.setValue(current_progress)
-
-        self._start_next_worker()
-        
-        # # Update progress bar
-        # current_progress = self.progress_bar.value()
-        # # Each worker contributes a fixed amount (e.g., 100 units of progress)
-        # self.progress_bar.setValue(current_progress + 100) 
-        
-        # # Check if all workers are done
-        # self._check_all_workers_finished()
-
-    def _on_step_update(self, step_name, message):
-        """Slot pour les mises à jour des étapes du test."""
-        sender_worker = self.sender()
-        platform_name = getattr(sender_worker, 'platform_name', 'Unknown Platform')
-        # We can update a more detailed status label or append to a log view
-        self.update_status(f"[{platform_name}] {message}")
-        # Could also update a specific progress for this platform in a more complex UI
-
-    def _on_debug_info(self, message):
-        """Slot pour les informations de débogage du test."""
-        sender_worker = self.sender()
-        platform_name = getattr(sender_worker, 'platform_name', 'Unknown Platform')
-        logger.debug(f"[{platform_name} DEBUG] {message}")
-        # Consider adding a debug log area in the UI if needed
-
-    def _on_worker_finished(self):
-        """Slot appelé quand un SimpleTestWorker a terminé."""
-        sender_worker = self.sender()
-        if sender_worker in self.running_workers:
-            self.running_workers.remove(sender_worker)
-            sender_worker.deleteLater() # Clean up the QThread
-
-        self._check_all_workers_finished()
+        # Update progress bar (now for single platform)
+        self.progress_bar.setValue(100)
 
     def _check_all_workers_finished(self):
         """Vérifie si tous les workers ont terminé et met à jour l'état de l'UI."""

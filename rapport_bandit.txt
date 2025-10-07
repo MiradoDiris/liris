@@ -1,0 +1,354 @@
+Run started:2025-10-01 09:48:57.026343
+
+Test results:
+>> Issue: [B404:blacklist] Consider possible security implications associated with the subprocess module.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/blacklists/blacklist_imports.html#b404-import-subprocess
+   Location: .\main.py:16:0
+15	import platform
+16	import subprocess
+17	from datetime import datetime
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:65:12
+64	        try:
+65	            subprocess.run(['wmctrl', '-i', '-r', self._window_id, '-e', f'0,{x},{y},-1,-1'], 
+66	                          check=True)
+67	            self._x = x
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:65:12
+64	        try:
+65	            subprocess.run(['wmctrl', '-i', '-r', self._window_id, '-e', f'0,{x},{y},-1,-1'], 
+66	                          check=True)
+67	            self._x = x
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:75:12
+74	        try:
+75	            subprocess.run(['wmctrl', '-i', '-r', self._window_id, '-e', f'0,-1,-1,{width},{height}'], 
+76	                          check=True)
+77	            self._width = width
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:75:12
+74	        try:
+75	            subprocess.run(['wmctrl', '-i', '-r', self._window_id, '-e', f'0,-1,-1,{width},{height}'], 
+76	                          check=True)
+77	            self._width = width
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:85:12
+84	        try:
+85	            subprocess.run(['xdotool', 'windowminimize', self._window_id], check=True)
+86	        except subprocess.CalledProcessError:
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:85:12
+84	        try:
+85	            subprocess.run(['xdotool', 'windowminimize', self._window_id], check=True)
+86	        except subprocess.CalledProcessError:
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:92:12
+91	        try:
+92	            subprocess.run(['wmctrl', '-i', '-r', self._window_id, '-b', 'add,maximized_vert,maximized_horz'], 
+93	                          check=True)
+94	        except subprocess.CalledProcessError:
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:92:12
+91	        try:
+92	            subprocess.run(['wmctrl', '-i', '-r', self._window_id, '-b', 'add,maximized_vert,maximized_horz'], 
+93	                          check=True)
+94	        except subprocess.CalledProcessError:
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:100:12
+99	        try:
+100	            subprocess.run(['xdotool', 'windowactivate', self._window_id], check=True)
+101	        except subprocess.CalledProcessError:
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:100:12
+99	        try:
+100	            subprocess.run(['xdotool', 'windowactivate', self._window_id], check=True)
+101	        except subprocess.CalledProcessError:
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:107:12
+106	        try:
+107	            subprocess.run(['xdotool', 'windowclose', self._window_id], check=True)
+108	        except subprocess.CalledProcessError:
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:107:12
+106	        try:
+107	            subprocess.run(['xdotool', 'windowclose', self._window_id], check=True)
+108	        except subprocess.CalledProcessError:
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:124:17
+123	        # Use wmctrl to get window list with geometry
+124	        result = subprocess.run(['wmctrl', '-l', '-G'], capture_output=True, text=True, check=True)
+125	        
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:124:17
+123	        # Use wmctrl to get window list with geometry
+124	        result = subprocess.run(['wmctrl', '-l', '-G'], capture_output=True, text=True, check=True)
+125	        
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:168:17
+167	        # Get active window ID
+168	        result = subprocess.run(['xdotool', 'getactivewindow'], 
+169	                              capture_output=True, text=True, check=True)
+170	        window_id = result.stdout.strip()
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:168:17
+167	        # Get active window ID
+168	        result = subprocess.run(['xdotool', 'getactivewindow'], 
+169	                              capture_output=True, text=True, check=True)
+170	        window_id = result.stdout.strip()
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:173:17
+172	        # Get window info
+173	        result = subprocess.run(['xdotool', 'getwindowgeometry', window_id], 
+174	                              capture_output=True, text=True, check=True)
+175	        
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:173:17
+172	        # Get window info
+173	        result = subprocess.run(['xdotool', 'getwindowgeometry', window_id], 
+174	                              capture_output=True, text=True, check=True)
+175	        
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:197:23
+196	        # Get window title
+197	        title_result = subprocess.run(['xdotool', 'getwindowname', window_id], 
+198	                                    capture_output=True, text=True, check=True)
+199	        title = title_result.stdout.strip()
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:197:23
+196	        # Get window title
+197	        title_result = subprocess.run(['xdotool', 'getwindowname', window_id], 
+198	                                    capture_output=True, text=True, check=True)
+199	        title = title_result.stdout.strip()
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:239:25
+238	            try:
+239	                result = subprocess.run(['which', 'xvfb-run'], capture_output=True)
+240	                if result.returncode == 0:
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:239:25
+238	            try:
+239	                result = subprocess.run(['which', 'xvfb-run'], capture_output=True)
+240	                if result.returncode == 0:
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b110_try_except_pass.html
+   Location: .\main.py:245:12
+244	                    print("   → Installation suggérée: sudo apt-get install xvfb")
+245	            except:
+246	                pass
+247	        
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:254:16
+253	            try:
+254	                subprocess.run(['wmctrl', '--version'], capture_output=True, check=True)
+255	            except (subprocess.CalledProcessError, FileNotFoundError):
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:254:16
+253	            try:
+254	                subprocess.run(['wmctrl', '--version'], capture_output=True, check=True)
+255	            except (subprocess.CalledProcessError, FileNotFoundError):
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:260:16
+259	            try:
+260	                subprocess.run(['xdotool', '--version'], capture_output=True, check=True)
+261	            except (subprocess.CalledProcessError, FileNotFoundError):
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:260:16
+259	            try:
+260	                subprocess.run(['xdotool', '--version'], capture_output=True, check=True)
+261	            except (subprocess.CalledProcessError, FileNotFoundError):
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:293:12
+292	            # Vérifier la disponibilité des outils Linux
+293	            subprocess.run(['wmctrl', '--version'], capture_output=True, check=True)
+294	            subprocess.run(['xdotool', '--version'], capture_output=True, check=True)
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:293:12
+292	            # Vérifier la disponibilité des outils Linux
+293	            subprocess.run(['wmctrl', '--version'], capture_output=True, check=True)
+294	            subprocess.run(['xdotool', '--version'], capture_output=True, check=True)
+
+--------------------------------------------------
+>> Issue: [B607:start_process_with_partial_path] Starting a process with a partial executable path
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html
+   Location: .\main.py:294:12
+293	            subprocess.run(['wmctrl', '--version'], capture_output=True, check=True)
+294	            subprocess.run(['xdotool', '--version'], capture_output=True, check=True)
+295	            print("   ✓ Outils Linux (wmctrl, xdotool) disponibles")
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: .\main.py:294:12
+293	            subprocess.run(['wmctrl', '--version'], capture_output=True, check=True)
+294	            subprocess.run(['xdotool', '--version'], capture_output=True, check=True)
+295	            print("   ✓ Outils Linux (wmctrl, xdotool) disponibles")
+
+--------------------------------------------------
+
+Code scanned:
+	Total lines of code: 344
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 0
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 32
+		Medium: 0
+		High: 0
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 0
+		Medium: 0
+		High: 32
+Files skipped (0):

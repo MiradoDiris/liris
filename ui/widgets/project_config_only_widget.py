@@ -33,6 +33,8 @@ class ProjectConfigOnlyWidget(QtWidgets.QWidget):
             "ProjectConfigOnlyWidget: Initialisation (onglet ProjectConfigWidget et NodeCreationWidget)..."
         )
 
+        self.setMinimumSize(1400, 900)
+
         self.config_provider = config_provider
         self.conductor = conductor
         self.project_config_widget_instance = None

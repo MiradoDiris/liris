@@ -3,1880 +3,1265 @@
 
 """
 Liris/ui/widgets/tabs/node_creation_widget.py
-Widget pour la création de nœuds dans l'ontologie.
+Widget amélioré pour la création de nœuds avec navigation type système de fichiers
 """
 
 import os
-import uuid  # Pour générer des UUIDs pour les nœuds de fonction
-import time  # Pour les délais dans l'automatisation du navigateur
-import pyperclip  # Pour la gestion du presse-papiers
-import json  # Pour json.dumps dans les scripts JS
-import traceback  # Pour les traces d'erreurs détaillées
+import uuid
+import time
+import pyperclip
+import json
+import traceback
+from datetime import datetime
 
-from PyQt5 import QtWidgets
-from PyQt5.QtCore import (
-    Qt,
-)  # QTimer pour les mises à jour non bloquantes de l'UI
+from PyQt5 import QtWidgets, QtGui, QtCore
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import (QPushButton, QHBoxLayout, QInputDialog, QMessageBox, 
+                             QDialog, QFormLayout, QLineEdit, QTextEdit, 
+                             QDialogButtonBox, QVBoxLayout, QPlainTextEdit)
 
-# Importation du générateur de sélecteurs universel
 from utils.selector_generator import UniversalSelectorGenerator
-from utils.logger import logger  # Assurez-vous que logger est importé
+from utils.logger import logger
+from utils.dgraph_connector import LirisDgraphConnector
 
 
-# --- Nouvelle classe pour la fenêtre de résultats ---
-class ResultsDialog(QtWidgets.QDialog):
+# Palette de couleurs sans bleu (blanc et noir)
+class ColorPalette:
+    PRIMARY = "#2c3e50"      # Noir doux
+    SECONDARY = "#34495e"    # Gris anthracite
+    ACCENT = "#555555"       # Gris moyen
+    SUCCESS = "#27ae60"      # Vert
+    WARNING = "#f39c12"      # Orange
+    DANGER = "#e74c3c"       # Rouge
+    LIGHT = "#ecf0f1"        # Gris très clair
+    LIGHTER = "#f8f9fa"      # Presque blanc
+    BORDER = "#dfe6e9"       # Bordure gris clair
+    TEXT = "#2c3e50"         # Texte principal
+    TEXT_LIGHT = "#7f8c8d"   # Texte secondaire
+    BACKGROUND = "#ffffff"   # Fond blanc
+    DARK = "#1a1a1a"         # Noir pour console
+    SELECTED = "#d5dbdb"     # Gris clair pour sélection
+    
+    # Couleurs pour les labels/tags
+    TAG_COLORS = [
+        {"bg": "#e8f5e9", "text": "#2e7d32", "border": "#66bb6a"},  # Vert
+        {"bg": "#fce4ec", "text": "#c2185b", "border": "#f06292"},  # Rose
+        {"bg": "#e3f2fd", "text": "#1565c0", "border": "#42a5f5"},  # Bleu
+        {"bg": "#fff3e0", "text": "#e65100", "border": "#ff9800"},  # Orange
+        {"bg": "#f3e5f5", "text": "#6a1b9a", "border": "#ba68c8"},  # Violet
+        {"bg": "#e0f2f1", "text": "#00695c", "border": "#26a69a"},  # Cyan
+        {"bg": "#fff9c4", "text": "#f57f17", "border": "#fdd835"},  # Jaune
+        {"bg": "#d7ccc8", "text": "#4e342e", "border": "#8d6e63"},  # Marron
+    ]
+
+
+class AddEditItemDialog(QDialog):
     """
-    Dialogue pour afficher les résultats de la génération de code de mutation.
+    Dialogue générique pour ajouter/éditer un item avec nom et description.
     """
-
-    def __init__(self, generated_mutations, parent=None):
+    def __init__(self, title, current_name="", current_description="", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Résultats")
-        self.setMinimumSize(600, 400)
-        self.generated_mutations = generated_mutations
-        self._init_ui()
+        self.setWindowTitle(title)
+        self.setMinimumSize(400, 200)
 
+        self.name_edit = QLineEdit(current_name)
+        self.name_edit.setPlaceholderText("Nom de l'item...")
+        self.name_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {ColorPalette.BACKGROUND};
+                border: 1px solid {ColorPalette.BORDER};
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {ColorPalette.PRIMARY};
+            }}
+        """)
+
+        self.description_edit = QTextEdit(current_description)
+        self.description_edit.setPlaceholderText("Description de l'item...")
+        self.description_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {ColorPalette.BACKGROUND};
+                border: 1px solid {ColorPalette.BORDER};
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 13px;
+            }}
+            QTextEdit:focus {{
+                border: 2px solid {ColorPalette.PRIMARY};
+            }}
+        """)
+        self.description_edit.setMaximumHeight(100)
+
+        layout = QFormLayout(self)
+        layout.addRow("Nom:", self.name_edit)
+        layout.addRow("Description:", self.description_edit)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addRow(button_box)
+
+    def get_data(self):
+        return {
+            "name": self.name_edit.text().strip(),
+            "description": self.description_edit.toPlainText().strip()
+        }
+
+
+class CodeEditDialog(QDialog):
+    """
+    Dialogue pour éditer le contenu code d'un fichier (cluster ou label).
+    """
+    def __init__(self, title, current_code="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumSize(600, 400)
+
+        layout = QVBoxLayout(self)
+
+        # Utiliser QPlainTextEdit pour une meilleure préservation de la structure de code
+        self.code_edit = QPlainTextEdit(current_code)
+        self.code_edit.setPlaceholderText("Contenu du fichier...")
+        self.code_edit.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background-color: {ColorPalette.BACKGROUND};
+                border: 1px solid {ColorPalette.BORDER};
+                border-radius: 4px;
+                padding: 8px;
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+            }}
+            QPlainTextEdit:focus {{
+                border: 2px solid {ColorPalette.PRIMARY};
+            }}
+        """)
+        # Configuration pour préserver la structure (indentation, retours à la ligne, tabs)
+        self.code_edit.setLineWrapMode(QPlainTextEdit.NoWrap)  # Pas de retour automatique à la ligne
+        self.code_edit.setTabStopWidth(4 * self.code_edit.fontMetrics().width(' '))  # Largeur de tabulation (4 espaces)
+        # Sauvegarder l'événement original et redéfinir pour gérer Tab
+        self.original_key_press = self.code_edit.keyPressEvent
+        self.code_edit.keyPressEvent = self._handle_key_press
+
+        layout.addWidget(self.code_edit)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def _handle_key_press(self, event):
+        """Gère la touche Tab pour insérer une tabulation au lieu de changer de focus."""
+        if event.key() == Qt.Key_Tab:
+            cursor = self.code_edit.textCursor()
+            cursor.insertText('\t')
+            event.accept()
+        else:
+            self.original_key_press(event)
+
+    def get_code(self):
+        return self.code_edit.toPlainText()  # Préserve tabs, newlines, espaces, etc.
+
+
+class TagWidget(QtWidgets.QWidget):
+    """Widget pour afficher un tag/label avec bouton de fermeture"""
+    
+    removed = pyqtSignal(object)  # Signal émis quand le tag est retiré
+    
+    def __init__(self, text, color_scheme=None, removable=True, parent=None):
+        super().__init__(parent)
+        self.text = text
+        self.removable = removable
+        
+        # Choisir un schéma de couleur
+        if color_scheme is None:
+            color_scheme = ColorPalette.TAG_COLORS[hash(text) % len(ColorPalette.TAG_COLORS)]
+        self.color_scheme = color_scheme
+        
+        self._init_ui()
+    
+    def _init_ui(self):
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(6)
+        
+        # Label du texte
+        self.label = QtWidgets.QLabel(self.text)
+        self.label.setStyleSheet(f"""
+            QLabel {{
+                color: {self.color_scheme['text']};
+                font-size: 12px;
+                font-weight: 500;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        layout.addWidget(self.label)
+        
+        # Bouton de fermeture (si removable)
+        if self.removable:
+            self.close_btn = QtWidgets.QPushButton("×")
+            self.close_btn.setFixedSize(16, 16)
+            self.close_btn.setCursor(Qt.PointingHandCursor)
+            self.close_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {self.color_scheme['text']};
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    font-weight: bold;
+                    padding: 0px;
+                }}
+                QPushButton:hover {{
+                    background: rgba(0, 0, 0, 0.1);
+                }}
+            """)
+            self.close_btn.clicked.connect(self._on_remove)
+            layout.addWidget(self.close_btn)
+        
+        # Style du widget principal
+        self.setStyleSheet(f"""
+            TagWidget {{
+                background-color: {self.color_scheme['bg']};
+                border: 1.5px solid {self.color_scheme['border']};
+                border-radius: 14px;
+            }}
+        """)
+    
+    def _on_remove(self):
+        """Émet le signal de suppression"""
+        self.removed.emit(self)
+
+
+class TagContainer(QtWidgets.QWidget):
+    """Conteneur pour afficher plusieurs tags avec wrapping automatique"""
+    
+    def __init__(self, title="Labels", parent=None):
+        super().__init__(parent)
+        self.title = title
+        self.tags = []
+        self._init_ui()
+    
     def _init_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(10)
-
-        title_label = QtWidgets.QLabel("Codes de Mutation Générés")
-        title_label.setStyleSheet(
-            "font-size: 18px; font-weight: bold; margin-bottom: 10px;"
-        )
-        main_layout.addWidget(title_label)
-
-        # Zone de défilement pour les résultats par fichier
-        scroll_area = QtWidgets.QScrollArea(self)
-        scroll_area.setWidgetResizable(True)
-        scroll_content_widget = QtWidgets.QWidget()
-        self.results_layout = QtWidgets.QVBoxLayout(scroll_content_widget)
-        self.results_layout.setAlignment(Qt.AlignTop)  # Align items to the top
-        scroll_area.setWidget(scroll_content_widget)
-        main_layout.addWidget(scroll_area)
-
-        self._populate_results()
-
-        # Bouton "Exécuter tout"
-        execute_all_button = QtWidgets.QPushButton("Exécuter tout")
-        execute_all_button.setStyleSheet("""
-            QPushButton {
-                background-color: #007bff;
-                color: white;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-            QPushButton:pressed {
-                background-color: #004085;
-            }
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(8)
+        
+        # En-tête avec titre et bouton collapse
+        header = QtWidgets.QWidget()
+        header_layout = QtWidgets.QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Icône et titre
+        title_layout = QtWidgets.QHBoxLayout()
+        title_icon = QtWidgets.QLabel("🏷️")
+        title_icon.setStyleSheet("font-size: 14px;")
+        title_layout.addWidget(title_icon)
+        
+        title_label = QtWidgets.QLabel(self.title)
+        title_label.setStyleSheet(f"""
+            font-size: 13px;
+            font-weight: 600;
+            color: {ColorPalette.TEXT};
         """)
-        execute_all_button.clicked.connect(self._on_execute_all)
-        main_layout.addWidget(execute_all_button, alignment=Qt.AlignCenter)
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
+        
+        header_layout.addLayout(title_layout)
+        
+        # Bouton collapse
+        self.collapse_btn = QtWidgets.QPushButton("Collapse")
+        self.collapse_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {ColorPalette.PRIMARY};
+                border: none;
+                font-size: 11px;
+                padding: 2px 8px;
+                text-decoration: underline;
+            }}
+            QPushButton:hover {{
+                color: {ColorPalette.ACCENT};
+            }}
+        """)
+        self.collapse_btn.setCursor(Qt.PointingHandCursor)
+        self.collapse_btn.clicked.connect(self._toggle_collapse)
+        header_layout.addWidget(self.collapse_btn)
+        
+        main_layout.addWidget(header)
+        
+        # Conteneur scrollable pour les tags
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setMaximumHeight(200)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background: transparent;
+            }}
+        """)
+        
+        # Widget pour le flow layout
+        self.tags_widget = QtWidgets.QWidget()
+        self.flow_layout = FlowLayout(self.tags_widget)
+        self.flow_layout.setSpacing(8)
+        
+        scroll.setWidget(self.tags_widget)
+        main_layout.addWidget(scroll)
+        
+        self.is_collapsed = False
+    
+    def add_tag(self, text, color_scheme=None, removable=True):
+        """Ajoute un nouveau tag"""
+        tag = TagWidget(text, color_scheme, removable)
+        tag.removed.connect(self._on_tag_removed)
+        self.flow_layout.addWidget(tag)
+        self.tags.append(tag)
+        return tag
+    
+    def clear_tags(self):
+        """Supprime tous les tags"""
+        for tag in self.tags[:]:
+            self.flow_layout.removeWidget(tag)
+            tag.deleteLater()
+        self.tags.clear()
+    
+    def _on_tag_removed(self, tag):
+        """Gère la suppression d'un tag"""
+        if tag in self.tags:
+            self.tags.remove(tag)
+            self.flow_layout.removeWidget(tag)
+            tag.deleteLater()
+    
+    def _toggle_collapse(self):
+        """Toggle l'état collapse/expand"""
+        self.is_collapsed = not self.is_collapsed
+        self.tags_widget.setVisible(not self.is_collapsed)
+        self.collapse_btn.setText("Expand" if self.is_collapsed else "Collapse")
+    
+    def get_tags_text(self):
+        """Retourne la liste des textes des tags"""
+        return [tag.text for tag in self.tags]
 
-    def _populate_results(self):
-        """Remplit la fenêtre de dialogue avec les résultats générés."""
-        for result in self.generated_mutations:
-            file_name = result.get("file_name", "Nom de fichier inconnu")
-            mutation_code = result.get(
-                "mutation_code", "Aucun code de mutation généré."
-            )
 
-            file_row_layout = QtWidgets.QHBoxLayout()
-            file_row_layout.setSpacing(10)
+class FlowLayout(QtWidgets.QLayout):
+    """Layout qui arrange les widgets en flow (wrapping automatique)"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.item_list = []
+        self._spacing = 5
+    
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+    
+    def addItem(self, item):
+        self.item_list.append(item)
+    
+    def count(self):
+        return len(self.item_list)
+    
+    def itemAt(self, index):
+        if 0 <= index < len(self.item_list):
+            return self.item_list[index]
+        return None
+    
+    def takeAt(self, index):
+        if 0 <= index < len(self.item_list):
+            return self.item_list.pop(index)
+        return None
+    
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+    
+    def hasHeightForWidth(self):
+        return True
+    
+    def heightForWidth(self, width):
+        height = self._do_layout(QtCore.QRect(0, 0, width, 0), True)
+        return height
+    
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, False)
+    
+    def sizeHint(self):
+        return self.minimumSize()
+    
+    def minimumSize(self):
+        size = QtCore.QSize()
+        for item in self.item_list:
+            size = size.expandedTo(item.minimumSize())
+        margin = self.contentsMargins()
+        size += QtCore.QSize(margin.left() + margin.right(), margin.top() + margin.bottom())
+        return size
+    
+    def setSpacing(self, spacing):
+        self._spacing = spacing
+    
+    def spacing(self):
+        return self._spacing
+    
+    def _do_layout(self, rect, test_only):
+        x = rect.x()
+        y = rect.y()
+        line_height = 0
+        spacing = self.spacing()
+        
+        for item in self.item_list:
+            widget = item.widget()
+            space_x = spacing
+            space_y = spacing
+            
+            next_x = x + item.sizeHint().width() + space_x
+            if next_x - space_x > rect.right() and line_height > 0:
+                x = rect.x()
+                y = y + line_height + space_y
+                next_x = x + item.sizeHint().width() + space_x
+                line_height = 0
+            
+            if not test_only:
+                item.setGeometry(QtCore.QRect(QtCore.QPoint(x, y), item.sizeHint()))
+            
+            x = next_x
+            line_height = max(line_height, item.sizeHint().height())
+        
+        return y + line_height - rect.y()
 
-            file_label = QtWidgets.QLabel(f"<b>Fichier:</b> {file_name}")
-            file_label.setMinimumWidth(150)
-            file_row_layout.addWidget(file_label)
 
-            file_row_layout.addStretch()
+class NodeInfoPanel(QtWidgets.QWidget):
+    """Panneau d'affichage des détails d'un nœud sélectionné"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMaximumWidth(400)
+        self._init_ui()
+    
+    def _init_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(15)
+        
+        # Titre
+        title = QtWidgets.QLabel("Détails du Nœud")
+        title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {ColorPalette.PRIMARY};")
+        layout.addWidget(title)
+        
+        # Zone de détails avec scroll
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: 1px solid {ColorPalette.BORDER};
+                border-radius: 6px;
+                background-color: {ColorPalette.BACKGROUND};
+            }}
+        """)
+        
+        self.details_widget = QtWidgets.QWidget()
+        self.details_layout = QtWidgets.QVBoxLayout(self.details_widget)
+        self.details_layout.setAlignment(Qt.AlignTop)
+        self.details_layout.setSpacing(12)
+        
+        scroll.setWidget(self.details_widget)
+        layout.addWidget(scroll)
+        
+        # Message par défaut
+        self.show_empty_state()
+    
+    def show_empty_state(self):
+        """Affiche un message quand aucun nœud n'est sélectionné"""
+        self._clear_details()
+        
+        empty_label = QtWidgets.QLabel("Sélectionnez un nœud pour voir ses détails")
+        empty_label.setStyleSheet(f"""
+            color: {ColorPalette.TEXT_LIGHT};
+            font-size: 12px;
+            padding: 30px 10px;
+        """)
+        empty_label.setAlignment(Qt.AlignCenter)
+        empty_label.setWordWrap(True)
+        self.details_layout.addWidget(empty_label)
+    
+    def display_node(self, node_data):
+        """Affiche les détails d'un nœud avec tags pour les catégories"""
+        self._clear_details()
+        
+        # Nom du nœud
+        node_name = node_data.get('label', node_data.get('name', 'N/A'))
+        name_label = self._create_field("Nom", node_name)
+        self.details_layout.addWidget(name_label)
+        
+        # ID
+        if 'id' in node_data or 'uid' in node_data:
+            node_id = node_data.get('id') or node_data.get('uid')
+            id_label = self._create_field("ID", node_id, monospace=True)
+            self.details_layout.addWidget(id_label)
+        
+        # Chemin
+        if 'path' in node_data:
+            path_label = self._create_field("Chemin", node_data['path'], monospace=True)
+            self.details_layout.addWidget(path_label)
+        
+        # Catégories avec TagContainer
+        if 'category' in node_data:
+            categories = node_data['category']
+            if categories:
+                cat_container = TagContainer(title="Catégories")
+                cat_list = categories if isinstance(categories, list) else [str(categories)]
+                
+                for i, cat in enumerate(cat_list):
+                    color_scheme = ColorPalette.TAG_COLORS[i % len(ColorPalette.TAG_COLORS)]
+                    cat_container.add_tag(cat, color_scheme, removable=False)
+                
+                self.details_layout.addWidget(cat_container)
+        
+        # Niveau
+        if 'level' in node_data:
+            level_label = self._create_field("Niveau", str(node_data['level']))
+            self.details_layout.addWidget(level_label)
+        
+        # Dates
+        if 'createdAt' in node_data:
+            created_label = self._create_field("Créé le", node_data['createdAt'])
+            self.details_layout.addWidget(created_label)
+        
+        if 'updatedAt' in node_data:
+            updated_label = self._create_field("Modifié le", node_data['updatedAt'])
+            self.details_layout.addWidget(updated_label)
+        
+        # Type de nœud avec tag
+        node_path = node_data.get('path', '')
+        is_file = node_path and os.path.splitext(node_path)[1]
+        node_type = "Fichier" if is_file else "Dossier"
+        type_container = TagContainer(title="Type")
+        color = ColorPalette.TAG_COLORS[0] if node_type == "Fichier" else ColorPalette.TAG_COLORS[5]
+        type_container.add_tag(node_type, color, removable=False)
+        self.details_layout.addWidget(type_container)
+        
+        self.details_layout.addStretch()
+    
+    def _create_field(self, label, value, monospace=False):
+        """Crée un widget de champ avec label et valeur"""
+        container = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 8)
+        layout.setSpacing(3)
+        
+        # Label
+        label_widget = QtWidgets.QLabel(label)
+        label_widget.setStyleSheet(f"font-weight: bold; color: {ColorPalette.SECONDARY}; font-size: 11px;")
+        layout.addWidget(label_widget)
+        
+        # Valeur
+        value_widget = QtWidgets.QLabel(str(value))
+        font_style = "font-family: 'Courier New', monospace;" if monospace else ""
+        value_widget.setStyleSheet(f"""
+            color: {ColorPalette.TEXT};
+            font-size: 11px;
+            padding: 6px;
+            background-color: {ColorPalette.LIGHTER};
+            border-radius: 4px;
+            {font_style}
+        """)
+        value_widget.setWordWrap(True)
+        value_widget.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(value_widget)
+        
+        return container
+    
+    def _clear_details(self):
+        """Efface tous les widgets de détails"""
+        while self.details_layout.count():
+            item = self.details_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-            view_code_button = QtWidgets.QPushButton("Afficher le code")
-            # Utilisation de functools.partial pour passer des arguments aux slots
-            view_code_button.clicked.connect(
-                lambda checked,
-                code=mutation_code,
-                name=file_name: self._show_code_dialog(code, name)
-            )
-            view_code_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #17a2b8;
-                    color: white;
-                    border-radius: 5px;
-                    padding: 5px 10px;
-                }
-                QPushButton:hover {
-                    background-color: #138496;
-                }
-            """)
-            file_row_layout.addWidget(view_code_button)
 
-            execute_code_button = QtWidgets.QPushButton("Exécuter le code")
-            execute_code_button.clicked.connect(
-                lambda checked,
-                code=mutation_code,
-                name=file_name: self._on_execute_code(code, name)
-            )
-            execute_code_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #28a745;
-                    color: white;
-                    border-radius: 5px;
-                    padding: 5px 10px;
-                }
-                QPushButton:hover {
-                    background-color: #218838;
-                }
-            """)
-            file_row_layout.addWidget(execute_code_button)
+class FileTreeWidget(QtWidgets.QTreeWidget):
+    """Widget d'arbre pour naviguer dans la hiérarchie des nœuds"""
+    
+    itemDoubleClicked = pyqtSignal(object)  # Signal pour double-clic sur item
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._init_ui()
+    
+    def _init_ui(self):
+        self.setColumnCount(1)
+        self.setAlternatingRowColors(True)
+        self.setMaximumWidth(450)
+        self.setStyleSheet(f"""
+            QTreeWidget {{
+                border: 1px solid {ColorPalette.BORDER};
+                border-radius: 6px;
+                background-color: {ColorPalette.BACKGROUND};
+                font-size: 12px;
+            }}
+            QTreeWidget::item {{
+                padding: 6px;
+                border-bottom: 1px solid {ColorPalette.LIGHT};
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {ColorPalette.SELECTED};
+                color: {ColorPalette.TEXT};
+            }}
+            QTreeWidget::item:hover {{
+                background-color: {ColorPalette.LIGHT};
+            }}
+        """)
+        self.itemDoubleClicked.connect(self._on_double_click)
+    
+    def _on_double_click(self, item):
+        """Gère le double-clic pour éditer le code si fichier"""
+        self.itemDoubleClicked.emit(item)
 
-            self.results_layout.addLayout(file_row_layout)
 
-    def _show_code_dialog(self, code, file_name):
-        """Affiche le code de mutation dans un nouveau dialogue."""
-        code_dialog = QtWidgets.QDialog(self)
-        code_dialog.setWindowTitle(f"Code de Mutation pour {file_name}")
-        code_dialog.setMinimumSize(700, 500)
-
-        layout = QtWidgets.QVBoxLayout(code_dialog)
-        code_editor = QtWidgets.QTextEdit()
-        code_editor.setReadOnly(True)
-        code_editor.setPlainText(code)
-        layout.addWidget(code_editor)
-
-        close_button = QtWidgets.QPushButton("Fermer")
-        close_button.clicked.connect(code_dialog.accept)
-        layout.addWidget(close_button, alignment=Qt.AlignCenter)
-
-        code_dialog.exec_()
-
-    def _on_execute_code(self, code, file_name):
-        """Placeholder pour l'exécution du code de mutation d'un fichier."""
-        logger.info(
-            f"Action: Exécuter le code pour '{file_name}' (Code: {code[:50]}...)"
-        )
-        QtWidgets.QMessageBox.information(
-            self,
-            "Exécuter le Code",
-            f"L'exécution du code pour '{file_name}' n'est pas encore implémentée.",
-        )
-
-    def _on_execute_all(self):
-        """Placeholder pour l'exécution de tous les codes de mutation."""
-        logger.info("Action: Exécuter tous les codes de mutation.")
-        QtWidgets.QMessageBox.information(
-            self,
-            "Exécuter Tout",
-            "L'exécution de tous les codes n'est pas encore implémentée.",
-        )
+class PlatformSelector(QtWidgets.QWidget):
+    """Widget de sélection des plateformes IA avec tags"""
+    
+    FALLBACK_PLATFORMS = [
+        {'name': 'ChatGPT', 'type': 'chatgpt', 'icon': '💬'},
+        {'name': 'Claude AI', 'type': 'claude', 'icon': '🤖'},
+        {'name': 'Grok', 'type': 'grok', 'icon': '🚀'},
+        {'name': 'Gemini', 'type': 'gemini', 'icon': '✨'}
+    ]
+    
+    def __init__(self, selector_generator, parent=None):
+        super().__init__(parent)
+        self.selector_generator = selector_generator
+        self.platforms_data = []
+        self.setMaximumWidth(400)
+        self._init_ui()
+    
+    def _init_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        
+        # En-tête
+        header = QtWidgets.QLabel("Plateformes IA Disponibles")
+        header.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {ColorPalette.PRIMARY};")
+        layout.addWidget(header)
+        
+        # Conteneur de tags pour les plateformes sélectionnées
+        self.selected_container = TagContainer(title="Plateformes Sélectionnées")
+        layout.addWidget(self.selected_container)
+        
+        # Liste des plateformes
+        self.platforms_list = QtWidgets.QListWidget()
+        self.platforms_list.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
+        self.platforms_list.setMinimumHeight(180)
+        self.platforms_list.setStyleSheet(f"""
+            QListWidget {{
+                border: 1px solid {ColorPalette.BORDER};
+                border-radius: 6px;
+                background-color: {ColorPalette.BACKGROUND};
+                font-size: 12px;
+            }}
+            QListWidget::item {{
+                padding: 8px;
+                border-bottom: 1px solid {ColorPalette.LIGHT};
+            }}
+            QListWidget::item:selected {{
+                background-color: {ColorPalette.SELECTED};
+                color: {ColorPalette.TEXT};
+            }}
+            QListWidget::item:hover {{
+                background-color: {ColorPalette.LIGHT};
+            }}
+        """)
+        self.platforms_list.itemSelectionChanged.connect(self._update_selected_tags)
+        layout.addWidget(self.platforms_list)
+    
+    def _update_selected_tags(self):
+        """Met à jour l'affichage des tags des plateformes sélectionnées"""
+        self.selected_container.clear_tags()
+        
+        for item in self.platforms_list.selectedItems():
+            config = item.data(Qt.UserRole)
+            if config:
+                name = config.get('name', 'Plateforme')
+                color_idx = hash(name) % len(ColorPalette.TAG_COLORS)
+                self.selected_container.add_tag(name, ColorPalette.TAG_COLORS[color_idx], removable=False)
+    
+    def load_platforms(self, conductor):
+        """Charge les plateformes depuis le conductor"""
+        self.platforms_list.clear()
+        self.platforms_data = []
+        
+        platforms_loaded = False
+        
+        if conductor:
+            try:
+                platforms = conductor.database.get_all_platforms()
+                
+                if platforms:
+                    for name, config in sorted(platforms.items()):
+                        icon_map = {
+                            'claude': '🤖',
+                            'chatgpt': '💬',
+                            'gemini': '✨',
+                            'grok': '🚀',
+                            'deepseek': '🔍'
+                        }
+                        
+                        platform_type = name.lower()
+                        icon = next((v for k, v in icon_map.items() if k in platform_type), '🔧')
+                        
+                        item = QtWidgets.QListWidgetItem(f"{icon} {name}")
+                        item.setData(Qt.UserRole, config)
+                        self.platforms_list.addItem(item)
+                        self.platforms_data.append(config)
+                    
+                    platforms_loaded = True
+                    self._log_platform(f"{len(platforms)} plateforme(s) chargée(s)")
+                    
+            except Exception as e:
+                self._log_platform(f"Erreur chargement plateformes: {e}")
+                logger.error(f"Erreur chargement plateformes: {e}")
+        
+        if not platforms_loaded:
+            self._log_platform("Chargement des plateformes par défaut")
+            for platform in self.FALLBACK_PLATFORMS:
+                item = QtWidgets.QListWidgetItem(f"{platform['icon']} {platform['name']}")
+                item.setData(Qt.UserRole, platform)
+                self.platforms_list.addItem(item)
+                self.platforms_data.append(platform)
+            
+            self._log_platform(f"{len(self.FALLBACK_PLATFORMS)} plateforme(s) par défaut chargée(s)")
+    
+    def _log_platform(self, message):
+        """Log pour le chargement des plateformes"""
+        print(f"[PlatformSelector] {message}")
+    
+    def get_selected_platforms(self):
+        """Retourne les plateformes sélectionnées"""
+        selected = []
+        for item in self.platforms_list.selectedItems():
+            config = item.data(Qt.UserRole)
+            if config:
+                selected.append(config)
+        return selected
 
 
 class NodeCreationWidget(QtWidgets.QWidget):
-    """
-    Widget pour la création de nœuds (clusters/labels) dans l'ontologie.
-    """
-
+    """Widget principal amélioré pour la création de nœuds"""
+    
     def __init__(self, config_provider, conductor, parent=None):
         super().__init__(parent)
         self.config_provider = config_provider
         self.conductor = conductor
-        self.current_project_files = []  # Pour stocker les fichiers (labels de type 'file') du projet sélectionné
-        self.platforms = {}  # Pour stocker les profils des plateformes IA disponibles
-
-        # Initialiser le générateur de sélecteurs universel
         self.selector_generator = UniversalSelectorGenerator()
-
+        self.current_node_data = None
+        self.dgraph_connector = None
+        self.tree_data = {}  # Pour stocker la hiérarchie locale
+        
         self._init_ui()
-        self._populate_project_selection()  # Remplir la sélection de projets au démarrage
-        self._populate_platform_selection()  # Remplir la sélection des plateformes IA au démarrage
+        self._load_data()
+        
+        if self.platform_selector:
+            self.platform_selector.load_platforms(self.conductor)
+    
+    def _transform_root_labels(self, dgraph_root_labels):
+        """Transforme les root_labels depuis le format Dgraph vers le format Liris."""
+        transformed = []
+
+        for root in dgraph_root_labels:
+            root_obj = {
+                "label": root.get('name', ''),
+                "id": root.get('id', str(uuid.uuid4())),
+                "description": root.get('description', ''),
+                "category": root.get('category', []),
+                "parents": [],
+                "codeContent": root.get('codeContent', '')  # Charger codeContent
+            }
+
+            for parent in root.get('parents', []):
+                parent_obj = {
+                    "label": parent.get('name', ''),
+                    "id": parent.get('id', str(uuid.uuid4())),
+                    "description": parent.get('description', ''),
+                    "category": parent.get('category', []),
+                    "children": [],
+                    "codeContent": parent.get('codeContent', '')  # Charger codeContent
+                }
+
+                for child in parent.get('children', []):
+                    child_obj = {
+                        "label": child.get('name', ''),
+                        "id": child.get('id', str(uuid.uuid4())),
+                        "description": child.get('description', ''),
+                        "category": child.get('category', []),
+                        "codeContent": child.get('codeContent', '')  # Charger codeContent
+                    }
+                    parent_obj['children'].append(child_obj)
+
+                root_obj['parents'].append(parent_obj)
+
+            transformed.append(root_obj)
+
+        return transformed
+
+    def _has_extension(self, filename):
+        """Vérifie si le nom a une extension de fichier"""
+        return bool(os.path.splitext(filename)[1])
 
     def _init_ui(self):
-        """Initialise l'interface utilisateur du widget de création de nœuds."""
         main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(15)
-
-        # # Titre de l'onglet
-        # title_label = QtWidgets.QLabel("Gestion des Nœuds d'Ontologie")
-        # title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #333333;")
-        # main_layout.addWidget(title_label)
-
-        # Section de sélection de projet
-        project_selection_group = QtWidgets.QGroupBox("Sélection du Projet")
-        project_selection_layout = QtWidgets.QHBoxLayout(project_selection_group)
-        project_selection_layout.addWidget(QtWidgets.QLabel("Projet :"))
-        self.project_combo = QtWidgets.QComboBox()
-        self.project_combo.setMinimumWidth(250)
-        self.project_combo.currentIndexChanged.connect(self._on_project_selected)
-        project_selection_layout.addWidget(self.project_combo)
-        project_selection_layout.addStretch()  # Pousser le combo vers la gauche
-        main_layout.addWidget(project_selection_group)
-
-        # Section d'affichage des fichiers et de filtrage
-        files_section_group = QtWidgets.QGroupBox("Fichiers du Projet")
-        files_section_layout = QtWidgets.QVBoxLayout(files_section_group)
-
-        # Filtre de catégorie
-        filter_layout = QtWidgets.QHBoxLayout()
-        filter_layout.addWidget(QtWidgets.QLabel("Filtrer par catégorie :"))
-        self.category_filter_combo = QtWidgets.QComboBox()
-        self.category_filter_combo.addItem("Tout")  # Option "Tout" par défaut
-        self.category_filter_combo.setMinimumWidth(200)
-        # Les autres catégories seront ajoutées dynamiquement après la sélection d'un projet
-        self.category_filter_combo.currentIndexChanged.connect(self._apply_filter)
-        filter_layout.addWidget(self.category_filter_combo)
-        filter_layout.addStretch()
-        files_section_layout.addLayout(filter_layout)
-
-        # Liste des fichiers
-        self.file_list_widget = QtWidgets.QListWidget()
-        self.file_list_widget.setSelectionMode(
-            QtWidgets.QAbstractItemView.ExtendedSelection
-        )  # Permettre la sélection multiple
-        files_section_layout.addWidget(self.file_list_widget)
-        main_layout.addWidget(files_section_group)
-
-        # Section de sélection des plateformes IA
-        platform_selection_group = QtWidgets.QGroupBox("Sélection des Plateformes IA")
-        platform_selection_layout = QtWidgets.QVBoxLayout(platform_selection_group)
-        self.platforms_list_widget = QtWidgets.QListWidget()
-        self.platforms_list_widget.setSelectionMode(
-            QtWidgets.QAbstractItemView.MultiSelection
-        )
-        self.platforms_list_widget.setMinimumHeight(80)
-        platform_selection_layout.addWidget(self.platforms_list_widget)
-        main_layout.addWidget(platform_selection_group)
-
-        # Section de zone de logs (anciennement "Réponses des IA")
-        log_group = QtWidgets.QGroupBox("Logs")
-        log_layout = QtWidgets.QVBoxLayout(log_group)
-        self.response_area = (
-            QtWidgets.QTextEdit()
-        )  # Renommée pour refléter son rôle de log
-        self.response_area.setReadOnly(True)
-        self.response_area.setMinimumHeight(150)
-        log_layout.addWidget(self.response_area)
-        main_layout.addWidget(log_group)
-
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(12)
+        
+        # Titre
+        title = QtWidgets.QLabel("🔨 Création de Nœuds de Fonction")
+        title.setStyleSheet(f"""
+            font-size: 18px;
+            font-weight: bold;
+            color: {ColorPalette.PRIMARY};
+            padding: 10px;
+            background-color: {ColorPalette.BACKGROUND};
+            border: 2px solid {ColorPalette.BORDER};
+            border-radius: 8px;
+        """)
+        main_layout.addWidget(title)
+        
+        # Layout principal en splitter
+        splitter = QtWidgets.QSplitter(Qt.Horizontal)
+        
+        # Panneau gauche: Navigation
+        left_panel = self._create_navigation_panel()
+        left_panel.setMaximumWidth(500)
+        splitter.addWidget(left_panel)
+        
+        # Panneau droite: Détails et actions
+        right_panel = self._create_details_panel()
+        right_panel.setMaximumWidth(450)
+        splitter.addWidget(right_panel)
+        
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 1)
+        
+        main_layout.addWidget(splitter, 1)
+        
         # Bouton de création
-        self.proceed_button = QtWidgets.QPushButton("Procéder à la création")
-        self.proceed_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
+        button_container = QtWidgets.QWidget()
+        button_layout = QtWidgets.QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 10, 0, 0)
+        
+        self.create_button = QtWidgets.QPushButton("🚀 Procéder à la Création")
+        self.create_button.setFixedHeight(45)
+        self.create_button.setMinimumWidth(250)
+        self.create_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ColorPalette.SUCCESS};
                 color: white;
                 border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 16px;
+                padding: 0px 30px;
+                font-size: 15px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3e8e41;
-            }
-        """)
-        self.proceed_button.clicked.connect(self._on_proceed_creation)
-        self.proceed_button.setEnabled(False)  # Désactivé par défaut
-        main_layout.addWidget(
-            self.proceed_button, alignment=Qt.AlignCenter
-        )  # Centrer le bouton
-
-        self.setLayout(main_layout)
-
-    def _debug_log(self, message):
-        """Affiche les messages de débogage dans la console et dans la zone de logs."""
-        timestamp = time.strftime("%H:%M:%S", time.localtime())
-        log_message = f"[{timestamp}] DEBUG: {message}"
-        print(log_message)
-        self.response_area.append(log_message)
-        QtWidgets.QApplication.processEvents()  # Mettre à jour l'UI
-
-    def _populate_project_selection(self):
-        """Remplit le QComboBox avec les noms des projets depuis la base de données."""
-        self.project_combo.clear()
-        self.project_combo.addItem("Sélectionner un projet...")  # Option par défaut
-
-        if not self.conductor or not self.conductor.database:
-            print("DEBUG: Conductor ou base de données non disponible.")
-            self.project_combo.setEnabled(False)
-            self.proceed_button.setEnabled(False)
-            return
-
-        try:
-            project_profiles = self.conductor.database.get_all_project_profiles()
-            if not project_profiles:
-                self.project_combo.addItem("Aucun projet disponible")
-                self.project_combo.setEnabled(False)
-                self.proceed_button.setEnabled(False)
-                return
-
-            for project_name in sorted(project_profiles.keys()):
-                self.project_combo.addItem(project_name)
-
-            self.project_combo.setEnabled(True)
-            # Le bouton Procéder sera activé par _on_project_selected si un projet valide est choisi
-            # self.proceed_button.setEnabled(True)
-
-            # Sélectionner le premier projet par défaut si disponible (après l'option "Sélectionner...")
-            if self.project_combo.count() > 1:
-                self.project_combo.setCurrentIndex(
-                    1
-                )  # Sélectionne le premier vrai projet
-                # _on_project_selected sera appelé automatiquement
-            else:
-                self._on_project_selected(
-                    0
-                )  # Appel manuel si un seul élément (l'option par défaut)
-
-        except Exception as e:
-            print(
-                f"Erreur lors du chargement des projets depuis la base de données: {e}"
-            )
-            self.project_combo.addItem("Erreur de chargement des projets")
-            self.project_combo.setEnabled(False)
-            self.proceed_button.setEnabled(False)
-
-    def _populate_platform_selection(self):
-        """Remplit le QListWidget avec les plateformes IA disponibles."""
-        self.platforms_list_widget.clear()
-        if not self.conductor:
-            print("DEBUG: Conductor non disponible pour les plateformes IA.")
-            self.platforms_list_widget.addItem("Conductor non disponible.")
-            self.platforms_list_widget.setEnabled(False)
-            return
-
-        try:
-            self.platforms = self.conductor.database.get_all_platforms()
-
-            if not self.platforms:
-                self.platforms_list_widget.addItem("Aucune plateforme IA disponible.")
-                self.platforms_list_widget.setEnabled(False)
-                return
-
-            for platform_name in sorted(self.platforms.keys()):
-                item = QtWidgets.QListWidgetItem(platform_name)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-                item.setCheckState(Qt.Unchecked)  # Décoché par défaut
-                self.platforms_list_widget.addItem(item)
-            self.platforms_list_widget.setEnabled(True)
-
-        except Exception as e:
-            print(f"Erreur lors du chargement des plateformes IA: {e}")
-            self.platforms_list_widget.addItem("Erreur de chargement des plateformes.")
-            self.platforms_list_widget.setEnabled(False)
-
-    def _on_project_selected(self, index):
-        """
-        Gère la sélection d'un projet dans le QComboBox.
-        Affiche les fichiers du projet sélectionné et met à jour les catégories de filtre.
-        """
-        self.file_list_widget.clear()
-        self.current_project_files = []  # Réinitialiser la liste des fichiers
-        self.category_filter_combo.clear()
-        self.category_filter_combo.addItem("Tout")  # Toujours ajouter "Tout"
-
-        selected_project_name = self.project_combo.currentText()
-
-        if (
-            index == 0
-            or not selected_project_name
-            or not self.conductor
-            or not self.conductor.database
-        ):
-            # "Sélectionner un projet..." ou aucun projet valide sélectionné
-            self.file_list_widget.addItem("Veuillez sélectionner un projet.")
-            self.proceed_button.setEnabled(False)
-            return
-
-        print(f"DEBUG: Projet sélectionné : {selected_project_name}")
-        self.proceed_button.setEnabled(
-            True
-        )  # Activer le bouton si un projet valide est sélectionné
-
-        try:
-            project_profile_data = self.conductor.database.get_project_profile(
-                selected_project_name
-            )
-            if project_profile_data:
-                turing_ontology = project_profile_data.get("turing_ontology", {})
-                clusters_detailed = turing_ontology.get("clusters_detailed", [])
-
-                # Collecter tous les fichiers et leurs catégories
-                unique_categories = set()
-                self.current_project_files = []  # Clear before re-populating
-
-                for cluster_data in clusters_detailed:
-                    cluster_id = cluster_data.get("id")  # Récupérer l'ID du cluster
-                    # Passer l'ID du cluster aux appels récursifs
-                    self._collect_files_from_ontology(
-                        cluster_data.get("root_labels", []),
-                        unique_categories,
-                        cluster_id,
-                    )
-
-                # Ajouter les catégories uniques au filtre
-                for category in sorted(list(unique_categories)):
-                    self.category_filter_combo.addItem(category)
-
-                self._apply_filter()  # Appliquer le filtre initial après chargement des fichiers
-            else:
-                self.file_list_widget.addItem(
-                    "Aucune donnée d'ontologie trouvée pour ce projet."
-                )
-
-        except Exception as e:
-            print(
-                f"Erreur lors du chargement des données d'ontologie pour le projet {selected_project_name}: {e}"
-            )
-            self.file_list_widget.addItem(f"Erreur de chargement des fichiers: {e}")
-
-    def _collect_files_from_ontology(
-        self, nodes_list, unique_categories_set, current_cluster_id=None
-    ):
-        """
-        Collecte récursivement tous les nœuds de fichier de la structure d'ontologie et leurs catégories,
-        ainsi que leur full_path, ID et l'ID du cluster conteneur.
-        nodes_list: Une liste de dictionnaires représentant les labels (racines, parents, enfants).
-        unique_categories_set: Un ensemble pour collecter toutes les catégories uniques trouvées.
-        current_cluster_id: L'ID du cluster en cours de traitement.
-        """
-        if not nodes_list:
-            return
-
-        for node in nodes_list:
-            node_id = node.get("id")  # Récupérer l'ID du nœud (label)
-            node_full_path = node.get(
-                "full_path"
-            )  # Récupérer le chemin complet du nœud
-
-            if node.get("type") == "file":
-                file_name = node.get("name", "N/A")
-                file_categories = node.get(
-                    "category", []
-                )  # category est une liste de chaînes
-                print(
-                    f"DEBUG: Traitement du fichier: {file_name}, ID: {node_id}, Cluster ID: {current_cluster_id}, Catégories: {file_categories}"
-                )
-
-                # S'assurer que full_path, id et cluster_id sont stockés
-                self.current_project_files.append(
-                    {
-                        "name": file_name,
-                        "category": file_categories,
-                        "full_path": node_full_path,  # Stocker le chemin réel du fichier
-                        "id": node_id,  # Stocker l'UUID du label (fichier)
-                        "cluster_id": current_cluster_id,  # Stocker l'UUID du cluster parent
-                    }
-                )
-                for cat in file_categories:
-                    if cat:
-                        unique_categories_set.add(cat)
-
-            # Récursion dans parent_labels (enfants de la racine)
-            if "parent_labels" in node and isinstance(node["parent_labels"], list):
-                self._collect_files_from_ontology(
-                    node["parent_labels"], unique_categories_set, current_cluster_id
-                )
-                print(f"DEBUG: Parent labels: {node['parent_labels']}")
-
-            # Récursion dans child_labels (enfants du parent)
-            if "child_labels" in node and isinstance(node["child_labels"], list):
-                self._collect_files_from_ontology(
-                    node["child_labels"], unique_categories_set, current_cluster_id
-                )
-                print(f"DEBUG: Child labels: {node['child_labels']}")
-
-    def _apply_filter(self):
-        """Applique le filtre de catégorie aux fichiers affichés."""
-        self.file_list_widget.clear()
-        selected_category_filter = self.category_filter_combo.currentText()
-
-        # Define non-development file extensions
-        NOT_DEV_FILE_EXTENSIONS = {
-            # Image formats
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".bmp",
-            ".tiff",
-            ".webp",
-            ".svg",
-            ".ico",
-            ".psd",
-            # Video formats
-            ".mp4",
-            ".avi",
-            ".mov",
-            ".mkv",
-            ".flv",
-            ".wmv",
-            ".mpeg",
-            ".mpg",
-            ".3gp",
-            ".webm",
-            # Document formats
-            ".pdf",
-            ".doc",
-            ".docx",
-            ".xls",
-            ".xlsx",
-            ".ppt",
-            ".pptx",
-            ".odt",
-            ".ods",
-            ".odp",
-            # Audio formats
-            ".mp3",
-            ".wav",
-            ".flac",
-            ".aac",
-            ".ogg",
-            ".wma",
-            # Archive formats
-            ".zip",
-            ".rar",
-            ".7z",
-            ".tar",
-            ".gz",
-            # Other binaries
-            ".exe",
-            ".dll",
-            ".so",
-            ".bin",
-            ".dat",
-        }
-
-        if not self.current_project_files:
-            self.file_list_widget.addItem("Aucun fichier à afficher.")
-            return
-
-        filtered_files = []
-        for file_info in self.current_project_files:
-            # Vérifier l'extension du fichier
-            file_name = file_info["name"]
-            file_extension = os.path.splitext(file_name)[1].lower()
-
-            # Exclure les fichiers non-dev
-            if file_extension in NOT_DEV_FILE_EXTENSIONS:
-                continue  # Ignorer ce fichier
-
-            file_categories = file_info.get("category", [])  # C'est une liste
-
-            if selected_category_filter == "Tout":
-                filtered_files.append(file_info)
-            else:
-                # Vérifier si la catégorie sélectionnée est présente dans la liste des catégories du fichier
-                if selected_category_filter in file_categories:
-                    filtered_files.append(file_info)
-
-        if not filtered_files:
-            self.file_list_widget.addItem("Aucun fichier correspondant au filtre.")
-        else:
-            for file_info in filtered_files:
-                # Afficher le nom et les catégories pour plus de clarté
-                categories_str = ", ".join(file_info.get("category", []))
-                item_text = f"{file_info['name']} (Catégories: {categories_str if categories_str else 'N/A'})"
-                self.file_list_widget.addItem(item_text)
-
-    # def extract_imports_from_code(self, code: str) -> List[str]:
-    #     """
-    #     Extrait les modules importés dans un fichier Python donné (sans duplication).
-    #     """
-    #     modules = set()
-    #     try:
-    #         tree = ast.parse(code)
-    #         for node in ast.walk(tree):
-    #             if isinstance(node, ast.Import):
-    #                 modules.update(alias.name.split(".")[0] for alias in node.names)
-    #             elif isinstance(node, ast.ImportFrom) and node.module:
-    #                 modules.add(node.module.split(".")[0])
-    #     except Exception as e:
-    #         print(f"[Erreur AST] {e}")
-    #     return list(modules)
-
-    # def match_imports_to_files(
-    #     self, imports: List[str], project_files: List[Dict]
-    # ) -> Dict[str, str]:
-    #     """
-    #     Associe chaque module importé à l'ID du fichier correspondant dans le projet.
-    #     Retourne un dict: {nom_module: id_du_fichier}
-    #     """
-    #     matched = {}
-    #     for imp in imports:
-    #         for file_info in project_files:
-    #             file_name = file_info.get("name", "")
-    #             base_name = os.path.splitext(file_name)[0]
-    #             if base_name == imp:
-    #                 matched[imp] = file_info["id"]
-    #                 break
-    #     return matched
-
-    # def generate_import_edges_for_file(
-    #     self, file_info: Dict, project_files: List[Dict], user_id: str
-    # ) -> List[Dict]:
-    #     """
-    #     Génère les arêtes de type 'IMPORTS' à partir des imports dans file_info['full_path']
-    #     """
-    #     edges = []
-    #     file_path = file_info.get("full_path")
-    #     source_id = file_info.get("id")
-
-    #     if not file_path or not os.path.exists(file_path):
-    #         print(f"[Erreur] Fichier introuvable: {file_path}")
-    #         return []
-
-    #     try:
-    #         with open(file_path, "r", encoding="utf-8") as f:
-    #             code = f.read()
-    #     except Exception as e:
-    #         print(f"[Erreur lecture] {file_path} : {e}")
-    #         return []
-
-    #     imports = self.extract_imports_from_code(code)
-    #     matched = self.match_imports_to_files(imports, project_files)
-
-    #     timestamp = datetime.utcnow().isoformat()
-
-    #     for module_name, target_id in matched.items():
-    #         edge = {
-    #             "dgraph.type": "Edge",
-    #             "Edge.id": str(uuid.uuid4()),
-    #             "Edge.source": source_id,
-    #             "Edge.target": target_id,
-    #             "Edge.type": "IMPORTS",
-    #             "Edge.label": "imports",
-    #             "Edge.weight": 1.0,
-    #             "Edge.userID": user_id,
-    #             "Edge.createdAt": timestamp,
-    #             "Edge.updatedAt": timestamp,
-    #             "Edge.metadata": None,  # ou tu peux ajouter un objet JSON si nécessaire
-    #         }
-    #         edges.append(edge)
-
-    #     return edges
-
-    def _on_proceed_creation(self):
-        """
-        Action pour le bouton "Procéder à la création".
-        Lit les fichiers sélectionnés, crée des prompts pour l'IA, les envoie,
-        et affiche les réponses extraites dans une nouvelle fenêtre de résultats.
-        """
-        self._debug_log("🎯 DÉBUT DU PROCESSUS DE CRÉATION DE NŒUDS DE FONCTION")
-        self.response_area.clear()  # Effacer les logs précédents
-        self.proceed_button.setEnabled(
-            False
-        )  # Désactiver le bouton pendant le traitement
-        QtWidgets.QApplication.processEvents()  # Mettre à jour l'UI
-
-        start_time = time.time()
-
-        selected_file_items = self.file_list_widget.selectedItems()
-        if not selected_file_items:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Sélection de Fichier",
-                "Veuillez sélectionner au moins un fichier dans la liste.",
-            )
-            self.proceed_button.setEnabled(True)
-            return
-
-        selected_files_info = []
-        for item in selected_file_items:
-            selected_file_display_text = item.text()
-            for file_info in self.current_project_files:
-                categories_str = ", ".join(file_info.get("category", []))
-                item_text_for_comparison = f"{file_info['name']} (Catégories: {categories_str if categories_str else 'N/A'})"
-                if item_text_for_comparison == selected_file_display_text:
-                    selected_files_info.append(file_info)
-                    break
-
-        if not selected_files_info:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Erreur de Fichier",
-                "Impossible de trouver les informations détaillées pour les fichiers sélectionnés.",
-            )
-            self.proceed_button.setEnabled(True)
-            return
-
-        # 3. Obtenir les plateformes IA sélectionnées
-        selected_platforms_profiles = []
-        for i in range(self.platforms_list_widget.count()):
-            item = self.platforms_list_widget.item(i)
-            if item.checkState() == Qt.Checked:
-                platform_name = item.text()
-                if platform_name in self.platforms:
-                    selected_platforms_profiles.append(self.platforms[platform_name])
-                else:
-                    self._debug_log(
-                        f"WARNING: La plateforme '{platform_name}' n'a pas été trouvée parmi les profils disponibles."
-                    )
-
-        if not selected_platforms_profiles:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Sélection de Plateforme",
-                "Veuillez sélectionner au moins une plateforme IA à utiliser.",
-            )
-            self.proceed_button.setEnabled(True)
-            return
-
-        generated_mutations_results = []  # Pour stocker les résultats de chaque fichier
-
-        for file_info in selected_files_info:
-            file_name = file_info.get("name")
-            file_path = file_info.get("full_path")
-            file_label_id = file_info.get("id")
-            file_cluster_id = file_info.get("cluster_id")
-            print(
-                f"DEBUG: Traitement du fichier: {file_name}, Chemin: {file_path}, ID: {file_label_id}, Cluster ID: {file_cluster_id}"
-            )
-
-            self._debug_log(f"\n--- Traitement du fichier: {file_name} ---")
-
-            if not file_path or not os.path.exists(file_path):
-                self._debug_log(
-                    f"❌ Le chemin du fichier '{file_name}' est invalide ou le fichier n'existe pas: {file_path}"
-                )
-                continue
-
-            if not file_label_id or not file_cluster_id:
-                self._debug_log(
-                    f"❌ Informations manquantes pour le fichier '{file_name}': label_id ou cluster_id est manquant."
-                )
-                continue
-
-            # Vérifier si un nœud de description existe déjà pour ce label
-            try:
-                existing_nodes = self.conductor.database.get_nodes_by_label(
-                    file_label_id
-                )
-                if existing_nodes:
-                    self._debug_log(
-                        f"ℹ️ Un nœud de description pour le label '{file_name}' (ID: {file_label_id}) existe déjà. "
-                        f"Aucune nouvelle création ne sera effectuée."
-                    )
-                    QtWidgets.QMessageBox.information(
-                        self,
-                        "Nœud Existant",
-                        f"Le nœud de description pour '{file_name}' existe déjà et ne sera pas recréé.",
-                    )
-                    continue  # Passer au fichier suivant
-            except Exception as e:
-                self._debug_log(
-                    f"❌ Erreur lors de la vérification des nœuds existants pour le label '{file_label_id}': {e}"
-                )
-                # Optionnel : décider si on continue ou pas en cas d'erreur de base de données
-                continue
-
-            # 2. Lire le contenu du fichier
-            self._debug_log(f"Lecture du contenu du fichier '{file_name}'...")
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    file_content = f.read()
-                self._debug_log(f"Contenu du fichier '{file_name}' lu avec succès.")
-            except Exception as e:
-                self._debug_log(f"❌ Impossible de lire le fichier '{file_name}': {e}")
-                continue
-
-            # =================================================================
-            # NOUVELLE LOGIQUE : PRÉ-GÉNÉRATION DU UID POUR LE SCRIPT (DESCRIPTION)
-            # =================================================================
-            self._debug_log(f"Pré-génération du UID pour le script {file_name}...")
-            script_uid = str(uuid.uuid4())
-
-            try:
-                # RÉCUPÉRER LE NOM DU PROJET ACTUEL DEPUIS LE COMBOBOX
-                current_project_name = self.project_combo.currentText()
-                if (
-                    not current_project_name
-                    or current_project_name == "Sélectionner un projet..."
-                ):
-                    self._debug_log(
-                        "  - ❌ Erreur: Aucun projet valide n'est sélectionné pour enregistrer la référence du noeud."
-                    )
-                    continue
-
-                self.conductor.database.add_node_reference(
-                    project_name=current_project_name,
-                    dgraph_uid=script_uid,
-                    cluster_uid=file_cluster_id,
-                    label_uid=file_label_id,
-                )
-                self._debug_log(
-                    f"  - UID {script_uid} pour le script '{file_name}' enregistré dans SQLite."
-                )
-            except Exception as e:
-                self._debug_log(
-                    f"  - ❌ Erreur lors de l'enregistrement de l'UID pour le script '{file_name}': {e}"
-                )
-                # Si l'enregistrement échoue, il est préférable de ne pas continuer
-                # car le prompt de l'IA ne sera pas correct.
-                continue
-
-            # Préparer l'injection dans le prompt
-            uids_for_prompt = f"\n\nUtilisez impérativement l'ID suivant pour le noeud SCRIPT (description) :\n- ID du script '{file_name}' : '{script_uid}'\n\n"
-            # =================================================================
-
-            # 4. Construire le prompt pour l'IA
-            print(
-                f"--- Construction du prompt pour {file_name} voici le contenu du fichier {file_content} ---"
-            )
-            prompt_template = """
-Étant donné le script de code suivant, décomposez toutes ses fonctions. Pour chaque fonction, créez un script de mutation Dgraph (en utilisant la syntaxe du client pydgraph) pour ajouter :
-1. Un nœud 'Node' représentant le script parent
-2. Des nœuds 'Node' pour chaque fonction
-3. Des arêtes 'Edge' reliant le script aux fonctions
-4. Des arêtes 'Edge' pour les relations d'appel entre fonctions (quand une fonction A appelle une fonction B)
-
-
-Le schéma Dgraph est :
-type Node {{
-    id: String! @id
-    title: String @index(fulltext, term)
-    content: String
-    clusterIds: [String] @index(hash)
-    labelIds: [String] @index(hash)
-    properties: [Property]
-    userID: String @index(term)
-    createdAt: String
-    updatedAt: String
-    metadata: Metadata
-}}
-
-type Edge {{
-    id: String! @id
-    source: String @index(term)
-    target: String @index(term)
-    type: String @index(term)
-    label: String
-    weight: Float
-    userID: String @index(term)
-    createdAt: String
-    updatedAt: String
-    metadata: Metadata
-}}
-
-Pour le nœud SCRIPT (parent) :
-- 'id': **UTILISEZ L'ID FOURNI CI-DESSOUS**
-- 'title': Nom du fichier ('{file_name}')
-- 'content': Description du script (générée par l'IA)
-- 'labelIds': ['{file_label_id}']
-- 'clusterIds': ['{file_cluster_id}']
-- 'userID': "47ea051e-8cce-4bee-bfe8-76489dd98b60"
-- 'createdAt'/'updatedAt': Horodatage ISO
-
-Pour chaque nœud FONCTION (enfant) :
-- 'id': UUID unique
-- 'title': Nom de la fonction
-- 'content': Code complet de la fonction
-- 'labelIds': [] (vide)
-- 'clusterIds': ['{file_cluster_id}']
-- 'userID': Même que le script
-- 'createdAt'/'updatedAt': Même que le script
-
-{uids_for_prompt_placeholder}
-
-Pour chaque arête SCRIPT → FONCTION :
-- 'id': UUID unique
-- 'source': ID du nœud script
-- 'target': ID du nœud fonction
-- 'type': "CONTAINS"
-- 'label': "contains"
-- 'weight': 1.0
-- 'userID': Même que les nœuds
-- 'createdAt'/'updatedAt': Même que les nœuds
-
-Pour les arêtes entre les fonctions (au sein du même script) :
-- Créez des arêtes de type "CALLS" ou "USES" entre les fonctions qui interagissent.
-- Analysez le code pour déterminer si une fonction en appelle une autre ou utilise une variable/classe d'une autre fonction.
-- **`Edge.type`** : "CALLS" si une fonction appelle directement une autre fonction, ou "USES" si elle utilise une variable ou une classe d'une autre.
-- **`Edge.label`** : Une description sémantique de la relation. Par exemple, "calls function `nom_de_la_fonction`", "uses class `nom_de_la_classe`". L'objectif est de rendre la relation explicite.
-- **`Edge.source`** : L'ID de la fonction appelante ou utilisatrice.
-- **`Edge.target`** : L'ID de la fonction appelée ou utilisée.
-- **`Edge.weight`** : 1.0
-- Les autres champs (`id`, `userID`, `createdAt`, `updatedAt`) doivent être gérés de la même manière que pour les autres arêtes.
-
-
-Voici le script à analyser :
-```code
-{file_content}
-```
-
-Assurez-vous que le script de mutation est complet et exécutable, y compris les importations nécessaires (pydgraph, json, datetime, uuid, logging) et la configuration du client. Ne pas inclure la fonction `main()` ou la fonction `insert_hierarchy`. Fournissez uniquement la fonction `generate_function_mutations` et son appel, ainsi que la configuration du client Dgraph.
-"""
-
-            full_prompt = prompt_template.format(
-                file_content=file_content,
-                file_label_id=file_label_id,
-                file_cluster_id=file_cluster_id,
-                file_name=file_name,
-                uids_for_prompt_placeholder=uids_for_prompt,
-            )
-
-            self._debug_log(f"--- Envoi du prompt pour {file_name} aux IAs ---")
-
-            # 5. Envoyer le prompt aux IAs sélectionnées
-            for platform_profile in selected_platforms_profiles:
-                platform_name = platform_profile.get("name", "Unknown Platform")
-                browser_type = platform_profile.get("browser", {}).get("type", "Chrome")
-
-                self._debug_log(
-                    f"\n--- Traitement avec {platform_name} pour {file_name} ---"
-                )
-
-                try:
-                    # ÉTAPE 1: Validation configuration (simplifiée pour l'UI)
-                    window_position = platform_profile.get("window_position")
-                    prompt_field = platform_profile.get("interface_positions", {}).get(
-                        "prompt_field"
-                    )
-                    extraction_config = platform_profile.get("extraction_config", {})
-                    detection_config = platform_profile.get("detection_config", {})
-                    send_keys_config = platform_profile.get("keyboard", {}).get(
-                        "send_keys_config", {}
-                    )
-
-                    if (
-                        not window_position
-                        or "x" not in window_position
-                        or "y" not in window_position
-                    ):
-                        self._debug_log(
-                            f"  ❌ Configuration incomplète pour {platform_name}: window_position invalide."
-                        )
-                        continue  # Passer à la plateforme suivante
-                    if (
-                        not prompt_field
-                        or "center_x" not in prompt_field
-                        or "center_y" not in prompt_field
-                    ):
-                        self._debug_log(
-                            f"  ❌ Configuration incomplète pour {platform_name}: prompt_field invalide."
-                        )
-                        continue  # Passer à la plateforme suivante
-
-                    # ÉTAPE 2: Clic icône fenêtre et ouverture URL
-                    self._debug_log(
-                        f"  - Clic icône fenêtre et ouverture URL pour {platform_name}..."
-                    )
-                    try:
-                        x, y = window_position["x"], window_position["y"]
-                        self._debug_log(f"Clic sur position: ({x}, {y})")
-                        self.conductor.mouse_controller.click(x, y)
-                        time.sleep(0.5)
-                        self._debug_log("Clic icône réussi")
-                        QtWidgets.QApplication.processEvents()
-
-                        # Ouverture URL de la plateforme
-                        browser_config = platform_profile.get("browser", {})
-                        platform_url = browser_config.get("url", "")
-                        if platform_url:
-                            self._debug_log(f"Ouverture URL plateforme: {platform_url}")
-                            result = self.conductor.browser_manager.open_url(
-                                platform_url, browser_type, new_window=False
-                            )  # Use browser_type here
-                            if result.get("success"):
-                                time.sleep(5)  # Attendre chargement page
-                                self._debug_log("URL ouverte avec succès")
-                            else:
-                                self._debug_log(
-                                    f"⚠️ Échec ouverture URL: {result.get('error', 'Erreur inconnue')}"
-                                )
-                        else:
-                            self._debug_log("⚠️ Aucune URL configurée")
-
-                        self._debug_log(f"  ✅ Navigateur prêt pour {platform_name}.")
-                    except Exception as e:
-                        self._debug_log(
-                            f"  ❌ Erreur lors de la préparation du navigateur pour {platform_name}: {e}"
-                        )
-                        continue
-
-                    # ÉTAPE 3: Clic champ de saisie
-                    self._debug_log(
-                        f"  - Clic sur le champ de saisie pour {platform_name}..."
-                    )
-                    try:
-                        x, y = prompt_field["center_x"], prompt_field["center_y"]
-                        self.conductor.mouse_controller.click(x, y)
-                        time.sleep(0.4)
-                        QtWidgets.QApplication.processEvents()
-                        self._debug_log("  ✅ Clic champ de saisie réussi.")
-                    except Exception as e:
-                        self._debug_log(
-                            f"  ❌ Erreur clic champ de saisie pour {platform_name}: {e}"
-                        )
-                        continue
-
-                    # ÉTAPE 4: Nettoyage champ
-                    self._debug_log(
-                        f"  - Nettoyage du champ de saisie pour {platform_name}..."
-                    )
-                    try:
-                        self.conductor.keyboard_controller.hotkey("ctrl", "a")
-                        time.sleep(0.2)
-                        self.conductor.keyboard_controller.press_key("delete")
-                        time.sleep(0.2)
-                        QtWidgets.QApplication.processEvents()
-                        self._debug_log("  ✅ Nettoyage champ réussi.")
-                    except Exception as e:
-                        self._debug_log(
-                            f"  ❌ Erreur nettoyage champ pour {platform_name}: {e}"
-                        )
-                        continue
-
-                    # ÉTAPE 5: Saisie texte
-                    self._debug_log(f"  - Saisie du prompt pour {platform_name}...")
-                    try:
-                        original_clipboard = pyperclip.paste()
-                        pyperclip.copy(full_prompt)
-                        time.sleep(0.05)
-                        self.conductor.keyboard_controller.hotkey("ctrl", "v")
-                        time.sleep(0.4)
-                        pyperclip.copy(original_clipboard)
-                        QtWidgets.QApplication.processEvents()
-                        self._debug_log("  ✅ Saisie du prompt réussie.")
-                    except Exception as e:
-                        self._debug_log(
-                            f"  ❌ Erreur saisie texte pour {platform_name}: {e}"
-                        )
-                        continue
-
-                    # ÉTAPE 6: Envoi formulaire
-                    self._debug_log(f"  - Envoi du prompt pour {platform_name}...")
-                    try:
-                        if send_keys_config.get("ctrl_enter_for_send", False):
-                            self.conductor.keyboard_controller.hotkey("ctrl", "enter")
-                        else:
-                            self.conductor.keyboard_controller.press_key("enter")
-                        time.sleep(2)
-                        QtWidgets.QApplication.processEvents()
-                        self._debug_log("  ✅ Envoi du formulaire réussi.")
-                    except Exception as e:
-                        self._debug_log(
-                            f"  ❌ Erreur envoi formulaire pour {platform_name}: {e}"
-                        )
-                        continue
-
-                    # ÉTAPE 7: Attente réponse avec DÉTECTION UNIVERSELLE
-                    self._debug_log(
-                        f"  - Attente de la fin de génération de réponse pour {platform_name}..."
-                    )
-                    response_completed = False
-                    try:
-                        response_completed = self._wait_for_ai_completion(
-                            detection_config, platform_profile, browser_type
-                        )
-                        if response_completed:
-                            self._debug_log(
-                                f"  ✅ Détection de fin de génération réussie pour {platform_name}."
-                            )
-                        else:
-                            self._debug_log(
-                                f"  ⚠️ Timeout de détection pour {platform_name}. La réponse pourrait être incomplète."
-                            )
-                    except Exception as e:
-                        self._debug_log(
-                            f"  ❌ Erreur lors de la détection de réponse pour {platform_name}: {e}"
-                        )
-                        print(traceback.format_exc())
-
-                    # ÉTAPE 8: Extraction réponse avec EXTRACTION UNIVERSELLE
-                    self._debug_log(
-                        f"  - Extraction de la réponse pour {platform_name}..."
-                    )
-                    ai_response_text = "Aucune réponse extraite."
-                    try:
-                        extracted_text = self._extract_response_universal(
-                            extraction_config, platform_profile, browser_type
-                        )
-                        if extracted_text:
-                            ai_response_text = extracted_text
-                        else:
-                            ai_response_text = "Réponse extraite, mais vide."
-                        self._debug_log(
-                            f"  ✅ Extraction de la réponse réussie pour {platform_name}."
-                        )
-                    except Exception as e:
-                        ai_response_text = (
-                            f"Erreur lors de l'extraction de la réponse: {e}"
-                        )
-                        self._debug_log(f"  ❌ {ai_response_text}")
-                        print(traceback.format_exc())
-
-                    # Collecter le résultat
-                    generated_mutations_results.append(
-                        {"file_name": file_name, "mutation_code": ai_response_text}
-                    )
-
-                except Exception as e:
-                    error_msg = f"Erreur inattendue lors du traitement de {platform_name} pour {file_name}: {e}"
-                    self._debug_log(f"Erreur: {error_msg}\n")
-                    print(traceback.format_exc())
-                    generated_mutations_results.append(
-                        {
-                            "file_name": file_name,
-                            "mutation_code": f"Erreur lors du traitement: {error_msg}",
-                        }
-                    )
-
-                QtWidgets.QApplication.processEvents()
-
-        self._debug_log("\n--- Traitement terminé ---")
-
-        # Afficher la fenêtre de résultats
-        if generated_mutations_results:
-            results_dialog = ResultsDialog(generated_mutations_results, self)
-            results_dialog.exec_()
-
-        self.proceed_button.setEnabled(True)  # Réactiver le bouton
-        duration = time.time() - start_time
-        self._debug_log(f"Processus complet terminé en {duration:.2f} secondes.")
-
-    def _wait_for_ai_completion(
-        self, detection_config, platform_profile, detected_browser_type
-    ):
-        """VERSION AMÉLIORÉE avec générateur universel"""
-        try:
-            if not detection_config:
-                self._debug_log("⚠️ Pas de config détection - attente fallback 8s")
-                time.sleep(9)
-                return True
-
-            # 🎯 NOUVEAU : Utilisation du générateur universel pour les scripts
-            universal_config = detection_config.get("universal_config")
-            if universal_config:
-                self._debug_log(
-                    f"🎯 Utilisation détection universelle pour {universal_config['platform']}"
-                )
-                js_code = self.selector_generator.generate_detection_script(
-                    universal_config
-                )
-                self._debug_log("📜 Script de détection universel généré")
-            else:
-                # Fallback vers les scripts spécialisés existants
-                platform_type = detection_config.get("platform_type", "").lower()
-                self._debug_log(f"🔄 Fallback scripts spécialisés pour {platform_type}")
-                if "chatgpt" in platform_type:
-                    js_code = self._get_chatgpt_detection_script()
-                elif "gemini" in platform_type:
-                    js_code = self._get_gemini_detection_script()
-                elif "claude" in platform_type:
-                    js_code = self._get_claude_detection_script()
-                else:
-                    primary_selector = detection_config.get("primary_selector", "div")
-                    js_code = self._get_generic_detection_script(primary_selector)
-
-            # Focus fenêtre avant détection
-            window_position = platform_profile.get("window_position", {})
-            if window_position:
-                self._debug_log(
-                    f"Focus fenêtre avant détection: ({window_position['x']}, {window_position['y']})"
-                )
-                self.conductor.mouse_controller.click(
-                    window_position["x"], window_position["y"]
-                )
-                time.sleep(0.2)
-
-            return self._execute_detection_script(
-                js_code, platform_profile, detected_browser_type
-            )
-
-        except Exception as e:
-            self._debug_log(f"❌ Erreur _wait_for_ai_completion: {e}")
-            logger.error(f"Erreur détection IA: {e}")
-            time.sleep(6)
-            return False
-
-    def _get_chatgpt_detection_script(self):
-        """Ancienne méthode ChatGPT en fallback"""
-        return """
-        (function() {
-            let lastDataState = '';
-            let stableCount = 0;
-            let checkCount = 0;
-            let maxChecks = 1000;
-            
-            // Store result in global variable AND console log
-            function setDetectionResult(result) {
-                window.LIRIS_DETECTION_RESULT = result;
-                console.log("LIRIS_DETECTION_COMPLETE:" + result);
-                console.log("Detection result stored in window.LIRIS_DETECTION_RESULT");
-            }
-            
-            function checkDataStability() {
-                try {
-                    checkCount++;
-                    if (checkCount > maxChecks) {
-                        setDetectionResult("timeout");
-                        return;
-                    }
-                    
-                    let elements = document.querySelectorAll('[data-start][data-end]');
-                    let currentState = '';
-                    elements.forEach(el => {
-                        let start = el.getAttribute('data-start') || '';
-                        let end = el.getAttribute('data-end') || '';
-                        currentState += start + ':' + end + ';';
-                    });
-                    
-                    if (currentState === lastDataState && currentState.length > 0) {
-                        stableCount++;
-                        if (stableCount >= 3) {
-                            setDetectionResult("success");
-                            return;
-                        }
-                    } else {
-                        lastDataState = currentState;
-                        stableCount = 0;
-                    }
-                    
-                    setTimeout(checkDataStability, 300);
-                } catch(e) {
-                    setDetectionResult("error");
-                }
-            }
-            
-            // Initialize detection result
-            window.LIRIS_DETECTION_RESULT = "running";
-            checkDataStability();
-            return "ChatGPT detection started";
-        })();
-        """
-
-    def _get_gemini_detection_script(self):
-        """Ancienne méthode Gemini en fallback"""
-        return """
-        (function() {
-            let lastContentState = '';
-            let stableCount = 0;
-            let checkCount = 0;
-            let maxChecks = 1000;
-            
-            function checkGeminiCompletion() {
-                try {
-                    checkCount++;
-                    console.log("Gemini check #" + checkCount);
-                    
-                    if (checkCount > maxChecks) {
-                        console.log("LIRIS_DETECTION_COMPLETE:timeout");
-                        return;
-                    }
-                    
-                    let generatingDiv = document.querySelector('[class*="_ngcontent-ng-c2459883256"]');
-                    let completedDiv = document.querySelector('[class*="_ngcontent-ng-c1375136285"]');
-                    
-                    console.log("Generating div found:", !!generatingDiv);
-                    console.log("Completed div found:", !!completedDiv);
-                    
-                    let currentState = (generatingDiv ? 'generating' : '') + (completedDiv ? 'completed' : '');
-                    
-                    if (currentState === lastContentState && completedDiv) {
-                        stableCount++;
-                        console.log("Stable count:", stableCount);
-                        if (stableCount >= 2) {
-                            console.log("LIRIS_DETECTION_COMPLETE:success");
-                            return;
-                        }
-                    } else {
-                        lastContentState = currentState;
-                        stableCount = 0;
-                    }
-                    
-                    setTimeout(checkGeminiCompletion, 400);
-                } catch(e) {
-                    console.log("Error in Gemini detection:", e);
-                    console.log("LIRIS_DETECTION_COMPLETE:error");
-                }
-            }
-
-            checkGeminiCompletion();
-            return "Gemini detection started";
-        })();
-        """
-
-    def _get_claude_detection_script(self):
-        """Ancienne méthode Claude en fallback"""
-        return """
-        (function() {
-            let checkCount = 0;
-            let maxChecks = 1000;
-        
-            // Store result in global variable AND console log
-            function setDetectionResult(result) {
-                window.LIRIS_DETECTION_RESULT = result;
-                console.log("LIRIS_DETECTION_COMPLETE:" + result);
-                console.log("Detection result stored in window.LIRIS_DETECTION_RESULT");
-            }
-        
-            function checkClaudeCompletion() {
-                try {
-                    checkCount++;
-                    if (checkCount > maxChecks) {
-                        setDetectionResult("timeout");
-                        return;
-                    }
-                
-                    let streamingElements = document.querySelectorAll('[data-is-streaming="true"]');
-                    let completedElements = document.querySelectorAll('[data-is-streaming="false"]');
-                
-                    if (streamingElements.length === 0 && completedElements.length > 0) {
-                        setDetectionResult("success");
-                        return;
-                    }
-                
-                    setTimeout(checkClaudeCompletion, 300);
-                } catch(e) {
-                    setDetectionResult("error");
-                }
-            }
-        
-            // Initialize detection result
-            window.LIRIS_DETECTION_RESULT = "running";
-            checkClaudeCompletion();
-            return "Claude detection started";
-        })();
-        """
-
-    def _get_generic_detection_script(self, selector):
-        """Ancienne méthode générique en fallback"""
-        return f'''
-        (function() {{
-            let lastText = '';
-            let stableCount = 0;
-            let checkCount = 0;
-            let maxChecks = 1000;
-            
-            function checkTextStability() {{
-                try {{
-                    checkCount++;
-                    console.log("Generic check #" + checkCount + " with selector: {selector}");
-                    
-                    if (checkCount > maxChecks) {{
-                        console.log("LIRIS_DETECTION_COMPLETE:timeout");
-                        return;
-                    }}
-                    
-                    let element = document.querySelector("{selector}");
-                    console.log("Element found:", !!element);
-                    
-                    let currentText = element ? (element.textContent || '').trim() : '';
-                    console.log("Current text length:", currentText.length);
-                    
-                    if (currentText === lastText && currentText.length > 30) {{
-                        stableCount++;
-                        console.log("Stable count:", stableCount);
-                        if (stableCount >= 3) {{
-                            console.log("LIRIS_DETECTION_COMPLETE:success");
-                            return;
-                        }}
-                    }} else {{
-                        lastText = currentText;
-                        stableCount = 0;
-                    }}
-                    
-                    setTimeout(checkTextStability, 500);
-                }} catch(e) {{
-                    console.log("Error in generic detection:", e);
-                    console.log("LIRIS_DETECTION_COMPLETE:error");
-                }}
+                border: none;
             }}
-
-            checkTextStability();
-            return "Generic detection started";
-        }})();
-        '''
-
-    def _execute_detection_script(
-        self, js_code, platform_profile, detected_browser_type
-    ):
-        """Exécute le script de détection et surveille les résultats"""
-        try:
-            self._debug_log(f"🖥️ Ouverture console ({detected_browser_type})")
-
-            if detected_browser_type == "firefox":
-                self.conductor.keyboard_controller.hotkey("ctrl", "shift", "k")
-            else:
-                self.conductor.keyboard_controller.hotkey("ctrl", "shift", "j")
-            time.sleep(0.7)
-
-            self._debug_log("🔐 Activation du collage")
+            QPushButton:hover {{
+                background-color: #229954;
+            }}
+            QPushButton:pressed {{
+                background-color: #1e8449;
+            }}
+            QPushButton:disabled {{
+                background-color: {ColorPalette.BORDER};
+                color: {ColorPalette.TEXT_LIGHT};
+            }}
+        """)
+        self.create_button.clicked.connect(self._on_create_nodes)
+        self.create_button.setEnabled(False)
+        button_layout.addStretch()
+        button_layout.addWidget(self.create_button)
+        button_layout.addStretch()
+        main_layout.addWidget(button_container)
+    
+    def _create_navigation_panel(self):
+        """Crée le panneau de navigation"""
+        panel = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        
+        # Workspace selector
+        workspace_label = QtWidgets.QLabel("📁 Workspace")
+        workspace_label.setStyleSheet(f"font-weight: bold; color: {ColorPalette.PRIMARY}; font-size: 13px;")
+        layout.addWidget(workspace_label)
+        
+        self.workspace_combo = QtWidgets.QComboBox()
+        self.workspace_combo.setStyleSheet(f"""
+            QComboBox {{
+                padding: 8px;
+                border: 2px solid {ColorPalette.BORDER};
+                border-radius: 6px;
+                font-size: 12px;
+                background-color: {ColorPalette.BACKGROUND};
+            }}
+            QComboBox:hover {{
+                border-color: {ColorPalette.SECONDARY};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+            }}
+        """)
+        self.workspace_combo.currentIndexChanged.connect(self._on_workspace_changed)
+        layout.addWidget(self.workspace_combo)
+        
+        # Arbre de fichiers
+        tree_label = QtWidgets.QLabel("📂 Structure des Nœuds")
+        tree_label.setStyleSheet(f"font-weight: bold; color: {ColorPalette.PRIMARY}; font-size: 13px; margin-top: 5px;")
+        layout.addWidget(tree_label)
+        
+        self.file_tree = FileTreeWidget()
+        self.file_tree.setHeaderHidden(True)
+        self.file_tree.itemClicked.connect(self._on_node_selected)
+        self.file_tree.itemDoubleClicked.connect(self.file_tree._on_double_click)
+        layout.addWidget(self.file_tree, 1)
+        
+        # Boutons de gestion
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(8)
+        
+        self.add_node_button = QPushButton("+ Ajouter")
+        self.add_node_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ColorPalette.SUCCESS};
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: #229954;
+            }}
+        """)
+        self.add_node_button.clicked.connect(self._add_node)
+        self.add_node_button.setEnabled(False)
+        buttons_layout.addWidget(self.add_node_button)
+        
+        self.edit_node_button = QPushButton("✏️ Éditer")
+        self.edit_node_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ColorPalette.WARNING};
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: #e67e22;
+            }}
+        """)
+        self.edit_node_button.clicked.connect(self._edit_node)
+        self.edit_node_button.setEnabled(False)
+        buttons_layout.addWidget(self.edit_node_button)
+        
+        self.delete_node_button = QPushButton("🗑️ Supprimer")
+        self.delete_node_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ColorPalette.DANGER};
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: #c0392b;
+            }}
+        """)
+        self.delete_node_button.clicked.connect(self._delete_node)
+        self.delete_node_button.setEnabled(False)
+        buttons_layout.addWidget(self.delete_node_button)
+        
+        buttons_layout.addStretch()
+        layout.addLayout(buttons_layout)
+        
+        return panel
+    
+    def _create_details_panel(self):
+        """Crée le panneau de détails"""
+        panel = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(15, 0, 10, 0)
+        layout.setSpacing(15)
+        
+        # Détails du nœud
+        self.node_info = NodeInfoPanel()
+        layout.addWidget(self.node_info, 1)
+        
+        # Sélecteur de plateformes
+        self.platform_selector = PlatformSelector(self.selector_generator)
+        layout.addWidget(self.platform_selector, 1)
+        
+        return panel
+    
+    def _load_data(self):
+        """Charge les données depuis Dgraph"""
+        self._log("🔄 Chargement des workspaces depuis Dgraph...")
+        
+        if not self.conductor or not hasattr(self.conductor, 'dgraph_connector'):
+            self._log("❌ Dgraph connector non disponible")
             try:
-                # Type 'allow pasting' to enable pasting in browser console
-                self.conductor.keyboard_controller.type_text("allow pasting")
-                self.conductor.keyboard_controller.press_key("enter")
-                time.sleep(2)  # Wait for browser to process the allow pasting command
-                self._debug_log("✅ Collage autorisé")
-            except Exception as e:
-                self._debug_log(f"⚠️ Erreur activation collage: {e}")
-
-            self._debug_log("🧹 Nettoyage console")
-            pyperclip.copy("console.clear();")
-            self.conductor.keyboard_controller.hotkey("ctrl", "v")
-            self.conductor.keyboard_controller.press_key("enter")
-            time.sleep(0.4)
-
-            self._debug_log("💉 Injection script de détection")
-            pyperclip.copy(js_code)
-            self.conductor.keyboard_controller.hotkey("ctrl", "v")
-            self.conductor.keyboard_controller.press_key("enter")
-            time.sleep(0.8)
-
-            max_wait = 100
-            waited = 0
-            check_interval = 0.7
-
-            self._debug_log(
-                f"👀 Surveillance console (max {max_wait}s, check chaque {check_interval}s)"
-            )
-
-            while waited < max_wait:  # Removed self.should_stop
-                try:
-                    check_script = (
-                        "console.log('STATUS_CHECK:' + window.LIRIS_DETECTION_RESULT);"
-                    )
-
-                    pyperclip.copy(check_script)
-                    self.conductor.keyboard_controller.hotkey("ctrl", "v")
-                    self.conductor.keyboard_controller.press_key("enter")
-                    time.sleep(0.2)
-
-                    result_copy_script = """
-                    if (window.LIRIS_DETECTION_RESULT) {
-                        copy('RESULT:' + window.LIRIS_DETECTION_RESULT);
-                    } else {
-                        copy('RESULT:not_set');
-                    }
-                    """
-
-                    pyperclip.copy(result_copy_script)
-                    self.conductor.keyboard_controller.hotkey("ctrl", "v")
-                    self.conductor.keyboard_controller.press_key("enter")
-                    time.sleep(0.5)
-
-                    result_content = pyperclip.paste().strip()
-
-                    self._debug_log(f"Detection result: {result_content}")
-
-                    if result_content.startswith("RESULT:"):
-                        status = result_content.replace("RESULT:", "").strip()
-
-                        if status == "success":
-                            self._debug_log(f"✅ Détection réussie après {waited:.1f}s")
-                            logger.info(f"✅ Détection réussie après {waited:.1f}s")
-                            return True
-                        elif status == "running":
-                            pass  # Continue waiting
-                        elif status == "timeout":
-                            self._debug_log(f"⏱️ Détection timeout après {waited:.1f}s")
-                            logger.warning(f"⏱️ Détection timeout après {waited:.1f}s")
-                            return False
-                        else:
-                            self._debug_log(f"❌ Détection erreur: {status}")
-                            logger.error(f"❌ Détection erreur: {status}")
-                            return False
-
-                except Exception as e:
-                    self._debug_log(f"❌ Erreur vérification statut: {e}")
-
-                time.sleep(check_interval)
-                waited += check_interval
-
-                if waited % 2 == 0:
-                    self._debug_log(
-                        f"⏳ Attente détection... {waited:.1f}s/{max_wait}s"
-                    )
-
-            self._debug_log(f"⏱️ Timeout global détection après {waited:.1f}s")
-            logger.warning(f"⏱️ Timeout global détection après {waited:.1f}s")
-            return False
-
-        except Exception as e:
-            self._debug_log(f"❌ Erreur exécution détection: {e}")
-            logger.error(f"❌ Erreur exécution détection: {e}")
-            return False
-
-    def _extract_response_universal(
-        self, extraction_config, platform_profile, detected_browser_type
-    ):
-        """VERSION UNIVERSELLE avec sélecteurs automatiques et stratégie de bouton de copie."""
-        try:
-            self._debug_log("🎯 Début extraction réponse universelle")
-
-            response_area = extraction_config.get("response_area", {})
-            universal_config = response_area.get("universal_config")
-
-            primary_selector = "p:last-child"
-            fallback_selectors = []
-            cleaning_method = "basic_text_extraction"
-            platform = "legacy"
-
-            if universal_config:
-                self._debug_log("🎯 Utilisation extraction universelle")
-                extraction_selectors = universal_config["extraction"]
-                primary_selector = extraction_selectors["primary_selector"]
-                fallback_selectors = extraction_selectors.get("fallback_selectors", [])
-                cleaning_method = extraction_selectors.get(
-                    "text_cleaning", "basic_text_extraction"
-                )
-                platform = universal_config.get("platform", "unknown")
-            else:
-                self._debug_log("🔄 Fallback extraction classique")
-                platform_config = response_area.get("platform_config", {})
-                primary_selector = platform_config.get(
-                    "primary_selector", "p:last-child"
-                )
-                fallback_selectors = platform_config.get("fallback_selectors", [])
-                cleaning_method = "basic_text_extraction"  # Default for legacy
-                platform = "legacy"
-
-            self._debug_log(f"Primary selector: {primary_selector}")
-            self._debug_log(f"Fallback selectors: {fallback_selectors}")
-
-            # Focus fenêtre avant extraction (déjà présent, mais ajouté pour clarté)
-            window_position = platform_profile.get("window_position", {})
-            if window_position:
-                self._debug_log(
-                    f"Focus fenêtre avant extraction: ({window_position['x']}, {window_position['y']})"
-                )
-                self.conductor.mouse_controller.click(
-                    window_position["x"], window_position["y"]
-                )
-                time.sleep(0.2)  # Petite pause pour s'assurer que le focus est pris
-
-            selectors = [primary_selector] + fallback_selectors[:3]
-            self._debug_log(f"Sélecteurs à tester: {selectors}")
-
-            # Le script JS est maintenant une fonction asynchrone qui retourne le texte
-            js_code = f"""
-                // Fonction pour préserver les sauts de ligne et l'indentation
-                function getTextWithFormatting(element) {{
-                    const isBlock = (tag) => ['DIV', 'P', 'PRE', 'CODE', 'BR', 'LI', 'UL', 'OL', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'SECTION', 'ARTICLE'].includes(tag);
-                    let result = '';
-
-                    element.childNodes.forEach(node => {{
-                        if (node.nodeType === Node.TEXT_NODE) {{
-                            // Préserve les espaces multiples pour l'indentation
-                            result += node.textContent;
-                        }} else if (node.nodeType === Node.ELEMENT_NODE) {{
-                            if (isBlock(node.tagName)) {{
-                                result += '\\n' + getTextWithFormatting(node) + '\\n';
-                            }} else {{
-                                result += getTextWithFormatting(node);
-                            }}
-                        }}
-                    }});
-                    
-                    return result;
-                }}
-
-                let selectors = {json.dumps(selectors)};
-                let cleaningMethod = "basic_text_extraction";
-                let platform = "legacy";
-
-                // Define classes to be excluded from text content
-                const excludedClasses = ["pt-3", "pb-3"]; // Add any other classes you want to exclude
-
-                console.log("🎯 Testing universal selectors for " + platform + ":", selectors);
-                console.log("🧹 Cleaning method:", cleaningMethod);
-                console.log("🚫 Excluded classes:", excludedClasses);
-
-                for (let i = 0; i < selectors.length; i++) {{
-                    let selector = selectors[i];
-                    console.log("Testing selector " + (i + 1) + ":", selector);
-
-                    try {{
-                        let elements = document.querySelectorAll(selector);
-                        console.log("Found " + elements.length + " elements for selector:", selector);
-
-                        if (elements.length > 0) {{
-                            // Get the last element (the most recent)
-                            let element = elements[elements.length - 1];
-
-                            // Create a deep clone of the element to avoid modifying the live DOM
-                            let clonedElement = element.cloneNode(true);
-
-                            // Replace elements with excluded classes with a newline character in the cloned element
-                            excludedClasses.forEach(className => {{
-                                const elementsToExclude = clonedElement.querySelectorAll(`.${{className}}`);
-                                elementsToExclude.forEach(el => {{
-                                    // Create a text node with a newline
-                                    const newlineTextNode = document.createTextNode('\\n');
-                                    // Replace the excluded element with the newline text node
-                                    el.replaceWith(newlineTextNode);
-                                }});
-                            }});
-
-                            let text = '';
-                            const specificCodeBlocks = clonedElement.querySelectorAll('code.language-python');
-                            if (specificCodeBlocks.length > 0) {{
-                                let codeContent = [];
-                                specificCodeBlocks.forEach(block => {{
-                                    // Utilisation de innerText pour préserver l'indentation
-                                    codeContent.push(block.innerText);
-                                }});
-                                text = codeContent.join('\\n');
-                                console.log("Extracted specific code content. Length:", text.length);
-                            }} else {{
-                                // Utilisation de innerText pour préserver l'indentation
-                                text = getTextWithFormatting(clonedElement).trim();
-                                console.log("No specific <code> tags found. Using formatted text content. Length:", text.length);
-                            }}
-
-                            // Clean the text based on the universal method
-                            if (cleaningMethod === 'remove_ui_elements') {{
-                                // Claude cleaning
-                                text = text.replace(/Send a message\\.\\.\\..*$/gim, '');
-                                text = text.replace(/Stop generating.*$/gim, '');
-                                text = text.replace(/Regenerate.*$/gim, '');
-                            }} else if (cleaningMethod === 'preserve_markdown_structure') {{
-                                // ChatGPT cleaning
-                                text = text.replace(/Copy code.*$/gim, '');
-                                text = text.replace(/Send a message.*$/gim, '');
-                                text = text.replace(/Stop generating.*$/gim, '');
-                            }} else if (cleaningMethod === 'extract_from_nested_spans') {{
-                                // Gemini cleaning
-                                text = text.replace(/Send a message.*$/gim, '');
-                                text = text.replace(/Écrivez votre message.*$/gim, '');
-                            }}
-
-                            // ===== SOLUTION DEFINITIVE =====
-                            // Création d'un élément temporaire pour contenir le texte extrait
-                            const tempContainer = document.createElement('div');
-                            tempContainer.textContent = text;  // Préserve le texte brut avec formatage
-
-                            // Suppression spécifique des éléments de debug générés par notre script
-                            const debugElements = tempContainer.querySelectorAll('script, style, .debug-marker');
-                            debugElements.forEach(el => el.remove());
-
-                            // Récupération du texte après nettoyage
-                            text = tempContainer.textContent;
-
-                            // Suppression des lignes spécifiques de debug (méthode plus sûre)
-                            const debugLines = [
-                                /Testing selector \\d+: .+/,
-                                /Found \\d+ elements for selector: .+/,
-                                /Extracted specific code content\\. Length: \\d+/,
-                                /No specific <code> tags found\\. Using .* content\\. Length: \\d+/,
-                                /Cleaned text length: \\d+/,
-                                /Text preview: .+/,
-                                /let selectors = \\[.*\\];?/,
-                                /const excludedClasses = \\[.*\\];?/,
-                                /let cleaningMethod = ".*";?/,
-                                /let platform = ".*";?/,
-                                /console\\.log\\(\\"🎯 Testing universal selectors for .*\\"\\);?/,
-                                /console\\.log\\(\\"🧹 Cleaning method: .*\\"\\);?/,
-                                /console\\.log\\(\\"🚫 Excluded classes: .*\\"\\);?/,
-                                /console\\.log\\(\\"Testing selector .*\\"\\);?/,
-                                /console\\.log\\(\\"Found .*\\"\\);?/,
-                                /console\\.log\\(\\"Extracted specific code content\\. Length: .*\\"\\);?/,
-                                /console\\.log\\(\\"Cleaned text length: .*\\"\\);?/,
-                                /console\\.log\\(\\"Text preview: .*\\"\\);?/,
-                                /console\\.log\\(\\"✅ Valid universal extraction found for .*\\"\\);?/,
-                                /console\\.log\\(\\"❌ Text rejected \\(contains debug info\\)\\"\\);?/
-                            ];
-
-                            debugLines.forEach(pattern => {{
-                                text = text.replace(new RegExp(pattern.source, 'g'), '');
-                            }});
-
-                            // Nettoyage final de la mise en forme
-                            text = text
-                                .replace(/^\\s+\\n|\\n\\s+$/g, '')  // Supprime les lignes vides au début/fin
-                                .replace(/[ \\t]+\\n/g, '\\n')       // Supprime les espaces en fin de ligne
-                                .replace(/\\n{(3,)}/g, '\\n\\n');       // Réduit les sauts de ligne multiples
-
-                            // ===== VALIDATION SIMPLIFIEE =====
-                            const isValid = text.length > 0 && 
-                                        !text.includes('Testing selector ') && 
-                                        !text.includes('Found ') && 
-                                        !text.includes('elements for selector');
-
-                            if (isValid) {{
-                                console.log("✅ Valid extraction, copying...");
-                                copy(text);
-                                break;
-                            }} else {{
-                                console.log("❌ Text rejected (contains debug info)");
-                            }}
-                        }}
-                    }} catch (e) {{
-                        console.log("❌ Error with selector " + selector + ":", e);
-                        continue;
-                    }}
-                }}
-                console.log("🎯 Universal extraction script completed for " + platform);
-                """
-            return self._execute_extraction_script(js_code, detected_browser_type)
-        except Exception as e:
-            self._debug_log(f"❌ Erreur extraction universelle: {e}")
-            logger.error(f"Erreur extraction: {e}")
-            # Fallback vers l'ancienne méthode
-            return self._extract_response_simple_fallback(
-                extraction_config, platform_profile, detected_browser_type
-            )
-
-    def _execute_extraction_script(self, js_code, detected_browser_type):
-        """Exécute le script d'extraction universel et retourne le résultat"""
-        try:
-            self._debug_log("🖥️ Ouverture console pour extraction universelle")
-
-            # These keyboard shortcuts are usually handled by the browser_manager itself
-            # if detected_browser_type == 'firefox':
-            #     self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'k')
-            # else:
-            #     self.conductor.keyboard_controller.hotkey('ctrl', 'shift', 'j')
-            # time.sleep(0.5)
-
-            # self.should_stop is not used here
-            # if self.should_stop:
-            #     self.debug_log("🛑 Arrêt pendant ouverture console extraction")
-            #     return ""
-
-            self._debug_log("🧹 Nettoyage console pour extraction")
-            pyperclip.copy("console.clear();")
-            self.conductor.keyboard_controller.hotkey("ctrl", "v")
-            self.conductor.keyboard_controller.press_key("enter")
-            time.sleep(0.1)
-
-            self._debug_log("💉 Injection script d'extraction universel")
-            pyperclip.copy(js_code)
-            self.conductor.keyboard_controller.hotkey("ctrl", "v")
-            self.conductor.keyboard_controller.press_key("enter")
-            time.sleep(0.9)  # Give JS time to execute and copy to clipboard
-
-            self._debug_log("📋 Lecture résultat extraction universelle")
-            result = pyperclip.paste().strip()
-            self._debug_log(f"Résultat brut longueur: {len(result)}")
-
-            if result:
-                self._debug_log(f"Aperçu résultat: '{result[:100]}...'")
-
-                # Validation supplémentaire pour s'assurer que ce n'est pas du code JS de débogage
-                excluded_keywords = []
-                has_excluded = any(
-                    keyword in result.lower() for keyword in excluded_keywords
-                )
-                self._debug_log(f"Test exclusion keywords: {has_excluded}")
-
-                if not has_excluded:
-                    self._debug_log(
-                        f"✅ Réponse universelle valide extraite: {len(result)} caractères"
-                    )
-                    return result
+                self.dgraph_connector = LirisDgraphConnector()
+                if self.dgraph_connector.client:
+                    self._log("✅ Connexion directe à Dgraph établie")
+                    self._load_workspaces_from_dgraph()
                 else:
-                    self._debug_log("❌ Réponse rejetée (contient du code/debug)")
-            else:
-                self._debug_log("❌ Réponse vide")
-            return ""
+                    self._log("❌ Impossible de se connecter à Dgraph")
+            except Exception as e:
+                self._log(f"❌ Erreur de connexion: {e}")
+            return
+        
+        self._load_workspaces_from_dgraph()
+    
+    def _load_workspaces_from_dgraph(self):
+        """Charge les workspaces depuis Dgraph via le connector"""
+        try:
+            connector = getattr(self.conductor, 'dgraph_connector', self.dgraph_connector)
+            
+            if not connector or not connector.client:
+                self._log("❌ Connector Dgraph invalide")
+                return
+            
+            result = connector.query_workspaces()
+            
+            if not result or 'q' not in result or not result['q']:
+                self._log("⚠️ Aucun workspace trouvé dans Dgraph")
+                self.workspace_combo.addItem("Aucun workspace disponible", None)
+                return
+            
+            self.workspace_combo.clear()
+            self.workspace_combo.addItem("Sélectionner...", None)
+            
+            for workspace in result['q']:
+                name = workspace.get('name', workspace.get('id', 'Sans nom'))
+                self.workspace_combo.addItem(name, workspace)
+            
+            self._log(f"✅ {len(result['q'])} workspace(s) chargé(s)")
+            
         except Exception as e:
-            self._debug_log(f"❌ Erreur exécution extraction: {e}")
-            return ""
-
-    def _extract_response_simple_fallback(
-        self, extraction_config, platform_profile, detected_browser_type
-    ):
-        """
-        Ancienne méthode d'extraction en fallback.
-        Cette méthode est maintenant un simple wrapper qui construit le JS et appelle _execute_extraction_script.
-        La logique de fallback est gérée dans le JS universel.
-        """
-        self._debug_log("🔄 Fallback vers extraction simple (via script universel)")
-        response_area = extraction_config.get("response_area", {})
-        platform_config = response_area.get("platform_config", {})
-        primary_selector = platform_config.get("primary_selector", "p:last-child")
-        fallback_selectors = platform_config.get("fallback_selectors", [])
-
-        self._debug_log(f"Primary selector fallback: {primary_selector}")
-        self._debug_log(f"Fallback selectors: {fallback_selectors}")
-
-        window_position = platform_profile.get("window_position", {})
-        if window_position:
-            self._debug_log(
-                f"Focus fenêtre avant extraction: ({window_position['x']}, {window_position['y']})"
-            )
-            self.conductor.mouse_controller.click(
-                window_position["x"], window_position["y"]
-            )
-            time.sleep(0.2)
-
-        selectors = [primary_selector] + fallback_selectors[:3]
-        self._debug_log(f"Sélecteurs fallback à tester: {selectors}")
-
-        # Le script JS est le même que pour l'extraction universelle, mais avec les sélecteurs de fallback
-        js_code = f"""
-            (async () => {{
-                let text = '';
-                const excludedClasses = ["pt-3", "pb-3"];
-                let selectorsToUse = {json.dumps(selectors)}; # Utilise les sélecteurs de fallback
-
-                console.log("🔄 Testing fallback selectors:", selectorsToUse);
-                console.log("🚫 Excluded classes:", excludedClasses);
-
-                for (let i = 0; i < selectorsToUse.length; i++) {{
-                    let selector = selectorsToUse[i];
-                    console.log("Testing selector " + (i + 1) + ":", selector);
-                    try {{
-                        let elements = document.querySelectorAll(selector);
-                        console.log("Found " + elements.length + " elements for selector:", selector);
-                        if (elements.length > 0) {{
-                            let element = elements[elements.length - 1];
-                            let clonedElement = element.cloneNode(true);
-
-                            excludedClasses.forEach(className => {{
-                                const elementsToExclude = clonedElement.querySelectorAll(`.${{className}}`);
-                                elementsToExclude.forEach(el => el.remove());
-                            }});
-
-                            // MODIFICATION ICI : Cibler spécifiquement la balise <code> avec la classe
-                            let codeContent = [];
-                            const specificCodeBlocks = clonedElement.querySelectorAll('code.whitespace-pre.language-python');
-                            
-                            if (specificCodeBlocks.length > 0) {{
-                                specificCodeBlocks.forEach(block => {{
-                                    codeContent.push(block.textContent);
-                                }});
-                                text = codeContent.join('\\n');
-                                console.log("Extracted specific code content. Length:", text.length);
-                            }} else {{
-                                text = (clonedElement.textContent || '').trim();
-                                console.log("No specific <code> tags found. Using full text content. Length:", text.length);
-                            }}
-                            
-                            console.log("Text length:", text.length);
-                            console.log("Text preview:", text.substring(0, 50));
-                            if (text.length > 15 && !text.includes('console.log') && !text.includes('function()') && !text.includes('Testing selector')) {{
-                                console.log("Valid fallback text found, returning...");
-                                return text; # Retourne le texte
-                            }} else {{
-                                console.log("Text rejected (too short or contains debug)");
-                            }}
-                        }}
-                    }} catch(e) {{
-                        console.log("Error with selector " + selector + ":", e);
-                        continue;
-                    }}
-                }}
-                console.log("Fallback extraction script completed");
-                return ''; # Retourne vide si rien n'est trouvé
-            }})();
-            """
-        return self._execute_extraction_script(js_code, detected_browser_type)
-
+            self._log(f"❌ Erreur lors du chargement: {e}")
+            traceback.print_exc()
+    
+    def _on_workspace_changed(self, index):
+        """Gère le changement de workspace"""
+        self.file_tree.clear()
+        self.node_info.show_empty_state()
+        self.current_node_data = None
+        self.create_button.setEnabled(False)
+        self.add_node_button.setEnabled(False)
+        self.edit_node_button.setEnabled(False)
+        self.delete_node_button.setEnabled(False)
+        
+        if index <= 0:
+            return
+        
+        workspace_data = self.workspace_combo.itemData(index)
+        if not workspace_data:
+            return
+        
+        self._log(f"📂 Chargement du workspace: {workspace_data.get('name')}")
+        self._build_tree(workspace_data)
+    
+    def _build_tree(self, workspace_data):
+        """Construit l'arbre de navigation avec transformation des données"""
+        self.tree_data = {}  # Reset tree data
+        cluster_mgmt = workspace_data.get('clusterManagement', {})
+        clusters = cluster_mgmt.get('clusters', [])
+        
+        clusters_detailed = []
+        for cluster in clusters:
+            cluster_data = {
+                "name": cluster.get('name', ''),
+                "id": cluster.get('id', str(uuid.uuid4())),
+                "description": cluster.get('description', ''),
+                "codeContent": cluster.get('codeContent', ''),
+                "root_labels": self._transform_root_labels(cluster.get('root_labels', []))
+            }
+            clusters_detailed.append(cluster_data)
+            self.tree_data[cluster_data['id']] = cluster_data
+        
+        for cluster_data in clusters_detailed:
+            cluster_name = cluster_data.get('name', 'Cluster')
+            cluster_item = QtWidgets.QTreeWidgetItem([f"📦 {cluster_name}"])
+            cluster_item.setData(0, Qt.UserRole, cluster_data)
+            self.file_tree.addTopLevelItem(cluster_item)
+            
+            # Ajouter le fichier du cluster s'il a une extension
+            if self._has_extension(cluster_data.get('name', '')):
+                file_item = QtWidgets.QTreeWidgetItem([f"📄 {cluster_data['name']}"])
+                full_data = cluster_data.copy()
+                full_data['is_cluster_file'] = True
+                file_item.setData(0, Qt.UserRole, full_data)
+                cluster_item.addChild(file_item)
+            
+            root_labels = cluster_data.get("root_labels", [])
+            
+            processed_ids = set()
+            self._add_nodes_to_tree(cluster_item, root_labels, cluster_data, processed_ids)
+            
+            cluster_item.setExpanded(True)
+    
+    def _add_nodes_to_tree(self, parent_item, nodes, cluster_data, processed_ids):
+        """Ajoute récursivement les nœuds à l'arbre sans doublons"""
+        if not nodes:
+            return
+        
+        for node in nodes:
+            node_id = node.get('id')
+            if not node_id or node_id in processed_ids:
+                continue
+            processed_ids.add(node_id)
+            
+            node_name = node.get('label', node.get('name', 'Sans nom'))
+            is_file = self._has_extension(node_name)
+            icon = "📄" if is_file else "📁"
+            
+            item = QtWidgets.QTreeWidgetItem([f"{icon} {node_name}"])
+            
+            full_data = node.copy()
+            full_data['cluster_id'] = cluster_data.get('id')
+            item.setData(0, Qt.UserRole, full_data)
+            
+            parent_item.addChild(item)
+            
+            if not is_file:
+                # Recurse seulement si pas un fichier
+                if 'parents' in node and node['parents']:
+                    self._add_nodes_to_tree(item, node['parents'], cluster_data, processed_ids)
+                if 'children' in node and node['children']:
+                    self._add_nodes_to_tree(item, node['children'], cluster_data, processed_ids)
+    
+    def _on_node_selected(self, item, column):
+        """Gère la sélection d'un nœud"""
+        node_data = item.data(0, Qt.UserRole)
+        if not node_data:
+            return
+        
+        self.current_node_data = node_data
+        self.node_info.display_node(node_data)
+        
+        path = node_data.get('path')
+        is_file = bool(path and self._has_extension(path))
+        
+        self.create_button.setEnabled(is_file)
+        self.add_node_button.setEnabled(True)
+        self.edit_node_button.setEnabled(True)
+        self.delete_node_button.setEnabled(True)
+        
+        if is_file:
+            self._log(f"Fichier sélectionné: {node_data.get('label', node_data.get('name'))}")
+        else:
+            self._log(f"Dossier sélectionné: {node_data.get('label', node_data.get('name'))}")
+    
+    def _add_node(self):
+        """Ajoute un nouveau nœud"""
+        if not self.current_node_data:
+            QMessageBox.warning(self, "Sélection", "Veuillez sélectionner un nœud parent")
+            return
+        
+        dialog = AddEditItemDialog("Ajouter un Nœud", parent=self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data["name"]:
+                new_node = {
+                    "label": data["name"],
+                    "id": str(uuid.uuid4()),
+                    "description": data["description"],
+                    "category": [],
+                    "codeContent": "",
+                    "createdAt": datetime.now().isoformat() + "Z",
+                    "updatedAt": datetime.now().isoformat() + "Z"
+                }
+                
+                # Ajouter comme enfant du courant
+                current_item = self.file_tree.currentItem()
+                if current_item:
+                    new_item = QtWidgets.QTreeWidgetItem([f"📁 {new_node['label']}"])
+                    new_item.setData(0, Qt.UserRole, new_node)
+                    current_item.addChild(new_item)
+                    current_item.setExpanded(True)
+                    self._log(f"Nœud ajouté: {new_node['label']}")
+    
+    def _edit_node(self):
+        """Édite le nœud sélectionné"""
+        if not self.current_node_data:
+            return
+        
+        current_name = self.current_node_data.get('label', self.current_node_data.get('name', ''))
+        dialog = AddEditItemDialog("Éditer le Nœud", current_name, self.current_node_data.get('description', ''), self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data["name"]:
+                self.current_node_data['label'] = data["name"]
+                self.current_node_data['description'] = data["description"]
+                self.current_node_data['updatedAt'] = datetime.now().isoformat() + "Z"
+                
+                current_item = self.file_tree.currentItem()
+                if current_item:
+                    current_item.setText(0, f"📁 {data['name']}")
+                    self.node_info.display_node(self.current_node_data)
+                    self._log(f"Nœud modifié: {data['name']}")
+    
+    def _delete_node(self):
+        """Supprime le nœud sélectionné"""
+        if not self.current_node_data:
+            return
+        
+        reply = QMessageBox.question(self, "Confirmer", f"Supprimer le nœud '{self.current_node_data.get('label', self.current_node_data.get('name'))}' ?", 
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            current_item = self.file_tree.currentItem()
+            if current_item:
+                parent = current_item.parent()
+                if parent:
+                    parent.removeChild(current_item)
+                else:
+                    self.file_tree.takeTopLevelItem(self.file_tree.indexOfTopLevelItem(current_item))
+                self._log("Nœud supprimé")
+                self.node_info.show_empty_state()
+                self.current_node_data = None
+                self.create_button.setEnabled(False)
+    
+    def _on_create_nodes(self):
+        """Lance le processus de création de nœuds"""
+        if not self.current_node_data:
+            QMessageBox.warning(self, "Sélection", "Veuillez sélectionner un fichier")
+            return
+        
+        selected_platforms = self.platform_selector.get_selected_platforms()
+        if not selected_platforms:
+            QMessageBox.warning(self, "Plateformes", "Veuillez sélectionner au moins une plateforme IA")
+            return
+        
+        self._log("🚀 Démarrage du processus de création...")
+        self.create_button.setEnabled(False)
+        
+        # TODO: Implémenter la logique de création de fonctions sous le nœud sélectionné
+        
+        self._log("✅ Processus terminé")
+        self.create_button.setEnabled(True)
+    
+    def _log(self, message):
+        """Log dans la console"""
+        timestamp = time.strftime("%H:%M:%S")
+        print(f"[{timestamp}] {message}")
+    
     def refresh(self):
-        """Méthode de rafraîchissement (peut être étendue plus tard)."""
-        self._debug_log("NodeCreationWidget rafraîchi.")
-        self._populate_project_selection()
-        self._populate_platform_selection()
-
-    def update_language(self):
-        """Met à jour les textes si la langue change."""
-        pass
+        """Rafraîchit le widget"""
+        self._load_data()
+        self.platform_selector.load_platforms(self.conductor)

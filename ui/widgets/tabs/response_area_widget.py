@@ -8,11 +8,8 @@ Liris/ui/widgets/tabs/response_area_widget.py
 import os
 import json
 import time
-import re
-import pyperclip
-from datetime import datetime
 from PyQt5 import QtWidgets, QtCore
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal
 
 from utils.logger import logger
 from utils.selector_generator import UniversalSelectorGenerator

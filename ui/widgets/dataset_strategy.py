@@ -2,12 +2,9 @@ import os
 import sqlite3
 import json
 import logging
-from collections import Counter
-from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt
-from ui.styles.theme import Theme
 from ui.styles.platform_config_style import PlatformConfigStyle
-from ui.localization.translator import tr
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
@@ -429,6 +426,29 @@ class DatasetStrategyWidget(QtWidgets.QWidget):
         layout.addLayout(batch_btn_layout)
         parent_layout.addWidget(strategy_frame, 1)
 
+    def _format_item_with_relationships(self, name, count, relationships):
+        if not relationships:
+            return f"{name} ({count})"
+
+        # Première ligne: nom + compteur + relations source/target
+        parts = [f"{name} ({count})"]
+        rel_labels = []
+
+        for rel in relationships:
+            source = rel.get('source', '?')
+            target = rel.get('target', '?')
+            rel_name = rel.get('name', 'relation')
+            parts.append(f"S: {source}  T: {target}")
+            rel_labels.append(rel_name)
+
+        first_line = " | ".join(parts)
+
+        # Deuxième ligne: espaces + noms des relations alignés
+        spacing = " " * (len(f"{name} ({count})") + 3)  # +3 pour " | "
+        rel_names_line = spacing + (" " * 15).join(rel_labels)  # Espacement entre les noms
+
+        return f"{first_line}\n{rel_names_line}"
+
     def _save_project(self):
         if not self.db_connection:
             logger.error("Connexion DB non disponible pour sauvegarde projet")
@@ -528,7 +548,11 @@ class DatasetStrategyWidget(QtWidgets.QWidget):
         for typologie in self.project_data.get('typologies', []):
             name = typologie.get('name', 'Sans nom')
             count = len(typologie.get('root_labels' if typologie.get('is_taxonomic', True) else 'simple_labels', []))
-            item = QtWidgets.QListWidgetItem(f"{name} ({count})")
+
+            relationships = typologie.get('relationships', [])
+
+            item_text = self._format_item_with_relationships(name, count, relationships)
+            item = QtWidgets.QListWidgetItem(item_text)
             item.setData(Qt.UserRole, {'type': 'typologie', 'object': typologie})
             item.setToolTip(f"Typologie: {name}")
             self.structure_list.addItem(item)
@@ -540,14 +564,20 @@ class DatasetStrategyWidget(QtWidgets.QWidget):
             for root in self.selected_typologie.get('root_labels', []):
                 name = root.get('name', 'Sans nom')
                 count = len(root.get('parent_labels', []))
-                item = QtWidgets.QListWidgetItem(f"{name} ({count})")
+                relationships = root.get('relationships', [])
+
+                item_text = self._format_item_with_relationships(name, count, relationships)
+                item = QtWidgets.QListWidgetItem(item_text)
                 item.setData(Qt.UserRole, {'type': 'root_label', 'object': root})
                 item.setToolTip(f"Label racine: {name}")
                 self.structure_list.addItem(item)
         else:
             for simple in self.selected_typologie.get('simple_labels', []):
                 name = simple.get('name', 'Sans nom')
-                item = QtWidgets.QListWidgetItem(name)
+                relationships = simple.get('relationships', [])
+
+                item_text = self._format_item_with_relationships(name, 0, relationships)
+                item = QtWidgets.QListWidgetItem(item_text)
                 item.setData(Qt.UserRole, {'type': 'simple_label', 'object': simple})
                 item.setToolTip(f"Label: {name}")
                 self.structure_list.addItem(item)
@@ -558,7 +588,10 @@ class DatasetStrategyWidget(QtWidgets.QWidget):
         for parent in self.selected_root.get('parent_labels', []):
             name = parent.get('name', 'Sans nom')
             count = len(parent.get('child_labels', []))
-            item = QtWidgets.QListWidgetItem(f"{name} ({count})")
+            relationships = parent.get('relationships', [])
+
+            item_text = self._format_item_with_relationships(name, count, relationships)
+            item = QtWidgets.QListWidgetItem(item_text)
             item.setData(Qt.UserRole, {'type': 'parent_label', 'object': parent})
             item.setToolTip(f"Label parent: {name}")
             self.structure_list.addItem(item)
@@ -568,7 +601,10 @@ class DatasetStrategyWidget(QtWidgets.QWidget):
             return
         for child in self.selected_parent.get('child_labels', []):
             name = child.get('name', 'Sans nom')
-            item = QtWidgets.QListWidgetItem(name)
+            relationships = child.get('relationships', [])
+
+            item_text = self._format_item_with_relationships(name, 0, relationships)
+            item = QtWidgets.QListWidgetItem(item_text)
             item.setData(Qt.UserRole, {'type': 'child_label', 'object': child})
             item.setToolTip(f"Label enfant: {name}")
             self.structure_list.addItem(item)

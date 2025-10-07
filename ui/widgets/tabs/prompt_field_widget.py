@@ -4,11 +4,8 @@
 """
 ui/widgets/tabs/prompt_field_widget.py
 """
-
-import os
-import json
 import time
-from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt, pyqtSignal
 
 from utils.logger import logger

@@ -28,6 +28,8 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
         self.data = {"context": []}  # Structure de données interne
         self.conductor = conductor
 
+        self.apercu_view = None  
+
         # Initialiser la connexion à la base de données
         self.db_connection = None
         self._init_database()
@@ -681,7 +683,7 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
         self.add_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_child_button.clicked.connect(self._add_child_label)
         self.edit_child_button = QtWidgets.QPushButton(
-            tr("project_config.edit_child_button")
+            tr("project_config.edit_child_dialog_title")
         )
         self.edit_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_child_button.clicked.connect(self._edit_child_label)
@@ -2019,6 +2021,8 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
 
     def _refresh_preview_combo(self):
         """Rafraîchit la liste déroulante des projets pour l'aperçu"""
+        if not hasattr(self, 'preview_project_combo') or self.preview_project_combo is None:
+            return
         self.preview_project_combo.clear()
         self.preview_project_combo.addItem("-- Sélectionnez un projet --")
         projects = self.get_all_projects()
@@ -2384,7 +2388,9 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
                 self.typologie_list_widget.setCurrentRow(0)
 
             # Mettre à jour la combo de preview
-            self.preview_project_combo.setCurrentText(project_name)
+            self._refresh_preview_combo()
+            if hasattr(self, 'preview_project_combo') and self.preview_project_combo is not None:
+                self.preview_project_combo.setCurrentText(project_name)
 
             logger.info(f"Projet '{project_name}' chargé avec succès")
             return True
@@ -2399,6 +2405,10 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
             return False
 
     def _update_structure_preview(self, project_data=None, show_config=True):
+        # ✅ Sécurité : si l'UI n'est pas encore prête
+        if not hasattr(self, "apercu_view") or self.apercu_view is None:
+            return
+
         if project_data is None:
             project_data = self.current_project_profile_data
             show_config = True
@@ -2414,7 +2424,7 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
 
         project_name = project_data.get('nom', 'Unnamed')
 
-        html = """
+        html = f"""
         <style>
             ul {{ list-style-type: none; padding-left: 20px; }}
             li {{ margin: 5px 0; }}
@@ -2428,19 +2438,18 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
             <h2 style='color: #2c3e50; margin-bottom: 20px; text-align: center; font-size: 20px;'>
                 📊 Structure du Projet: {project_name}
             </h2>
-        """.format(project_name=project_name)
+        """
 
         html += f"""
             <div style='background: #ecf0f1; padding: 10px; border-radius: 5px; margin-bottom: 15px; border-left: 4px solid #3498db;'>
                 <p style='margin: 0; color: #34495e; font-style: italic;'><strong>Description:</strong> {project_data.get('description', '')}</p>
             </div>
-            """
+        """
 
         total_themes = 0
         typologies = project_data.get('typologies', [])
         if typologies:
-            html += f"<h3 style='color: #27ae60; margin-bottom: 10px; font-size: 16px;'>🏷️ Typologies ({len(typologies)})</h3>"
-            html += "<ul>"
+            html += f"<h3 style='color: #27ae60; margin-bottom: 10px; font-size: 16px;'>🏷️ Typologies ({len(typologies)})</h3><ul>"
             for typologie in typologies:
                 typologie_name = typologie.get('name', 'Typologie sans nom')
                 root_labels = typologie.get('root_labels', [])
@@ -2493,28 +2502,24 @@ class DatasetGeneratorWidget(QtWidgets.QWidget):
             """
 
         if show_config:
-            html += """
+            html += f"""
             <div style='margin-top: 20px; padding: 10px; background: rgba(52, 73, 94, 0.1); border-radius: 5px;'>
                 <h4 style='color: #2c3e50; margin: 0 0 10px 0; font-size: 14px;'>🛠️ Configuration</h4>
                 <ul style='margin: 0; padding-left: 20px; color: #34495e; font-size: 13px;'>
-                    <li><strong>Plateforme:</strong> {platform}</li>
-                    <li><strong>Description:</strong> {description}</li>
-                    <li><strong>Format de sortie:</strong> {output_format}</li>
-                    <li><strong>Nombre d'échantillons:</strong> {sample_count}</li>
-                    <li><strong>Technique d'entraînement:</strong> {training_technique}</li>
+                    <li><strong>Plateforme:</strong> {self.config_data['platform']}</li>
+                    <li><strong>Description:</strong> {self.config_data['description'] or 'Aucune'}</li>
+                    <li><strong>Format de sortie:</strong> {self.config_data['output_format']}</li>
+                    <li><strong>Nombre d'échantillons:</strong> {self.config_data['sample_count']}</li>
+                    <li><strong>Technique d'entraînement:</strong> {self.config_data['training_technique']}</li>
                 </ul>
             </div>
-            """.format(
-                platform=self.config_data['platform'],
-                description=self.config_data['description'] or 'Aucune',
-                output_format=self.config_data['output_format'],
-                sample_count=self.config_data['sample_count'],
-                training_technique=self.config_data['training_technique']
-            )
+            """
 
         html += "</div>"
 
-        self.apercu_view.setHtml(html)
+        # ✅ Enfin, affichage si disponible
+        if self.apercu_view:
+            self.apercu_view.setHtml(html)
 
     def _export_project_strategy(self, project_name):
         """Exporte automatiquement la stratégie d'un projet vers un fichier JSON"""
