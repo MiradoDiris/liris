@@ -1229,4 +1229,4 @@ class RelationImportWidget(QtWidgets.QWidget):
     def refresh(self):
         """Rafraîchit tout"""
         self._log("Rafraîchissement complet...")
-        self._load_workspaces()
+        self._load_workspaces()     

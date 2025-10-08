@@ -4,8 +4,10 @@ import uuid
 from datetime import datetime
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QVBoxLayout, QPlainTextEdit
+from PyQt5.QtWidgets import QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QVBoxLayout, QPlainTextEdit, QListWidgetItem, QHBoxLayout, QLabel, QComboBox, QPushButton, QInputDialog, QMessageBox
+from collections import defaultdict
 import requests  # Added for schema update
+import ast  # Added for extraction
 
 from utils.logger import logger
 from ui.styles.platform_config_style import PlatformConfigStyle
@@ -220,6 +222,121 @@ class CategoryEditDialog(QtWidgets.QDialog):
         return self.categories
 
 
+class RelationsConfig(QtWidgets.QWidget):
+    """
+    Widget pour configurer les relations d'import pour un niveau de hiérarchie spécifique.
+    """
+    def __init__(self, parent_widget, level="global"):
+        super().__init__()
+        self.parent_widget = parent_widget
+        self.level = level
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(5)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        title = QtWidgets.QLabel(f"Relations {self.level.capitalize()}")
+        title.setStyleSheet("font-weight: bold; font-size: 12px;")
+        layout.addWidget(title)
+
+        # Type de relation
+        layout.addWidget(QtWidgets.QLabel("Type:"))
+        self.type_combo = QtWidgets.QComboBox()
+        self.type_combo.addItems([
+            "import", "heritage", "extend", "implement",
+            "depends_on", "calls", "uses", "references"
+        ])
+        self.type_combo.setMinimumWidth(100)
+        layout.addWidget(self.type_combo)
+
+        # Source
+        layout.addWidget(QtWidgets.QLabel("Source:"))
+        self.source_label = QtWidgets.QLabel("Aucun sélectionné")
+        self.source_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(self.source_label)
+
+        # Cible
+        layout.addWidget(QtWidgets.QLabel("Cible:"))
+        self.target_combo = QtWidgets.QComboBox()
+        self.target_combo.setMinimumWidth(200)
+        layout.addWidget(self.target_combo)
+
+        # Bouton ajouter
+        self.add_button = QtWidgets.QPushButton("➕ Ajouter Relation")
+        self.add_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.add_button.clicked.connect(self._on_add)
+        layout.addWidget(self.add_button)
+
+        # Liste des relations
+        layout.addWidget(QtWidgets.QLabel("Relations:"))
+        self.relations_list = QtWidgets.QListWidget()
+        self.relations_list.setMaximumHeight(100)
+        self.relations_list.currentItemChanged.connect(self.parent_widget._update_button_states)
+        layout.addWidget(self.relations_list)
+
+        # Bouton supprimer
+        self.remove_button = QtWidgets.QPushButton("🗑️ Supprimer")
+        self.remove_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.remove_button.clicked.connect(self._on_remove)
+        layout.addWidget(self.remove_button)
+
+    def update_current(self, source_id):
+        if source_id:
+            source_info = self.parent_widget.label_id_to_info.get(source_id)
+            self.source_label.setText(source_info['name'] if source_info else "Inconnu")
+            self.parent_widget._populate_target_combo(self.target_combo, source_id)
+            self._update_relations_list(source_id)
+        else:
+            self.source_label.setText("Aucun sélectionné")
+            self.target_combo.clear()
+            self._update_relations_list(None)
+
+    def _on_add(self):
+        source_id = self.parent_widget.current_selected_label_id
+        if not source_id:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Sélectionnez un élément source.")
+            return
+        target_id = self.target_combo.currentData()
+        rel_type = self.type_combo.currentText()
+        if not target_id:
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Sélectionnez une cible.")
+            return
+        relation = {'target_id': target_id, 'relation_type': rel_type}
+        pending = self.parent_widget.pending_relations
+        if relation not in pending[source_id]:
+            pending[source_id].append(relation)
+            self.parent_widget._update_local_relations(source_id, target_id, rel_type)
+            self._update_relations_list(source_id)
+            logger.info(f"Relation ajoutée: {rel_type} vers {target_id}")
+
+    def _on_remove(self):
+        current_item = self.relations_list.currentItem()
+        if not current_item:
+            return
+        rel = current_item.data(Qt.UserRole)
+        source_id = self.parent_widget.current_selected_label_id
+        if source_id:
+            self.parent_widget.pending_relations[source_id].remove(rel)
+            self.parent_widget._update_local_relations_remove(source_id, rel['target_id'], rel['relation_type'])
+            self._update_relations_list(source_id)
+            logger.info(f"Relation supprimée")
+
+    def _update_relations_list(self, source_id):
+        self.relations_list.clear()
+        if not source_id:
+            return
+        pending = self.parent_widget.pending_relations[source_id]
+        for r in pending:
+            target_info = self.parent_widget.label_id_to_info.get(r['target_id'])
+            if target_info:
+                display = f"{r['relation_type'].upper()}: -> {target_info['name']} ({target_info['cluster']})"
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, r)
+                self.relations_list.addItem(item)
+
+
 class ProjectConfigWidget(QtWidgets.QWidget):
     """Widget pour configurer les profils de projet et l'ontologie de Turing avec liaison hiérarchique."""
 
@@ -239,6 +356,10 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.current_cluster_index = -1
         self.current_cluster_data = None
 
+        self.current_root_data = None
+        self.current_level1_data = None
+        self.current_level2_data = None
+
         self.current_top_level_is_file = False
         self.current_top_level_filename = None
 
@@ -246,34 +367,136 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.current_root_is_file = False
         self.current_root_filename = None
 
-        self.current_parent_label_index = -1
-        self.current_parent_is_file = False
-        self.current_parent_filename = None
+        self.current_level1_label_index = -1
+        self.current_level1_is_file = False
+        self.current_level1_filename = None
 
-        self.current_child_label_index = -1
-        self.current_child_is_file = False
-        self.current_child_filename = None
+        self.current_level2_label_index = -1
+        self.current_level2_is_file = False
+        self.current_level2_filename = None
 
-        # Définir une taille minimale pour le widget
-        self.setMinimumSize(1200, 800)
+        # Pour les relations
+        self.pending_relations = defaultdict(list)
+        self.label_id_to_info = {}
+        self.name_to_id = {}
+        self.current_selected_label_id = None
+
+        self.global_relations_config = RelationsConfig(self, "global")
+
+        # Définir une taille minimale pour le widget et maximiser
+        self.setMinimumSize(1400, 900)
 
         try:
-            # Vérifier que le schéma est bien configuré
             if self.dgraph_connector.client:
-                # Optionnel : vérifier si les reverse edges existent
                 schema = self.dgraph_connector.get_current_schema()
                 if schema and '@reverse' not in schema:
                     logger.warning("Le schéma ne contient pas de @reverse. Mise à jour recommandée.")
-                    # Décommenter la ligne suivante pour forcer la mise à jour
-                    # self.dgraph_connector.update_schema_only_reverse_edges()
 
             self._init_ui()
             self._load_project_profiles()
         except Exception as e:
             logger.error(f"Erreur lors de l'initialisation : {str(e)}")
 
+    def _get_all_nodes(self):
+        """Récupère tous les nœuds de labels dans la hiérarchie."""
+        if not self.current_project_profile_data:
+            return []
+        all_nodes = []
+        def collect_nodes(node_list):
+            for node in node_list:
+                all_nodes.append(node)
+                collect_nodes(node.get('children', []))
+        for cluster in self.current_project_profile_data.get('turing_ontology', {}).get('clusters_detailed', []):
+            collect_nodes(cluster.get('root_labels', []))
+        return all_nodes
+
+    def _update_local_relations(self, source_id, target_id, rel_type):
+        """Met à jour les relations locales dans les données des nœuds."""
+        all_nodes = self._get_all_nodes()
+        source_node = next((n for n in all_nodes if n['id'] == source_id), None)
+        if source_node:
+            source_node.setdefault('outgoing_relations', []).append({'target_id': target_id, 'relation_type': rel_type})
+        target_node = next((n for n in all_nodes if n['id'] == target_id), None)
+        if target_node:
+            target_node.setdefault('incoming_relations', []).append({'source_id': source_id, 'relation_type': rel_type})
+
+    def _update_local_relations_remove(self, source_id, target_id, rel_type):
+        """Supprime les relations locales dans les données des nœuds."""
+        all_nodes = self._get_all_nodes()
+        source_node = next((n for n in all_nodes if n['id'] == source_id), None)
+        if source_node:
+            to_remove = next((r for r in source_node.get('outgoing_relations', []) if r['target_id'] == target_id and r['relation_type'] == rel_type), None)
+            if to_remove:
+                source_node['outgoing_relations'].remove(to_remove)
+        target_node = next((n for n in all_nodes if n['id'] == target_id), None)
+        if target_node:
+            to_remove = next((r for r in target_node.get('incoming_relations', []) if r['source_id'] == source_id and r['relation_type'] == rel_type), None)
+            if to_remove:
+                target_node['incoming_relations'].remove(to_remove)
+
+    def showEvent(self, event):
+        """Maximiser la fenêtre lors de l'affichage"""
+        super().showEvent(event)
+        if self.window():
+            self.window().showMaximized()
+
+    def _get_compact_button_style(self):
+        """Style pour les boutons carrés compacts avec icônes améliorées"""
+        return """
+            QPushButton {
+                background-color: #922B3C;
+                color: white;
+                border: 1px solid #7a2431;
+                border-radius: 3px;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 6px;
+                min-width: 70px;
+                max-width: 70px;
+                min-height: 32px;
+                max-height: 32px;
+            }
+            QPushButton:hover {
+                background-color: #a63342;
+                border: 1px solid #922B3C;
+            }
+            QPushButton:pressed {
+                background-color: #6d1f2b;
+            }
+            QPushButton:disabled {
+                background-color: #CCCCCC;
+                color: #888888;
+                border: 1px solid #BBBBBB;
+            }
+        """
+    
+    def _get_button_style_grenat(self):
+        """Style grenat pour les boutons de sauvegarde"""
+        return """
+            QPushButton {
+                background-color: #922B3C;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 10px 20px;
+                font-size: 14px;
+                font-weight: bold;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #6d1f2b;
+            }
+            QPushButton:pressed {
+                background-color: #5a1823;
+            }
+            QPushButton:disabled {
+                background-color: #d3d3d3;
+                color: #a0a0a0;
+            }
+        """
+
     def _get_improved_list_style(self):
-        """Style amélioré pour les listes avec sélection grise"""
+        """Style amélioré pour les listes avec sélection gris clair"""
         return """
             QListWidget {
                 background-color: #ffffff;
@@ -288,27 +511,27 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 margin: 2px 0px;
             }
             QListWidget::item:selected {
-                background-color: #888888;
-                color: white;
+                background-color: #e0e0e0;
+                color: #000000;
             }
             QListWidget::item:hover {
-                background-color: #e8e8e8;
+                background-color: #f0f0f0;
             }
         """
 
     def _init_ui(self):
-        """Initialise l'interface utilisateur pour la configuration du projet (layout 2 colonnes)."""
+        """Initialise l'interface utilisateur pour la configuration du projet (layout 3 colonnes)."""
         main_vertical_layout = QtWidgets.QVBoxLayout(self)
-        main_vertical_layout.setSpacing(20)
-        main_vertical_layout.setContentsMargins(20, 20, 20, 20)
+        main_vertical_layout.setSpacing(15)
+        main_vertical_layout.setContentsMargins(15, 15, 15, 15)
 
         top_columns_layout = QtWidgets.QHBoxLayout()
-        top_columns_layout.setSpacing(20)
+        top_columns_layout.setSpacing(15)
         main_vertical_layout.addLayout(top_columns_layout)
 
         # --- Colonne de gauche ---
         left_column_layout = QtWidgets.QVBoxLayout()
-        left_column_layout.setSpacing(15)
+        left_column_layout.setSpacing(12)
         left_column_layout.addStretch()
 
         project_selection_group = QtWidgets.QGroupBox(
@@ -325,14 +548,14 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         project_selection_layout.addWidget(self.project_combo)
 
         self.add_project_button = QtWidgets.QPushButton(
-            tr("project_config.new_project_button")
+            "➕ " + tr("project_config.new_project_button")
         )
         self.add_project_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_project_button.clicked.connect(self._on_add_new_project)
         project_selection_layout.addWidget(self.add_project_button)
 
         self.delete_project_button = QtWidgets.QPushButton(
-            tr("project_config.delete_project_button")
+            "🗑️ " + tr("project_config.delete_project_button")
         )
         self.delete_project_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.delete_project_button.clicked.connect(self._on_delete_project)
@@ -352,7 +575,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         details_group.setObjectName("details_group")
         details_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         details_form_layout = QtWidgets.QFormLayout(details_group)
-        details_form_layout.setSpacing(15)
+        details_form_layout.setSpacing(12)
         details_form_layout.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
 
         self.project_name_edit = QtWidgets.QLineEdit()
@@ -393,24 +616,36 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         cluster_list_layout.addWidget(self.cluster_list_widget)
 
         cluster_buttons_layout = QtWidgets.QHBoxLayout()
-        self.add_cluster_button = QtWidgets.QPushButton(
-            tr("project_config.add_cluster_button")
-        )
-        self.add_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        cluster_buttons_layout.setSpacing(5)
+
+        self.add_cluster_button = QtWidgets.QPushButton("Ajouter")
+        self.add_cluster_button.setStyleSheet(self._get_compact_button_style())
         self.add_cluster_button.clicked.connect(self._add_cluster)
-        self.edit_cluster_button = QtWidgets.QPushButton(
-            tr("project_config.edit_cluster_button")
-        )
-        self.edit_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.add_cluster_button.setMinimumWidth(70)
+        self.add_cluster_button.setMaximumWidth(70)
+        self.add_cluster_button.setMinimumHeight(32)
+        self.add_cluster_button.setMaximumHeight(32)
+
+        self.edit_cluster_button = QtWidgets.QPushButton("Modif")
+        self.edit_cluster_button.setStyleSheet(self._get_compact_button_style())
         self.edit_cluster_button.clicked.connect(self._edit_cluster)
-        self.remove_cluster_button = QtWidgets.QPushButton(
-            tr("project_config.remove_cluster_button")
-        )
-        self.remove_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.edit_cluster_button.setMinimumWidth(70)
+        self.edit_cluster_button.setMaximumWidth(70)
+        self.edit_cluster_button.setMinimumHeight(32)
+        self.edit_cluster_button.setMaximumHeight(32)
+
+        self.remove_cluster_button = QtWidgets.QPushButton("✕")
+        self.remove_cluster_button.setStyleSheet(self._get_compact_button_style())
         self.remove_cluster_button.clicked.connect(self._remove_cluster)
+        self.remove_cluster_button.setMinimumWidth(70)
+        self.remove_cluster_button.setMaximumWidth(70)
+        self.remove_cluster_button.setMinimumHeight(32)
+        self.remove_cluster_button.setMaximumHeight(32)
+
         cluster_buttons_layout.addWidget(self.add_cluster_button)
         cluster_buttons_layout.addWidget(self.edit_cluster_button)
         cluster_buttons_layout.addWidget(self.remove_cluster_button)
+        cluster_buttons_layout.addStretch()
         cluster_list_layout.addLayout(cluster_buttons_layout)
 
         details_form_layout.addRow(cluster_list_layout)
@@ -436,447 +671,672 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         details_selected_layout.addWidget(self.details_text)
         left_column_layout.addWidget(details_selected_group)
 
-        import_export_layout = QtWidgets.QHBoxLayout()
-        import_export_layout.addStretch()
-
-        self.import_folder_button = QtWidgets.QPushButton(
-            tr("project_config.import_folder_button")
-        )
-        self.import_folder_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.import_folder_button.clicked.connect(self._on_import_directory)
-        import_export_layout.addWidget(self.import_folder_button)
-
-        self.export_profile_button = QtWidgets.QPushButton("💾 Exporter")
-        self.export_profile_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.export_profile_button.clicked.connect(self._on_export_profile)
-        self.export_profile_button.setEnabled(bool(self.current_project_name))
-        import_export_layout.addWidget(self.export_profile_button)
-
-        import_export_layout.addStretch()
-        left_column_layout.addLayout(import_export_layout)
-
-        save_buttons_layout = QtWidgets.QHBoxLayout()
-        save_buttons_layout.addStretch()
-
-        self.save_button = QtWidgets.QPushButton("💾 Sauvegarder")
-        self.save_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.save_button.clicked.connect(self._on_save_profile)
-        self.save_button.setEnabled(False)
-        save_buttons_layout.addWidget(self.save_button)
-
-        self.insert_dgraph_button = QtWidgets.QPushButton("🔄 Insérer dans Dgraph")
-        self.insert_dgraph_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.insert_dgraph_button.clicked.connect(self._on_insert_dgraph)
-        self.insert_dgraph_button.setEnabled(False)
-        save_buttons_layout.addWidget(self.insert_dgraph_button)
-
-        save_buttons_layout.addStretch()
-
-        left_column_layout.addLayout(save_buttons_layout)
-
         left_column_layout.addStretch()
 
-        top_columns_layout.addLayout(left_column_layout, 3)
+        top_columns_layout.addLayout(left_column_layout, 5)
 
-        # --- Colonne de droite ---
-        right_column_container = QtWidgets.QScrollArea()
-        right_column_container.setWidgetResizable(True)
-        right_column_container.setStyleSheet("border: none;")
+        # --- Colonne du milieu: Hiérarchie (largeur augmentée) ---
+        middle_scroll = QtWidgets.QScrollArea()
+        middle_scroll.setWidgetResizable(True)
+        middle_scroll.setStyleSheet("border: none;")
 
-        hierarchy_scroll_content = QtWidgets.QWidget()
-        hierarchy_layout = QtWidgets.QVBoxLayout(hierarchy_scroll_content)
-        hierarchy_layout.setSpacing(10)
+        middle_content = QtWidgets.QWidget()
+        hierarchy_layout = QtWidgets.QVBoxLayout(middle_content)
+        hierarchy_layout.setSpacing(8)
         hierarchy_layout.setContentsMargins(0, 0, 0, 0)
 
         hierarchy_group = QtWidgets.QGroupBox(tr("project_config.hierarchy_group"))
         hierarchy_group.setObjectName("hierarchy_group")
         hierarchy_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         hierarchy_group_layout = QtWidgets.QVBoxLayout(hierarchy_group)
-        hierarchy_group_layout.setSpacing(10)
+        hierarchy_group_layout.setSpacing(8)
 
         # 1. Labels Racines
         root_label_title = QtWidgets.QLabel(tr("project_config.root_labels_list_label"))
-        root_label_title.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        root_label_title.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 11px;")
         hierarchy_group_layout.addWidget(root_label_title)
 
         self.root_list_widget = QtWidgets.QListWidget()
         self.root_list_widget.setStyleSheet(self._get_improved_list_style())
-        self.root_list_widget.setMinimumHeight(100)
+        self.root_list_widget.setMinimumHeight(80)
         self.root_list_widget.currentItemChanged.connect(self._on_root_label_selected)
+        self.root_list_widget.currentItemChanged.connect(lambda curr, prev: self._on_any_label_selected(curr))
         hierarchy_group_layout.addWidget(self.root_list_widget)
 
         root_buttons_layout = QtWidgets.QHBoxLayout()
-        self.add_root_button = QtWidgets.QPushButton(
-            tr("project_config.add_root_button")
-        )
-        self.add_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        root_buttons_layout.setSpacing(5)
+
+        self.add_root_button = QtWidgets.QPushButton("Ajouter")
+        self.add_root_button.setStyleSheet(self._get_compact_button_style())
         self.add_root_button.clicked.connect(self._add_root_label)
-        self.edit_root_button = QtWidgets.QPushButton(
-            tr("project_config.edit_root_button")
-        )
-        self.edit_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.add_root_button.setMinimumWidth(70)
+        self.add_root_button.setMaximumWidth(70)
+        self.add_root_button.setMinimumHeight(32)
+        self.add_root_button.setMaximumHeight(32)
+
+        self.edit_root_button = QtWidgets.QPushButton("Modif")
+        self.edit_root_button.setStyleSheet(self._get_compact_button_style())
         self.edit_root_button.clicked.connect(self._edit_root_label)
-        self.remove_root_button = QtWidgets.QPushButton(
-            tr("project_config.remove_root_button")
-        )
-        self.remove_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.edit_root_button.setMinimumWidth(70)
+        self.edit_root_button.setMaximumWidth(70)
+        self.edit_root_button.setMinimumHeight(32)
+        self.edit_root_button.setMaximumHeight(32)
+
+        self.remove_root_button = QtWidgets.QPushButton("✕")
+        self.remove_root_button.setStyleSheet(self._get_compact_button_style())
         self.remove_root_button.clicked.connect(self._remove_root_label)
+        self.remove_root_button.setMinimumWidth(70)
+        self.remove_root_button.setMaximumWidth(70)
+        self.remove_root_button.setMinimumHeight(32)
+        self.remove_root_button.setMaximumHeight(32)
+
+        self.modify_category_root_button = QtWidgets.QPushButton("Cat")
+        self.modify_category_root_button.setStyleSheet(self._get_compact_button_style())
+        self.modify_category_root_button.clicked.connect(lambda: self._modify_category_for_selected_label("root"))
+        self.modify_category_root_button.setMinimumWidth(70)
+        self.modify_category_root_button.setMaximumWidth(70)
+        self.modify_category_root_button.setMinimumHeight(32)
+        self.modify_category_root_button.setMaximumHeight(32)
+
         root_buttons_layout.addWidget(self.add_root_button)
         root_buttons_layout.addWidget(self.edit_root_button)
         root_buttons_layout.addWidget(self.remove_root_button)
-
-        self.modify_category_root_button = QtWidgets.QPushButton(
-            tr("project_config.modify_category_button")
-        )
-        self.modify_category_root_button.setStyleSheet(
-            PlatformConfigStyle.get_button_style()
-        )
-        self.modify_category_root_button.clicked.connect(
-            lambda: self._modify_category_for_selected_label("root")
-        )
-        self.modify_category_root_button.setEnabled(False)
         root_buttons_layout.addWidget(self.modify_category_root_button)
+        root_buttons_layout.addStretch()
 
         hierarchy_group_layout.addLayout(root_buttons_layout)
 
-        # 2. Labels Parents
-        parent_label_title = QtWidgets.QLabel(
+        # 2. Labels Niveau 1 (anciennement Parents)
+        level1_label_title = QtWidgets.QLabel(
             tr("project_config.parent_labels_list_for_root_label")
         )
-        parent_label_title.setStyleSheet("font-weight: bold; color: #2c3e50;")
-        hierarchy_group_layout.addWidget(parent_label_title)
+        level1_label_title.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 11px;")
+        hierarchy_group_layout.addWidget(level1_label_title)
 
-        self.parent_list_widget = QtWidgets.QListWidget()
-        self.parent_list_widget.setStyleSheet(self._get_improved_list_style())
-        self.parent_list_widget.setMinimumHeight(100)
-        self.parent_list_widget.currentItemChanged.connect(
-            self._on_parent_label_selected
+        self.level1_list_widget = QtWidgets.QListWidget()
+        self.level1_list_widget.setStyleSheet(self._get_improved_list_style())
+        self.level1_list_widget.setMinimumHeight(80)
+        self.level1_list_widget.currentItemChanged.connect(
+            self._on_level1_label_selected
         )
-        hierarchy_group_layout.addWidget(self.parent_list_widget)
+        self.level1_list_widget.currentItemChanged.connect(lambda curr, prev: self._on_any_label_selected(curr))
+        hierarchy_group_layout.addWidget(self.level1_list_widget)
 
-        parent_buttons_layout = QtWidgets.QHBoxLayout()
-        self.add_parent_button = QtWidgets.QPushButton(
-            tr("project_config.add_parent_button")
-        )
-        self.add_parent_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.add_parent_button.clicked.connect(self._add_parent_label)
-        self.edit_parent_button = QtWidgets.QPushButton(
-            tr("project_config.edit_parent_button")
-        )
-        self.edit_parent_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.edit_parent_button.clicked.connect(self._edit_parent_label)
-        self.remove_parent_button = QtWidgets.QPushButton(
-            tr("project_config.remove_parent_button")
-        )
-        self.remove_parent_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.remove_parent_button.clicked.connect(self._remove_parent_label)
-        parent_buttons_layout.addWidget(self.add_parent_button)
-        parent_buttons_layout.addWidget(self.edit_parent_button)
-        parent_buttons_layout.addWidget(self.remove_parent_button)
+        level1_buttons_layout = QtWidgets.QHBoxLayout()
+        level1_buttons_layout.setSpacing(5)
 
-        self.modify_category_parent_button = QtWidgets.QPushButton(
-            tr("project_config.modify_category_button")
-        )
-        self.modify_category_parent_button.setStyleSheet(
-            PlatformConfigStyle.get_button_style()
-        )
-        self.modify_category_parent_button.clicked.connect(
-            lambda: self._modify_category_for_selected_label("parent")
-        )
-        self.modify_category_parent_button.setEnabled(False)
-        parent_buttons_layout.addWidget(self.modify_category_parent_button)
+        self.add_level1_button = QtWidgets.QPushButton("Ajouter")
+        self.add_level1_button.setStyleSheet(self._get_compact_button_style())
+        self.add_level1_button.clicked.connect(self._add_level1_label)
+        self.add_level1_button.setMinimumWidth(70)
+        self.add_level1_button.setMaximumWidth(70)
+        self.add_level1_button.setMinimumHeight(32)
+        self.add_level1_button.setMaximumHeight(32)
 
-        hierarchy_group_layout.addLayout(parent_buttons_layout)
+        self.edit_level1_button = QtWidgets.QPushButton("Modif")
+        self.edit_level1_button.setStyleSheet(self._get_compact_button_style())
+        self.edit_level1_button.clicked.connect(self._edit_level1_label)
+        self.edit_level1_button.setMinimumWidth(70)
+        self.edit_level1_button.setMaximumWidth(70)
+        self.edit_level1_button.setMinimumHeight(32)
+        self.edit_level1_button.setMaximumHeight(32)
 
-        # 3. Labels Enfants
-        child_label_title = QtWidgets.QLabel(tr("project_config.child_labels_list_label"))
-        child_label_title.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.remove_level1_button = QtWidgets.QPushButton("✕")
+        self.remove_level1_button.setStyleSheet(self._get_compact_button_style())
+        self.remove_level1_button.clicked.connect(self._remove_level1_label)
+        self.remove_level1_button.setMinimumWidth(70)
+        self.remove_level1_button.setMaximumWidth(70)
+        self.remove_level1_button.setMinimumHeight(32)
+        self.remove_level1_button.setMaximumHeight(32)
+
+        self.modify_category_level1_button = QtWidgets.QPushButton("Cat")
+        self.modify_category_level1_button.setStyleSheet(self._get_compact_button_style())
+        self.modify_category_level1_button.clicked.connect(lambda: self._modify_category_for_selected_label("level1"))
+        self.modify_category_level1_button.setMinimumWidth(70)
+        self.modify_category_level1_button.setMaximumWidth(70)
+        self.modify_category_level1_button.setMinimumHeight(32)
+        self.modify_category_level1_button.setMaximumHeight(32)
+
+        level1_buttons_layout.addWidget(self.add_level1_button)
+        level1_buttons_layout.addWidget(self.edit_level1_button)
+        level1_buttons_layout.addWidget(self.remove_level1_button)
+        level1_buttons_layout.addWidget(self.modify_category_level1_button)
+        level1_buttons_layout.addStretch()
+
+        hierarchy_group_layout.addLayout(level1_buttons_layout)
+
+        # 3. Labels Enfants (Niveau 2)
+        child_label_title = QtWidgets.QLabel("Labels Niveau 2")
+        child_label_title.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 11px;")
         hierarchy_group_layout.addWidget(child_label_title)
 
         self.child_list_widget = QtWidgets.QListWidget()
         self.child_list_widget.setStyleSheet(self._get_improved_list_style())
-        self.child_list_widget.setMinimumHeight(100)
+        self.child_list_widget.setMinimumHeight(80)
         self.child_list_widget.currentItemChanged.connect(self._on_child_label_selected)
+        self.child_list_widget.currentItemChanged.connect(lambda curr, prev: self._on_any_label_selected(curr))
         hierarchy_group_layout.addWidget(self.child_list_widget)
 
         child_buttons_layout = QtWidgets.QHBoxLayout()
-        self.add_child_button = QtWidgets.QPushButton(
-            tr("project_config.add_child_button")
-        )
-        self.add_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        child_buttons_layout.setSpacing(5)
+
+        self.add_child_button = QtWidgets.QPushButton("Ajouter")
+        self.add_child_button.setStyleSheet(self._get_compact_button_style())
         self.add_child_button.clicked.connect(self._add_child_label)
-        self.edit_child_button = QtWidgets.QPushButton(
-            tr("project_config.edit_child_button")
-        )
-        self.edit_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.add_child_button.setMinimumWidth(70)
+        self.add_child_button.setMaximumWidth(70)
+        self.add_child_button.setMinimumHeight(32)
+        self.add_child_button.setMaximumHeight(32)
+
+        self.edit_child_button = QtWidgets.QPushButton("Modif")
+        self.edit_child_button.setStyleSheet(self._get_compact_button_style())
         self.edit_child_button.clicked.connect(self._edit_child_label)
-        self.remove_child_button = QtWidgets.QPushButton(
-            tr("project_config.remove_child_button")
-        )
-        self.remove_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.edit_child_button.setMinimumWidth(70)
+        self.edit_child_button.setMaximumWidth(70)
+        self.edit_child_button.setMinimumHeight(32)
+        self.edit_child_button.setMaximumHeight(32)
+
+        self.remove_child_button = QtWidgets.QPushButton("✕")
+        self.remove_child_button.setStyleSheet(self._get_compact_button_style())
         self.remove_child_button.clicked.connect(self._remove_child_label)
+        self.remove_child_button.setMinimumWidth(70)
+        self.remove_child_button.setMaximumWidth(70)
+        self.remove_child_button.setMinimumHeight(32)
+        self.remove_child_button.setMaximumHeight(32)
+
+        self.modify_category_child_button = QtWidgets.QPushButton("Cat")
+        self.modify_category_child_button.setStyleSheet(self._get_compact_button_style())
+        self.modify_category_child_button.clicked.connect(lambda: self._modify_category_for_selected_label("child"))
+        self.modify_category_child_button.setMinimumWidth(70)
+        self.modify_category_child_button.setMaximumWidth(70)
+        self.modify_category_child_button.setMinimumHeight(32)
+        self.modify_category_child_button.setMaximumHeight(32)
+
         child_buttons_layout.addWidget(self.add_child_button)
         child_buttons_layout.addWidget(self.edit_child_button)
         child_buttons_layout.addWidget(self.remove_child_button)
-
-        self.modify_category_child_button = QtWidgets.QPushButton(
-            tr("project_config.modify_category_button")
-        )
-        self.modify_category_child_button.setStyleSheet(
-            PlatformConfigStyle.get_button_style()
-        )
-        self.modify_category_child_button.clicked.connect(
-            lambda: self._modify_category_for_selected_label("child")
-        )
-        self.modify_category_child_button.setEnabled(False)
         child_buttons_layout.addWidget(self.modify_category_child_button)
+        child_buttons_layout.addStretch()
 
         hierarchy_group_layout.addLayout(child_buttons_layout)
 
         hierarchy_layout.addWidget(hierarchy_group)
+        middle_scroll.setWidget(middle_content)
+        top_columns_layout.addWidget(middle_scroll, 5)
 
-        hierarchy_layout.addStretch()
+        # --- Colonne de droite: Relations ---
+        right_column_layout = QtWidgets.QVBoxLayout()
+        right_column_layout.addStretch()
 
-        right_column_container.setWidget(hierarchy_scroll_content)
-        top_columns_layout.addWidget(right_column_container, 4)
+        relations_group = QtWidgets.QGroupBox("Configuration des Relations")
+        relations_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
+        relations_layout = QtWidgets.QVBoxLayout(relations_group)
+        relations_layout.addWidget(self.global_relations_config)
+        right_column_layout.addWidget(relations_group)
 
-    def _update_project_details(self):
-        """Met à jour les détails pour le projet."""
-        if self.current_project_profile_data:
-            self._update_selected_details("Projet", self.current_project_profile_data)
+        # Boutons de sauvegarde/export/insert
+        save_layout = QtWidgets.QHBoxLayout()
+        self.save_button = QtWidgets.QPushButton("💾 Sauvegarder Profil")
+        self.save_button.setStyleSheet(self._get_button_style_grenat())
+        self.save_button.clicked.connect(self._on_save_project)
+        self.save_button.setEnabled(False)
+        save_layout.addWidget(self.save_button)
 
-    def _update_selected_details(self, item_type, item_data, source="", target=""):
-        """Met à jour l'affichage des détails pour l'item sélectionné."""
-        if item_data:
-            name = item_data.get("name", item_data.get("label", ""))
-            desc = item_data.get("description", "")
-            cat = ", ".join(item_data.get("category", []))
-            cat_str = f"Catégorie: {cat}" if cat else "Catégorie: "
-            source_str = f"Source: {source}" if source else "Source: "
-            target_str = f"Cible: {target}" if target else "Cible: "
-            files_str = f"Fichiers: {', '.join(item_data.get('files', []))}" if item_data.get('files') else "Fichiers: aucun"
+        self.export_profile_button = QtWidgets.QPushButton("📤 Exporter Profil")
+        self.export_profile_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.export_profile_button.clicked.connect(self._on_export_profile)
+        self.export_profile_button.setEnabled(False)
+        save_layout.addWidget(self.export_profile_button)
 
-            text = f"{item_type}: {name}\nDescription: {desc}\n{cat_str}\n{files_str}\n{source_str}\n{target_str}"
-        else:
-            text = ""
-        self.details_text.setPlainText(text)
+        self.insert_dgraph_button = QtWidgets.QPushButton("🔄 Insérer dans Dgraph")
+        self.insert_dgraph_button.setStyleSheet(self._get_button_style_grenat())
+        self.insert_dgraph_button.clicked.connect(self._on_insert_dgraph)
+        self.insert_dgraph_button.setEnabled(False)
+        save_layout.addWidget(self.insert_dgraph_button)
 
-    def _update_selected_details_for_file(self, item_type, filename, content, source=""):
-        """Met à jour l'affichage pour un fichier sélectionné."""
-        source_str = f"Source: {source}" if source else ""
-        text = f"{item_type}: {filename}\n{source_str}"
-        self.details_text.setPlainText(text)
+        right_column_layout.addLayout(save_layout)
+        right_column_layout.addStretch()
 
-    # === SCAN D'UPLOAD DOSSIER ===
-    def _scan_project_directory(self, directory):
-        """Scanne le dossier projet racine et construit la structure de données."""
-        project_name = os.path.basename(directory)
-        project_desc = ""
-        desc_path = os.path.join(directory, "description.txt")
-        if os.path.exists(desc_path):
-            with open(desc_path, 'r', encoding='utf-8') as f:
-                project_desc = f.read().strip()
+        top_columns_layout.addLayout(right_column_layout, 4)
 
-        # Collecter les fichiers au niveau projet
-        project_files = []
-        project_file_contents = {}
-        for f in os.listdir(directory):
-            fpath = os.path.join(directory, f)
-            if os.path.isfile(fpath) and f != "description.txt":
-                try:
-                    with open(fpath, 'r', encoding='utf-8') as ff:
-                        content = ff.read()
-                    project_files.append(f)
-                    project_file_contents[f] = content
-                except Exception as e:
-                    logger.warning(f"Impossible de lire {fpath}: {e}")
-                    project_files.append(f)
-                    project_file_contents[f] = f"(erreur lecture: {e})"
+    def _load_project_profiles(self):
+        """Charge les profils depuis Dgraph."""
+        query_result = self.dgraph_connector.query_workspaces()
+        if query_result and 'q' in query_result:
+            for ws in query_result['q']:
+                name = ws.get('name', '')
+                self.project_profiles[name] = self._workspace_to_profile(ws)
+        self._update_project_combo()
 
-        turing_ontology = {"clusters_detailed": []}
-        for item in os.listdir(directory):
-            item_path = os.path.join(directory, item)
-            if os.path.isdir(item_path):
-                cluster_data = self._scan_cluster(item_path, item)
-                if cluster_data:
-                    turing_ontology["clusters_detailed"].append(cluster_data)
-
-        return {
-            "name": project_name,
-            "description": project_desc,
-            "files": project_files,
-            "file_contents": project_file_contents,
-            "turing_ontology": turing_ontology,
-            "last_modified": datetime.now().isoformat()
+    def _label_to_data(self, label):
+        """Convertit un label Dgraph en data local."""
+        data = {
+            'label': label.get('name', ''),
+            'id': label.get('id', ''),
+            'description': label.get('description', ''),
+            'category': label.get('category', []),
+            'files': label.get('files', []),
+            'file_contents': json.loads(label.get('fileContents', '{}')),
+            'parents': [],
+            'children': [],
+            'outgoing_relations': [],
+            'incoming_relations': []
         }
+        # Outgoing relations
+        for rel in label.get('relations', []):
+            target = rel.get('target', {})
+            data['outgoing_relations'].append({
+                'target_id': target.get('id'),
+                'relation_type': rel.get('relationType')
+            })
+        # Incoming relations
+        for rel in label.get('~relations', []):
+            source = rel.get('source', {})
+            data['incoming_relations'].append({
+                'source_id': source.get('id'),
+                'relation_type': rel.get('relationType')
+            })
+        return data
 
-    def _scan_cluster(self, cluster_path, cluster_name):
-        """Scanne un dossier cluster, incluant le contenu des fichiers."""
-        cluster_desc_path = os.path.join(cluster_path, "description.txt")
-        cluster_desc = ""
-        if os.path.exists(cluster_desc_path):
-            with open(cluster_desc_path, 'r', encoding='utf-8') as f:
-                cluster_desc = f.read().strip()
+    def _fill_hierarchy(self, data, label_node):
+        """Remplit récursivement les enfants."""
+        # Gérer l'inconsistance dans les clés de la requête Dgraph ('parents' pour niveau 1, 'children' pour niveau 2)
+        children_key = 'children' if 'children' in label_node else 'parents'
+        children = label_node.get(children_key, [])
+        for child in children:
+            child_data = self._label_to_data(child)
+            data['children'].append(child_data)
+            self._fill_hierarchy(child_data, child)
 
-        # Collecter tous les fichiers et leur contenu
-        files = []
-        file_contents = {}
-        for f in os.listdir(cluster_path):
-            fpath = os.path.join(cluster_path, f)
-            if os.path.isfile(fpath) and f != "description.txt":
-                try:
-                    with open(fpath, 'r', encoding='utf-8') as ff:
-                        content = ff.read()
-                    files.append(f)
-                    file_contents[f] = content
-                except Exception as e:
-                    logger.warning(f"Impossible de lire {fpath}: {e}")
-                    files.append(f)
-                    file_contents[f] = f"(erreur lecture: {e})"
+    def _collect_relations(self, profile):
+        """Collecte toutes les relations dans pending_relations."""
+        pending = defaultdict(list)
+        def collect(node):
+            label_id = node['id']
+            # Outgoing
+            for rel in node.get('outgoing_relations', []):
+                pending[label_id].append(rel)
+            # Incoming: add to source
+            for rel in node.get('incoming_relations', []):
+                source_id = rel['source_id']
+                target_id = label_id
+                rel_type = rel['relation_type']
+                pending[source_id].append({'target_id': target_id, 'relation_type': rel_type})
+            # Recursive
+            for child in node.get('children', []):
+                collect(child)
+        for cluster in profile['turing_ontology']['clusters_detailed']:
+            for root in cluster['root_labels']:
+                collect(root)
+        profile['pending_relations'] = dict(pending)
 
-        root_labels = []
-        for item in os.listdir(cluster_path):
-            item_path = os.path.join(cluster_path, item)
-            if os.path.isdir(item_path) and item != "description.txt":
-                root_data = self._scan_root_label(item_path, item)
-                if root_data:
-                    root_labels.append(root_data)
-
-        if root_labels or files:  # Inclure même si pas de roots mais des files
-            return {
-                "name": cluster_name,
-                "id": str(uuid.uuid4()),
-                "description": cluster_desc,
-                "files": files,
-                "file_contents": file_contents,
-                "root_labels": root_labels
+    def _workspace_to_profile(self, ws):
+        """Convertit un workspace Dgraph en profil local."""
+        profile = {
+            'name': ws.get('name', ''),
+            'description': ws.get('description', ''),
+            'files': ws.get('files', []),
+            'file_contents': json.loads(ws.get('fileContents', '{}')),
+            'turing_ontology': {
+                'clusters_detailed': []
+            },
+            'pending_relations': defaultdict(list)
+        }
+        cm = ws.get('clusterManagement', {})
+        for cluster in cm.get('clusters', []):
+            cluster_data = {
+                'name': cluster.get('name', ''),
+                'id': cluster.get('id', ''),
+                'description': cluster.get('description', ''),
+                'files': cluster.get('files', []),
+                'file_contents': json.loads(cluster.get('fileContents', '{}')),
+                'root_labels': []
             }
-        return None
+            for root_label in cluster.get('root_labels', []):
+                root_data = self._label_to_data(root_label)
+                cluster_data['root_labels'].append(root_data)
+                # Remplir enfants récursivement
+                self._fill_hierarchy(root_data, root_label)
+            profile['turing_ontology']['clusters_detailed'].append(cluster_data)
+        # Collect relations
+        self._collect_relations(profile)
+        return profile
 
-    def _scan_root_label(self, root_path, root_name):
-        """Scanne un dossier label racine, incluant le contenu des fichiers."""
-        root_desc_path = os.path.join(root_path, "description.txt")
-        root_desc = ""
-        if os.path.exists(root_desc_path):
-            with open(root_desc_path, 'r', encoding='utf-8') as f:
-                root_desc = f.read().strip()
+    def _update_project_combo(self):
+        self.project_combo.clear()
+        for name in self.project_profiles.keys():
+            self.project_combo.addItem(name)
 
-        # Collecter tous les fichiers et leur contenu
-        files = []
-        file_contents = {}
-        for f in os.listdir(root_path):
-            fpath = os.path.join(root_path, f)
-            if os.path.isfile(fpath) and f != "description.txt":
-                try:
-                    with open(fpath, 'r', encoding='utf-8') as ff:
-                        content = ff.read()
-                    files.append(f)
-                    file_contents[f] = content
-                except Exception as e:
-                    logger.warning(f"Impossible de lire {fpath}: {e}")
-                    files.append(f)
-                    file_contents[f] = f"(erreur lecture: {e})"
+    def _on_project_selected(self, index):
+        """Gère la sélection d'un projet dans la combo."""
+        if index < 0:
+            return
+        project_name = self.project_combo.currentText()
+        self.current_project_name = project_name
+        self.current_project_profile_data = json.loads(json.dumps(self.project_profiles[project_name]))
+        # Restore relations
+        pending_relations_data = self.current_project_profile_data.get("pending_relations", {})
+        self.pending_relations = defaultdict(list, pending_relations_data)
+        self._load_project_data_into_ui()
+        self._update_project_details()
+        self._update_button_states()
 
-        parents = []
-        for item in os.listdir(root_path):
-            item_path = os.path.join(root_path, item)
-            if os.path.isdir(item_path) and item != "description.txt":
-                parent_data = self._scan_parent_label(item_path, item)
-                if parent_data:
-                    parents.append(parent_data)
-
-        return {
-            "label": root_name,
-            "id": str(uuid.uuid4()),
-            "description": root_desc,
-            "category": [],
-            "files": files,
-            "file_contents": file_contents,
-            "parents": parents
-        }
-
-    def _scan_parent_label(self, parent_path, parent_name):
-        """Scanne un dossier label parent, incluant le contenu des fichiers."""
-        parent_desc_path = os.path.join(parent_path, "description.txt")
-        parent_desc = ""
-        if os.path.exists(parent_desc_path):
-            with open(parent_desc_path, 'r', encoding='utf-8') as f:
-                parent_desc = f.read().strip()
-
-        # Collecter tous les fichiers et leur contenu
-        files = []
-        file_contents = {}
-        for f in os.listdir(parent_path):
-            fpath = os.path.join(parent_path, f)
-            if os.path.isfile(fpath) and f != "description.txt":
-                try:
-                    with open(fpath, 'r', encoding='utf-8') as ff:
-                        content = ff.read()
-                    files.append(f)
-                    file_contents[f] = content
-                except Exception as e:
-                    logger.warning(f"Impossible de lire {fpath}: {e}")
-                    files.append(f)
-                    file_contents[f] = f"(erreur lecture: {e})"
-
-        children = []
-        for item in os.listdir(parent_path):
-            item_path = os.path.join(parent_path, item)
-            if os.path.isdir(item_path) and item != "description.txt":
-                child_data = self._scan_child_label(item_path, item)
-                if child_data:
-                    children.append(child_data)
-
-        return {
-            "label": parent_name,
-            "id": str(uuid.uuid4()),
-            "description": parent_desc,
-            "category": [],
-            "files": files,
-            "file_contents": file_contents,
-            "children": children
-        }
-
-    def _scan_child_label(self, child_path, child_name):
-        """Scanne un dossier label enfant, incluant le contenu des fichiers."""
-        child_desc_path = os.path.join(child_path, "description.txt")
-        child_desc = ""
-        if os.path.exists(child_desc_path):
-            with open(child_desc_path, 'r', encoding='utf-8') as f:
-                child_desc = f.read().strip()
-
-        # Collecter tous les fichiers et leur contenu
-        files = []
-        file_contents = {}
-        for f in os.listdir(child_path):
-            fpath = os.path.join(child_path, f)
-            if os.path.isfile(fpath) and f != "description.txt":
-                try:
-                    with open(fpath, 'r', encoding='utf-8') as ff:
-                        content = ff.read()
-                    files.append(f)
-                    file_contents[f] = content
-                except Exception as e:
-                    logger.warning(f"Impossible de lire {fpath}: {e}")
-                    files.append(f)
-                    file_contents[f] = f"(erreur lecture: {e})"
-
-        return {
-            "label": child_name,
-            "id": str(uuid.uuid4()),
-            "description": child_desc,
-            "category": [],
-            "files": files,
-            "file_contents": file_contents
-        }
-
-    # === GESTION DES CLUSTERS ===
-    def _add_cluster(self):
-        """Ajoute un nouveau cluster avec dialogue pour nom et description."""
-        if not self.current_project_name:
+    def _load_project_data_into_ui(self):
+        """Charge les données du projet dans l'UI avec réinitialisation complète."""
+        if not self.current_project_profile_data:
             return
 
-        dialog = AddEditItemDialog("Ajouter un Cluster", parent=self)
+        # Réinitialiser toute la hiérarchie
+        self.current_cluster_data = None
+        self.current_root_data = None
+        self.current_level1_data = None
+        self.current_level2_data = None
+
+        self.current_cluster_index = -1
+        self.current_root_label_index = -1
+        self.current_level1_label_index = -1
+        self.current_level2_label_index = -1
+
+        # Vider toutes les listes
+        self.cluster_list_widget.clear()
+        self.root_list_widget.clear()
+        self.level1_list_widget.clear()
+        self.child_list_widget.clear()
+
+        # Charger les informations de base
+        self.project_name_edit.setText(self.current_project_profile_data.get('name', ''))
+        self.project_description_edit.setPlainText(self.current_project_profile_data.get('description', ''))
+
+        # Charger uniquement la liste des clusters
+        self._refresh_cluster_list()
+
+        # Collecter tous les labels pour les relations
+        self._collect_all_labels()
+
+        # Réinitialiser les relations
+        self.current_selected_label_id = None
+        self.global_relations_config.update_current(None)
+
+    def _update_project_details(self):
+        """Met à jour les détails du projet sélectionné."""
+        if self.current_project_name:
+            details = f"Projet: {self.current_project_name}\n"
+            details += f"Clusters: {len(self.current_project_profile_data.get('turing_ontology', {}).get('clusters_detailed', []))}\n"
+            details += f"Fichiers: {len(self.current_project_profile_data.get('files', []))}"
+            self.details_text.setPlainText(details)
+
+    def _refresh_cluster_list(self):
+        """Rafraîchit la liste des clusters sans charger les niveaux inférieurs."""
+        self.cluster_list_widget.clear()
+        clusters = self.current_project_profile_data.get("turing_ontology", {}).get("clusters_detailed", [])
+        for cluster in clusters:
+            self.cluster_list_widget.addItem(cluster["name"])
+
+    def _on_cluster_selected(self, current):    
+        """Gère la sélection d'un cluster."""
+        if current:
+            self.current_cluster_index = self.cluster_list_widget.row(current)
+            self.current_cluster_data = self.current_project_profile_data["turing_ontology"]["clusters_detailed"][self.current_cluster_index]
+
+            # Réinitialiser les sélections inférieures
+            self.current_root_data = None
+            self.current_level1_data = None
+            self.current_level2_data = None
+            self.current_root_label_index = -1
+            self.current_level1_label_index = -1
+            self.current_level2_label_index = -1
+
+            # Afficher uniquement les root labels du cluster
+            self._populate_root_list()
+
+            # Vider les listes inférieures
+            self.level1_list_widget.clear()
+            self.child_list_widget.clear()
+
+            # Mettre à jour les détails
+            details = f"Cluster: {self.current_cluster_data.get('name', '')}\n"
+            details += f"Description: {self.current_cluster_data.get('description', '')}\n"
+            details += f"Root Labels: {len(self.current_cluster_data.get('root_labels', []))}\n"
+            details += f"Fichiers cluster: {len(self.current_cluster_data.get('files', []))}"
+            self.details_text.setPlainText(details)
+
+            self.global_relations_config.update_current(None)
+        else:
+            self.current_cluster_data = None
+            self._reset_hierarchy_ui()
+
+        self._update_button_states()
+
+    def _populate_root_list(self):
+        """Peuple la liste des root labels pour le cluster sélectionné."""
+        self.root_list_widget.clear()
+        if self.current_cluster_data:
+            for root in self.current_cluster_data.get("root_labels", []):
+                display = root['label']
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, root["id"])
+                self.root_list_widget.addItem(item)
+        self._update_button_states()
+
+    def _on_root_label_selected(self, current):
+        """Gère la sélection d'un root label."""
+        if current:
+            self.current_root_label_index = self.root_list_widget.row(current)
+            self.current_root_data = self.current_cluster_data["root_labels"][self.current_root_label_index]
+            self.current_selected_label_id = current.data(Qt.UserRole)
+
+            # Réinitialiser les sélections inférieures
+            self.current_level1_data = None
+            self.current_level2_data = None
+            self.current_level1_label_index = -1
+            self.current_level2_label_index = -1
+
+            # Afficher les détails du root label
+            self._update_selected_details("Label Racine", self.current_root_data)
+
+            # Afficher uniquement les enfants de ce root label
+            self._populate_level1_list()
+
+            # Vider la liste des niveau 2
+            self.child_list_widget.clear()
+
+            # Mettre à jour les relations
+            self.global_relations_config.update_current(self.current_selected_label_id)
+        else:
+            self.current_root_data = None
+            self.current_selected_label_id = None
+            self.level1_list_widget.clear()
+            self.child_list_widget.clear()
+            self.global_relations_config.update_current(None)
+
+        self._update_button_states()
+
+    def _populate_level1_list(self):
+        """Peuple la liste des labels niveau 1 pour le root label sélectionné."""
+        self.level1_list_widget.clear()
+        if self.current_root_data:
+            for level1 in self.current_root_data.get("children", []):
+                display = level1['label']
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, level1["id"])
+                self.level1_list_widget.addItem(item)
+        self._update_button_states()
+
+    def _on_level1_label_selected(self, current):
+        """Gère la sélection d'un label niveau 1."""
+        if current:
+            self.current_level1_label_index = self.level1_list_widget.row(current)
+            self.current_level1_data = self.current_root_data["children"][self.current_level1_label_index]
+            self.current_selected_label_id = current.data(Qt.UserRole)
+
+            # Réinitialiser la sélection niveau 2
+            self.current_level2_data = None
+            self.current_level2_label_index = -1
+
+            # Afficher les détails du label niveau 1
+            self._update_selected_details("Label Niveau 1", self.current_level1_data)
+
+            # Afficher uniquement les enfants de ce label niveau 1
+            self._populate_child_list()
+
+            # Mettre à jour les relations
+            self.global_relations_config.update_current(self.current_selected_label_id)
+        else:
+            self.current_level1_data = None
+            self.current_selected_label_id = None
+            self.child_list_widget.clear()
+            self.global_relations_config.update_current(None)
+
+        self._update_button_states()
+
+    def _populate_child_list(self):
+        """Peuple la liste des labels niveau 2 pour le label niveau 1 sélectionné."""
+        self.child_list_widget.clear()
+        if self.current_level1_data:
+            for child in self.current_level1_data.get("children", []):
+                display = child['label']
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, child["id"])
+                self.child_list_widget.addItem(item)
+        self._update_button_states()
+
+    def _on_child_label_selected(self, current):
+        """Gère la sélection d'un label niveau 2."""
+        if current:
+            self.current_level2_label_index = self.child_list_widget.row(current)
+            self.current_level2_data = self.current_level1_data["children"][self.current_level2_label_index]
+            self.current_selected_label_id = current.data(Qt.UserRole)
+
+            # Afficher les détails du niveau 2
+            self._update_selected_details("Label Niveau 2", self.current_level2_data)
+
+            # Mettre à jour les relations
+            self.global_relations_config.update_current(self.current_selected_label_id)
+        else:
+            self.current_level2_data = None
+            self.current_selected_label_id = None
+            self.global_relations_config.update_current(None)
+    
+        self._update_button_states()
+
+    def _on_any_label_selected(self, current):
+        """Gère la sélection de n'importe quel label pour relations."""
+        if current:
+            self.current_selected_label_id = current.data(Qt.UserRole)
+            self.global_relations_config.update_current(self.current_selected_label_id)
+        else:
+            self.current_selected_label_id = None
+            self.global_relations_config.update_current(None)
+
+    def _update_selected_details(self, title, data):
+        """Met à jour les détails de l'élément sélectionné."""
+        if not data:
+            self.details_text.clear()
+            return
+
+        details = f"=== {title} ===\n\n"
+        details += f"Nom: {data.get('label', '')}\n"
+        details += f"ID: {data.get('id', '')}\n"
+        details += f"Description: {data.get('description', '')}\n\n"
+
+        categories = data.get('category', [])
+        if categories:
+            details += f"Catégories: {', '.join(categories)}\n\n"
+
+        files = data.get('files', [])
+        if files:
+            details += f"Fichiers ({len(files)}):\n"
+            for f in files[:10]:  # Limiter à 10 fichiers pour l'affichage
+                details += f"  - {f}\n"
+            if len(files) > 10:
+                details += f"  ... et {len(files) - 10} autres\n"
+        else:
+            details += "Aucun fichier associé\n"
+
+        # Relations sortantes
+        outgoing = data.get('outgoing_relations', [])
+        if outgoing:
+            details += f"\nRelations sortantes ({len(outgoing)}):\n"
+            for r in outgoing:
+                target_name = self.label_id_to_info.get(r['target_id'], {}).get('name', 'Inconnu')
+                details += f"  {r['relation_type'].upper()} -> {target_name}\n"
+
+        # Relations entrantes
+        incoming = data.get('incoming_relations', [])
+        if incoming:
+            details += f"\nRelations entrantes ({len(incoming)}):\n"
+            for r in incoming:
+                source_name = self.label_id_to_info.get(r['source_id'], {}).get('name', 'Inconnu')
+                details += f"  {source_name} {r['relation_type'].upper()} -> \n"
+
+        # Ajouter info sur la hiérarchie
+        if title == "Label Racine":
+            nb_children = len(data.get('children', []))
+            details += f"\nNombre d'enfants: {nb_children}"
+        elif title == "Label Niveau 1":
+            nb_children = len(data.get('children', []))
+            details += f"\nNombre d'enfants: {nb_children}"
+
+        self.details_text.setPlainText(details)
+
+    def _reset_hierarchy_ui(self):
+        """Réinitialise complètement l'interface hiérarchique."""
+        self.root_list_widget.clear()
+        self.level1_list_widget.clear()
+        self.child_list_widget.clear()
+
+        self.current_root_data = None
+        self.current_level1_data = None
+        self.current_level2_data = None
+
+        self.current_root_label_index = -1
+        self.current_level1_label_index = -1
+        self.current_level2_label_index = -1
+
+        self.current_selected_label_id = None
+        self.global_relations_config.update_current(None)
+
+        self.details_text.clear()
+
+    def _collect_all_labels(self):
+        """Collecte tous les labels pour relations."""
+        self.label_id_to_info.clear()
+        self.name_to_id.clear()
+        if not self.current_project_profile_data:
+            return
+        for cluster in self.current_project_profile_data.get("turing_ontology", {}).get("clusters_detailed", []):
+            cluster_name = cluster.get('name', '')
+            for root in cluster.get("root_labels", []):
+                info = {'name': root.get('label', ''), 'cluster': cluster_name}
+                self.label_id_to_info[root['id']] = info
+                self.name_to_id[root['label']] = root['id']
+                self._collect_labels_recursive(root)
+        self._populate_target_combo_for_all()
+
+    def _collect_labels_recursive(self, node):
+        """Collecte récursivement labels dans hierarchy."""
+        for child in node.get('children', []):
+            info = {'name': child.get('label', ''), 'cluster': self.label_id_to_info.get(node['id'], {}).get('cluster', '')}
+            self.label_id_to_info[child['id']] = info
+            self.name_to_id[child['label']] = child['id']
+            self._collect_labels_recursive(child)
+
+    def _populate_target_combo_for_all(self):
+        """Peuple les combos cibles avec tous les labels."""
+        # Pour global relations
+        self._populate_target_combo(self.global_relations_config.target_combo, None)
+
+    def _populate_target_combo(self, combo, source_id):
+        """Peuple le combo cible, excluant la source."""
+        combo.clear()
+        for label_id, info in self.label_id_to_info.items():
+            if source_id and label_id == source_id:
+                continue
+            display = f"{info['name']} ({info['cluster']})"
+            combo.addItem(display, label_id)
+
+    def _add_cluster(self):
+        dialog = AddEditItemDialog("Ajouter Cluster", parent=self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data["name"]:
@@ -886,68 +1346,52 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     "description": data["description"],
                     "files": [],
                     "file_contents": {},
-                    "root_labels": [],
+                    "root_labels": []
                 }
-                turing_ontology = self.current_project_profile_data.get("turing_ontology", {})
-                clusters_detailed = turing_ontology.get("clusters_detailed", [])
-                clusters_detailed.append(new_cluster)
-                turing_ontology["clusters_detailed"] = clusters_detailed
-                self.current_project_profile_data["turing_ontology"] = turing_ontology
+                self.current_project_profile_data["turing_ontology"]["clusters_detailed"].append(new_cluster)
                 self._refresh_cluster_list()
-                self.cluster_list_widget.setCurrentRow(len(clusters_detailed) - 1)
-                logger.info(f"Cluster ajouté : {data['name']}")
+                self._collect_all_labels()
+                self.cluster_list_widget.setCurrentRow(self.cluster_list_widget.count() - 1)
+                self._update_button_states()
+                logger.info(f"Cluster ajouté: {data['name']}")
 
     def _edit_cluster(self):
-        """Édite le cluster sélectionné avec dialogue pour nom et description."""
-        if not self.current_cluster_data:
+        current = self.cluster_list_widget.currentItem()
+        if not current:
             return
-
-        dialog = AddEditItemDialog(
-            "Éditer le Cluster",
-            current_name=self.current_cluster_data["name"],
-            current_description=self.current_cluster_data.get("description", ""),
-            parent=self
-        )
+        index = self.cluster_list_widget.row(current)
+        cluster = self.current_project_profile_data["turing_ontology"]["clusters_detailed"][index]
+        dialog = AddEditItemDialog("Modifier Cluster", cluster["name"], cluster["description"], self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data["name"]:
-                self.current_cluster_data["name"] = data["name"]
-                self.current_cluster_data["description"] = data["description"]
+                cluster["name"] = data["name"]
+                cluster["description"] = data["description"]
                 self._refresh_cluster_list()
-                self._update_selected_details("Cluster", self.current_cluster_data)
-                logger.info(f"Cluster modifié : {data['name']}")
+                self._collect_all_labels()
+                self._update_button_states()
+                logger.info(f"Cluster modifié: {data['name']}")
 
     def _remove_cluster(self):
-        """Supprime le cluster sélectionné et sa hiérarchie."""
-        if not self.current_cluster_data:
+        current = self.cluster_list_widget.currentItem()
+        if not current:
             return
-    
-        cluster_name = self.current_cluster_data["name"]  # Sauvegarder le nom AVANT la suppression
-        
-        reply = QtWidgets.QMessageBox.question(
-            self,
-            tr("project_config.remove_cluster_title"),
-            tr("project_config.remove_cluster_msg").format(cluster=cluster_name),
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-        )
+        index = self.cluster_list_widget.row(current)
+        cluster_name = self.current_project_profile_data["turing_ontology"]["clusters_detailed"][index]["name"]
+        reply = QtWidgets.QMessageBox.question(self, "Confirmer", f"Supprimer le cluster '{cluster_name}'?")
         if reply == QtWidgets.QMessageBox.Yes:
-            turing_ontology = self.current_project_profile_data.get("turing_ontology", {})
-            clusters_detailed = turing_ontology.get("clusters_detailed", [])
-            clusters_detailed.pop(self.current_cluster_index)
-            turing_ontology["clusters_detailed"] = clusters_detailed
-            self.current_project_profile_data["turing_ontology"] = turing_ontology
+            del self.current_project_profile_data["turing_ontology"]["clusters_detailed"][index]
             self._refresh_cluster_list()
             self._reset_hierarchy_ui()
-            self._update_project_details()
-            logger.info(f"Cluster supprimé : {cluster_name}")  # Utiliser la variable sauvegardée
+            self._collect_all_labels()
+            self._update_button_states()
+            logger.info(f"Cluster supprimé: {cluster_name}")
 
-    # === GESTION DES LABELS RACINES ===
     def _add_root_label(self):
-        """Ajoute un nouveau label racine avec dialogue pour nom et description."""
+        """Ajoute un label racine avec vérification des fichiers."""
         if not self.current_cluster_data:
             return
-
-        dialog = AddEditItemDialog("Ajouter un Label Racine", parent=self)
+        dialog = AddEditItemDialog("Ajouter Label Racine", parent=self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data["name"]:
@@ -959,126 +1403,113 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     "files": [],
                     "file_contents": {},
                     "parents": [],
+                    "children": [],
+                    "outgoing_relations": [],
+                    "incoming_relations": []
                 }
                 self.current_cluster_data["root_labels"].append(new_root)
-                self._refresh_root_list()
+                self._populate_root_list()
                 self.root_list_widget.setCurrentRow(self.root_list_widget.count() - 1)
-                logger.info(f"Label racine ajouté : {data['name']}")
+                self._collect_all_labels()
+                self._update_button_states()
+                logger.info(f"Label racine ajouté: {data['name']}")
 
     def _edit_root_label(self):
-        """Édite le label racine sélectionné avec dialogue pour nom et description."""
-        if self.current_root_label_index < 0 or self.current_root_is_file:
+        current = self.root_list_widget.currentItem()
+        if not current:
             return
-
-        current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-        dialog = AddEditItemDialog(
-            "Éditer le Label Racine",
-            current_name=current_root["label"],
-            current_description=current_root.get("description", ""),
-            parent=self
-        )
+        index = self.root_list_widget.row(current)
+        root = self.current_cluster_data["root_labels"][index]
+        dialog = AddEditItemDialog("Modifier Label Racine", root["label"], root["description"], self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data["name"]:
-                current_root["label"] = data["name"]
-                current_root["description"] = data["description"]
-                self._refresh_root_list()
-                self._update_selected_details("Label Racine", current_root, source=self.current_cluster_data["name"])
-                logger.info(f"Label racine modifié : {data['name']}")
+                root["label"] = data["name"]
+                root["description"] = data["description"]
+                self._populate_root_list()
+                self._collect_all_labels()
+                self._update_button_states()
+                logger.info(f"Label racine modifié: {data['name']}")
 
     def _remove_root_label(self):
-        """Supprime le label racine sélectionné."""
-        if self.current_root_label_index < 0 or self.current_root_is_file:
+        current = self.root_list_widget.currentItem()
+        if not current:
             return
-
-        reply = QtWidgets.QMessageBox.question(
-            self,
-            "Confirmer suppression",
-            f"Supprimer le label racine '{self.current_cluster_data['root_labels'][self.current_root_label_index]['label']}' ?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-        )
+        index = self.root_list_widget.row(current)
+        root_name = self.current_cluster_data["root_labels"][index]["label"]
+        reply = QtWidgets.QMessageBox.question(self, "Confirmer", f"Supprimer le label racine '{root_name}'?")
         if reply == QtWidgets.QMessageBox.Yes:
-            del self.current_cluster_data["root_labels"][self.current_root_label_index]
-            self._refresh_root_list()
+            del self.current_cluster_data["root_labels"][index]
+            self._populate_root_list()
             self._reset_hierarchy_ui()
-            if self.current_cluster_data:
-                self._update_selected_details("Cluster", self.current_cluster_data, target=f"Labels racines: {len(self.current_cluster_data.get('root_labels', []))}")
-            else:
-                self._update_project_details()
-            logger.info("Label racine supprimé")
+            self._collect_all_labels()
+            self._update_button_states()
+            logger.info(f"Label racine supprimé: {root_name}")
 
-    # === GESTION DES LABELS PARENTS ===
-    def _add_parent_label(self):
-        """Ajoute un nouveau label parent sous le root sélectionné."""
-        if self.current_root_label_index < 0 or self.current_root_is_file:
+    def _add_level1_label(self):
+        """Ajoute un label niveau 1 avec vérification des fichiers."""
+        if not self.current_root_data:
             return
-        current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-        dialog = AddEditItemDialog("Ajouter un Label Parent", parent=self)
+        dialog = AddEditItemDialog("Ajouter Label Niveau 1", parent=self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data["name"]:
-                new_parent = {
+                new_level1 = {
                     "label": data["name"],
                     "id": str(uuid.uuid4()),
                     "description": data["description"],
                     "category": [],
                     "files": [],
                     "file_contents": {},
+                    "parents": [],
                     "children": [],
+                    "outgoing_relations": [],
+                    "incoming_relations": []
                 }
-                current_root["parents"].append(new_parent)
-                self._refresh_parent_list()
-                self.parent_list_widget.setCurrentRow(self.parent_list_widget.count() - 1)
-                logger.info(f"Label parent ajouté : {data['name']}")
+                self.current_root_data["children"].append(new_level1)
+                self._populate_level1_list()
+                self.level1_list_widget.setCurrentRow(self.level1_list_widget.count() - 1)
+                self._collect_all_labels()
+                self._update_button_states()
+                logger.info(f"Label niveau 1 ajouté: {data['name']}")
 
-    def _edit_parent_label(self):
-        """Édite le label parent sélectionné."""
-        if self.current_parent_label_index < 0 or self.current_parent_is_file:
+    def _edit_level1_label(self):
+        current = self.level1_list_widget.currentItem()
+        if not current:
             return
-        current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-        current_parent = current_root["parents"][self.current_parent_label_index]
-        dialog = AddEditItemDialog(
-            "Éditer le Label Parent",
-            current_name=current_parent["label"],
-            current_description=current_parent.get("description", ""),
-            parent=self
-        )
+        index = self.level1_list_widget.row(current)
+        level1 = self.current_root_data["children"][index]
+        dialog = AddEditItemDialog("Modifier Label Niveau 1", level1["label"], level1["description"], self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data["name"]:
-                current_parent["label"] = data["name"]
-                current_parent["description"] = data["description"]
-                self._refresh_parent_list()
-                target = f"Enfants: {len(current_parent.get('children', []))}"
-                self._update_selected_details("Label Parent", current_parent, source=current_root["label"], target=target)
-                logger.info(f"Label parent modifié : {data['name']}")
+                level1["label"] = data["name"]
+                level1["description"] = data["description"]
+                self._populate_level1_list()
+                self._collect_all_labels()
+                self._update_button_states()
+                logger.info(f"Label niveau 1 modifié: {data['name']}")
 
-    def _remove_parent_label(self):
-        """Supprime le label parent sélectionné."""
-        if self.current_parent_label_index < 0 or self.current_parent_is_file:
+    def _remove_level1_label(self):
+        current = self.level1_list_widget.currentItem()
+        if not current:
             return
-        reply = QtWidgets.QMessageBox.question(
-            self,
-            "Confirmer suppression",
-            f"Supprimer le label parent '{self.current_cluster_data['root_labels'][self.current_root_label_index]['parents'][self.current_parent_label_index]['label']}' ?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-        )
+        index = self.level1_list_widget.row(current)
+        level1_name = self.current_root_data["children"][index]["label"]
+        reply = QtWidgets.QMessageBox.question(self, "Confirmer", f"Supprimer le label niveau 1 '{level1_name}'?")
         if reply == QtWidgets.QMessageBox.Yes:
-            current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            del current_root["parents"][self.current_parent_label_index]
-            self._refresh_parent_list()
-            self._reset_child_ui()
-            self._update_selected_details("Label Racine", current_root, source=self.current_cluster_data["name"], target=f"Parents: {len(current_root.get('parents', []))}")
-            logger.info("Label parent supprimé")
+            del self.current_root_data["children"][index]
+            self._populate_level1_list()
+            self._reset_hierarchy_ui()
+            self._collect_all_labels()
+            self._update_button_states()
+            logger.info(f"Label niveau 1 supprimé: {level1_name}")
 
-    # === GESTION DES LABELS ENFANTS ===
     def _add_child_label(self):
-        """Ajoute un nouveau label enfant sous le parent sélectionné."""
-        if self.current_parent_label_index < 0 or self.current_parent_is_file:
+        """Ajoute un label enfant avec vérification des fichiers."""
+        if not self.current_level1_data:
             return
-        current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-        current_parent = current_root["parents"][self.current_parent_label_index]
-        dialog = AddEditItemDialog("Ajouter un Label Enfant", parent=self)
+        dialog = AddEditItemDialog("Ajouter Label Niveau 2", parent=self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data["name"]:
@@ -1089,1026 +1520,264 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     "category": [],
                     "files": [],
                     "file_contents": {},
+                    "outgoing_relations": [],
+                    "incoming_relations": []
                 }
-                current_parent["children"].append(new_child)
-                self._refresh_child_list()
+                self.current_level1_data["children"].append(new_child)
+                self._populate_child_list()
                 self.child_list_widget.setCurrentRow(self.child_list_widget.count() - 1)
-                logger.info(f"Label enfant ajouté : {data['name']}")
+                self._collect_all_labels()
+                self._update_button_states()
+                logger.info(f"Label niveau 2 ajouté: {data['name']}")
 
     def _edit_child_label(self):
-        """Édite le label enfant sélectionné."""
-        if self.current_child_label_index < 0 or self.current_child_is_file:
+        current = self.child_list_widget.currentItem()
+        if not current:
             return
-        current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-        current_parent = current_root["parents"][self.current_parent_label_index]
-        current_child = current_parent["children"][self.current_child_label_index]
-        dialog = AddEditItemDialog(
-            "Éditer le Label Enfant",
-            current_name=current_child["label"],
-            current_description=current_child.get("description", ""),
-            parent=self
-        )
+        index = self.child_list_widget.row(current)
+        child = self.current_level1_data["children"][index]
+        dialog = AddEditItemDialog("Modifier Label Niveau 2", child["label"], child["description"], self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data["name"]:
-                current_child["label"] = data["name"]
-                current_child["description"] = data["description"]
-                self._refresh_child_list()
-                self._update_selected_details("Label Enfant", current_child, source=current_parent["label"])
-                logger.info(f"Label enfant modifié : {data['name']}")
+                child["label"] = data["name"]
+                child["description"] = data["description"]
+                self._populate_child_list()
+                self._collect_all_labels()
+                self._update_button_states()
+                logger.info(f"Label niveau 2 modifié: {data['name']}")
 
     def _remove_child_label(self):
-        """Supprime le label enfant sélectionné."""
-        if self.current_child_label_index < 0 or self.current_child_is_file:
+        current = self.child_list_widget.currentItem()
+        if not current:
             return
-        reply = QtWidgets.QMessageBox.question(
-            self,
-            "Confirmer suppression",
-            f"Supprimer le label enfant '{self.current_cluster_data['root_labels'][self.current_root_label_index]['parents'][self.current_parent_label_index]['children'][self.current_child_label_index]['label']}' ?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-        )
+        index = self.child_list_widget.row(current)
+        child_name = self.current_level1_data["children"][index]["label"]
+        reply = QtWidgets.QMessageBox.question(self, "Confirmer", f"Supprimer le label niveau 2 '{child_name}'?")
         if reply == QtWidgets.QMessageBox.Yes:
-            current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            current_parent = current_root["parents"][self.current_parent_label_index]
-            del current_parent["children"][self.current_child_label_index]
-            self._refresh_child_list()
-            target = f"Enfants: {len(current_parent.get('children', []))}"
-            self._update_selected_details("Label Parent", current_parent, source=current_root["label"], target=target)
-            logger.info("Label enfant supprimé")
+            del self.current_level1_data["children"][index]
+            self._populate_child_list()
+            self._collect_all_labels()
+            self._update_button_states()
+            logger.info(f"Label niveau 2 supprimé: {child_name}")
 
-    # === GESTION DE LA HIÉRARCHIE ===
-    def _on_cluster_selected(self, current, previous):
-        """Gère la sélection d'un cluster ou fichier de niveau supérieur."""
-        self.current_cluster_index = -1
-        self.current_cluster_data = None
-        self.current_top_level_is_file = False
-        self.current_top_level_filename = None
-
-        turing_ontology = self.current_project_profile_data.get("turing_ontology", {}) if self.current_project_profile_data else {}
-        clusters = turing_ontology.get("clusters_detailed", [])
-
-        if current:
-            item_text = current.text()
-            if item_text.startswith("📄 "):
-                self.current_top_level_is_file = True
-                self.current_top_level_filename = item_text[2:]
-                content = self.current_project_profile_data.get("file_contents", {}).get(self.current_top_level_filename, "(contenu non disponible)")
-                self._update_selected_details_for_file("Fichier (Projet)", self.current_top_level_filename, content)
-                self._reset_hierarchy_ui()
-            else:
-                self.current_top_level_is_file = False
-                self.current_cluster_index = self._find_cluster_index_by_name(item_text, clusters)
-                if self.current_cluster_index >= 0:
-                    self.current_cluster_data = clusters[self.current_cluster_index]
-                    target = f"Labels racines: {len(self.current_cluster_data.get('root_labels', []))}"
-                    self._update_selected_details("Cluster", self.current_cluster_data, target=target)
-                    self._refresh_root_list()
-                else:
-                    # Inconnu, reset
-                    self._update_project_details()
-                    self._reset_hierarchy_ui()
-        else:
-            self._update_project_details()
-            self._reset_hierarchy_ui()
-        self._update_hierarchy_button_states()
-
-    def _refresh_cluster_list(self):
-        """Rafraîchit la liste des clusters et fichiers de niveau supérieur, dossiers en haut, fichiers en bas."""
-        self.cluster_list_widget.clear()
-        if self.current_project_profile_data:
-            turing_ontology = self.current_project_profile_data.get("turing_ontology", {})
-            clusters = turing_ontology.get("clusters_detailed", [])
-            files = self.current_project_profile_data.get("files", [])
-            # Dossiers (clusters) en premier, triés
-            cluster_items = sorted([(cluster["name"], "cluster") for cluster in clusters], key=lambda x: x[0].lower())
-            for name, _ in cluster_items:
-                self.cluster_list_widget.addItem(name)
-            # Fichiers ensuite, triés
-            file_items = sorted(files)
-            for f in file_items:
-                self.cluster_list_widget.addItem(f"📄 {f}")
-
-    def _find_cluster_index_by_name(self, item_text, clusters_list):
-        """Trouve l'index d'un cluster par son nom dans la liste."""
-        for i, cluster in enumerate(clusters_list):
-            if cluster["name"] == item_text:
-                return i
-        return -1
-
-    def _get_grouped_items(self, labels_list, files_list):
-        """Retourne d'abord les labels triés, puis les fichiers triés."""
-        # Labels en premier, triés
-        label_items = sorted([(label["label"], "label") for label in labels_list], key=lambda x: x[0].lower())
-        # Fichiers ensuite, triés
-        file_items = sorted([(f, "file") for f in files_list], key=lambda x: x[0].lower())
-        return label_items + file_items
-
-    def _find_label_index_by_name(self, item_text, labels_list):
-        """Trouve l'index d'un label par son nom dans la liste."""
-        for i, label in enumerate(labels_list):
-            if label["label"] == item_text:
-                return i
-        return -1
-
-    def _on_root_label_selected(self, current, previous):
-        """Gère la sélection d'un label racine ou fichier."""
-        self.current_root_label_index = -1
-        self.current_root_is_file = False
-        self.current_root_filename = None
-        self.current_parent_label_index = -1
-        self.current_parent_is_file = False
-        self.current_parent_filename = None
-        self.current_child_label_index = -1
-        self.current_child_is_file = False
-        self.current_child_filename = None
-
-        if not self.current_cluster_data:
-            self._update_project_details()
-            self._reset_parent_ui()
-            self._update_hierarchy_button_states()
-            return
-
-        # Niveau cluster
-        if current:
-            item_text = current.text()
-            if item_text.startswith("📄 "):
-                self.current_root_is_file = True
-                self.current_root_filename = item_text[2:]
-                self._update_selected_details_for_file("Fichier (Cluster)", self.current_root_filename, self.current_cluster_data["file_contents"].get(self.current_root_filename, ""))
-                self._reset_parent_ui()
-            else:
-                # Chercher l'index dans root_labels
-                self.current_root_label_index = self._find_label_index_by_name(item_text, self.current_cluster_data.get("root_labels", []))
-                if self.current_root_label_index >= 0:
-                    current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-                    target = f"Parents: {len(current_root.get('parents', []))}"
-                    self._update_selected_details("Label Racine", current_root, source=self.current_cluster_data["name"], target=target)
-                    self._refresh_parent_list()
-                else:
-                    # Inconnu, reset
-                    self._reset_parent_ui()
-        else:
-            if self.current_cluster_data:
-                target = f"Labels racines: {len(self.current_cluster_data.get('root_labels', []))}"
-                self._update_selected_details("Cluster", self.current_cluster_data, target=target)
-            self._reset_parent_ui()
-        self._update_hierarchy_button_states()
-
-    def _refresh_root_list(self):
-        """Rafraîchit la liste des labels racines et fichiers du cluster, dossiers en haut, fichiers en bas."""
-        self.root_list_widget.clear()
-        if self.current_cluster_data:
-            items = self._get_grouped_items(self.current_cluster_data.get("root_labels", []), self.current_cluster_data.get("files", []))
-            for name, item_type in items:
-                if item_type == "file":
-                    self.root_list_widget.addItem(f"📄 {name}")
-                else:
-                    self.root_list_widget.addItem(name)
-
-    def _on_parent_label_selected(self, current, previous):
-        """Gère la sélection d'un label parent ou fichier."""
-        self.current_parent_label_index = -1
-        self.current_parent_is_file = False
-        self.current_parent_filename = None
-        self.current_child_label_index = -1
-        self.current_child_is_file = False
-        self.current_child_filename = None
-    
-        # ✅ CORRECTION : Vérifications de sécurité
-        if not self.current_cluster_data:
-            self._update_project_details()
-            self._reset_child_ui()
-            self._update_hierarchy_button_states()
-            return
-        
-        if self.current_root_label_index < 0 or self.current_root_label_index >= len(self.current_cluster_data.get("root_labels", [])):
-            self._update_project_details()
-            self._reset_child_ui()
-            self._update_hierarchy_button_states()
-            return
-    
-        if current and self.current_root_label_index >= 0 and not self.current_root_is_file:
-            item_text = current.text()
-            current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            
-            if item_text.startswith("📄 "):
-                self.current_parent_is_file = True
-                self.current_parent_filename = item_text[2:]
-                self._update_selected_details_for_file("Fichier (Root)", self.current_parent_filename, current_root.get("file_contents", {}).get(self.current_parent_filename, ""), source=current_root["label"])
-                self._reset_child_ui()
-            else:
-                # Chercher l'index dans parents
-                self.current_parent_label_index = self._find_label_index_by_name(item_text, current_root.get("parents", []))
-                if self.current_parent_label_index >= 0:
-                    current_parent = current_root["parents"][self.current_parent_label_index]
-                    target = f"Enfants: {len(current_parent.get('children', []))}"
-                    self._update_selected_details("Label Parent", current_parent, source=current_root["label"], target=target)
-                    self._refresh_child_list()
-                else:
-                    # Inconnu, reset
-                    self._reset_child_ui()
-        else:
-            # Gestion des cas de désélection avec vérifications
-            if self.current_root_label_index >= 0 and not self.current_root_is_file:
-                if self.current_root_label_index < len(self.current_cluster_data.get("root_labels", [])):
-                    current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-                    target = f"Parents: {len(current_root.get('parents', []))}"
-                    self._update_selected_details("Label Racine", current_root, source=self.current_cluster_data["name"], target=target)
-            elif self.current_cluster_index >= 0 and self.current_cluster_data:
-                target = f"Labels racines: {len(self.current_cluster_data.get('root_labels', []))}"
-                self._update_selected_details("Cluster", self.current_cluster_data, target=target)
-            else:
-                self._update_project_details()
-            self._reset_child_ui()
-        
-        self._update_hierarchy_button_states()
-
-    def _refresh_parent_list(self):
-        """Rafraîchit la liste des labels parents et fichiers du root, dossiers en haut, fichiers en bas."""
-        self.parent_list_widget.clear()
-        if self.current_root_label_index >= 0 and self.current_cluster_data and not self.current_root_is_file:
-            current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            items = self._get_grouped_items(current_root.get("parents", []), current_root.get("files", []))
-            for name, item_type in items:
-                if item_type == "file":
-                    self.parent_list_widget.addItem(f"📄 {name}")
-                else:
-                    self.parent_list_widget.addItem(name)
-
-    def _on_child_label_selected(self, current, previous):
-        """Gère la sélection d'un label enfant ou fichier."""
-        self.current_child_label_index = -1
-        self.current_child_is_file = False
-        self.current_child_filename = None
-
-        # ✅ CORRECTION : Vérification complète avant accès
-        if not self.current_cluster_data:
-            self._update_project_details()
-            self._update_hierarchy_button_states()
-            return
-
-        if self.current_root_label_index < 0 or self.current_root_label_index >= len(self.current_cluster_data.get("root_labels", [])):
-            self._update_project_details()
-            self._update_hierarchy_button_states()
-            return
-
-        if current and self.current_parent_label_index >= 0 and not self.current_parent_is_file:
-            item_text = current.text()
-            current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-
-            # ✅ Vérification que parents existe
-            if self.current_parent_label_index >= len(current_root.get("parents", [])):
-                self._update_project_details()
-                self._update_hierarchy_button_states()
-                return
-
-            current_parent = current_root["parents"][self.current_parent_label_index]
-
-            if item_text.startswith("📄 "):
-                self.current_child_is_file = True
-                self.current_child_filename = item_text[2:]
-                self._update_selected_details_for_file("Fichier (Parent)", self.current_child_filename, current_parent.get("file_contents", {}).get(self.current_child_filename, ""), source=current_parent["label"])
-            else:
-                # Chercher l'index dans children
-                self.current_child_label_index = self._find_label_index_by_name(item_text, current_parent.get("children", []))
-                if self.current_child_label_index >= 0:
-                    current_child = current_parent["children"][self.current_child_label_index]
-                    self._update_selected_details("Label Enfant", current_child, source=current_parent["label"])
-        else:
-            if self.current_parent_label_index >= 0 and not self.current_parent_is_file:
-                current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-                if self.current_parent_label_index < len(current_root.get("parents", [])):
-                    current_parent = current_root["parents"][self.current_parent_label_index]
-                    target = f"Enfants: {len(current_parent.get('children', []))}"
-                    self._update_selected_details("Label Parent", current_parent, source=current_root["label"], target=target)
-            elif self.current_root_label_index >= 0 and not self.current_root_is_file:
-                current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-                target = f"Parents: {len(current_root.get('parents', []))}"
-                self._update_selected_details("Label Racine", current_root, source=self.current_cluster_data["name"], target=target)
-            elif self.current_cluster_index >= 0:
-                target = f"Labels racines: {len(self.current_cluster_data.get('root_labels', []))}"
-                self._update_selected_details("Cluster", self.current_cluster_data, target=target)
-            else:
-                self._update_project_details()
-
-        self._update_hierarchy_button_states()
-
-    def _refresh_child_list(self):
-        """Rafraîchit la liste des labels enfants et fichiers du parent, dossiers en haut, fichiers en bas."""
-        self.child_list_widget.clear()
-        if self.current_parent_label_index >= 0 and self.current_root_label_index >= 0 and self.current_cluster_data and not self.current_parent_is_file:
-            current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            current_parent = current_root["parents"][self.current_parent_label_index]
-            items = self._get_grouped_items(current_parent.get("children", []), current_parent.get("files", []))
-            for name, item_type in items:
-                if item_type == "file":
-                    self.child_list_widget.addItem(f"📄 {name}")
-                else:
-                    self.child_list_widget.addItem(name)
-
-    def _reset_hierarchy_ui(self):
-        """Réinitialise l'UI de la hiérarchie."""
-        self._reset_parent_ui()
-        self.root_list_widget.clear()
-
-    def _reset_parent_ui(self):
-        """Réinitialise l'UI des parents et enfants."""
-        self._reset_child_ui()
-        self.parent_list_widget.clear()
-
-    def _reset_child_ui(self):
-        """Réinitialise l'UI des enfants."""
-        self.child_list_widget.clear()
-
-    def _modify_category_for_selected_label(self, level_type):
-        """Modifie les catégories pour le label sélectionné."""
-        if level_type == "root" and self.current_root_label_index >= 0 and not self.current_root_is_file:
-            current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            dialog = CategoryEditDialog(current_root["category"], self)
-        elif level_type == "parent" and self.current_parent_label_index >= 0 and not self.current_parent_is_file:
-            current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            current_parent = current_root["parents"][self.current_parent_label_index]
-            dialog = CategoryEditDialog(current_parent["category"], self)
-        elif level_type == "child" and self.current_child_label_index >= 0 and not self.current_child_is_file:
-            current_root = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            current_parent = current_root["parents"][self.current_parent_label_index]
-            current_child = current_parent["children"][self.current_child_label_index]
-            dialog = CategoryEditDialog(current_child["category"], self)
+    def _modify_category_for_selected_label(self, level):
+        if level == "root" and self.current_root_label_index >= 0:
+            label_data = self.current_root_data
+            list_widget = self.root_list_widget
+        elif level == "level1" and self.current_level1_label_index >= 0:
+            label_data = self.current_level1_data
+            list_widget = self.level1_list_widget
+        elif level == "child" and self.current_level2_label_index >= 0:
+            label_data = self.current_level2_data
+            list_widget = self.child_list_widget
         else:
             return
 
+        current_categories = label_data.get("category", [])
+        dialog = CategoryEditDialog(current_categories, self)
         if dialog.exec_() == QDialog.Accepted:
             new_categories = dialog.get_categories()
-            if level_type == "root":
-                current_root["category"] = new_categories
-                target = f"Parents: {len(current_root.get('parents', []))}"
-                self._update_selected_details("Label Racine", current_root, source=self.current_cluster_data["name"], target=target)
-            elif level_type == "parent":
-                current_parent["category"] = new_categories
-                target = f"Enfants: {len(current_parent.get('children', []))}"
-                self._update_selected_details("Label Parent", current_parent, source=current_root["label"], target=target)
-            elif level_type == "child":
-                current_child["category"] = new_categories
-                self._update_selected_details("Label Enfant", current_child, source=current_parent["label"])
-            logger.info(f"Catégories modifiées pour {level_type} label.")
+            label_data["category"] = new_categories
+            current_row = list_widget.currentRow()
+            if current_row >= 0:
+                current_item = list_widget.item(current_row)
+                if current_item:
+                    display = label_data['label']
+                    current_item.setText(display)
+            self._update_button_states()
+            logger.info(f"Catégories modifiées pour {label_data['label']}: {new_categories}")
 
-    # === ÉTATS DES BOUTONS ===
-    def _update_hierarchy_button_states(self):
-        """Met à jour l'état des boutons de la hiérarchie."""
-        has_cluster = bool(self.current_cluster_data)
-        has_root_label = self.current_root_label_index >= 0 and not self.current_root_is_file
-        has_root_file = self.current_root_is_file
-        has_parent_label = self.current_parent_label_index >= 0 and not self.current_parent_is_file
-        has_parent_file = self.current_parent_is_file
-        has_child_label = self.current_child_label_index >= 0 and not self.current_child_is_file
-        has_child_file = self.current_child_is_file
+    def _add_all_files_from_dir(self, dir_path, base_dir, label, profile):
+        """Ajoute récursivement tous les fichiers d'un dossier à un label."""
+        for root, dirs, files in os.walk(dir_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, base_dir)
+                content = ''
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                except Exception as e:
+                    logger.warning(f"Could not read {file_path}: {e}")
+                profile['files'].append(rel_path)
+                profile['file_contents'][rel_path] = content
+                label['files'].append(rel_path)
+                label['file_contents'][rel_path] = content
 
-        self.edit_cluster_button.setEnabled(has_cluster)
-        self.remove_cluster_button.setEnabled(has_cluster)
-        self.import_folder_button.setEnabled(has_cluster)
+    def _build_sub_hierarchy(self, dir_path, base_dir, parent_label, is_parents=True, profile=None):
+        """Construit la hiérarchie récursivement à partir d'un dossier."""
+        level_key = 'children' if is_parents else 'children'
+        for item in sorted(os.listdir(dir_path)):
+            item_path = os.path.join(dir_path, item)
+            rel_path = os.path.relpath(item_path, base_dir)
+            if os.path.isfile(item_path):
+                content = ''
+                try:
+                    with open(item_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                except Exception as e:
+                    logger.warning(f"Could not read {item_path}: {e}")
+                if profile:
+                    profile['files'].append(rel_path)
+                    profile['file_contents'][rel_path] = content
+                new_label = {
+                    'label': item,
+                    'id': str(uuid.uuid4()),
+                    'description': f"Fichier: {rel_path}",
+                    'category': ['file'],
+                    'files': [rel_path],
+                    'file_contents': {rel_path: content},
+                    'parents': [],
+                    'children': [],
+                    'outgoing_relations': [],
+                    'incoming_relations': []
+                }
+                parent_label[level_key].append(new_label)
+            elif os.path.isdir(item_path):
+                new_label = {
+                    'label': item,
+                    'id': str(uuid.uuid4()),
+                    'description': f"Dossier: {rel_path}",
+                    'category': ['folder'],
+                    'files': [],
+                    'file_contents': {},
+                    'parents': [],
+                    'children': [],
+                    'outgoing_relations': [],
+                    'incoming_relations': []
+                }
+                parent_label[level_key].append(new_label)
+                if is_parents:
+                    self._build_sub_hierarchy(item_path, base_dir, new_label, False, profile)
+                else:
+                    # Pour le niveau children, ajouter les fichiers profonds au label
+                    self._add_all_files_from_dir(item_path, base_dir, new_label, profile)
 
-        self.add_root_button.setEnabled(has_cluster)
-        self.edit_root_button.setEnabled(has_root_label)
-        self.remove_root_button.setEnabled(has_root_label)
-        self.modify_category_root_button.setEnabled(has_root_label)
-
-        self.add_parent_button.setEnabled(has_root_label)
-        self.edit_parent_button.setEnabled(has_parent_label)
-        self.remove_parent_button.setEnabled(has_parent_label)
-        self.modify_category_parent_button.setEnabled(has_parent_label)
-
-        self.add_child_button.setEnabled(has_parent_label)
-        self.edit_child_button.setEnabled(has_child_label)
-        self.remove_child_button.setEnabled(has_child_label)
-        self.modify_category_child_button.setEnabled(has_child_label)
-
-    def _update_button_states(self):
-        """Met à jour l'état des boutons généraux."""
-        has_project = bool(self.current_project_name)
-        self.delete_project_button.setEnabled(has_project)
-        self.save_button.setEnabled(has_project)
-        self.insert_dgraph_button.setEnabled(has_project and self.is_configured())
-        self.export_profile_button.setEnabled(has_project)
-        self.add_cluster_button.setEnabled(has_project)
-        self._update_hierarchy_button_states()
+    def _scan_project_directory(self, directory):
+        """Scanne un dossier et crée une structure hiérarchique avec un cluster par élément de niveau supérieur."""
+        profile = {
+            'name': os.path.basename(directory),
+            'description': f"Projet importé depuis {directory}",
+            'files': [],
+            'file_contents': {},
+            'turing_ontology': {
+                'clusters_detailed': []
+            },
+            'pending_relations': {}
+        }
+        for item in sorted(os.listdir(directory)):
+            item_path = os.path.join(directory, item)
+            cluster = {
+                'name': item,
+                'id': str(uuid.uuid4()),
+                'description': f"{'Fichier' if os.path.isfile(item_path) else 'Dossier'}: {item}",
+                'files': [],
+                'file_contents': {},
+                'root_labels': []
+            }
+            if os.path.isfile(item_path):
+                rel_path = item
+                content = ''
+                try:
+                    with open(item_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                except Exception as e:
+                    logger.warning(f"Could not read {item_path}: {e}")
+                profile['files'].append(rel_path)
+                profile['file_contents'][rel_path] = content
+                new_root = {
+                    'label': item,
+                    'id': str(uuid.uuid4()),
+                    'description': f"Fichier: {rel_path}",
+                    'category': ['file'],
+                    'files': [rel_path],
+                    'file_contents': {rel_path: content},
+                    'parents': [],
+                    'children': [],
+                    'outgoing_relations': [],
+                    'incoming_relations': []
+                }
+                cluster['root_labels'].append(new_root)
+            elif os.path.isdir(item_path):
+                # Ajouter les contenus directs comme root_labels
+                for subitem in sorted(os.listdir(item_path)):
+                    subitem_path = os.path.join(item_path, subitem)
+                    sub_rel_path = os.path.relpath(subitem_path, directory)
+                    if os.path.isfile(subitem_path):
+                        content = ''
+                        try:
+                            with open(subitem_path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                        except Exception as e:
+                            logger.warning(f"Could not read {subitem_path}: {e}")
+                        profile['files'].append(sub_rel_path)
+                        profile['file_contents'][sub_rel_path] = content
+                        new_root = {
+                            'label': subitem,
+                            'id': str(uuid.uuid4()),
+                            'description': f"Fichier: {sub_rel_path}",
+                            'category': ['file'],
+                            'files': [sub_rel_path],
+                            'file_contents': {sub_rel_path: content},
+                            'parents': [],
+                            'children': [],
+                            'outgoing_relations': [],
+                            'incoming_relations': []
+                        }
+                        cluster['root_labels'].append(new_root)
+                    elif os.path.isdir(subitem_path):
+                        new_root = {
+                            'label': subitem,
+                            'id': str(uuid.uuid4()),
+                            'description': f"Dossier: {sub_rel_path}",
+                            'category': ['folder'],
+                            'files': [],
+                            'file_contents': {},
+                            'parents': [],
+                            'children': [],
+                            'outgoing_relations': [],
+                            'incoming_relations': []
+                        }
+                        cluster['root_labels'].append(new_root)
+                        # Construire la hiérarchie pour ce sous-dossier
+                        self._build_sub_hierarchy(subitem_path, directory, new_root, True, profile)
+            profile['turing_ontology']['clusters_detailed'].append(cluster)
+        logger.info(f"Scanné {len(profile['files'])} fichiers depuis {directory}")
+        return profile
 
     def _on_upload_local_project(self):
-        """Charge un projet local depuis un dossier entier avec scan hiérarchique."""
-        directory = QFileDialog.getExistingDirectory(self, "Sélectionner un dossier projet")
+        directory = QFileDialog.getExistingDirectory(self, "Sélectionner un dossier projet local")
         if directory:
-            try:
-                local_data = self._scan_project_directory(directory)
-                project_name = local_data["name"]
-                if not project_name:
-                    QtWidgets.QMessageBox.warning(self, "Erreur", "Le dossier sélectionné ne peut pas être utilisé comme projet (nom manquant).")
-                    return
-                if project_name in self.project_profiles:
-                    reply = QtWidgets.QMessageBox.question(
-                        self,
-                        "Projet existant",
-                        f"Le projet '{project_name}' existe déjà. Remplacer ?",
-                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    )
-                    if reply != QtWidgets.QMessageBox.Yes:
-                        return
-                self.project_profiles[project_name] = local_data
-                self._update_project_combo()
-                self.project_combo.setCurrentText(project_name)
-                self._on_project_selected(self.project_combo.currentIndex())
-                QtWidgets.QMessageBox.information(self, "Succès", f"Projet '{project_name}' uploadé depuis le dossier {directory}.")
-                logger.info(f"Projet local uploadé : {project_name} depuis {directory}")
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(self, "Erreur", f"Échec de l'upload : {str(e)}")
-                logger.error(f"Erreur upload local : {str(e)}")
-
-    # === SAUVEGARDE ET CHARGEMENT ===
-    def _on_save_profile(self):
-        """Sauvegarde le profil actuel (local + Dgraph)."""
-        if not self.current_project_name:
-            QtWidgets.QMessageBox.warning(self, tr("project_config.save_title"), tr("project_config.no_project_save_msg"))
-            return
-
-        old_project_name = None
-        current_name_in_edit = self.project_name_edit.text().strip()
-        if current_name_in_edit and current_name_in_edit != self.current_project_name:
-            old_project_name = self.current_project_name
-            rename = True
-        else:
-            current_name_in_edit = self.current_project_name
-            rename = False
-
-        self.current_project_profile_data["name"] = current_name_in_edit
-        self.current_project_profile_data["description"] = self.project_description_edit.toPlainText().strip()
-        self.current_project_profile_data["last_modified"] = datetime.now().isoformat()
-
-        if rename:
-            if not self.dgraph_connector.client:
-                self.dgraph_connector.connect()
-            query_result = self.dgraph_connector.query_workspaces()
-            if query_result is None:
-                logger.error("Query workspaces failed during rename check.")
-                QtWidgets.QMessageBox.critical(self, "Erreur Dgraph", "Impossible de vérifier les projets existants. Sauvegarde annulée.")
-                return
-            new_exists = any(item.get('name') == current_name_in_edit for item in query_result.get('q', []))
-            if new_exists:
-                QtWidgets.QMessageBox.warning(self, tr("project_config.duplicate_title"), "Nom de projet déjà existant dans Dgraph.")
-                return
-            old_exists = any(item.get('name') == old_project_name for item in query_result.get('q', []))
-            if old_exists:
-                old_uid = next((item['uid'] for item in query_result['q'] if item['name'] == old_project_name), None)
-                if old_uid:
-                    to_delete = self._collect_uids_to_delete(old_uid)
-                    self._collect_and_delete_uids(to_delete)
-                    logger.info(f"Supprimé ancien workspace pour rename : {old_project_name}")
-            self.current_project_name = current_name_in_edit
-            rename = True
-
-        if not rename:
-            if not self.dgraph_connector.client:
-                self.dgraph_connector.connect()
-            query_result = self.dgraph_connector.query_workspaces()
-            if query_result is None:
-                logger.error("Query workspaces failed during existence check.")
-                QtWidgets.QMessageBox.critical(self, "Erreur Dgraph", "Impossible de vérifier le projet existant. Sauvegarde annulée.")
-                return
-            exists = any(item.get('name') == self.current_project_name for item in query_result.get('q', []))
-            if exists:
-                uid = next((item['uid'] for item in query_result['q'] if item['name'] == self.current_project_name), None)
-                if uid:
-                    to_delete = self._collect_uids_to_delete(uid)
-                    self._collect_and_delete_uids(to_delete)
-                    logger.info(f"Supprimé workspace existant pour modification : {self.current_project_name}")
-
-        self.project_profiles[self.current_project_name] = self.current_project_profile_data
-        
-        mutations = self._generate_dgraph_mutations(self.current_project_profile_data)
-        success = self.dgraph_connector.insert_mutations(mutations)
-        
-        if success:
-            self._load_project_profiles()
+            scanned_data = self._scan_project_directory(directory)
+            project_name = scanned_data['name']
+            self.project_profiles[project_name] = json.loads(json.dumps(scanned_data))
             self._update_project_combo()
-            self.project_combo.setCurrentText(self.current_project_name)
-            self.project_profile_saved.emit(self.current_project_name, self.current_project_profile_data)
-            logger.info(f"Projet '{self.current_project_name}' modifié/sauvegardé.")
-            QtWidgets.QMessageBox.information(self, "Succès", f"Projet '{self.current_project_name}' modifié avec succès dans Dgraph.")
-        else:
-            logger.error("Échec insertion Dgraph lors de la modification.")
-            QtWidgets.QMessageBox.critical(self, "Erreur", "Échec de la modification dans Dgraph.")
-
-    def _on_export_profile(self):
-        """Exporte le profil actuel vers un fichier JSON."""
-        if not self.current_project_name:
-            QtWidgets.QMessageBox.warning(self, "Erreur", "Aucun projet sélectionné pour exporter.")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Exporter le profil de projet",
-            f"{self.current_project_name}.json",
-            "JSON Files (*.json)"
-        )
-        if file_path:
-            try:
-                export_data = {
-                    "name": self.current_project_name,
-                    "description": self.project_description_edit.toPlainText().strip(),
-                    "files": self.current_project_profile_data.get("files", []),
-                    "file_contents": self.current_project_profile_data.get("file_contents", {}),
-                    "turing_ontology": self.current_project_profile_data.get("turing_ontology", {}),
-                    "exported_at": datetime.now().isoformat()
-                }
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(export_data, f, indent=4, ensure_ascii=False)
-                QtWidgets.QMessageBox.information(self, "Succès", f"Projet '{self.current_project_name}' exporté vers {file_path}.")
-                logger.info(f"Projet exporté : {file_path}")
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(self, "Erreur", f"Échec de l'export : {str(e)}")
-                logger.error(f"Erreur export : {str(e)}")
-
-    def _on_insert_dgraph(self):
-        """Insère directement l'ontologie du projet actuel dans Dgraph."""
-        if not self.current_project_profile_data:
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("project_config.insert_dgraph_title"),
-                tr("project_config.no_project_data_insert_msg"),
-            )
-            return
-
-        if not self.is_configured():
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("project_config.insert_dgraph_title"),
-                tr("project_config.not_configured_insert_msg"),
-            )
-            return
-
-        if not self.dgraph_connector.client:
-            reply = QtWidgets.QMessageBox.question(
-                self,
-                tr("project_config.insert_dgraph_title"),
-                "Connexion à Dgraph non disponible. Voulez-vous réessayer de vous connecter ?",
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            )
-            if reply == QtWidgets.QMessageBox.Yes:
-                if not self.dgraph_connector.connect():
-                    QtWidgets.QMessageBox.critical(
-                        self,
-                        tr("project_config.insert_dgraph_title"),
-                        "Impossible de se connecter à Dgraph. Vérifiez que Dgraph est démarré.",
-                    )
-                    return
-            else:
-                return
-
-        try:
-            mutations = self._generate_dgraph_mutations(self.current_project_profile_data)
-
-            if not mutations:
-                logger.info("Aucune mutation à effectuer pour les données du projet actuel.")
-                return
-
-            success = self.dgraph_connector.insert_mutations(mutations)
-
-            if success:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    tr("project_config.insert_dgraph_title"),
-                    tr("project_config.insert_dgraph_success_msg").format(
-                        project_name=self.current_project_name
-                    ),
-                )
-                logger.info(f"Ontologie insérée avec succès dans Dgraph pour le projet : {self.current_project_name}")
-                self.dgraph_connector.open_ratel()
-            else:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    tr("project_config.insert_dgraph_title"),
-                    "Échec de l'insertion dans Dgraph.",
-                )
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'insertion dans Dgraph : {str(e)}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                tr("project_config.insert_dgraph_title"),
-                tr("project_config.insert_dgraph_error_msg").format(error=str(e)),
-            )
-
-    def _generate_dgraph_mutations(self, project_data):
-        """Génère la liste des mutations Dgraph à partir des données du projet."""
-        USER_ID = self.conductor.get_current_user_id() if hasattr(self.conductor, 'get_current_user_id') else str(uuid.uuid4())
-        WORKSPACE_ID = str(uuid.uuid4())
-
-        mutations = []
-        
-        turing_ontology = project_data.get("turing_ontology", {})
-        clusters_detailed_from_project = turing_ontology.get("clusters_detailed", [])
-
-        cluster_uuid_to_blank_uid_map = {} 
-        all_cluster_blank_uids_for_workspace = []
-
-        for i, cluster_data in enumerate(clusters_detailed_from_project):
-            cluster_name = cluster_data["name"]
-            cluster_unique_id = cluster_data["id"]
-            cluster_blank_uid = f"_:cluster_{cluster_unique_id.replace('-', '_')}"
-            
-            cluster_uuid_to_blank_uid_map[cluster_unique_id] = cluster_blank_uid
-
-            now_iso = datetime.now().isoformat() + "Z"
-            
-            file_contents_str = json.dumps(cluster_data.get("file_contents", {}))
-            
-            cluster_mutation = {
-                "uid": cluster_blank_uid,
-                "dgraph.type": "Cluster",
-                "id": str(cluster_unique_id),
-                "name": cluster_name,
-                "description": cluster_data.get("description", ""),
-                "files": cluster_data.get("files", []),
-                "fileContents": file_contents_str,
-                "userId": USER_ID,
-                "createdAt": now_iso,
-                "updatedAt": now_iso,
-            }
-            mutations.append(cluster_mutation)
-            
-            all_cluster_blank_uids_for_workspace.append(cluster_blank_uid)
-            logger.debug(f"Prepared cluster: {cluster_name} (ID: {cluster_unique_id})")
-
-        workspace_unique_id = WORKSPACE_ID
-        now_iso = datetime.now().isoformat() + "Z"
-        
-        clusters_list = [{"uid": blank_uid} for blank_uid in all_cluster_blank_uids_for_workspace]
-        
-        workspace_name = project_data.get("name", "")
-        workspace_description = project_data.get("description", "")
-        files = project_data.get("files", [])
-        file_contents_str = json.dumps(project_data.get("file_contents", {}))
-        workspace_mutation = {
-            "uid": f"_:workspace_node",
-            "dgraph.type": "Workspace",
-            "name": workspace_name,
-            "description": workspace_description,
-            "files": files,
-            "fileContents": file_contents_str,
-            "id": workspace_unique_id,
-            "ownerId": USER_ID,
-            "updatedAt": now_iso,
-            "clusterManagement": {
-                "uid": f"_:cluster_management_node",
-                "dgraph.type": "ClusterManagement",
-                "lastUpdated": now_iso,
-                "version": "1.0",
-                "clusters": clusters_list
-            }
-        }
-        mutations.append(workspace_mutation)
-        logger.debug(f"Prepared Workspace (ID: {workspace_unique_id})")
-
-        def _process_label_hierarchy(label_data, level_numeric, parent_uid_for_relation, current_path_ids, containing_cluster_unique_id, containing_cluster_blank_uid, all_mutations):
-            label_name = label_data.get("label", label_data.get("name", ""))
-            label_category = label_data.get("category", [])
-            if isinstance(label_category, str):
-                label_category = [label_category]
-            elif label_category is None:
-                label_category = []
-            if not isinstance(label_category, list):
-                label_category = []
-            
-            label_unique_id = label_data.get("id", str(uuid.uuid4()))
-            label_blank_uid = f"_:label_{label_unique_id.replace('-', '_')}"
-            
-            if level_numeric == 0:
-                full_path = "/"
-            else:
-                full_path = "/".join(current_path_ids) + "/"
-            now_iso = datetime.now().isoformat() + "Z"
-            
-            file_contents_str = json.dumps(label_data.get("file_contents", {}))
-            
-            label_node = {
-                "uid": label_blank_uid,
-                "dgraph.type": "Label",
-                "id": label_unique_id,
-                "name": label_name,
-                "level": level_numeric,
-                "path": full_path,
-                "category": label_category,
-                "description": label_data.get("description", ""),
-                "files": label_data.get("files", []),
-                "fileContents": file_contents_str,
-                "createdAt": now_iso,
-                "updatedAt": now_iso,
-            }
-            if parent_uid_for_relation:
-                label_node["parents"] = [{"uid": parent_uid_for_relation}]
-                if current_path_ids:
-                    label_node["parentId"] = current_path_ids[-1] 
-                else:
-                    label_node["parentId"] = ""
-            if containing_cluster_unique_id and containing_cluster_blank_uid:
-                label_node["clusters"] = [{"uid": containing_cluster_blank_uid}]
-            all_mutations.append(label_node)
-            next_level_numeric = level_numeric + 1
-            children_list_key = None
-            if level_numeric == 0:
-                children_list_key = "parents" 
-            elif level_numeric == 1:
-                children_list_key = "children"
-            if children_list_key and children_list_key in label_data:
-                for child_label_data in label_data[children_list_key]:
-                    _process_label_hierarchy(
-                        child_label_data,
-                        next_level_numeric,
-                        label_blank_uid,
-                        current_path_ids + [label_unique_id],
-                        containing_cluster_unique_id,
-                        containing_cluster_blank_uid,
-                        all_mutations
-                    )
-
-        # Process all labels from clusters (moved outside the nested function)
-        for cluster_data in clusters_detailed_from_project:
-            cluster_name = cluster_data["name"]
-            current_cluster_unique_id = cluster_data["id"]
-            current_cluster_blank_uid = cluster_uuid_to_blank_uid_map.get(current_cluster_unique_id)
-
-            if not current_cluster_unique_id or not current_cluster_blank_uid:
-                logger.warning(f"Could not find Dgraph ID/UID for cluster '{cluster_name}'.")
-                continue
-
-            root_labels_of_this_cluster = cluster_data.get("root_labels", [])
-            for root_label in root_labels_of_this_cluster:
-                _process_label_hierarchy(
-                    root_label,
-                    0,
-                    None,
-                    [],
-                    current_cluster_unique_id,
-                    current_cluster_blank_uid,
-                    mutations
-                )
-        
-        return mutations
-
-    def _load_project_profiles(self):
-        """Charge tous les profils de projet depuis Dgraph."""
-        try:
-            dgraph_profiles = {}
-            if self.dgraph_connector.client or self.dgraph_connector.connect():
-                logger.info("Chargement des profils depuis Dgraph...")
-                dgraph_profiles = self._load_profiles_from_dgraph_internal()
-                if dgraph_profiles:
-                    logger.info(f"{len(dgraph_profiles)} profils chargés depuis Dgraph.")
-                    self.project_profiles = dgraph_profiles
-                else:
-                    logger.warning("Aucun profil trouvé dans Dgraph.")
-
-            self._update_project_combo()
-
-            if self.project_profiles:
-                first_project_name = sorted(self.project_profiles.keys())[0]
-                self.project_combo.setCurrentText(first_project_name)
-                self.current_project_name = first_project_name
-                self.current_project_profile_data = json.loads(
-                    json.dumps(self.project_profiles[first_project_name])
-                )
-                self._load_project_data_into_ui()
-                self.delete_project_button.setEnabled(True)
-                self.save_button.setEnabled(True)
-                self.insert_dgraph_button.setEnabled(self.is_configured())
-            else:
-                logger.info("Aucun profil trouvé, démarrage vide.")
-                self._reset_ui()
-
-            self._update_button_states()
-
-        except Exception as e:
-            logger.error(f"Erreur critique lors du chargement : {str(e)}")
-            self.project_profiles = {}
-            self._update_project_combo()
-            self._reset_ui()
-            QtWidgets.QMessageBox.critical(
-                self,
-                tr("project_config.loading_error_title"),
-                f"Erreur de chargement : {str(e)}",
-            )
-
-    def _load_project_data_into_ui(self):
-        """Charge les données du projet dans l'UI."""
-        if not self.current_project_profile_data:
-            return
-
-        self.project_name_edit.setText(self.current_project_profile_data.get("name", ""))
-        self.project_description_edit.setPlainText(self.current_project_profile_data.get("description", ""))
-        self._refresh_cluster_list()
-
-    def _load_profiles_from_dgraph_internal(self):
-        """Charge les profils depuis Dgraph et les transforme en format Liris."""
-        if not self.dgraph_connector.client:
-            return {}
-
-        try:
-            query_result = self.dgraph_connector.query_workspaces()
-
-            if not query_result or not query_result.get('q'):
-                logger.info("Aucun workspace trouvé dans Dgraph.")
-                return {}
-
-            profiles = {}
-
-            for workspace in query_result['q']:
-                workspace_name = workspace.get('name', "")
-
-                # Charger fileContents pour workspace
-                file_contents_str = workspace.get('fileContents', '{}')
-                try:
-                    file_contents = json.loads(file_contents_str) if file_contents_str else {}
-                except Exception as e:
-                    logger.warning(f"Erreur parse fileContents workspace : {e}")
-                    file_contents = {}
-
-                clusters_detailed = []
-                cm = workspace.get('clusterManagement', {})
-
-                for cluster in cm.get('clusters', []):
-                    # Charger fileContents pour cluster
-                    cluster_file_contents_str = cluster.get('fileContents', '{}')
-                    try:
-                        cluster_file_contents = json.loads(cluster_file_contents_str) if cluster_file_contents_str else {}
-                    except Exception as e:
-                        logger.warning(f"Erreur parse fileContents cluster : {e}")
-                        cluster_file_contents = {}
-
-                    cluster_data = {
-                        "name": cluster.get('name', ''),
-                        "id": cluster.get('id', str(uuid.uuid4())),
-                        "description": cluster.get('description', ''),
-                        "files": cluster.get('files', []),
-                        "file_contents": cluster_file_contents,
-                        "root_labels": self._transform_root_labels(cluster.get('root_labels', []))
-                    }
-                    clusters_detailed.append(cluster_data)
-
-                profile_data = {
-                    "name": workspace_name,
-                    "description": workspace.get('description', ""),
-                    "files": workspace.get('files', []),
-                    "file_contents": file_contents,
-                    "created_at": workspace.get('updatedAt', datetime.now().isoformat()),
-                    "last_modified": workspace.get('updatedAt', datetime.now().isoformat()),
-                    "turing_ontology": {
-                        "clusters_detailed": clusters_detailed
-                    }
-                }
-
-                if workspace_name:
-                    profiles[workspace_name] = profile_data
-
-            return profiles
-
-        except Exception as e:
-            logger.error(f"Erreur lors du chargement depuis Dgraph : {e}")
-            return {}
-
-    def _transform_root_labels(self, dgraph_root_labels):
-        """Transforme les root_labels depuis le format Dgraph vers le format Liris."""
-        transformed = []
-    
-        for root in dgraph_root_labels:
-            # Charger fileContents pour root
-            root_file_contents_str = root.get('fileContents', '{}')
-            try:
-                root_file_contents = json.loads(root_file_contents_str) if root_file_contents_str else {}
-            except Exception as e:
-                logger.warning(f"Erreur parse fileContents root : {e}")
-                root_file_contents = {}
-            
-            root_obj = {
-                "label": root.get('name', ''),
-                "id": root.get('id', str(uuid.uuid4())),
-                "description": root.get('description', ''),
-                "category": root.get('category', []),
-                "files": root.get('files', []),
-                "file_contents": root_file_contents,
-                "parents": [],
-            }
-    
-            for parent in root.get('parents', []):
-                # Charger fileContents pour parent
-                parent_file_contents_str = parent.get('fileContents', '{}')
-                try:
-                    parent_file_contents = json.loads(parent_file_contents_str) if parent_file_contents_str else {}
-                except Exception as e:
-                    logger.warning(f"Erreur parse fileContents parent : {e}")
-                    parent_file_contents = {}
-                
-                parent_obj = {
-                    "label": parent.get('name', ''),
-                    "id": parent.get('id', str(uuid.uuid4())),
-                    "description": parent.get('description', ''),
-                    "category": parent.get('category', []),
-                    "files": parent.get('files', []),
-                    "file_contents": parent_file_contents,
-                    "children": [],
-                }
-    
-                for child in parent.get('children', []):
-                    # Charger fileContents pour child
-                    child_file_contents_str = child.get('fileContents', '{}')
-                    try:
-                        child_file_contents = json.loads(child_file_contents_str) if child_file_contents_str else {}
-                    except Exception as e:
-                        logger.warning(f"Erreur parse fileContents child : {e}")
-                        child_file_contents = {}
-                    
-                    child_obj = {
-                        "label": child.get('name', ''),
-                        "id": child.get('id', str(uuid.uuid4())),
-                        "description": child.get('description', ''),
-                        "category": child.get('category', []),
-                        "files": child.get('files', []),
-                        "file_contents": child_file_contents,
-                    }
-                    parent_obj['children'].append(child_obj)
-    
-                root_obj['parents'].append(parent_obj)
-    
-            transformed.append(root_obj)
-    
-        return transformed
-    
-    def _update_project_combo(self):
-        """Met à jour la combo box avec les noms de projets."""
-        self.project_combo.clear()
-        for project_name in sorted(self.project_profiles.keys()):
-            self.project_combo.addItem(project_name)
-
-    def _reset_ui(self):
-        """Réinitialise l'UI quand aucun projet n'est sélectionné."""
-        self.project_name_edit.clear()
-        self.project_description_edit.clear()
-        self.cluster_list_widget.clear()
-        self._reset_hierarchy_ui()
-        self.details_text.clear()
-        self.current_project_name = None
-        self.current_project_profile_data = None
-        self.current_cluster_index = -1
-        self.current_cluster_data = None
-        self.current_top_level_is_file = False
-        self.current_top_level_filename = None
-        self.current_root_label_index = -1
-        self.current_root_is_file = False
-        self.current_root_filename = None
-        self.current_parent_label_index = -1
-        self.current_parent_is_file = False
-        self.current_parent_filename = None
-        self.current_child_label_index = -1
-        self.current_child_is_file = False
-        self.current_child_filename = None
-        self._update_button_states()
-
-    def is_configured(self):
-        """Vérifie si le profil de projet actuel est configuré au minimum."""
-        if not self.current_project_profile_data:
-            return False
-        turing_config = self.current_project_profile_data.get("turing_ontology", {})
-
-        if not turing_config.get("clusters_detailed"):
-            return False
-
-        for cluster_data in turing_config["clusters_detailed"]:
-            if cluster_data.get("root_labels") and len(cluster_data["root_labels"]) > 0:
-                return True
-        return False
+            self.project_combo.setCurrentText(project_name)
+            self._on_project_selected(self.project_combo.currentIndex())
+            logger.info(f"Upload local complété pour: {directory}")
 
     def _on_add_new_project(self):
         """Crée un nouveau projet vide."""
-        name, ok = QtWidgets.QInputDialog.getText(self, "Nouveau Projet", "Nom du projet:")
-        if ok and name.strip():
-            project_name = name.strip()
-            if project_name in self.project_profiles:
-                QtWidgets.QMessageBox.warning(self, "Erreur", "Projet existant.")
-                return
-            new_profile = {
-                "name": project_name,
-                "description": "",
-                "files": [],
-                "file_contents": {},
-                "created_at": datetime.now().isoformat(),
-                "last_modified": datetime.now().isoformat(),
-                "turing_ontology": {"clusters_detailed": []}
-            }
-            self.project_profiles[project_name] = new_profile
-            self._update_project_combo()
-            self.project_combo.setCurrentText(project_name)
-            self.current_project_name = project_name
-            self.current_project_profile_data = json.loads(json.dumps(new_profile))
-            self._load_project_data_into_ui()
-            self._update_project_details()
-            self._update_button_states()
-            logger.info(f"Nouveau projet créé : {project_name}")
+        dialog = AddEditItemDialog("Nouveau Projet", parent=self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data["name"]:
+                project_name = data["name"]
+                self.project_profiles[project_name] = {
+                    'name': project_name,
+                    'description': data["description"],
+                    'files': [],
+                    'file_contents': {},
+                    'turing_ontology': {
+                        'clusters_detailed': []
+                    },
+                    'pending_relations': {}
+                }
+                self._update_project_combo()
+                self.project_combo.setCurrentText(project_name)
+                self._on_project_selected(self.project_combo.currentIndex())
+                logger.info(f"Nouveau projet créé : {project_name}")
 
     def _on_delete_project(self):
         """Supprime le projet actuel."""
@@ -2137,24 +1806,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self.project_profile_deleted.emit(self.current_project_name)
             logger.info(f"Projet supprimé : {self.current_project_name}")
 
-    def _on_project_selected(self, index):
-        """Gère la sélection d'un projet dans la combo."""
-        if index < 0:
-            return
-        project_name = self.project_combo.currentText()
-        self.current_project_name = project_name
-        self.current_project_profile_data = json.loads(json.dumps(self.project_profiles[project_name]))
-        self._load_project_data_into_ui()
-        self._update_project_details()
-        self._update_button_states()
-
-    def _on_import_directory(self):
-        """Importe la structure d'un dossier (placeholder)."""
-        directory = QFileDialog.getExistingDirectory(self, "Sélectionner un dossier projet")
-        if directory:
-            logger.info(f"Import du dossier : {directory}")
-            QtWidgets.QMessageBox.information(self, "Info", f"Dossier sélectionné : {directory}")
-
     def _collect_uids_to_delete(self, workspace_uid):
         """Collecte récursivement tous les UIDs liés au workspace (clusters, labels, functions)."""
         if not self.dgraph_connector.client:
@@ -2169,12 +1820,18 @@ class ProjectConfigWidget(QtWidgets.QWidget):
               uid
               clusters {{
                 uid
-                root_labels {{  # Uses ~clusters implicitly via schema reverse
+                root_labels {{
                   uid
+                  relations {{ uid }}
+                  ~relations {{ uid }}
                   parents: ~parents {{
                     uid
+                    relations {{ uid }}
+                    ~relations {{ uid }}
                     children: ~parents {{
                       uid
+                      relations {{ uid }}
+                      ~relations {{ uid }}
                       functions {{
                         uid
                         calls {{
@@ -2206,18 +1863,27 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     for root_label in cluster.get('root_labels', []):
                         if 'uid' in root_label:
                             to_delete.append(root_label['uid'])
-                            for parent in root_label.get('parents', []):
-                                if 'uid' in parent:
-                                    to_delete.append(parent['uid'])
-                                    for child in parent.get('children', []):
-                                        if 'uid' in child:
-                                            to_delete.append(child['uid'])
-                                            for func in child.get('functions', []):
-                                                if 'uid' in func:
-                                                    to_delete.append(func['uid'])
-                                                    for call in func.get('calls', []):
-                                                        if 'uid' in call:
-                                                            to_delete.append(call['uid'])
+                        for rel in root_label.get('relations', []) + root_label.get('~relations', []):
+                            if 'uid' in rel:
+                                to_delete.append(rel['uid'])
+                        for level1 in root_label.get('parents', []):
+                            if 'uid' in level1:
+                                to_delete.append(level1['uid'])
+                            for rel in level1.get('relations', []) + level1.get('~relations', []):
+                                if 'uid' in rel:
+                                    to_delete.append(rel['uid'])
+                            for level2 in level1.get('children', []):
+                                if 'uid' in level2:
+                                    to_delete.append(level2['uid'])
+                                for rel in level2.get('relations', []) + level2.get('~relations', []):
+                                    if 'uid' in rel:
+                                        to_delete.append(rel['uid'])
+                                for func in level2.get('functions', []):
+                                    if 'uid' in func:
+                                        to_delete.append(func['uid'])
+                                    for call in func.get('calls', []):
+                                        if 'uid' in call:
+                                            to_delete.append(call['uid'])
         
         logger.info(f"Collectés {len(to_delete)} UIDs à supprimer pour workspace {workspace_uid}")
         return to_delete
@@ -2243,6 +1909,261 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         finally:
             if not committed:
                 txn.discard()
+
+    def _reset_ui(self):
+        """Reset l'UI."""
+        self.current_project_name = None
+        self.current_project_profile_data = None
+        self.project_name_edit.clear()
+        self.project_description_edit.clear()
+        self._refresh_cluster_list()
+        self._reset_hierarchy_ui()
+        self.pending_relations.clear()
+        self.label_id_to_info.clear()
+        self.name_to_id.clear()
+        self.current_selected_label_id = None
+        self.global_relations_config.update_current(None)
+        self._update_button_states()
+
+    def _on_save_project(self):
+        """Sauvegarde le profil local."""
+        if not self.current_project_name:
+            return
+        self.current_project_profile_data['name'] = self.project_name_edit.text().strip()
+        self.current_project_profile_data['description'] = self.project_description_edit.toPlainText().strip()
+        self.current_project_profile_data['pending_relations'] = dict(self.pending_relations)
+        self.project_profiles[self.current_project_name] = json.loads(json.dumps(self.current_project_profile_data))
+        self.project_profile_saved.emit(self.current_project_name, self.current_project_profile_data)
+        logger.info(f"Profil sauvegardé : {self.current_project_name}")
+
+    def _on_export_profile(self):
+        """Exporte le profil en JSON."""
+        if not self.current_project_name:
+            return
+        file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Profil", f"{self.current_project_name}.json", "JSON (*.json)")
+        if file_path:
+            with open(file_path, 'w') as f:
+                json.dump(self.current_project_profile_data, f, indent=4)
+            logger.info(f"Profil exporté : {file_path}")
+
+    def _on_insert_dgraph(self):
+        """Insère le profil dans Dgraph."""
+        if not self.is_configured():
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Configuration incomplète.")
+            return
+        mutations = self._transform_profile_to_dgraph_mutations()
+        if self.dgraph_connector.insert_mutations(mutations):
+            logger.info("Insertion réussie dans Dgraph, y compris les relations.")
+            QtWidgets.QMessageBox.information(self, "Succès", "Inséré dans Dgraph avec succès. Ratel ouvert pour vérification.")
+            self.dgraph_connector.open_ratel()
+            self._load_project_profiles()  # Refresh
+            if self.current_project_name and self.current_project_name in self.project_profiles:
+                self.project_combo.setCurrentText(self.current_project_name)
+                self._on_project_selected(self.project_combo.currentIndex())
+        else:
+            QtWidgets.QMessageBox.critical(self, "Erreur", "Échec insertion Dgraph.")
+
+    def is_configured(self):
+        """Vérifie si la config est complète."""
+        return (self.current_project_profile_data and
+                self.project_name_edit.text().strip() and
+                len(self.current_project_profile_data.get('turing_ontology', {}).get('clusters_detailed', [])) > 0)
+
+    def _create_label_mutation(self, label_data, level, cluster_uid):
+        """Crée une mutation pour un label avec ses fichiers."""
+        uid = f"_:label_{label_data.get('id', str(uuid.uuid4()))}"
+        
+        # S'assurer que les fichiers sont bien présents
+        files = label_data.get('files', [])
+        file_contents = label_data.get('file_contents', {})
+        
+        label = {
+            "uid": uid,
+            "dgraph.type": "Label",
+            "name": label_data.get("label", label_data.get("name", "")),
+            "id": label_data.get("id", str(uuid.uuid4())),
+            "level": level,
+            "path": "",
+            "category": label_data.get("category", []),
+            "createdAt": datetime.now().isoformat() + "Z",
+            "updatedAt": datetime.now().isoformat() + "Z",
+            "parentId": "",
+            "nodeType": "label",
+            "description": label_data.get("description", ""),
+            "codeContent": "",
+            "files": files,
+            "fileContents": json.dumps(file_contents),
+            "clusters": [{"uid": cluster_uid}]
+        }
+        return label
+
+    def _transform_profile_to_dgraph_mutations(self):
+        """Transforme le profil actuel en mutations Dgraph avec gestion complète de la hiérarchie."""
+        if not self.current_project_profile_data:
+            return []
+
+        mutations = []
+
+        # Créer Workspace
+        workspace = {
+            "uid": "_:workspace_uid",
+            "dgraph.type": "Workspace",
+            "name": self.current_project_profile_data.get("name", ""),
+            "id": self.current_project_profile_data.get("name", str(uuid.uuid4())),
+            "ownerId": "user1",
+            "description": self.current_project_profile_data.get("description", ""),
+            "updatedAt": datetime.now().isoformat() + "Z",
+            "files": self.current_project_profile_data.get("files", []),
+            "fileContents": json.dumps(self.current_project_profile_data.get("file_contents", {}))
+        }
+        mutations.append(workspace)
+
+        # Créer ClusterManagement
+        cluster_management = {
+            "uid": "_:cm_uid",
+            "dgraph.type": "ClusterManagement",
+            "lastUpdated": datetime.now().isoformat() + "Z",
+            "version": "1.0",
+            "clusters": []
+        }
+        mutations.append(cluster_management)
+
+        # Lier ClusterManagement au Workspace
+        workspace["clusterManagement"] = {"uid": "_:cm_uid"}
+
+        turing_ontology = self.current_project_profile_data.get("turing_ontology", {})
+        clusters_detailed = turing_ontology.get("clusters_detailed", [])
+
+        label_uids = {}  # Map label id to uid
+
+        for cluster_data in clusters_detailed:
+            cluster_uid = f"_:cluster_{cluster_data.get('id', str(uuid.uuid4()))}"
+            cluster = {
+                "uid": cluster_uid,
+                "dgraph.type": "Cluster",
+                "name": cluster_data.get("name", ""),
+                "id": cluster_data.get("id", str(uuid.uuid4())),
+                "userId": "user1",
+                "nodeType": "cluster",
+                "description": cluster_data.get("description", ""),
+                "codeContent": "",
+                "createdAt": datetime.now().isoformat() + "Z",
+                "updatedAt": datetime.now().isoformat() + "Z",
+                "files": cluster_data.get("files", []),
+                "fileContents": json.dumps(cluster_data.get("file_contents", {})),
+                "root_labels": []
+            }
+            mutations.append(cluster)
+            cluster_management["clusters"].append({"uid": cluster_uid})
+
+            # Créer root_labels avec leurs hiérarchies complètes
+            root_labels = cluster_data.get("root_labels", [])
+            for root in root_labels:
+                # Créer le root label
+                root_label = self._create_label_mutation(root, level=0, cluster_uid=cluster_uid)
+                mutations.append(root_label)
+                cluster["root_labels"].append({"uid": root_label["uid"]})
+                label_uids[root['id']] = root_label["uid"]
+
+                # Traiter récursivement la hiérarchie complète
+                self._process_hierarchy_recursive(
+                    root, 
+                    root_label, 
+                    cluster_uid, 
+                    mutations, 
+                    label_uids, 
+                    level=1
+                )
+
+        # Ajouter les relations après création de tous les labels
+        for source_id, rels in self.pending_relations.items():
+            for rel in rels:
+                if source_id in label_uids and rel['target_id'] in label_uids:
+                    relation = {
+                        "uid": f"_:rel_{uuid.uuid4()}",
+                        "dgraph.type": "Relation",
+                        "name": f"Relation {rel['relation_type']}",
+                        "relationType": rel['relation_type'],
+                        "source": {"uid": label_uids[source_id]},
+                        "target": {"uid": label_uids[rel['target_id']]}
+                    }
+                    mutations.append(relation)
+
+        return mutations
+    
+    def _process_hierarchy_recursive(self, node_data, parent_mutation, cluster_uid, 
+                                 mutations, label_uids, level):
+        """
+        Traite récursivement la hiérarchie en créant les mutations.
+        Utilise le prédicat 'parents' sur l'enfant pour lier au parent (reverse ~parents).
+        """
+        children_list = node_data.get('children', [])
+
+        if not children_list:
+            return
+
+        parent_uid = parent_mutation["uid"]
+
+        for child_data in children_list:
+            # Créer la mutation pour cet enfant
+            child_mutation = self._create_label_mutation(
+                child_data, 
+                level=level, 
+                cluster_uid=cluster_uid
+            )
+            mutations.append(child_mutation)
+
+            # Enregistrer l'UID
+            label_uids[child_data['id']] = child_mutation["uid"]
+
+            # Lier au parent via 'parents' sur l'enfant
+            if "parents" not in child_mutation:
+                child_mutation["parents"] = []
+            child_mutation["parents"].append({"uid": parent_uid})
+
+            # Définir le parentId (string)
+            child_mutation["parentId"] = node_data.get('id', '')
+
+            # Traiter récursivement les enfants de cet enfant
+            self._process_hierarchy_recursive(
+                child_data,
+                child_mutation,
+                cluster_uid,
+                mutations,
+                label_uids,
+                level + 1
+            )
+
+    def _update_button_states(self):
+        """Met à jour l'état des boutons en fonction de la sélection."""
+        has_project = bool(self.current_project_name)
+        self.delete_project_button.setEnabled(has_project)
+        self.save_button.setEnabled(has_project)
+        self.export_profile_button.setEnabled(has_project)
+        self.insert_dgraph_button.setEnabled(has_project and self.is_configured())
+    
+        has_cluster = bool(self.current_cluster_data)
+        self.add_root_button.setEnabled(has_cluster)
+        self.edit_root_button.setEnabled(self.root_list_widget.currentRow() != -1)
+        self.remove_root_button.setEnabled(self.root_list_widget.currentRow() != -1)
+        self.modify_category_root_button.setEnabled(self.root_list_widget.currentRow() != -1)
+    
+        has_root = bool(self.current_root_data)
+        self.add_level1_button.setEnabled(has_root)
+        self.edit_level1_button.setEnabled(self.level1_list_widget.currentRow() != -1)
+        self.remove_level1_button.setEnabled(self.level1_list_widget.currentRow() != -1)
+        self.modify_category_level1_button.setEnabled(self.level1_list_widget.currentRow() != -1)
+    
+        has_level1 = bool(self.current_level1_data)
+        self.add_child_button.setEnabled(has_level1)
+        self.edit_child_button.setEnabled(self.child_list_widget.currentRow() != -1)
+        self.remove_child_button.setEnabled(self.child_list_widget.currentRow() != -1)
+        self.modify_category_child_button.setEnabled(self.child_list_widget.currentRow() != -1)
+
+        # Boutons relations
+        has_source = bool(self.current_selected_label_id)
+        self.global_relations_config.add_button.setEnabled(has_source and self.global_relations_config.target_combo.count() > 0)
+        self.global_relations_config.remove_button.setEnabled(self.global_relations_config.relations_list.currentRow() != -1)
 
     def closeEvent(self, event):
         """Ferme proprement le connector lors de la fermeture du widget."""
