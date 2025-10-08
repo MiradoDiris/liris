@@ -8,6 +8,9 @@ from PyQt5.QtWidgets import QFileDialog, QDialog, QFormLayout, QLineEdit, QTextE
 from collections import defaultdict
 import requests  # Added for schema update
 import ast  # Added for extraction
+import networkx as nx
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 from utils.logger import logger
 from ui.styles.platform_config_style import PlatformConfigStyle
@@ -60,168 +63,6 @@ class AddEditItemDialog(QDialog):
         }
 
 
-class CategoryEditDialog(QtWidgets.QDialog):
-    """
-    Dialogue pour l'ajout, la modification et la suppression de catégories multiples.
-    """
-
-    def __init__(self, current_categories, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(tr("category_edit_dialog.title"))
-        self.setMinimumSize(400, 300)
-
-        self.categories = list(current_categories)
-
-        self._init_ui()
-        self._load_categories_into_list()
-        self._update_button_states()
-
-    def _init_ui(self):
-        main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-
-        info_label = QtWidgets.QLabel(tr("category_edit_dialog.info_label"))
-        info_label.setStyleSheet("font-style: italic; color: #555;")
-        info_label.setWordWrap(True)
-        info_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(info_label)
-
-        self.category_list_widget = QtWidgets.QListWidget()
-        self.category_list_widget.setStyleSheet("""
-            QListWidget {
-                background-color: #ffffff;
-                border: 1px solid #d0d0d0;
-                border-radius: 4px;
-                padding: 5px;
-                font-size: 13px;
-            }
-            QListWidget::item {
-                padding: 8px;
-                border-radius: 3px;
-                margin: 2px 0px;
-            }
-            QListWidget::item:selected {
-                background-color: #888888;
-                color: white;
-            }
-            QListWidget::item:hover {
-                background-color: #e8e8e8;
-            }
-        """)
-        self.category_list_widget.currentItemChanged.connect(self._update_button_states)
-        main_layout.addWidget(self.category_list_widget)
-
-        buttons_layout = QtWidgets.QHBoxLayout()
-        self.add_button = QtWidgets.QPushButton(tr("category_edit_dialog.add_button"))
-        self.add_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.add_button.clicked.connect(self._add_category)
-        buttons_layout.addWidget(self.add_button)
-
-        self.edit_button = QtWidgets.QPushButton(tr("category_edit_dialog.edit_button"))
-        self.edit_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.edit_button.clicked.connect(self._edit_category)
-        buttons_layout.addWidget(self.edit_button)
-
-        self.remove_button = QtWidgets.QPushButton(
-            tr("category_edit_dialog.remove_button")
-        )
-        self.remove_button.setStyleSheet(PlatformConfigStyle.get_button_style())
-        self.remove_button.clicked.connect(self._remove_category)
-        buttons_layout.addWidget(self.remove_button)
-
-        main_layout.addLayout(buttons_layout)
-
-        button_box = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
-        )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        main_layout.addWidget(button_box)
-
-    def _load_categories_into_list(self):
-        self.category_list_widget.clear()
-        for cat in self.categories:
-            self.category_list_widget.addItem(cat)
-
-    def _update_button_states(self):
-        has_selection = self.category_list_widget.currentRow() != -1
-        self.edit_button.setEnabled(has_selection)
-        self.remove_button.setEnabled(has_selection)
-
-    def _add_category(self):
-        text, ok = QtWidgets.QInputDialog.getText(
-            self,
-            tr("category_edit_dialog.add_category_title"),
-            tr("category_edit_dialog.add_category_text"),
-        )
-        if ok and text:
-            category = text.strip()
-            if category and category not in self.categories:
-                self.categories.append(category)
-                self._load_categories_into_list()
-                self.category_list_widget.setCurrentRow(
-                    self.category_list_widget.count() - 1
-                )
-                logger.info(f"Catégorie ajoutée : {category}")
-
-    def _edit_category(self):
-        current_row = self.category_list_widget.currentRow()
-        if current_row == -1:
-            return
-
-        old_category = self.categories[current_row]
-        text, ok = QtWidgets.QInputDialog.getText(
-            self,
-            tr("category_edit_dialog.edit_category_title"),
-            tr("category_edit_dialog.edit_category_text"),
-            QtWidgets.QLineEdit.Normal,
-            old_category,
-        )
-        if ok and text:
-            new_category = text.strip()
-            if new_category and new_category != old_category:
-                if (
-                    new_category in self.categories
-                    and self.categories.index(new_category) != current_row
-                ):
-                    QtWidgets.QMessageBox.warning(
-                        self,
-                        tr("project_config.duplicate_title"),
-                        tr("category_edit_dialog.duplicate_category_msg"),
-                    )
-                    return
-                self.categories[current_row] = new_category
-                self._load_categories_into_list()
-                self.category_list_widget.setCurrentRow(current_row)
-                logger.info(
-                    f"Catégorie modifiée de '{old_category}' à '{new_category}'"
-                )
-
-    def _remove_category(self):
-        current_row = self.category_list_widget.currentRow()
-        if current_row == -1:
-            return
-
-        category_to_remove = self.categories[current_row]
-        reply = QtWidgets.QMessageBox.question(
-            self,
-            tr("category_edit_dialog.remove_category_title"),
-            tr("category_edit_dialog.remove_category_text").format(
-                category=category_to_remove
-            ),
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-        )
-        if reply == QtWidgets.QMessageBox.Yes:
-            del self.categories[current_row]
-            self._load_categories_into_list()
-            logger.info(f"Catégorie supprimée : {category_to_remove}")
-            self._update_button_states()
-
-    def get_categories(self):
-        return self.categories
-
-
 class RelationsConfig(QtWidgets.QWidget):
     """
     Widget pour configurer les relations d'import pour un niveau de hiérarchie spécifique.
@@ -241,101 +82,625 @@ class RelationsConfig(QtWidgets.QWidget):
         title.setStyleSheet("font-weight: bold; font-size: 12px;")
         layout.addWidget(title)
 
-        # Type de relation
-        layout.addWidget(QtWidgets.QLabel("Type:"))
+        # Source
+        source_layout = QHBoxLayout()
+        source_layout.addWidget(QtWidgets.QLabel("Source:"))
+        self.source_label = QtWidgets.QLabel("Aucun sélectionné")
+        self.source_label.setStyleSheet("color: #666; font-style: italic;")
+        source_layout.addWidget(self.source_label)
+        source_layout.addStretch()
+        layout.addLayout(source_layout)
+
+        # Type et Cible côte à côte
+        type_target_layout = QHBoxLayout()
+        type_target_layout.setSpacing(10)
+
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(QtWidgets.QLabel("Type:"))
         self.type_combo = QtWidgets.QComboBox()
         self.type_combo.addItems([
             "import", "heritage", "extend", "implement",
             "depends_on", "calls", "uses", "references"
         ])
-        self.type_combo.setMinimumWidth(100)
-        layout.addWidget(self.type_combo)
+        self.type_combo.setMinimumWidth(150)
+        type_layout.addWidget(self.type_combo)
+        type_layout.addStretch()
+        type_target_layout.addLayout(type_layout)
 
-        # Source
-        layout.addWidget(QtWidgets.QLabel("Source:"))
-        self.source_label = QtWidgets.QLabel("Aucun sélectionné")
-        self.source_label.setStyleSheet("color: #666; font-style: italic;")
-        layout.addWidget(self.source_label)
-
-        # Cible
-        layout.addWidget(QtWidgets.QLabel("Cible:"))
+        target_layout = QHBoxLayout()
+        target_layout.addWidget(QtWidgets.QLabel("Cible:"))
         self.target_combo = QtWidgets.QComboBox()
-        self.target_combo.setMinimumWidth(200)
-        layout.addWidget(self.target_combo)
+        self.target_combo.setMinimumWidth(150)
+        target_layout.addWidget(self.target_combo)
+        target_layout.addStretch()
+        type_target_layout.addLayout(target_layout)
+
+        layout.addLayout(type_target_layout)
 
         # Bouton ajouter
-        self.add_button = QtWidgets.QPushButton("➕ Ajouter Relation")
+        add_buttons_layout = QHBoxLayout()
+        self.add_button = QtWidgets.QPushButton("➕ Ajouter")
         self.add_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.add_button.setMaximumWidth(80)
         self.add_button.clicked.connect(self._on_add)
-        layout.addWidget(self.add_button)
+        add_buttons_layout.addStretch()
+        add_buttons_layout.addWidget(self.add_button)
+        layout.addLayout(add_buttons_layout)
 
         # Liste des relations
-        layout.addWidget(QtWidgets.QLabel("Relations:"))
+        relations_label_layout = QHBoxLayout()
+        relations_label_layout.addWidget(QtWidgets.QLabel("Relations:"))
+        relations_label_layout.addStretch()
+        layout.addLayout(relations_label_layout)
         self.relations_list = QtWidgets.QListWidget()
         self.relations_list.setMaximumHeight(100)
         self.relations_list.currentItemChanged.connect(self.parent_widget._update_button_states)
         layout.addWidget(self.relations_list)
 
-        # Bouton supprimer
+        # Bouton supprimer en bas
+        remove_buttons_layout = QHBoxLayout()
         self.remove_button = QtWidgets.QPushButton("🗑️ Supprimer")
         self.remove_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.remove_button.setMaximumWidth(80)
         self.remove_button.clicked.connect(self._on_remove)
-        layout.addWidget(self.remove_button)
+        remove_buttons_layout.addStretch()
+        remove_buttons_layout.addWidget(self.remove_button)
+        layout.addLayout(remove_buttons_layout)
 
-    def update_current(self, source_id):
-        if source_id:
-            source_info = self.parent_widget.label_id_to_info.get(source_id)
+    def update_current(self, source_uid):
+        if source_uid:
+            source_info = self.parent_widget.label_uid_to_info.get(source_uid)
             self.source_label.setText(source_info['name'] if source_info else "Inconnu")
-            self.parent_widget._populate_target_combo(self.target_combo, source_id)
-            self._update_relations_list(source_id)
+            self.parent_widget._populate_target_combo(self.target_combo, source_uid)
+            self._update_relations_list(source_uid)
         else:
             self.source_label.setText("Aucun sélectionné")
             self.target_combo.clear()
             self._update_relations_list(None)
 
     def _on_add(self):
-        source_id = self.parent_widget.current_selected_label_id
-        if not source_id:
+        source_uid = self.parent_widget.current_selected_label_uid
+        if not source_uid:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Sélectionnez un élément source.")
             return
-        target_id = self.target_combo.currentData()
+        target_uid = self.target_combo.currentData()
         rel_type = self.type_combo.currentText()
-        if not target_id:
+        if not target_uid:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Sélectionnez une cible.")
             return
-        relation = {'target_id': target_id, 'relation_type': rel_type}
+        relation = {'target_uid': target_uid, 'relation_type': rel_type}
         pending = self.parent_widget.pending_relations
-        if relation not in pending[source_id]:
-            pending[source_id].append(relation)
-            self.parent_widget._update_local_relations(source_id, target_id, rel_type)
-            self._update_relations_list(source_id)
-            logger.info(f"Relation ajoutée: {rel_type} vers {target_id}")
+        if relation not in pending[source_uid]:
+            pending[source_uid].append(relation)
+            self.parent_widget._update_local_relations(source_uid, target_uid, rel_type)
+            self._update_relations_list(source_uid)
+            logger.info(f"Relation ajoutée: {rel_type} vers {target_uid}")
 
     def _on_remove(self):
         current_item = self.relations_list.currentItem()
         if not current_item:
             return
         rel = current_item.data(Qt.UserRole)
-        source_id = self.parent_widget.current_selected_label_id
-        if source_id:
-            self.parent_widget.pending_relations[source_id].remove(rel)
-            self.parent_widget._update_local_relations_remove(source_id, rel['target_id'], rel['relation_type'])
-            self._update_relations_list(source_id)
+        source_uid = self.parent_widget.current_selected_label_uid
+        if source_uid:
+            self.parent_widget.pending_relations[source_uid].remove(rel)
+            self.parent_widget._update_local_relations_remove(source_uid, rel['target_uid'], rel['relation_type'])
+            self._update_relations_list(source_uid)
             logger.info(f"Relation supprimée")
 
-    def _update_relations_list(self, source_id):
+    def _update_relations_list(self, source_uid):
         self.relations_list.clear()
-        if not source_id:
+        if not source_uid:
             return
-        pending = self.parent_widget.pending_relations[source_id]
+        pending = self.parent_widget.pending_relations[source_uid]
         for r in pending:
-            target_info = self.parent_widget.label_id_to_info.get(r['target_id'])
+            target_info = self.parent_widget.label_uid_to_info.get(r['target_uid'])
             if target_info:
                 display = f"{r['relation_type'].upper()}: -> {target_info['name']} ({target_info['cluster']})"
                 item = QListWidgetItem(display)
                 item.setData(Qt.UserRole, r)
                 self.relations_list.addItem(item)
 
+
+class RelationsGraphWidget(QtWidgets.QWidget):
+    """Widget optimisé pour afficher le graphe des relations du nœud sélectionné"""
+
+    def __init__(self, parent_widget, parent=None):
+        super().__init__(parent)
+        self.parent_widget = parent_widget
+        self.figure = None
+        self.canvas = None
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
+
+        # Titre dynamique
+        self.title_label = QLabel("Graphe des Relations")
+        self.title_label.setStyleSheet("font-weight: bold; font-size: 12px; color: #2c3e50;")
+        layout.addWidget(self.title_label)
+
+        # Canvas pour le graphe
+        self.figure = Figure(figsize=(5, 3), facecolor='white', dpi=100)  # Taille optimisée pour le panneau
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.setMinimumHeight(300)
+        layout.addWidget(self.canvas)
+
+        # Légende simplifiée
+        self.legend_label = QLabel("Aucun nœud sélectionné")
+        self.legend_label.setStyleSheet("font-size: 10px; color: #666; font-style: italic;")
+        layout.addWidget(self.legend_label)
+
+        # Message initial
+        self._draw_empty_graph()
+
+    def update_graph(self, central_uid=None):
+        """
+        Met à jour le graphe pour le nœud central sélectionné
+        Version améliorée avec meilleur diagnostic
+        """
+        if not central_uid:
+            self._draw_empty_graph()
+            self.title_label.setText("Graphe des Relations")
+            self.legend_label.setText("Aucun nœud sélectionné")
+            return
+
+        # Récupérer les données du nœud central
+        central_info = self.parent_widget.label_uid_to_info.get(central_uid)
+        if not central_info:
+            logger.warning(f"Nœud {central_uid} introuvable dans label_uid_to_info")
+            self._draw_empty_graph()
+            return
+
+        central_name = central_info.get('name', central_uid)
+
+        # Récupérer toutes les relations
+        related_items = self._collect_related_items(central_uid, max_depth=1, max_nodes=50)
+
+        if not related_items:
+            self.title_label.setText(f"Graphe: {central_name}")
+            self.legend_label.setText("Aucune relation trouvée")
+            self._draw_empty_graph_with_message(
+                f"Le nœud '{central_name}' n'a aucune relation"
+            )
+            logger.info(f"Aucune relation pour {central_name}")
+            return
+
+        # Afficher le graphe
+        logger.info(f"Affichage graphe pour {central_name}: {len(related_items)} relations")
+        self.title_label.setText(f"Graphe: {central_name}")
+        self._draw_graph(central_uid, central_name, related_items)
+
+    def _draw_empty_graph_with_message(self, message):
+        """
+        Dessine un graphe vide avec un message personnalisé
+        """
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        ax.text(
+            0.5, 0.5, 
+            message, 
+            ha='center', 
+            va='center', 
+            transform=ax.transAxes, 
+            fontsize=11, 
+            color='#666',
+            style='italic'
+        )
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis('off')
+        self.figure.tight_layout()
+        self.canvas.draw()
+
+    def _query_relations_for_node(self, central_uid):
+        """
+        Query Dgraph pour les relations impliquant le nÅ"ud central.
+        """
+        if not self.parent_widget.dgraph_connector.client:
+            return []
+
+        query = f"""
+        {{
+          q(func: type(Relation)) @filter(uid_in(source, {central_uid}) OR uid_in(target, {central_uid})) {{
+            uid
+            name
+            relationType
+            source {{
+              uid
+              name
+              id
+              level
+            }}
+            target {{
+              uid
+              name
+              id
+              level
+            }}
+          }}
+        }}
+        """
+        try:
+            txn = self.parent_widget.dgraph_connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+            data = self.parent_widget.dgraph_connector._parse_response(resp)
+            return data.get('q', [])
+        except Exception as e:
+            logger.error(f"Erreur lors de la query des relations: {e}")
+            return []
+
+    def _collect_related_items(self, central_uid, max_depth=1, max_nodes=50):
+        """
+        Collecte TOUTES les relations d'un nœud (hiérarchiques, imports, héritage, etc.)
+        Version améliorée qui récupère tous les types de relations, y compris depuis Dgraph
+        """
+        if not self.parent_widget.current_project_profile_data:
+            return []
+
+        all_nodes = self.parent_widget._get_all_nodes()
+        central_node = next((n for n in all_nodes if n['uid'] == central_uid), None)
+        if not central_node:
+            return []
+
+        related = []
+        visited = set([central_uid])
+
+        # 1. Relations sortantes locales (outgoing_relations)
+        for rel in central_node.get('outgoing_relations', [])[:max_nodes]:
+            target_uid = rel.get('target_uid', rel.get('target_id', ''))
+            if target_uid in visited:
+                continue
+            
+            target_node = next((n for n in all_nodes if n['uid'] == target_uid), None)
+            if target_node:
+                related.append({
+                    'name': target_node['label'],
+                    'type': rel['relation_type'],
+                    'uid': target_uid,
+                    'direction': 'out'
+                })
+                visited.add(target_uid)
+
+        # 2. Relations entrantes locales (incoming_relations)
+        for rel in central_node.get('incoming_relations', [])[:max_nodes]:
+            source_uid = rel.get('source_uid', rel.get('source_id', ''))
+            if source_uid in visited:
+                continue
+            
+            source_node = next((n for n in all_nodes if n['uid'] == source_uid), None)
+            if source_node:
+                related.append({
+                    'name': source_node['label'],
+                    'type': rel['relation_type'] + ' (inverse)',
+                    'uid': source_uid,
+                    'direction': 'in'
+                })
+                visited.add(source_uid)
+
+        # 3. Enfants hiérarchiques locaux
+        for child in central_node.get('children', [])[:max_nodes]:
+            child_uid = child['uid']
+            if child_uid in visited:
+                continue
+            
+            related.append({
+                'name': child['label'],
+                'type': 'enfant',
+                'uid': child_uid,
+                'direction': 'hierarchy'
+            })
+            visited.add(child_uid)
+
+        # 4. Parents hiérarchiques locaux (si présents)
+        for parent_uid in central_node.get('parents', [])[:max_nodes]:
+            if parent_uid in visited:
+                continue
+            
+            parent_info = self.parent_widget.label_uid_to_info.get(parent_uid)
+            if parent_info:
+                related.append({
+                    'name': parent_info['name'],
+                    'type': 'parent',
+                    'uid': parent_uid,
+                    'direction': 'hierarchy'
+                })
+                visited.add(parent_uid)
+
+        # 5. Relations supplémentaires depuis Dgraph (pour cas persistés non locaux)
+        dgraph_rels = self._query_relations_for_node(central_uid)
+        for rel in dgraph_rels:
+            if rel['source']['uid'] == central_uid:
+                target_uid = rel['target']['uid']
+                if target_uid in visited:
+                    continue
+                target_name = rel['target']['name']
+                related.append({
+                    'name': target_name,
+                    'type': rel['relationType'],
+                    'uid': target_uid,
+                    'direction': 'out'
+                })
+                visited.add(target_uid)
+            elif rel['target']['uid'] == central_uid:
+                source_uid = rel['source']['uid']
+                if source_uid in visited:
+                    continue
+                source_name = rel['source']['name']
+                related.append({
+                    'name': source_name,
+                    'type': rel['relationType'] + ' (inverse)',
+                    'uid': source_uid,
+                    'direction': 'in'
+                })
+                visited.add(source_uid)
+
+        # Limiter le nombre total pour la performance
+        related = related[:max_nodes]
+
+        logger.info(f"Collecté {len(related)} relations pour {central_node['label']}")
+        return related
+
+    def _draw_empty_graph(self):
+        """Dessine un graphe vide avec message"""
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        ax.text(0.5, 0.5, 'Sélectionnez un nœud pour voir ses relations', 
+                ha='center', va='center', transform=ax.transAxes, fontsize=12, color='#666')
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis('off')
+        self.figure.tight_layout()
+        self.canvas.draw()
+
+    def _draw_graph(self, central_uid, central_name, related_items):
+        """
+        Dessine le graphe avec NetworkX - Version améliorée avec tous types de relations
+        Utilise les UIDs comme identifiants de nœuds pour éviter les doublons de noms
+        """
+        self.figure.clear()
+        G = nx.DiGraph()
+
+        # Nœud central
+        G.add_node(central_uid, node_type='central', label=central_name)
+
+        if not related_items:
+            self._draw_empty_graph()
+            return
+
+        # Grouper par type pour statistiques
+        relation_types = {}
+        seen_nodes = set([central_uid])
+        edge_colors = []
+        edge_labels = {}
+
+        for item in related_items:
+            rel_uid = item['uid']
+            rel_name = item['name']
+            rel_type = item['type']
+            direction = item.get('direction', 'out')
+
+            # Éviter doublons
+            if rel_uid in seen_nodes:
+                continue
+            
+            # Ajouter nœud
+            G.add_node(rel_uid, node_type='related', label=rel_name)
+            seen_nodes.add(rel_uid)
+
+            # Ajouter arête selon direction
+            if direction == 'in':
+                # Relation entrante : de rel_uid vers central
+                G.add_edge(rel_uid, central_uid, type=rel_type)
+                edge_labels[(rel_uid, central_uid)] = rel_type[:6]
+            else:
+                # Relation sortante ou hiérarchique : de central vers rel_uid
+                G.add_edge(central_uid, rel_uid, type=rel_type)
+                edge_labels[(central_uid, rel_uid)] = rel_type[:6]
+
+            # Couleur selon type
+            edge_colors.append(self._get_color_for_type(rel_type))
+
+            # Comptage
+            base_type = rel_type.replace(' (inverse)', '')
+            relation_types[base_type] = relation_types.get(base_type, 0) + 1
+
+        if len(G.nodes()) == 1:
+            self._draw_empty_graph()
+            return
+
+        # Layout optimisé selon taille
+        num_nodes = len(G.nodes())
+
+        if num_nodes <= 10:
+            pos = nx.spring_layout(G, k=2.5, iterations=100, seed=42)
+        elif num_nodes <= 30:
+            pos = nx.kamada_kawai_layout(G)
+        else:
+            # Layout circulaire pour grands graphes
+            pos = nx.circular_layout(G)
+            pos[central_uid] = (0, 0)
+
+        # Dessiner
+        ax = self.figure.add_subplot(111)
+        ax.set_facecolor('white')
+
+        # Arêtes avec couleurs
+        if G.edges():
+            edges_list = list(G.edges())
+            nx.draw_networkx_edges(
+                G, pos, 
+                edgelist=edges_list,
+                edge_color=edge_colors,
+                ax=ax,
+                width=2.0 if num_nodes <= 20 else 1.5,
+                alpha=0.7,
+                arrows=True,
+                arrowsize=15 if num_nodes <= 20 else 12,
+                arrowstyle='->',
+                connectionstyle='arc3,rad=0.1'
+            )
+
+        # Nœuds avec couleurs distinctes
+        node_colors = []
+        node_sizes = []
+        for node in G.nodes():
+            if node == central_uid:
+                node_colors.append('#A23B2D')  # Rouge pour central
+                node_sizes.append(800)
+            else:
+                node_colors.append('#4CAF50')  # Vert pour liés
+                node_sizes.append(500)
+
+        nx.draw_networkx_nodes(
+            G, pos, 
+            ax=ax,
+            node_color=node_colors,
+            node_size=node_sizes,
+            alpha=0.85,
+            linewidths=2,
+            edgecolors='white'
+        )
+
+        # Labels des nœuds
+        labels = {}
+        for node in G.nodes():
+            node_label = G.nodes[node].get('label', node)
+            # Tronquer les noms longs
+            label = node_label if len(node_label) <= 15 else node_label[:12] + "..."
+            labels[node] = label
+
+        label_opts = {
+            'ax': ax,
+            'font_size': 9 if num_nodes > 20 else 10,
+            'font_weight': 'bold',
+        }
+
+        if num_nodes <= 30:
+            label_opts.update({
+                'font_color': 'white',
+                'bbox': dict(
+                    boxstyle='round,pad=0.3', 
+                    facecolor='black', 
+                    alpha=0.7, 
+                    edgecolor='none'
+                )
+            })
+        else:
+            label_opts['font_color'] = 'black'
+
+        nx.draw_networkx_labels(G, pos, labels, **label_opts)
+
+        # Labels des arêtes pour petits graphes
+        if num_nodes <= 15 and edge_labels:
+            nx.draw_networkx_edge_labels(
+                G, pos, 
+                edge_labels,
+                ax=ax,
+                font_size=7,
+                font_color='#333',
+                bbox=dict(
+                    boxstyle='round,pad=0.2', 
+                    facecolor='white', 
+                    alpha=0.9
+                )
+            )
+
+        # Titre informatif
+        title_text = (
+            f"Réseau de relations\n"
+            f"Nœud central: {central_name}\n"
+            f"({num_nodes} nœuds, {len(G.edges())} relations)"
+        )
+        ax.set_title(title_text, fontsize=11, fontweight='bold', pad=15)
+
+        ax.axis('off')
+        ax.margins(0.15)
+
+        self.figure.tight_layout()
+        self.canvas.draw()
+
+        # Mettre à jour la légende avec tous les types
+        self._update_legend_with_types(relation_types)
+
+    def _get_color_for_type(self, rel_type):
+        """
+        Retourne une couleur selon le type de relation
+        Version étendue avec plus de types
+        """
+        # Normaliser le type (retirer "(inverse)" si présent)
+        rel_lower = rel_type.lower().replace(' (inverse)', '')
+
+        colors = {
+            'import': '#FF9800',
+            'heritage': '#2196F3',
+            'extend': '#4CAF50',
+            'implement': '#9C27B0',
+            'depends_on': '#FF5722',
+            'calls': '#00BCD4',
+            'uses': '#795548',
+            'references': '#607D8B',
+            'enfant': '#00BCD4',
+            'parent': '#3F51B5',
+            'relation': '#E91E63',
+        }
+
+        # Recherche exacte puis partielle
+        if rel_lower in colors:
+            return colors[rel_lower]
+
+        for key, color in colors.items():
+            if key in rel_lower:
+                return color
+
+        return '#999999'  # Couleur par défaut
+
+    def _update_legend_with_types(self, relation_types):
+        """
+        Met à jour la légende avec tous les types de relations
+        """
+        if not relation_types:
+            self.legend_label.setText("Aucune relation")
+            return
+
+        # Construire texte de légende avec compteurs
+        legend_parts = []
+        for rel_type, count in sorted(relation_types.items()):
+            color = self._get_color_for_type(rel_type)
+            legend_parts.append(f"{rel_type}: {count}")
+
+        legend_text = " | ".join(legend_parts)
+
+        # Tronquer si trop long
+        if len(legend_text) > 80:
+            legend_text = legend_text[:77] + "..."
+
+        self.legend_label.setText(legend_text)
+
+    def _update_legend(self, related_items):
+        """
+        Version alternative : légende simple avec comptage
+        """
+        if not related_items:
+            self.legend_label.setText("Aucune relation")
+            return
+    
+        # Grouper par type
+        types = {}
+        for item in related_items:
+            rel_type = item['type'].replace(' (inverse)', '')
+            types[rel_type] = types.get(rel_type, 0) + 1
+    
+        # Construire texte
+        legend_text = " | ".join([f"{k}: {v}" for k, v in sorted(types.items())])
+        
+        if len(legend_text) > 80:
+            legend_text = legend_text[:77] + "..."
+        
+        self.legend_label.setText(legend_text)
 
 class ProjectConfigWidget(QtWidgets.QWidget):
     """Widget pour configurer les profils de projet et l'ontologie de Turing avec liaison hiérarchique."""
@@ -377,11 +742,12 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         # Pour les relations
         self.pending_relations = defaultdict(list)
-        self.label_id_to_info = {}
-        self.name_to_id = {}
-        self.current_selected_label_id = None
+        self.label_uid_to_info = {}
+        self.name_to_uid = {}
+        self.current_selected_label_uid = None
 
         self.global_relations_config = RelationsConfig(self, "global")
+        self.relations_graph = RelationsGraphWidget(self)  # Nouveau widget graphe
 
         # Définir une taille minimale pour le widget et maximiser
         self.setMinimumSize(1400, 900)
@@ -410,27 +776,27 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             collect_nodes(cluster.get('root_labels', []))
         return all_nodes
 
-    def _update_local_relations(self, source_id, target_id, rel_type):
+    def _update_local_relations(self, source_uid, target_uid, rel_type):
         """Met à jour les relations locales dans les données des nœuds."""
         all_nodes = self._get_all_nodes()
-        source_node = next((n for n in all_nodes if n['id'] == source_id), None)
+        source_node = next((n for n in all_nodes if n['uid'] == source_uid), None)
         if source_node:
-            source_node.setdefault('outgoing_relations', []).append({'target_id': target_id, 'relation_type': rel_type})
-        target_node = next((n for n in all_nodes if n['id'] == target_id), None)
+            source_node.setdefault('outgoing_relations', []).append({'target_uid': target_uid, 'relation_type': rel_type})
+        target_node = next((n for n in all_nodes if n['uid'] == target_uid), None)
         if target_node:
-            target_node.setdefault('incoming_relations', []).append({'source_id': source_id, 'relation_type': rel_type})
+            target_node.setdefault('incoming_relations', []).append({'source_uid': source_uid, 'relation_type': rel_type})
 
-    def _update_local_relations_remove(self, source_id, target_id, rel_type):
+    def _update_local_relations_remove(self, source_uid, target_uid, rel_type):
         """Supprime les relations locales dans les données des nœuds."""
         all_nodes = self._get_all_nodes()
-        source_node = next((n for n in all_nodes if n['id'] == source_id), None)
+        source_node = next((n for n in all_nodes if n['uid'] == source_uid), None)
         if source_node:
-            to_remove = next((r for r in source_node.get('outgoing_relations', []) if r['target_id'] == target_id and r['relation_type'] == rel_type), None)
+            to_remove = next((r for r in source_node.get('outgoing_relations', []) if r['target_uid'] == target_uid and r['relation_type'] == rel_type), None)
             if to_remove:
                 source_node['outgoing_relations'].remove(to_remove)
-        target_node = next((n for n in all_nodes if n['id'] == target_id), None)
+        target_node = next((n for n in all_nodes if n['uid'] == target_uid), None)
         if target_node:
-            to_remove = next((r for r in target_node.get('incoming_relations', []) if r['source_id'] == source_id and r['relation_type'] == rel_type), None)
+            to_remove = next((r for r in target_node.get('incoming_relations', []) if r['source_uid'] == source_uid and r['relation_type'] == rel_type), None)
             if to_remove:
                 target_node['incoming_relations'].remove(to_remove)
 
@@ -439,61 +805,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         super().showEvent(event)
         if self.window():
             self.window().showMaximized()
-
-    def _get_compact_button_style(self):
-        """Style pour les boutons carrés compacts avec icônes améliorées"""
-        return """
-            QPushButton {
-                background-color: #922B3C;
-                color: white;
-                border: 1px solid #7a2431;
-                border-radius: 3px;
-                font-weight: bold;
-                font-size: 12px;
-                padding: 6px;
-                min-width: 70px;
-                max-width: 70px;
-                min-height: 32px;
-                max-height: 32px;
-            }
-            QPushButton:hover {
-                background-color: #a63342;
-                border: 1px solid #922B3C;
-            }
-            QPushButton:pressed {
-                background-color: #6d1f2b;
-            }
-            QPushButton:disabled {
-                background-color: #CCCCCC;
-                color: #888888;
-                border: 1px solid #BBBBBB;
-            }
-        """
-    
-    def _get_button_style_grenat(self):
-        """Style grenat pour les boutons de sauvegarde"""
-        return """
-            QPushButton {
-                background-color: #922B3C;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-                min-width: 150px;
-            }
-            QPushButton:hover {
-                background-color: #6d1f2b;
-            }
-            QPushButton:pressed {
-                background-color: #5a1823;
-            }
-            QPushButton:disabled {
-                background-color: #d3d3d3;
-                color: #a0a0a0;
-            }
-        """
 
     def _get_improved_list_style(self):
         """Style amélioré pour les listes avec sélection gris clair"""
@@ -518,7 +829,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 background-color: #f0f0f0;
             }
         """
-
+    
     def _init_ui(self):
         """Initialise l'interface utilisateur pour la configuration du projet (layout 3 colonnes)."""
         main_vertical_layout = QtWidgets.QVBoxLayout(self)
@@ -619,28 +930,16 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         cluster_buttons_layout.setSpacing(5)
 
         self.add_cluster_button = QtWidgets.QPushButton("Ajouter")
-        self.add_cluster_button.setStyleSheet(self._get_compact_button_style())
+        self.add_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_cluster_button.clicked.connect(self._add_cluster)
-        self.add_cluster_button.setMinimumWidth(70)
-        self.add_cluster_button.setMaximumWidth(70)
-        self.add_cluster_button.setMinimumHeight(32)
-        self.add_cluster_button.setMaximumHeight(32)
 
-        self.edit_cluster_button = QtWidgets.QPushButton("Modif")
-        self.edit_cluster_button.setStyleSheet(self._get_compact_button_style())
+        self.edit_cluster_button = QtWidgets.QPushButton("Modifier")
+        self.edit_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_cluster_button.clicked.connect(self._edit_cluster)
-        self.edit_cluster_button.setMinimumWidth(70)
-        self.edit_cluster_button.setMaximumWidth(70)
-        self.edit_cluster_button.setMinimumHeight(32)
-        self.edit_cluster_button.setMaximumHeight(32)
 
         self.remove_cluster_button = QtWidgets.QPushButton("✕")
-        self.remove_cluster_button.setStyleSheet(self._get_compact_button_style())
+        self.remove_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_cluster_button.clicked.connect(self._remove_cluster)
-        self.remove_cluster_button.setMinimumWidth(70)
-        self.remove_cluster_button.setMaximumWidth(70)
-        self.remove_cluster_button.setMinimumHeight(32)
-        self.remove_cluster_button.setMaximumHeight(32)
 
         cluster_buttons_layout.addWidget(self.add_cluster_button)
         cluster_buttons_layout.addWidget(self.edit_cluster_button)
@@ -673,7 +972,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         left_column_layout.addStretch()
 
-        top_columns_layout.addLayout(left_column_layout, 5)
+        top_columns_layout.addLayout(left_column_layout, 4)
 
         # --- Colonne du milieu: Hiérarchie (largeur augmentée) ---
         middle_scroll = QtWidgets.QScrollArea()
@@ -707,41 +1006,20 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         root_buttons_layout.setSpacing(5)
 
         self.add_root_button = QtWidgets.QPushButton("Ajouter")
-        self.add_root_button.setStyleSheet(self._get_compact_button_style())
+        self.add_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_root_button.clicked.connect(self._add_root_label)
-        self.add_root_button.setMinimumWidth(70)
-        self.add_root_button.setMaximumWidth(70)
-        self.add_root_button.setMinimumHeight(32)
-        self.add_root_button.setMaximumHeight(32)
 
-        self.edit_root_button = QtWidgets.QPushButton("Modif")
-        self.edit_root_button.setStyleSheet(self._get_compact_button_style())
+        self.edit_root_button = QtWidgets.QPushButton("Modifier")
+        self.edit_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_root_button.clicked.connect(self._edit_root_label)
-        self.edit_root_button.setMinimumWidth(70)
-        self.edit_root_button.setMaximumWidth(70)
-        self.edit_root_button.setMinimumHeight(32)
-        self.edit_root_button.setMaximumHeight(32)
 
         self.remove_root_button = QtWidgets.QPushButton("✕")
-        self.remove_root_button.setStyleSheet(self._get_compact_button_style())
+        self.remove_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_root_button.clicked.connect(self._remove_root_label)
-        self.remove_root_button.setMinimumWidth(70)
-        self.remove_root_button.setMaximumWidth(70)
-        self.remove_root_button.setMinimumHeight(32)
-        self.remove_root_button.setMaximumHeight(32)
-
-        self.modify_category_root_button = QtWidgets.QPushButton("Cat")
-        self.modify_category_root_button.setStyleSheet(self._get_compact_button_style())
-        self.modify_category_root_button.clicked.connect(lambda: self._modify_category_for_selected_label("root"))
-        self.modify_category_root_button.setMinimumWidth(70)
-        self.modify_category_root_button.setMaximumWidth(70)
-        self.modify_category_root_button.setMinimumHeight(32)
-        self.modify_category_root_button.setMaximumHeight(32)
 
         root_buttons_layout.addWidget(self.add_root_button)
         root_buttons_layout.addWidget(self.edit_root_button)
         root_buttons_layout.addWidget(self.remove_root_button)
-        root_buttons_layout.addWidget(self.modify_category_root_button)
         root_buttons_layout.addStretch()
 
         hierarchy_group_layout.addLayout(root_buttons_layout)
@@ -766,41 +1044,20 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         level1_buttons_layout.setSpacing(5)
 
         self.add_level1_button = QtWidgets.QPushButton("Ajouter")
-        self.add_level1_button.setStyleSheet(self._get_compact_button_style())
+        self.add_level1_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_level1_button.clicked.connect(self._add_level1_label)
-        self.add_level1_button.setMinimumWidth(70)
-        self.add_level1_button.setMaximumWidth(70)
-        self.add_level1_button.setMinimumHeight(32)
-        self.add_level1_button.setMaximumHeight(32)
 
-        self.edit_level1_button = QtWidgets.QPushButton("Modif")
-        self.edit_level1_button.setStyleSheet(self._get_compact_button_style())
+        self.edit_level1_button = QtWidgets.QPushButton("Modifier")
+        self.edit_level1_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_level1_button.clicked.connect(self._edit_level1_label)
-        self.edit_level1_button.setMinimumWidth(70)
-        self.edit_level1_button.setMaximumWidth(70)
-        self.edit_level1_button.setMinimumHeight(32)
-        self.edit_level1_button.setMaximumHeight(32)
 
         self.remove_level1_button = QtWidgets.QPushButton("✕")
-        self.remove_level1_button.setStyleSheet(self._get_compact_button_style())
+        self.remove_level1_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_level1_button.clicked.connect(self._remove_level1_label)
-        self.remove_level1_button.setMinimumWidth(70)
-        self.remove_level1_button.setMaximumWidth(70)
-        self.remove_level1_button.setMinimumHeight(32)
-        self.remove_level1_button.setMaximumHeight(32)
-
-        self.modify_category_level1_button = QtWidgets.QPushButton("Cat")
-        self.modify_category_level1_button.setStyleSheet(self._get_compact_button_style())
-        self.modify_category_level1_button.clicked.connect(lambda: self._modify_category_for_selected_label("level1"))
-        self.modify_category_level1_button.setMinimumWidth(70)
-        self.modify_category_level1_button.setMaximumWidth(70)
-        self.modify_category_level1_button.setMinimumHeight(32)
-        self.modify_category_level1_button.setMaximumHeight(32)
 
         level1_buttons_layout.addWidget(self.add_level1_button)
         level1_buttons_layout.addWidget(self.edit_level1_button)
         level1_buttons_layout.addWidget(self.remove_level1_button)
-        level1_buttons_layout.addWidget(self.modify_category_level1_button)
         level1_buttons_layout.addStretch()
 
         hierarchy_group_layout.addLayout(level1_buttons_layout)
@@ -821,63 +1078,50 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         child_buttons_layout.setSpacing(5)
 
         self.add_child_button = QtWidgets.QPushButton("Ajouter")
-        self.add_child_button.setStyleSheet(self._get_compact_button_style())
+        self.add_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_child_button.clicked.connect(self._add_child_label)
-        self.add_child_button.setMinimumWidth(70)
-        self.add_child_button.setMaximumWidth(70)
-        self.add_child_button.setMinimumHeight(32)
-        self.add_child_button.setMaximumHeight(32)
 
-        self.edit_child_button = QtWidgets.QPushButton("Modif")
-        self.edit_child_button.setStyleSheet(self._get_compact_button_style())
+        self.edit_child_button = QtWidgets.QPushButton("Modifier")
+        self.edit_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_child_button.clicked.connect(self._edit_child_label)
-        self.edit_child_button.setMinimumWidth(70)
-        self.edit_child_button.setMaximumWidth(70)
-        self.edit_child_button.setMinimumHeight(32)
-        self.edit_child_button.setMaximumHeight(32)
 
         self.remove_child_button = QtWidgets.QPushButton("✕")
-        self.remove_child_button.setStyleSheet(self._get_compact_button_style())
+        self.remove_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_child_button.clicked.connect(self._remove_child_label)
-        self.remove_child_button.setMinimumWidth(70)
-        self.remove_child_button.setMaximumWidth(70)
-        self.remove_child_button.setMinimumHeight(32)
-        self.remove_child_button.setMaximumHeight(32)
-
-        self.modify_category_child_button = QtWidgets.QPushButton("Cat")
-        self.modify_category_child_button.setStyleSheet(self._get_compact_button_style())
-        self.modify_category_child_button.clicked.connect(lambda: self._modify_category_for_selected_label("child"))
-        self.modify_category_child_button.setMinimumWidth(70)
-        self.modify_category_child_button.setMaximumWidth(70)
-        self.modify_category_child_button.setMinimumHeight(32)
-        self.modify_category_child_button.setMaximumHeight(32)
 
         child_buttons_layout.addWidget(self.add_child_button)
         child_buttons_layout.addWidget(self.edit_child_button)
         child_buttons_layout.addWidget(self.remove_child_button)
-        child_buttons_layout.addWidget(self.modify_category_child_button)
         child_buttons_layout.addStretch()
 
         hierarchy_group_layout.addLayout(child_buttons_layout)
 
         hierarchy_layout.addWidget(hierarchy_group)
         middle_scroll.setWidget(middle_content)
-        top_columns_layout.addWidget(middle_scroll, 5)
+        top_columns_layout.addWidget(middle_scroll, 4)
 
         # --- Colonne de droite: Relations ---
         right_column_layout = QtWidgets.QVBoxLayout()
-        right_column_layout.addStretch()
 
+        # Configuration des Relations en haut
         relations_group = QtWidgets.QGroupBox("Configuration des Relations")
         relations_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         relations_layout = QtWidgets.QVBoxLayout(relations_group)
         relations_layout.addWidget(self.global_relations_config)
         right_column_layout.addWidget(relations_group)
 
-        # Boutons de sauvegarde/export/insert
+        # Section graphe des relations (plus grande) - Maintenant dynamique
+        graph_group = QtWidgets.QGroupBox("Graphe des Relations")
+        graph_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
+        graph_layout = QtWidgets.QVBoxLayout(graph_group)
+        graph_layout.addWidget(self.relations_graph)
+        graph_group.setMinimumHeight(400)
+        right_column_layout.addWidget(graph_group)
+
+        # Boutons de sauvegarde/export/insert en bas
         save_layout = QtWidgets.QHBoxLayout()
         self.save_button = QtWidgets.QPushButton("💾 Sauvegarder Profil")
-        self.save_button.setStyleSheet(self._get_button_style_grenat())
+        self.save_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.save_button.clicked.connect(self._on_save_project)
         self.save_button.setEnabled(False)
         save_layout.addWidget(self.save_button)
@@ -889,7 +1133,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         save_layout.addWidget(self.export_profile_button)
 
         self.insert_dgraph_button = QtWidgets.QPushButton("🔄 Insérer dans Dgraph")
-        self.insert_dgraph_button.setStyleSheet(self._get_button_style_grenat())
+        self.insert_dgraph_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.insert_dgraph_button.clicked.connect(self._on_insert_dgraph)
         self.insert_dgraph_button.setEnabled(False)
         save_layout.addWidget(self.insert_dgraph_button)
@@ -897,7 +1141,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         right_column_layout.addLayout(save_layout)
         right_column_layout.addStretch()
 
-        top_columns_layout.addLayout(right_column_layout, 4)
+        top_columns_layout.addLayout(right_column_layout, 5)
 
     def _load_project_profiles(self):
         """Charge les profils depuis Dgraph."""
@@ -913,6 +1157,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         data = {
             'label': label.get('name', ''),
             'id': label.get('id', ''),
+            'uid': label.get('uid', ''),
             'description': label.get('description', ''),
             'category': label.get('category', []),
             'files': label.get('files', []),
@@ -926,25 +1171,28 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         for rel in label.get('relations', []):
             target = rel.get('target', {})
             data['outgoing_relations'].append({
-                'target_id': target.get('id'),
+                'target_uid': target.get('uid', ''),
+                'target_id': target.get('id', ''),
                 'relation_type': rel.get('relationType')
             })
         # Incoming relations
         for rel in label.get('~relations', []):
             source = rel.get('source', {})
             data['incoming_relations'].append({
-                'source_id': source.get('id'),
+                'source_uid': source.get('uid', ''),
+                'source_id': source.get('id', ''),
                 'relation_type': rel.get('relationType')
             })
         return data
 
     def _fill_hierarchy(self, data, label_node):
-        """Remplit récursivement les enfants."""
+        """Remplit récursivement les enfants et set les parents comme uids."""
         # Gérer l'inconsistance dans les clés de la requête Dgraph ('parents' pour niveau 1, 'children' pour niveau 2)
         children_key = 'children' if 'children' in label_node else 'parents'
         children = label_node.get(children_key, [])
         for child in children:
             child_data = self._label_to_data(child)
+            child_data['parents'] = [data['uid']]  # Set parent uid
             data['children'].append(child_data)
             self._fill_hierarchy(child_data, child)
 
@@ -952,16 +1200,16 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         """Collecte toutes les relations dans pending_relations."""
         pending = defaultdict(list)
         def collect(node):
-            label_id = node['id']
+            label_uid = node['uid']
             # Outgoing
             for rel in node.get('outgoing_relations', []):
-                pending[label_id].append(rel)
+                pending[label_uid].append(rel)
             # Incoming: add to source
             for rel in node.get('incoming_relations', []):
-                source_id = rel['source_id']
-                target_id = label_id
+                source_uid = rel['source_uid']
+                target_uid = label_uid
                 rel_type = rel['relation_type']
-                pending[source_id].append({'target_id': target_id, 'relation_type': rel_type})
+                pending[source_uid].append({'target_uid': target_uid, 'relation_type': rel_type})
             # Recursive
             for child in node.get('children', []):
                 collect(child)
@@ -986,7 +1234,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         for cluster in cm.get('clusters', []):
             cluster_data = {
                 'name': cluster.get('name', ''),
-                'id': cluster.get('id', ''),
+                'uid': cluster.get('uid', ''),
                 'description': cluster.get('description', ''),
                 'files': cluster.get('files', []),
                 'file_contents': json.loads(cluster.get('fileContents', '{}')),
@@ -1053,9 +1301,10 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         # Collecter tous les labels pour les relations
         self._collect_all_labels()
 
-        # Réinitialiser les relations
-        self.current_selected_label_id = None
+        # Réinitialiser les relations et graphe
+        self.current_selected_label_uid = None
         self.global_relations_config.update_current(None)
+        self.relations_graph.update_graph(None)
 
     def _update_project_details(self):
         """Met à jour les détails du projet sélectionné."""
@@ -1101,6 +1350,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self.details_text.setPlainText(details)
 
             self.global_relations_config.update_current(None)
+            self.relations_graph.update_graph(None)
         else:
             self.current_cluster_data = None
             self._reset_hierarchy_ui()
@@ -1114,7 +1364,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             for root in self.current_cluster_data.get("root_labels", []):
                 display = root['label']
                 item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, root["id"])
+                item.setData(Qt.UserRole, root["uid"])
                 self.root_list_widget.addItem(item)
         self._update_button_states()
 
@@ -1123,7 +1373,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         if current:
             self.current_root_label_index = self.root_list_widget.row(current)
             self.current_root_data = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            self.current_selected_label_id = current.data(Qt.UserRole)
+            self.current_selected_label_uid = current.data(Qt.UserRole)
 
             # Réinitialiser les sélections inférieures
             self.current_level1_data = None
@@ -1140,14 +1390,16 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             # Vider la liste des niveau 2
             self.child_list_widget.clear()
 
-            # Mettre à jour les relations
-            self.global_relations_config.update_current(self.current_selected_label_id)
+            # Mettre à jour les relations et graphe
+            self.global_relations_config.update_current(self.current_selected_label_uid)
+            self.relations_graph.update_graph(self.current_selected_label_uid)
         else:
             self.current_root_data = None
-            self.current_selected_label_id = None
+            self.current_selected_label_uid = None
             self.level1_list_widget.clear()
             self.child_list_widget.clear()
             self.global_relations_config.update_current(None)
+            self.relations_graph.update_graph(None)
 
         self._update_button_states()
 
@@ -1158,7 +1410,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             for level1 in self.current_root_data.get("children", []):
                 display = level1['label']
                 item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, level1["id"])
+                item.setData(Qt.UserRole, level1["uid"])
                 self.level1_list_widget.addItem(item)
         self._update_button_states()
 
@@ -1167,7 +1419,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         if current:
             self.current_level1_label_index = self.level1_list_widget.row(current)
             self.current_level1_data = self.current_root_data["children"][self.current_level1_label_index]
-            self.current_selected_label_id = current.data(Qt.UserRole)
+            self.current_selected_label_uid = current.data(Qt.UserRole)
 
             # Réinitialiser la sélection niveau 2
             self.current_level2_data = None
@@ -1179,13 +1431,15 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             # Afficher uniquement les enfants de ce label niveau 1
             self._populate_child_list()
 
-            # Mettre à jour les relations
-            self.global_relations_config.update_current(self.current_selected_label_id)
+            # Mettre à jour les relations et graphe
+            self.global_relations_config.update_current(self.current_selected_label_uid)
+            self.relations_graph.update_graph(self.current_selected_label_uid)
         else:
             self.current_level1_data = None
-            self.current_selected_label_id = None
+            self.current_selected_label_uid = None
             self.child_list_widget.clear()
             self.global_relations_config.update_current(None)
+            self.relations_graph.update_graph(None)
 
         self._update_button_states()
 
@@ -1196,7 +1450,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             for child in self.current_level1_data.get("children", []):
                 display = child['label']
                 item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, child["id"])
+                item.setData(Qt.UserRole, child["uid"])
                 self.child_list_widget.addItem(item)
         self._update_button_states()
 
@@ -1205,28 +1459,32 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         if current:
             self.current_level2_label_index = self.child_list_widget.row(current)
             self.current_level2_data = self.current_level1_data["children"][self.current_level2_label_index]
-            self.current_selected_label_id = current.data(Qt.UserRole)
+            self.current_selected_label_uid = current.data(Qt.UserRole)
 
             # Afficher les détails du niveau 2
             self._update_selected_details("Label Niveau 2", self.current_level2_data)
 
-            # Mettre à jour les relations
-            self.global_relations_config.update_current(self.current_selected_label_id)
+            # Mettre à jour les relations et graphe
+            self.global_relations_config.update_current(self.current_selected_label_uid)
+            self.relations_graph.update_graph(self.current_selected_label_uid)
         else:
             self.current_level2_data = None
-            self.current_selected_label_id = None
+            self.current_selected_label_uid = None
             self.global_relations_config.update_current(None)
+            self.relations_graph.update_graph(None)
     
         self._update_button_states()
 
     def _on_any_label_selected(self, current):
-        """Gère la sélection de n'importe quel label pour relations."""
+        """Gère la sélection de n'importe quel label pour relations et graphe."""
         if current:
-            self.current_selected_label_id = current.data(Qt.UserRole)
-            self.global_relations_config.update_current(self.current_selected_label_id)
+            self.current_selected_label_uid = current.data(Qt.UserRole)
+            self.global_relations_config.update_current(self.current_selected_label_uid)
+            self.relations_graph.update_graph(self.current_selected_label_uid)
         else:
-            self.current_selected_label_id = None
+            self.current_selected_label_uid = None
             self.global_relations_config.update_current(None)
+            self.relations_graph.update_graph(None)
 
     def _update_selected_details(self, title, data):
         """Met à jour les détails de l'élément sélectionné."""
@@ -1237,6 +1495,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         details = f"=== {title} ===\n\n"
         details += f"Nom: {data.get('label', '')}\n"
         details += f"ID: {data.get('id', '')}\n"
+        details += f"UID: {data.get('uid', '')}\n"
         details += f"Description: {data.get('description', '')}\n\n"
 
         categories = data.get('category', [])
@@ -1258,7 +1517,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         if outgoing:
             details += f"\nRelations sortantes ({len(outgoing)}):\n"
             for r in outgoing:
-                target_name = self.label_id_to_info.get(r['target_id'], {}).get('name', 'Inconnu')
+                target_name = self.label_uid_to_info.get(r['target_uid'], {}).get('name', 'Inconnu')
                 details += f"  {r['relation_type'].upper()} -> {target_name}\n"
 
         # Relations entrantes
@@ -1266,7 +1525,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         if incoming:
             details += f"\nRelations entrantes ({len(incoming)}):\n"
             for r in incoming:
-                source_name = self.label_id_to_info.get(r['source_id'], {}).get('name', 'Inconnu')
+                source_name = self.label_uid_to_info.get(r['source_uid'], {}).get('name', 'Inconnu')
                 details += f"  {source_name} {r['relation_type'].upper()} -> \n"
 
         # Ajouter info sur la hiérarchie
@@ -1293,32 +1552,35 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.current_level1_label_index = -1
         self.current_level2_label_index = -1
 
-        self.current_selected_label_id = None
+        self.current_selected_label_uid = None
         self.global_relations_config.update_current(None)
+        self.relations_graph.update_graph(None)
 
         self.details_text.clear()
 
     def _collect_all_labels(self):
         """Collecte tous les labels pour relations."""
-        self.label_id_to_info.clear()
-        self.name_to_id.clear()
+        self.label_uid_to_info.clear()
+        self.name_to_uid.clear()
         if not self.current_project_profile_data:
             return
         for cluster in self.current_project_profile_data.get("turing_ontology", {}).get("clusters_detailed", []):
             cluster_name = cluster.get('name', '')
             for root in cluster.get("root_labels", []):
+                uid = root.get('uid', root['id'])
                 info = {'name': root.get('label', ''), 'cluster': cluster_name}
-                self.label_id_to_info[root['id']] = info
-                self.name_to_id[root['label']] = root['id']
+                self.label_uid_to_info[uid] = info
+                self.name_to_uid[root['label']] = uid
                 self._collect_labels_recursive(root)
         self._populate_target_combo_for_all()
 
     def _collect_labels_recursive(self, node):
         """Collecte récursivement labels dans hierarchy."""
         for child in node.get('children', []):
-            info = {'name': child.get('label', ''), 'cluster': self.label_id_to_info.get(node['id'], {}).get('cluster', '')}
-            self.label_id_to_info[child['id']] = info
-            self.name_to_id[child['label']] = child['id']
+            uid = child.get('uid', child['id'])
+            info = {'name': child.get('label', ''), 'cluster': self.label_uid_to_info.get(node['uid'], {}).get('cluster', '')}
+            self.label_uid_to_info[uid] = info
+            self.name_to_uid[child['label']] = uid
             self._collect_labels_recursive(child)
 
     def _populate_target_combo_for_all(self):
@@ -1326,14 +1588,14 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         # Pour global relations
         self._populate_target_combo(self.global_relations_config.target_combo, None)
 
-    def _populate_target_combo(self, combo, source_id):
+    def _populate_target_combo(self, combo, source_uid):
         """Peuple le combo cible, excluant la source."""
         combo.clear()
-        for label_id, info in self.label_id_to_info.items():
-            if source_id and label_id == source_id:
+        for uid, info in self.label_uid_to_info.items():
+            if source_uid and uid == source_uid:
                 continue
             display = f"{info['name']} ({info['cluster']})"
-            combo.addItem(display, label_id)
+            combo.addItem(display, uid)
 
     def _add_cluster(self):
         dialog = AddEditItemDialog("Ajouter Cluster", parent=self)
@@ -1342,7 +1604,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             if data["name"]:
                 new_cluster = {
                     "name": data["name"],
-                    "id": str(uuid.uuid4()),
+                    "uid": str(uuid.uuid4()),
                     "description": data["description"],
                     "files": [],
                     "file_contents": {},
@@ -1398,6 +1660,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 new_root = {
                     "label": data["name"],
                     "id": str(uuid.uuid4()),
+                    "uid": str(uuid.uuid4()),
                     "description": data["description"],
                     "category": [],
                     "files": [],
@@ -1457,11 +1720,12 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 new_level1 = {
                     "label": data["name"],
                     "id": str(uuid.uuid4()),
+                    "uid": str(uuid.uuid4()),
                     "description": data["description"],
                     "category": [],
                     "files": [],
                     "file_contents": {},
-                    "parents": [],
+                    "parents": [self.current_root_data['uid']],
                     "children": [],
                     "outgoing_relations": [],
                     "incoming_relations": []
@@ -1516,10 +1780,13 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 new_child = {
                     "label": data["name"],
                     "id": str(uuid.uuid4()),
+                    "uid": str(uuid.uuid4()),
                     "description": data["description"],
                     "category": [],
                     "files": [],
                     "file_contents": {},
+                    "parents": [self.current_level1_data['uid']],
+                    "children": [],
                     "outgoing_relations": [],
                     "incoming_relations": []
                 }
@@ -1561,33 +1828,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self._update_button_states()
             logger.info(f"Label niveau 2 supprimé: {child_name}")
 
-    def _modify_category_for_selected_label(self, level):
-        if level == "root" and self.current_root_label_index >= 0:
-            label_data = self.current_root_data
-            list_widget = self.root_list_widget
-        elif level == "level1" and self.current_level1_label_index >= 0:
-            label_data = self.current_level1_data
-            list_widget = self.level1_list_widget
-        elif level == "child" and self.current_level2_label_index >= 0:
-            label_data = self.current_level2_data
-            list_widget = self.child_list_widget
-        else:
-            return
-
-        current_categories = label_data.get("category", [])
-        dialog = CategoryEditDialog(current_categories, self)
-        if dialog.exec_() == QDialog.Accepted:
-            new_categories = dialog.get_categories()
-            label_data["category"] = new_categories
-            current_row = list_widget.currentRow()
-            if current_row >= 0:
-                current_item = list_widget.item(current_row)
-                if current_item:
-                    display = label_data['label']
-                    current_item.setText(display)
-            self._update_button_states()
-            logger.info(f"Catégories modifiées pour {label_data['label']}: {new_categories}")
-
     def _add_all_files_from_dir(self, dir_path, base_dir, label, profile):
         """Ajoute récursivement tous les fichiers d'un dossier à un label."""
         for root, dirs, files in os.walk(dir_path):
@@ -1624,11 +1864,12 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 new_label = {
                     'label': item,
                     'id': str(uuid.uuid4()),
+                    'uid': str(uuid.uuid4()),
                     'description': f"Fichier: {rel_path}",
                     'category': ['file'],
                     'files': [rel_path],
                     'file_contents': {rel_path: content},
-                    'parents': [],
+                    'parents': [parent_label['uid']],
                     'children': [],
                     'outgoing_relations': [],
                     'incoming_relations': []
@@ -1638,11 +1879,12 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 new_label = {
                     'label': item,
                     'id': str(uuid.uuid4()),
+                    'uid': str(uuid.uuid4()),
                     'description': f"Dossier: {rel_path}",
                     'category': ['folder'],
                     'files': [],
                     'file_contents': {},
-                    'parents': [],
+                    'parents': [parent_label['uid']],
                     'children': [],
                     'outgoing_relations': [],
                     'incoming_relations': []
@@ -1670,7 +1912,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             item_path = os.path.join(directory, item)
             cluster = {
                 'name': item,
-                'id': str(uuid.uuid4()),
+                'uid': str(uuid.uuid4()),
                 'description': f"{'Fichier' if os.path.isfile(item_path) else 'Dossier'}: {item}",
                 'files': [],
                 'file_contents': {},
@@ -1689,6 +1931,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 new_root = {
                     'label': item,
                     'id': str(uuid.uuid4()),
+                    'uid': str(uuid.uuid4()),
                     'description': f"Fichier: {rel_path}",
                     'category': ['file'],
                     'files': [rel_path],
@@ -1716,6 +1959,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                         new_root = {
                             'label': subitem,
                             'id': str(uuid.uuid4()),
+                            'uid': str(uuid.uuid4()),
                             'description': f"Fichier: {sub_rel_path}",
                             'category': ['file'],
                             'files': [sub_rel_path],
@@ -1730,6 +1974,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                         new_root = {
                             'label': subitem,
                             'id': str(uuid.uuid4()),
+                            'uid': str(uuid.uuid4()),
                             'description': f"Dossier: {sub_rel_path}",
                             'category': ['folder'],
                             'files': [],
@@ -1919,10 +2164,11 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self._refresh_cluster_list()
         self._reset_hierarchy_ui()
         self.pending_relations.clear()
-        self.label_id_to_info.clear()
-        self.name_to_id.clear()
-        self.current_selected_label_id = None
+        self.label_uid_to_info.clear()
+        self.name_to_uid.clear()
+        self.current_selected_label_uid = None
         self.global_relations_config.update_current(None)
+        self.relations_graph.update_graph(None)
         self._update_button_states()
 
     def _on_save_project(self):
@@ -1971,7 +2217,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
     def _create_label_mutation(self, label_data, level, cluster_uid):
         """Crée une mutation pour un label avec ses fichiers."""
-        uid = f"_:label_{label_data.get('id', str(uuid.uuid4()))}"
+        uid = f"_:label_{label_data.get('uid', str(uuid.uuid4()))}"
         
         # S'assurer que les fichiers sont bien présents
         files = label_data.get('files', [])
@@ -2034,15 +2280,15 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         turing_ontology = self.current_project_profile_data.get("turing_ontology", {})
         clusters_detailed = turing_ontology.get("clusters_detailed", [])
 
-        label_uids = {}  # Map label id to uid
+        label_uids = {}  # Map label uid to dgraph uid
 
         for cluster_data in clusters_detailed:
-            cluster_uid = f"_:cluster_{cluster_data.get('id', str(uuid.uuid4()))}"
+            cluster_uid = f"_:cluster_{cluster_data.get('uid', str(uuid.uuid4()))}"
             cluster = {
                 "uid": cluster_uid,
                 "dgraph.type": "Cluster",
                 "name": cluster_data.get("name", ""),
-                "id": cluster_data.get("id", str(uuid.uuid4())),
+                "id": cluster_data.get("uid", str(uuid.uuid4())),
                 "userId": "user1",
                 "nodeType": "cluster",
                 "description": cluster_data.get("description", ""),
@@ -2063,7 +2309,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 root_label = self._create_label_mutation(root, level=0, cluster_uid=cluster_uid)
                 mutations.append(root_label)
                 cluster["root_labels"].append({"uid": root_label["uid"]})
-                label_uids[root['id']] = root_label["uid"]
+                label_uids[root['uid']] = root_label["uid"]
 
                 # Traiter récursivement la hiérarchie complète
                 self._process_hierarchy_recursive(
@@ -2076,16 +2322,16 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 )
 
         # Ajouter les relations après création de tous les labels
-        for source_id, rels in self.pending_relations.items():
+        for source_uid, rels in self.pending_relations.items():
             for rel in rels:
-                if source_id in label_uids and rel['target_id'] in label_uids:
+                if source_uid in label_uids and rel['target_uid'] in label_uids:
                     relation = {
                         "uid": f"_:rel_{uuid.uuid4()}",
                         "dgraph.type": "Relation",
                         "name": f"Relation {rel['relation_type']}",
                         "relationType": rel['relation_type'],
-                        "source": {"uid": label_uids[source_id]},
-                        "target": {"uid": label_uids[rel['target_id']]}
+                        "source": {"uid": label_uids[source_uid]},
+                        "target": {"uid": label_uids[rel['target_uid']]}
                     }
                     mutations.append(relation)
 
@@ -2114,7 +2360,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             mutations.append(child_mutation)
 
             # Enregistrer l'UID
-            label_uids[child_data['id']] = child_mutation["uid"]
+            label_uids[child_data['uid']] = child_mutation["uid"]
 
             # Lier au parent via 'parents' sur l'enfant
             if "parents" not in child_mutation:
@@ -2122,7 +2368,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             child_mutation["parents"].append({"uid": parent_uid})
 
             # Définir le parentId (string)
-            child_mutation["parentId"] = node_data.get('id', '')
+            child_mutation["parentId"] = node_data.get('uid', '')
 
             # Traiter récursivement les enfants de cet enfant
             self._process_hierarchy_recursive(
@@ -2146,22 +2392,19 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.add_root_button.setEnabled(has_cluster)
         self.edit_root_button.setEnabled(self.root_list_widget.currentRow() != -1)
         self.remove_root_button.setEnabled(self.root_list_widget.currentRow() != -1)
-        self.modify_category_root_button.setEnabled(self.root_list_widget.currentRow() != -1)
     
         has_root = bool(self.current_root_data)
         self.add_level1_button.setEnabled(has_root)
         self.edit_level1_button.setEnabled(self.level1_list_widget.currentRow() != -1)
         self.remove_level1_button.setEnabled(self.level1_list_widget.currentRow() != -1)
-        self.modify_category_level1_button.setEnabled(self.level1_list_widget.currentRow() != -1)
     
         has_level1 = bool(self.current_level1_data)
         self.add_child_button.setEnabled(has_level1)
         self.edit_child_button.setEnabled(self.child_list_widget.currentRow() != -1)
         self.remove_child_button.setEnabled(self.child_list_widget.currentRow() != -1)
-        self.modify_category_child_button.setEnabled(self.child_list_widget.currentRow() != -1)
 
         # Boutons relations
-        has_source = bool(self.current_selected_label_id)
+        has_source = bool(self.current_selected_label_uid)
         self.global_relations_config.add_button.setEnabled(has_source and self.global_relations_config.target_combo.count() > 0)
         self.global_relations_config.remove_button.setEnabled(self.global_relations_config.relations_list.currentRow() != -1)
 
