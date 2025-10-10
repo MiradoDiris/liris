@@ -62,7 +62,7 @@ class GlassSwitch(QtWidgets.QWidget):
         self.animation = QPropertyAnimation(self, b"pill_x", self)
         self.animation.setDuration(220)
 
-        self.pill_color = QColor(66, 133, 244, 200)
+        self.pill_color = QColor(Theme.PRIMARY_COLOR)
         self.font = QFont("Segoe UI", 9, QFont.Bold)
         self.section_width = 100.0  # 200/2 = 100
 

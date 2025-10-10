@@ -111,7 +111,7 @@ class LirisDgraphConnector:
             return True
     
     def reset_and_apply_schema(self):
-        """Drop all et applique schéma propre."""
+        """Drop all et applique schéma propre (version mise à jour avec @reverse sur imports)."""
         if not self.client:
             logger.error("Pas de client connecté.")
             return False
@@ -123,9 +123,9 @@ class LirisDgraphConnector:
             self.client.alter(op_drop)
             logger.info("Drop all exécuté : schéma et données supprimés.")
             
-            # Schéma complet avec TOUS les @reverse
+            # Même schéma avec @reverse sur imports
             clean_schema = """
-# Types
+# Types (inchangés)
 type Cluster {
   name
   id
@@ -186,7 +186,7 @@ type Function {
   calls
 }
 
-# Prédicats avec types, index et reverse
+# Prédicats avec types, index et reverse (ajout @reverse sur imports)
 name: string @index(exact) .
 id: string @index(exact) .
 level: int @index(int) .
@@ -206,7 +206,7 @@ nodeType: string @index(exact) .
 codeContent: string .
 description: string .
 functions: [uid] .
-imports: [uid] .
+imports: [uid] @reverse .  # AJOUT : @reverse pour supporter ~imports
 calls: [uid] @reverse .
 relations: [uid] @reverse .
 relationType: string @index(exact) .
@@ -216,7 +216,7 @@ fileContents: string .
 
             op_schema = pydgraph.Operation(schema=clean_schema)
             self.client.alter(op_schema)
-            logger.info("Schéma mis à jour appliqué avec succès (avec @reverse sur clusters, parents, calls, relations).")
+            logger.info("Schéma mis à jour appliqué avec succès (avec @reverse sur imports).")
             return True
         except Exception as e:
             logger.error(f"Erreur reset/apply schema: {e}")
@@ -227,7 +227,7 @@ fileContents: string .
         if not self.client:
             return
         
-        # Même schéma avec TOUS les @reverse
+        # Schéma mis à jour avec @reverse sur imports (et autres pour cohérence)
         schema = """
 # Types
 type Cluster {
@@ -290,7 +290,7 @@ type Function {
   calls
 }
 
-# Prédicats avec types, index et reverse
+# Prédicats avec types, index et reverse (ajout @reverse sur imports)
 name: string @index(exact) .
 id: string @index(exact) .
 level: int @index(int) .
@@ -310,7 +310,7 @@ nodeType: string @index(exact) .
 codeContent: string .
 description: string .
 functions: [uid] .
-imports: [uid] .
+imports: [uid] @reverse .  # AJOUT : @reverse pour supporter ~imports
 calls: [uid] @reverse .
 relations: [uid] @reverse .
 relationType: string @index(exact) .
@@ -321,7 +321,7 @@ fileContents: string .
         try:
             op = pydgraph.Operation(schema=schema)
             self.client.alter(op)
-            logger.info("Schéma Dgraph configuré avec succès (avec @reverse sur clusters, parents, calls, relations).")
+            logger.info("Schéma Dgraph configuré avec succès (avec @reverse sur imports, clusters, parents, calls, relations).")
         except Exception as e:
             logger.warning(f"Erreur lors de la configuration du schéma (peut-être déjà existant): {e}")
     
@@ -333,6 +333,7 @@ fileContents: string .
         
         try:
             schema_update = """
+imports: [uid] @reverse .
 parents: [uid] @reverse .
 clusters: [uid] @reverse .
 calls: [uid] @reverse .
@@ -340,7 +341,7 @@ relations: [uid] @reverse .
 """
             op = pydgraph.Operation(schema=schema_update)
             self.client.alter(op)
-            logger.info("Reverse edges ajoutées au schéma avec succès.")
+            logger.info("Reverse edges ajoutées au schéma avec succès (incluant imports).")
             return True
         except Exception as e:
             logger.error(f"Erreur update reverse edges: {e}")

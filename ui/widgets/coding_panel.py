@@ -33,17 +33,17 @@ class TaxonomyItem(QtWidgets.QTreeWidgetItem):
         primary = '#A23B2D'  # Rouge thème
         dark_gray = '#424242'
         medium_gray = '#666666'
-        light_gray = '#999999'
+        strong_gray = '#555555'
         
         # Icônes professionnelles avec couleurs sobres
         if item_type == "folder":
-            self.setIcon(0, qta.icon('fa5s.folder', color=dark_gray))
+            self.setIcon(0, qta.icon('fa5s.folder', color= strong_gray))
         elif item_type == "file":
-            self.setIcon(0, qta.icon('fa5s.file-code', color=medium_gray))
+            self.setIcon(0, qta.icon('fa5s.file-code', color=strong_gray))
         elif item_type == "function":
             self.setIcon(0, qta.icon('fa5s.cube', color=primary))
         elif item_type == "dependency":
-            self.setIcon(0, qta.icon('fa5s.link', color=light_gray))
+            self.setIcon(0, qta.icon('fa5s.link', color=strong_gray))
         elif item_type == "class":
             self.setIcon(0, qta.icon('fa5s.cubes', color=dark_gray))
         elif item_type == "variable":
@@ -464,27 +464,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
         desc_layout.addWidget(self.description_text)
         
         # Bouton pour afficher le graphe
-        graph_button = QtWidgets.QPushButton("Afficher le Graphe des Relations")
-        graph_button.clicked.connect(self._show_graph)
-        graph_button.setStyleSheet("""
-            QPushButton {
-                background-color: #A23B2D;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #D35A4A;
-            }
-            QPushButton:disabled {
-                background-color: #CCC;
-            }
-        """)
-        graph_button.setEnabled(False)
-        self.graph_button = graph_button
-        desc_layout.addWidget(graph_button)
         
         # Liste des sélections
         selected_label = QtWidgets.QLabel("Éléments sélectionnés:")
@@ -1079,7 +1058,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
         if not selected_items:
             self.description_text.clear()
             self.selected_list.clear()
-            self.graph_button.setEnabled(False)
+            #self.graph_button.setEnabled(False)
             return
         
         # Afficher la description du dernier item sélectionné
@@ -1094,7 +1073,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
             # Stocker pour le graphe
             self.current_central_node = data.get('name', data.get('label', 'N/A'))
             self.current_related_items = related_items if selected_level >= 2 else []
-            self.graph_button.setEnabled(selected_level >= 2 and len(related_items) > 0)
             
             desc = data.get('description', 'Aucune description disponible')
             
@@ -1705,7 +1683,7 @@ class CodingPanel(QtWidgets.QWidget):
             font-size: 13px;
         }}
         QPushButton:hover {{ background-color: {self.secondary_color}; }}
-        QPushButton:disabled {{ background-color: #CCCCCC; color: #888888; }}
+        QPushButton:disabled {{ background-color: #e0e0e0; color: #424242; }}
 
         /* Champs sobres avec effet subtil au focus */
         QLineEdit, QComboBox, QTextEdit {{
@@ -1933,8 +1911,8 @@ class CodingPanel(QtWidgets.QWidget):
                 background-color: {self.primary_color};
             }}
             QPushButton:disabled {{
-                background-color: #E8E8E8;
-                color: #AAAAAA;
+                background-color: #e0e0e0;
+                    color: #424242;
             }}
         """)
 

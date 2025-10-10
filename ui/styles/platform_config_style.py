@@ -131,8 +131,9 @@ class PlatformConfigStyle:
                 background-color: #922E23;
             }}
             QPushButton:disabled {{
-                background-color: #CCCCCC;
-                color: #888888;
+                background-color: #e0e0e0;
+                color: #424242;
+                border: 1px solid #bdbdbd;
             }}
         """
 
