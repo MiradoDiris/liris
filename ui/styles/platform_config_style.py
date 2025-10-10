@@ -119,10 +119,11 @@ class PlatformConfigStyle:
                 color: white;
                 border: none;
                 border-radius: 4px;
-                padding: 8px 16px;
+                padding: 4px 8px;
                 font-size: 11px;
                 font-weight: bold;
                 min-height: 20px;
+                min-width: 80px; 
             }}
             QPushButton:hover {{
                 background-color: {PlatformConfigStyle.SECONDARY_COLOR};
