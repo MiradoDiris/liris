@@ -1,10 +1,11 @@
 import os
 import json
 from pathlib import Path
+from typing import Dict, Any, Optional, List
 import uuid
 from datetime import datetime
 import sqlite3
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QVBoxLayout, QPlainTextEdit, QListWidgetItem, QHBoxLayout, QLabel, QComboBox, QPushButton, QInputDialog, QMessageBox
 from collections import defaultdict
@@ -16,6 +17,12 @@ from utils.logger import logger
 from ui.styles.platform_config_style import PlatformConfigStyle
 from ui.localization.translator import tr
 from utils.dgraph_connector import LirisDgraphConnector
+from utils.multi_language_parser import (
+    MultiLanguageDependencyParser, 
+    ProjectStructureScanner,
+    normalize_node_name,
+    is_supported_file
+)
 
 
 class AddEditItemDialog(QDialog):
@@ -65,6 +72,7 @@ class AddEditItemDialog(QDialog):
 class RelationsConfig(QtWidgets.QWidget):
     """
     Widget pour configurer les relations d'import pour un niveau de hiérarchie spécifique.
+    Version corrigée avec logique source/target cohérente et affichage tableau.
     """
     def __init__(self, parent_widget, level="global"):
         super().__init__()
@@ -78,75 +86,239 @@ class RelationsConfig(QtWidgets.QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
 
         title = QtWidgets.QLabel(f"Relations {self.level.capitalize()}")
-        title.setStyleSheet("font-weight: bold; font-size: 12px;")
+        title.setStyleSheet("""
+            font-weight: bold;
+            font-size: 12px;
+            color: black;
+        """)
         layout.addWidget(title)
 
-        # Source affichée
-        source_layout = QHBoxLayout()
-        source_layout.addWidget(QtWidgets.QLabel("Nœud sélectionné:"))
-        self.source_label = QtWidgets.QLabel("Aucun sélectionné")
-        self.source_label.setStyleSheet("color: #666; font-style: italic;")
-        source_layout.addWidget(self.source_label)
-        source_layout.addStretch()
-        layout.addLayout(source_layout)
+        # Tableau Source/Target (horizontal, sans bordure)
+        table_layout = QHBoxLayout()
+        table_layout.setSpacing(20)
 
-        # Liste des relations (sortantes + entrantes)
+        # Colonne Source
+        source_container = QVBoxLayout()
+        source_header = QLabel("Source")
+        source_header.setStyleSheet("""
+            font-weight: bold;
+            font-size: 11px;
+            color: #333;
+            padding: 5px;
+        """)
+        source_container.addWidget(source_header)
+
+        self.source_label = QLabel("Aucun sélectionné")
+        self.source_label.setStyleSheet("""
+            color: black;
+            font-weight: bold;
+            padding: 8px;
+            background-color: #f2f2f2;
+            border-radius: 4px;
+            min-width: 150px;
+        """)
+        self.source_label.setAlignment(Qt.AlignCenter)
+        source_container.addWidget(self.source_label)
+
+        # Flèche
+        arrow_container = QVBoxLayout()
+        arrow_container.addWidget(QLabel(""))  # Spacer pour header
+        arrow_label = QLabel("→")
+        arrow_label.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            color: #666;
+            padding: 8px;
+        """)
+        arrow_label.setAlignment(Qt.AlignCenter)
+        arrow_container.addWidget(arrow_label)
+
+        # Colonne Target
+        target_container = QVBoxLayout()
+        target_header = QLabel("Target")
+        target_header.setStyleSheet("""
+            font-weight: bold;
+            font-size: 11px;
+            color: #333;
+            padding: 5px;
+        """)
+        target_container.addWidget(target_header)
+
+        self.target_label = QLabel("—")
+        self.target_label.setStyleSheet("""
+            color: black;
+            font-weight: bold;
+            padding: 8px;
+            background-color: #f2f2f2;
+            border-radius: 4px;
+            min-width: 150px;
+        """)
+        self.target_label.setAlignment(Qt.AlignCenter)
+        target_container.addWidget(self.target_label)
+
+        table_layout.addLayout(source_container)
+        table_layout.addLayout(arrow_container)
+        table_layout.addLayout(target_container)
+        table_layout.addStretch()
+
+        layout.addLayout(table_layout)
+
+        # Séparateur
+        separator = QtWidgets.QFrame()
+        separator.setFrameShape(QtWidgets.QFrame.HLine)
+        separator.setStyleSheet("background-color: #ccc; max-height: 1px;")
+        layout.addWidget(separator)
+
+        # Liste des relations
         relations_label_layout = QHBoxLayout()
-        relations_label_layout.addWidget(QtWidgets.QLabel("Relations:"))
+        relations_label = QtWidgets.QLabel("Relations :")
+        relations_label.setStyleSheet("color: black; font-weight: bold;")
+        relations_label_layout.addWidget(relations_label)
         relations_label_layout.addStretch()
         layout.addLayout(relations_label_layout)
 
         self.relations_list = QtWidgets.QListWidget()
         self.relations_list.setMaximumHeight(200)
         self.relations_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.relations_list.currentItemChanged.connect(self._on_relation_selected)
+        self.relations_list.setStyleSheet("""
+            QListWidget {
+                background-color: #fafafa;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                padding: 5px;
+                color: black;
+            }
+            QListWidget::item {
+                padding: 6px;
+                border-radius: 3px;
+                margin: 2px 0px;
+            }
+            QListWidget::item:selected {
+                background-color: #dcdcdc;
+            }
+            QListWidget::item:hover {
+                background-color: #eaeaea;
+            }
+        """)
         layout.addWidget(self.relations_list)
 
-        # Boutons d'action
+        # Boutons d’action
         buttons_layout = QHBoxLayout()
+
+        button_style = """
+            QPushButton {
+                background-color: #f2f2f2;
+                color: black;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+            QPushButton:pressed {
+                background-color: #d0d0d0;
+            }
+        """
+
         self.add_button = QtWidgets.QPushButton("Nouvelle relation")
-        self.add_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.add_button.setStyleSheet(button_style)
         self.add_button.setMaximumWidth(150)
         self.add_button.clicked.connect(self._on_add_new_relation)
         buttons_layout.addWidget(self.add_button)
 
         self.edit_button = QtWidgets.QPushButton("Modifier")
-        self.edit_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.edit_button.setStyleSheet(button_style)
         self.edit_button.setMaximumWidth(100)
         self.edit_button.clicked.connect(self._on_edit)
         buttons_layout.addWidget(self.edit_button)
 
         self.remove_button = QtWidgets.QPushButton("Supprimer")
-        self.remove_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.remove_button.setStyleSheet(button_style)
         self.remove_button.setMaximumWidth(100)
         self.remove_button.clicked.connect(self._on_remove)
         buttons_layout.addWidget(self.remove_button)
 
         buttons_layout.addStretch()
-        layout.addLayout(buttons_layout)   
+        layout.addLayout(buttons_layout)
+
+    def _on_relation_selected(self, current):
+        """Gère la sélection d'une relation pour afficher source/target."""
+        if not current:
+            self.target_label.setText("—")
+            return
+        
+        rel = current.data(Qt.UserRole)
+        if not rel:
+            return
+        
+        # Récupérer les infos source et target
+        source_uid = rel.get('source')
+        target_uid = rel.get('target')
+        
+        source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
+        target_info = self.parent_widget.label_uid_to_info.get(target_uid, {})
+        
+        source_name = source_info.get('name', source_info.get('label', 'Inconnu'))
+        target_name = target_info.get('name', target_info.get('label', 'Inconnu'))
+        
+        # Mettre à jour l'affichage
+        self.source_label.setText(source_name)
+        self.target_label.setText(target_name)
 
     def update_current(self, source_uid):
+        """Met à jour l'affichage pour le nœud source sélectionné."""
         self.relations_list.clear()
+        self.target_label.setText("—")
+        
         if source_uid:
-            source_info = self.parent_widget.label_uid_to_info.get(source_uid)
-            self.source_label.setText(source_info['name'] if source_info else "Inconnu")
+            source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
+            source_name = source_info.get('name', source_info.get('label', 'Inconnu'))
+            self.source_label.setText(source_name)
             self._update_relations_list(source_uid)
         else:
             self.source_label.setText("Aucun sélectionné")
             self.relations_list.clear()
 
+    def _get_node_name(self, uid):
+        """Récupère le nom d'un nœud par son UID avec fallback robuste."""
+        if not uid:
+            return None
+        
+        # Chercher dans label_uid_to_info
+        info = self.parent_widget.label_uid_to_info.get(uid)
+        if info:
+            return info.get('name') or info.get('label')
+        
+        # Fallback: chercher directement dans les nœuds
+        all_nodes = self.parent_widget._get_all_nodes()
+        node = next((n for n in all_nodes if n.get('uid') == uid), None)
+        if node:
+            return node.get('label') or node.get('name')
+        
+        return None
+
     def _on_edit(self):
+        """Modifie une relation existante (change la target)."""
         current_item = self.relations_list.currentItem()
         if not current_item:
             return
 
         rel = current_item.data(Qt.UserRole)
-        direction = rel.get('direction', '')
-        if direction.startswith('hier'):
-            QtWidgets.QMessageBox.information(self, "Info", "Les relations hiérarchiques ne peuvent pas être modifiées.")
+        rel_category = rel.get('category', 'custom')
+        
+        # Ne pas permettre modification des relations hiérarchiques
+        if rel_category == 'hierarchy':
+            QtWidgets.QMessageBox.information(
+                self, 
+                "Info", 
+                "Les relations hiérarchiques (parent/child) ne peuvent pas être modifiées."
+            )
             return
 
         src_uid = rel['source']
-        tgt_uid = rel['target']
+        old_target_uid = rel['target']
         rel_type = rel.get('type', 'relation')
 
         # Boîte de dialogue pour choisir une nouvelle cible
@@ -155,40 +327,62 @@ class RelationsConfig(QtWidgets.QWidget):
         for uid, info in self.parent_widget.label_uid_to_info.items():
             if uid == src_uid:
                 continue
+            name = info.get('name') or info.get('label', 'N/A')
+            cluster = info.get('cluster', 'N/A')
             target_uids.append(uid)
-            target_names.append(f"{info['name']} ({info['cluster']})")
+            target_names.append(f"{name} ({cluster})")
+
+        if not target_names:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Aucune cible",
+                "Aucun nœud disponible comme nouvelle cible."
+            )
+            return
 
         new_target_name, ok = QInputDialog.getItem(
-            self, "Modifier la relation",
-            "Nouvelle cible :", target_names, 0, False
+            self, 
+            "Modifier la relation",
+            "Nouvelle cible:", 
+            target_names, 
+            0, 
+            False
         )
+        
         if ok and new_target_name:
             new_index = target_names.index(new_target_name)
             new_target_uid = target_uids[new_index]
 
-            # Supprimer ancienne
-            self.parent_widget._update_local_relations_remove(src_uid, tgt_uid, rel_type)
-            old_rel = {"target_uid": tgt_uid, "relation_type": rel_type}
+            # Supprimer ancienne relation
+            self.parent_widget._update_local_relations_remove(src_uid, old_target_uid, rel_type)
+            old_rel = {"target_uid": old_target_uid, "relation_type": rel_type}
             if old_rel in self.parent_widget.pending_relations[src_uid]:
                 self.parent_widget.pending_relations[src_uid].remove(old_rel)
 
-            # Ajouter nouvelle
+            # Ajouter nouvelle relation
             new_rel = {"target_uid": new_target_uid, "relation_type": rel_type}
             self.parent_widget.pending_relations[src_uid].append(new_rel)
             self.parent_widget._update_local_relations(src_uid, new_target_uid, rel_type)
 
             self._update_relations_list(self.parent_widget.current_selected_label_uid)
-            logger.info(f"Relation modifiée: {src_uid} → {new_target_uid}")  
+            logger.info(f"Relation modifiée: {src_uid} → {new_target_uid}")
 
     def _on_remove(self):
+        """Supprime une relation."""
         current_item = self.relations_list.currentItem()
         if not current_item:
             return
 
         rel = current_item.data(Qt.UserRole)
-        direction = rel.get('direction', '')
-        if direction.startswith('hier'):
-            QtWidgets.QMessageBox.information(self, "Info", "Les relations hiérarchiques ne peuvent pas être supprimées.")
+        rel_category = rel.get('category', 'custom')
+        
+        # Ne pas permettre suppression des relations hiérarchiques
+        if rel_category == 'hierarchy':
+            QtWidgets.QMessageBox.information(
+                self,
+                "Info",
+                "Les relations hiérarchiques (parent/child) ne peuvent pas être supprimées."
+            )
             return
 
         src_uid = rel['source']
@@ -196,87 +390,159 @@ class RelationsConfig(QtWidgets.QWidget):
         rel_type = rel.get('type', 'relation')
 
         reply = QtWidgets.QMessageBox.question(
-            self, "Supprimer", "Voulez-vous vraiment supprimer cette relation ?"
+            self, 
+            "Supprimer", 
+            "Voulez-vous vraiment supprimer cette relation?"
         )
+        
         if reply == QtWidgets.QMessageBox.Yes:
             self.parent_widget._update_local_relations_remove(src_uid, tgt_uid, rel_type)
             rel_obj = {"target_uid": tgt_uid, "relation_type": rel_type}
             if rel_obj in self.parent_widget.pending_relations[src_uid]:
                 self.parent_widget.pending_relations[src_uid].remove(rel_obj)
+            
             self._update_relations_list(self.parent_widget.current_selected_label_uid)
             logger.info(f"Relation supprimée: {src_uid} → {tgt_uid}")
 
     def _update_relations_list(self, source_uid):
+        """Met à jour la liste des relations avec affichage source/target cohérent."""
         self.relations_list.clear()
         if not source_uid:
             return
+
+        # Mapping Dgraph -> local pour résolution
+        dgraph_to_local = self.parent_widget._get_dgraph_to_local_mapping()
 
         all_nodes = self.parent_widget._get_all_nodes()
         node = next((n for n in all_nodes if n['uid'] == source_uid), None)
         if not node:
             return
 
-        # Sortantes (relations custom)
+        # === 1. Relations sortantes (custom) ===
         for r in node.get('outgoing_relations', []):
-            target_info = self.parent_widget.label_uid_to_info.get(r['target_uid'], {})
-            target_name = target_info.get('name', 'Inconnu')
+            target_uid = r['target_uid']
+            
+            # Mapper si hex Dgraph
+            if target_uid.startswith('0x') and len(target_uid) == 6:
+                target_uid = dgraph_to_local.get(target_uid, target_uid)
+            
+            target_name = self._get_node_name(target_uid)
+            if not target_name:
+                continue  # Skip si nom introuvable
+            
             rel_type = r.get('relation_type', 'relation')
-            display = f"[OUT] {node['label']} ({rel_type}) → {target_name}"
+            
+            # Affichage: Source → (type) → Target
+            source_name = self._get_node_name(source_uid) or 'Source'
+            
+            display = f"{source_name} →({rel_type})→ {target_name}"
+            
             item = QListWidgetItem(display)
             item.setData(Qt.UserRole, {
+                "category": "custom",
                 "direction": "out",
                 "source": source_uid,
-                "target": r['target_uid'],
+                "target": r['target_uid'],  # Garder original
                 "type": rel_type
             })
+            item.setForeground(QtGui.QColor("#2196F3"))  # Bleu pour sortantes
             self.relations_list.addItem(item)
 
-        # Entrantes (relations custom)
+        # === 2. Relations entrantes (custom) ===
         for r in node.get('incoming_relations', []):
-            source_info = self.parent_widget.label_uid_to_info.get(r['source_uid'], {})
-            source_name = source_info.get('name', 'Inconnu')
+            source_uid_rel = r['source_uid']
+            
+            # Mapper si hex
+            if source_uid_rel.startswith('0x') and len(source_uid_rel) == 6:
+                source_uid_rel = dgraph_to_local.get(source_uid_rel, source_uid_rel)
+            
+            source_name = self._get_node_name(source_uid_rel)
+            if not source_name:
+                continue  # Skip si nom introuvable
+            
             rel_type = r.get('relation_type', 'relation')
-            display = f"[IN] {source_name} ({rel_type}) → {node['label']}"
+            
+            # Affichage: Source → (type) → Target (current node)
+            target_name = self._get_node_name(source_uid) or 'Target'
+            
+            display = f"{source_name} →({rel_type})→ {target_name}"
+            
             item = QListWidgetItem(display)
             item.setData(Qt.UserRole, {
+                "category": "custom",
                 "direction": "in",
-                "source": r['source_uid'],
+                "source": r['source_uid'],  # Original
                 "target": source_uid,
                 "type": rel_type
             })
+            item.setForeground(QtGui.QColor("#FF9800"))  # Orange pour entrantes
             self.relations_list.addItem(item)
 
-        # Hiérarchie sortante (enfants)
-        for child in node.get('children', []):
-            child_name = child['label']
-            display = f"[HIER-OUT] {node['label']} (child) → {child_name}"
-            item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, {
-                "direction": "hier-out",
-                "source": source_uid,
-                "target": child['uid'],
-                "type": "child"
-            })
-            self.relations_list.addItem(item)
+        # === 3. Hiérarchie: Enfants ===
+        children = node.get('children', [])
+        if children:  # Afficher seulement s'il y a des enfants
+            for child in children:
+                child_uid = child['uid']
+                child_name = child.get('label') or child.get('name')
+                
+                if not child_name:
+                    continue  # Skip si pas de nom
+                
+                # Affichage: Source → (child) → Target
+                source_name = self._get_node_name(source_uid) or 'Source'
+                
+                display = f"{source_name} →(child)→ {child_name}"
+                
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, {
+                    "category": "hierarchy",
+                    "direction": "out",
+                    "source": source_uid,
+                    "target": child_uid,
+                    "type": "child"
+                })
+                item.setForeground(QtGui.QColor("#4CAF50"))  # Vert pour hiérarchie
+                self.relations_list.addItem(item)
 
-        # Hiérarchie entrante (parents)
-        for p_uid in node.get('parents', []):
-            parent_info = self.parent_widget.label_uid_to_info.get(p_uid, {})
-            parent_name = parent_info.get('name', 'Inconnu')
-            display = f"[HIER-IN] {parent_name} (parent) → {node['label']}"
-            item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, {
-                "direction": "hier-in",
-                "source": p_uid,
-                "target": source_uid,
-                "type": "parent"
-            })
-            self.relations_list.addItem(item)
+        # === 4. Hiérarchie: Parents ===
+        parents = node.get('parents', [])
+        if parents:  # Afficher seulement s'il y a des parents
+            for p_uid in parents:
+                # Mapper si hex
+                if p_uid.startswith('0x') and len(p_uid) == 6:
+                    p_uid_mapped = dgraph_to_local.get(p_uid, p_uid)
+                else:
+                    p_uid_mapped = p_uid
+                
+                parent_name = self._get_node_name(p_uid_mapped)
+                if not parent_name:
+                    continue  # Skip si nom introuvable
+                
+                # Affichage: Parent → (parent) → Current
+                source_name = self._get_node_name(source_uid) or 'Current'
+                
+                display = f"{parent_name} →(parent)→ {source_name}"
+                
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, {
+                    "category": "hierarchy",
+                    "direction": "in",
+                    "source": p_uid,  # Original
+                    "target": source_uid,
+                    "type": "parent"
+                })
+                item.setForeground(QtGui.QColor("#9C27B0"))  # Violet pour parents
+                self.relations_list.addItem(item)
 
     def _on_add_new_relation(self):
+        """Ajoute une nouvelle relation custom."""
         source_uid = self.parent_widget.current_selected_label_uid
         if not source_uid:
-            QtWidgets.QMessageBox.warning(self, "Erreur", "Sélectionnez un nœud.")
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Erreur", 
+                "Sélectionnez un nœud source."
+            )
             return
 
         # Créer une liste de toutes les cibles possibles
@@ -285,26 +551,63 @@ class RelationsConfig(QtWidgets.QWidget):
         for uid, info in self.parent_widget.label_uid_to_info.items():
             if uid == source_uid:
                 continue
+            name = info.get('name') or info.get('label', 'N/A')
+            cluster = info.get('cluster', 'N/A')
             target_uids.append(uid)
-            target_names.append(f"{info['name']} ({info['cluster']})")
+            target_names.append(f"{name} ({cluster})")
 
-        # Boîte de sélection
+        if not target_names:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Aucune cible",
+                "Aucun nœud disponible comme cible."
+            )
+            return
+
+        # Boîte de sélection de la cible
         target_name, ok = QInputDialog.getItem(
-            self, "Nouvelle relation",
-            "Choisissez une cible :", target_names, 0, False
+            self, 
+            "Nouvelle relation",
+            "Choisissez une cible:", 
+            target_names, 
+            0, 
+            False
         )
+        
         if ok and target_name:
             target_index = target_names.index(target_name)
             target_uid = target_uids[target_index]
 
+            # Boîte pour le type de relation
+            rel_types = [
+                "import", 
+                "extends", 
+                "implements", 
+                "uses", 
+                "calls", 
+                "depends_on",
+                "relation"
+            ]
+            
+            rel_type, ok2 = QInputDialog.getItem(
+                self,
+                "Type de relation",
+                "Type de relation:",
+                rel_types,
+                0,
+                True  # Editable
+            )
+            
+            if not ok2 or not rel_type:
+                rel_type = "relation"
+
             # Enregistrer relation
-            rel_type = "relation"  # Default type
             relation = {"target_uid": target_uid, "relation_type": rel_type}
             self.parent_widget.pending_relations[source_uid].append(relation)
             self.parent_widget._update_local_relations(source_uid, target_uid, rel_type)
 
             self._update_relations_list(source_uid)
-            logger.info(f"Nouvelle relation ajoutée: {source_uid} → {target_uid} ({rel_type})")
+            logger.info(f"Nouvelle relation ajoutée: {source_uid} →({rel_type})→ {target_uid}")
 
 class RelationsGraphWidget(QtWidgets.QWidget):
     """Widget optimisé pour afficher le graphe des relations du nœud sélectionné"""
@@ -340,10 +643,18 @@ class RelationsGraphWidget(QtWidgets.QWidget):
         # Message initial
         self._draw_empty_graph()
 
+    def _init_uid_mappings(self):
+        """Initialize UID mapping dictionaries."""
+        if not hasattr(self, 'local_to_dgraph'):
+            self.local_to_dgraph = {}
+        if not hasattr(self, 'dgraph_to_local'):
+            self.dgraph_to_local = {}
+        logger.debug("UID mappings initialized")
+
     def update_graph(self, central_uid=None):
         """
-        Met à jour le graphe pour le nœud central sélectionné
-        Version améliorée avec meilleur diagnostic
+        Updates the graph for the selected central node.
+        Improved version with better Dgraph UID mapping and fallback handling.
         """
         if not central_uid:
             self._draw_empty_graph()
@@ -351,16 +662,29 @@ class RelationsGraphWidget(QtWidgets.QWidget):
             self.legend_label.setText("Aucun nœud sélectionné")
             return
 
-        # Récupérer les données du nœud central
+        # Try to get the node info (local first, then Dgraph)
         central_info = self.parent_widget.label_uid_to_info.get(central_uid)
+
         if not central_info:
-            logger.warning(f"Nœud {central_uid} introuvable dans label_uid_to_info")
-            self._draw_empty_graph()
-            return
+            # Fallback: try Dgraph query
+            central_info = self._query_node_info_from_dgraph(central_uid)
+
+            if central_info:
+                # Cache it locally for next time
+                self.parent_widget.label_uid_to_info[central_uid] = central_info
+            else:
+                # If still not found, use minimal info
+                logger.warning(f"Nœud {central_uid} introuvable, utilisation de fallback")
+                central_info = {
+                    'name': central_uid if len(central_uid) < 20 else central_uid[:17] + '...',
+                    'cluster': 'unknown',
+                    'type': 'unknown'
+                }
+                # Don't cache fallback info
 
         central_name = central_info.get('name', central_uid)
 
-        # Récupérer toutes les relations
+        # Collect related items
         related_items = self._collect_related_items(central_uid, max_depth=1, max_nodes=50)
 
         if not related_items:
@@ -372,10 +696,84 @@ class RelationsGraphWidget(QtWidgets.QWidget):
             logger.info(f"Aucune relation pour {central_name}")
             return
 
-        # Afficher le graphe
+        # Display the graph
         logger.info(f"Affichage graphe pour {central_name}: {len(related_items)} relations")
         self.title_label.setText(f"Graphe: {central_name}")
         self._draw_graph(central_uid, central_name, related_items)
+
+    def _query_node_info_from_dgraph(self, central_uid):
+        """
+        Query Dgraph for node information with improved error handling.
+        Returns node info or None if not found.
+        """
+        if not self.parent_widget.dgraph_connector or not self.parent_widget.dgraph_connector.client:
+            logger.debug("No Dgraph client available.")
+            return None
+
+        # Check if it's already a hex Dgraph UID (format: 0x...)
+        is_hex_uid = isinstance(central_uid, str) and central_uid.startswith('0x')
+
+        if is_hex_uid:
+            # Direct Dgraph query with hex UID
+            query = f"""
+            {{
+              q(func: uid({central_uid})) {{
+                uid
+                name
+                id
+                local_id
+                label
+                description
+              }}
+            }}
+            """
+        else:
+            # Try local UUID first via local_id field
+            query = f"""
+            {{
+              q(func: eq(local_id, "{central_uid}")) {{
+                uid
+                name
+                id
+                local_id
+                label
+                description
+              }}
+            }}
+            """
+
+        try:
+            txn = self.parent_widget.dgraph_connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+
+            data = self.parent_widget.dgraph_connector._parse_response(resp)
+            nodes = data.get("q", [])
+
+            if nodes:
+                node = nodes[0]
+                node_uid = node.get('uid', central_uid)
+
+                # Map the Dgraph UID to local UID if not already mapped
+                if is_hex_uid and node.get('local_id'):
+                    self.parent_widget.local_to_dgraph[node['local_id']] = central_uid
+                    self.parent_widget.dgraph_to_local[central_uid] = node['local_id']
+
+                return {
+                    'uid': node_uid,
+                    'name': node.get('name') or node.get('label', 'Unknown'),
+                    'label': node.get('label', node.get('name', 'Unknown')),
+                    'description': node.get('description', ''),
+                    'id': node.get('id', central_uid)
+                }
+
+            # No node found in Dgraph
+            logger.warning(f"Nœud {central_uid} non trouvé dans Dgraph")
+            return None
+
+        except Exception as e:
+            logger.error(f"Erreur query Dgraph pour {central_uid}: {e}")
+            return None
 
     def _draw_empty_graph_with_message(self, message):
         """
@@ -402,13 +800,46 @@ class RelationsGraphWidget(QtWidgets.QWidget):
     def _query_relations_for_node(self, central_uid):
         """
         Query Dgraph pour les relations impliquant le nœud central.
+        Corrigée pour supporter les identifiants non numériques (UUID string) et mapper.
         """
         if not self.parent_widget.dgraph_connector.client:
+            logger.warning("Aucun client Dgraph connecté.")
             return []
 
+        # Mapping pour query : local -> Dgraph UID
+        local_to_dgraph = self.parent_widget._get_local_to_dgraph_mapping()
+        dgraph_uid = local_to_dgraph.get(central_uid)
+        if not dgraph_uid:
+            # Fallback : query par 'local_id' si stocké comme champ
+            query = f"""
+            {{
+              q(func: eq(local_id, "{central_uid}")) {{
+                uid
+                name
+                id
+                local_id
+              }}
+            }}
+            """
+            try:
+                txn = self.parent_widget.dgraph_connector.client.txn(read_only=True)
+                resp = txn.query(query)
+                txn.discard()
+                data = self.parent_widget.dgraph_connector._parse_response(resp)
+                nodes = data.get("q", [])
+                if nodes:
+                    dgraph_uid = nodes[0]['uid']
+                else:
+                    logger.warning(f"Pas de Dgraph UID pour local {central_uid}")
+                    return []
+            except Exception as e:
+                logger.error(f"Erreur fallback query pour {central_uid}: {e}")
+                return []
+
+        # Query principale avec Dgraph UID (hex)
         query = f"""
         {{
-          q(func: type(Relation)) @filter(uid_in(source, {central_uid}) OR uid_in(target, {central_uid})) {{
+          q(func: uid({dgraph_uid})) {{
             uid
             name
             relationType
@@ -416,31 +847,59 @@ class RelationsGraphWidget(QtWidgets.QWidget):
               uid
               name
               id
+              local_id
               level
             }}
             target {{
               uid
               name
               id
+              local_id
+              level
+            }}
+          }}
+          incoming(func: type(Relation)) @filter(eq(target.uid, {dgraph_uid})) {{
+            uid
+            name
+            relationType
+            source {{
+              uid
+              name
+              id
+              local_id
+              level
+            }}
+            target {{
+              uid
+              name
+              id
+              local_id
               level
             }}
           }}
         }}
         """
+
         try:
+            logger.debug(f"Envoi de la requête Dgraph pour le nœud dgraph_uid={dgraph_uid} (local={central_uid})")
             txn = self.parent_widget.dgraph_connector.client.txn(read_only=True)
             resp = txn.query(query)
             txn.discard()
+
             data = self.parent_widget.dgraph_connector._parse_response(resp)
-            return data.get('q', [])
+            relations = data.get("q", []) + data.get("incoming", [])
+
+            logger.info(f"{len(relations)} relations récupérées depuis Dgraph pour {central_uid}")
+            return relations
+
         except Exception as e:
-            logger.error(f"Erreur lors de la query des relations: {e}")
+            logger.error(f"Erreur lors de la query des relations (dgraph={dgraph_uid}): {e}")
             return []
 
     def _collect_related_items(self, central_uid, max_depth=1, max_nodes=50):
         """
         Collecte TOUTES les relations d'un nœud (hiérarchiques, imports, héritage, etc.)
-        Version améliorée qui récupère tous les types de relations, y compris depuis Dgraph
+        Version améliorée avec mapping UID local <-> Dgraph pour éviter mismatches
         """
         if not self.parent_widget.current_project_profile_data:
             return []
@@ -453,9 +912,15 @@ class RelationsGraphWidget(QtWidgets.QWidget):
         related = []
         visited = set([central_uid])
 
+        # Mapping pour résolution Dgraph -> local
+        dgraph_to_local = self.parent_widget._get_dgraph_to_local_mapping()
+
         # 1. Relations sortantes locales (outgoing_relations)
         for rel in central_node.get('outgoing_relations', [])[:max_nodes]:
             target_uid = rel.get('target_uid', rel.get('target_id', ''))
+            # Mapper si hex Dgraph
+            if target_uid.startswith('0x') and len(target_uid) == 6:  # Format hex court
+                target_uid = dgraph_to_local.get(target_uid, target_uid)
             if target_uid in visited:
                 continue
             
@@ -464,7 +929,7 @@ class RelationsGraphWidget(QtWidgets.QWidget):
                 related.append({
                     'name': target_node['label'],
                     'type': rel['relation_type'],
-                    'uid': target_uid,
+                    'uid': target_uid,  # UID local mappé
                     'direction': 'out'
                 })
                 visited.add(target_uid)
@@ -472,6 +937,9 @@ class RelationsGraphWidget(QtWidgets.QWidget):
         # 2. Relations entrantes locales (incoming_relations)
         for rel in central_node.get('incoming_relations', [])[:max_nodes]:
             source_uid = rel.get('source_uid', rel.get('source_id', ''))
+            # Mapper si hex Dgraph
+            if source_uid.startswith('0x') and len(source_uid) == 6:
+                source_uid = dgraph_to_local.get(source_uid, source_uid)
             if source_uid in visited:
                 continue
             
@@ -501,6 +969,9 @@ class RelationsGraphWidget(QtWidgets.QWidget):
 
         # 4. Parents hiérarchiques locaux (si présents)
         for parent_uid in central_node.get('parents', [])[:max_nodes]:
+            # Mapper si hex
+            if parent_uid.startswith('0x') and len(parent_uid) == 6:
+                parent_uid = dgraph_to_local.get(parent_uid, parent_uid)
             if parent_uid in visited:
                 continue
             
@@ -514,23 +985,25 @@ class RelationsGraphWidget(QtWidgets.QWidget):
                 })
                 visited.add(parent_uid)
 
-        # 5. Relations supplémentaires depuis Dgraph (pour cas persistés non locaux)
+        # 5. Relations supplémentaires depuis Dgraph (mappées vers local)
         dgraph_rels = self._query_relations_for_node(central_uid)
         for rel in dgraph_rels:
-            if rel['source']['uid'] == central_uid:
-                target_uid = rel['target']['uid']
+            if rel['source']['uid'] == central_uid:  # Utiliser local central_uid
+                target_dgraph_uid = rel['target']['uid']
+                target_uid = dgraph_to_local.get(target_dgraph_uid, target_dgraph_uid)
                 if target_uid in visited:
                     continue
                 target_name = rel['target']['name']
                 related.append({
                     'name': target_name,
                     'type': rel['relationType'],
-                    'uid': target_uid,
+                    'uid': target_uid,  # Mappé local
                     'direction': 'out'
                 })
                 visited.add(target_uid)
             elif rel['target']['uid'] == central_uid:
-                source_uid = rel['source']['uid']
+                source_dgraph_uid = rel['source']['uid']
+                source_uid = dgraph_to_local.get(source_dgraph_uid, source_dgraph_uid)
                 if source_uid in visited:
                     continue
                 source_name = rel['source']['name']
@@ -819,6 +1292,15 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.dgraph_connector = LirisDgraphConnector(auto_reset=False)
         self.db_path = os.path.join("data", "liris.db")
         self._init_sqlite_db()
+
+        self.dependency_parser = MultiLanguageDependencyParser()
+        self.project_scanner = ProjectStructureScanner(self.dependency_parser)
+
+            # 🔁 Alias rétrocompatible
+        self.structure_scanner = self.project_scanner
+        
+        self.parsed_relations_cache = {}
+        self.file_content_cache = {}
 
         self.project_profiles = {}
         self.current_project_name = None
@@ -2035,38 +2517,43 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         top_columns_layout.setSpacing(15)
         main_vertical_layout.addLayout(top_columns_layout)
 
+        self.label_uid_to_info = {}
+        self.pending_relations = defaultdict(list)
+        self.current_selected_label_uid = None
+
         # --- Colonne de gauche ---
         left_column_layout = QtWidgets.QVBoxLayout()
         left_column_layout.setSpacing(12)
-        left_column_layout.addStretch()
 
+        # Groupe sélection projet
         project_selection_group = QtWidgets.QGroupBox(
             tr("project_config.select_profile_group")
         )
         project_selection_group.setObjectName("project_selection_group")
         project_selection_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         project_selection_layout = QtWidgets.QHBoxLayout(project_selection_group)
-        project_selection_layout.addStretch()
 
         self.project_combo = QtWidgets.QComboBox()
         self.project_combo.setStyleSheet(PlatformConfigStyle.get_input_style())
+        self.project_combo.setMinimumWidth(200)
+        self.project_combo.setMaximumWidth(350)
         self.project_combo.currentIndexChanged.connect(self._on_project_selected)
         project_selection_layout.addWidget(self.project_combo)
-        
+
         # Bouton "Ajouter"
         self.add_project_button = QtWidgets.QPushButton("Ajouter")
         self.add_project_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_project_button.clicked.connect(self._on_add_new_project)
         project_selection_layout.addWidget(self.add_project_button)
-        
+
         # Bouton "Supprimer"
         self.delete_project_button = QtWidgets.QPushButton("Supprimer")
         self.delete_project_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.delete_project_button.clicked.connect(self._on_delete_project)
-        self.delete_project_button.setEnabled(False)  # désactivé tant qu'aucun projet n'est sélectionné
+        self.delete_project_button.setEnabled(False)
         project_selection_layout.addWidget(self.delete_project_button)
 
-
+        # Bouton "Uploader"
         self.upload_local_button = QtWidgets.QPushButton("📁 Uploader")
         self.upload_local_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.upload_local_button.clicked.connect(self._on_upload_local_project)
@@ -2076,6 +2563,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         left_column_layout.addWidget(project_selection_group)
 
+        # Groupe détails
         details_group = QtWidgets.QGroupBox(tr("project_config.details_group"))
         details_group.setObjectName("details_group")
         details_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
@@ -2088,28 +2576,27 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         project_name_layout = QtWidgets.QHBoxLayout(project_name_widget)
         project_name_layout.setContentsMargins(0, 0, 0, 0)
         project_name_layout.setSpacing(8)
-        
+
         self.project_name_edit = QtWidgets.QLineEdit()
         self.project_name_edit.setPlaceholderText(
             tr("project_config.project_name_placeholder")
         )
         self.project_name_edit.setStyleSheet(PlatformConfigStyle.get_input_style())
-        self.project_name_edit.setMaximumWidth(250)
+        self.project_name_edit.setMinimumWidth(200)
+        self.project_name_edit.setMaximumWidth(350)
         project_name_layout.addWidget(self.project_name_edit)
-        
+
         # Bouton Parcourir
-        self.browse_button = QtWidgets.QPushButton("Afficher les noeuds")
+        self.browse_button = QtWidgets.QPushButton("Scanner les noeuds")
         self.browse_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.browse_button.setMaximumWidth(120)
         if hasattr(self, '_on_browse_project'):
             self.browse_button.clicked.connect(self._on_browse_project)
         project_name_layout.addWidget(self.browse_button)
-        
+
         project_name_layout.addStretch()
-        
-        details_form_layout.addRow(
-            tr("project_config.project_name_label"), project_name_widget
-        )
+
+        details_form_layout.addRow("", project_name_widget)
 
         self.project_description_edit = QtWidgets.QTextEdit()
         self.project_description_edit.setPlaceholderText("Description du projet...")
@@ -2212,7 +2699,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.root_list_widget.setStyleSheet(self._get_improved_list_style())
         self.root_list_widget.setMinimumHeight(80)
         self.root_list_widget.currentItemChanged.connect(self._on_root_label_selected)
-        self.root_list_widget.currentItemChanged.connect(lambda curr, prev: self._on_any_label_selected(curr))
         hierarchy_group_layout.addWidget(self.root_list_widget)
 
         root_buttons_layout = QtWidgets.QHBoxLayout()
@@ -2247,10 +2733,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.level1_list_widget = QtWidgets.QListWidget()
         self.level1_list_widget.setStyleSheet(self._get_improved_list_style())
         self.level1_list_widget.setMinimumHeight(80)
-        self.level1_list_widget.currentItemChanged.connect(
-            self._on_level1_label_selected
-        )
-        self.level1_list_widget.currentItemChanged.connect(lambda curr, prev: self._on_any_label_selected(curr))
+        self.level1_list_widget.currentItemChanged.connect(self._on_level1_label_selected)
         hierarchy_group_layout.addWidget(self.level1_list_widget)
 
         level1_buttons_layout = QtWidgets.QHBoxLayout()
@@ -2276,7 +2759,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         hierarchy_group_layout.addLayout(level1_buttons_layout)
 
         # 3. Labels Enfants (Niveau 2)
-        child_label_title = QtWidgets.QLabel("Labels Niveau 2")
+        child_label_title = QtWidgets.QLabel("Labels enfants")
         child_label_title.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 11px;")
         hierarchy_group_layout.addWidget(child_label_title)
 
@@ -2284,7 +2767,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.child_list_widget.setStyleSheet(self._get_improved_list_style())
         self.child_list_widget.setMinimumHeight(80)
         self.child_list_widget.currentItemChanged.connect(self._on_child_label_selected)
-        self.child_list_widget.currentItemChanged.connect(lambda curr, prev: self._on_any_label_selected(curr))
         hierarchy_group_layout.addWidget(self.child_list_widget)
 
         child_buttons_layout = QtWidgets.QHBoxLayout()
@@ -2323,7 +2805,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         relations_layout.addWidget(self.global_relations_config)
         right_column_layout.addWidget(relations_group)
 
-        # Section graphe des relations (plus grande) - Maintenant dynamique
+        # Section graphe des relations
         graph_group = QtWidgets.QGroupBox("Graphe des Relations")
         graph_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         graph_layout = QtWidgets.QVBoxLayout(graph_group)
@@ -2589,35 +3071,39 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     self.root_list_widget.addItem(item)
         self._update_button_states()
 
-    def _on_root_label_selected(self, current):
-        """Gère la sélection d'un root label."""
+    def _on_level1_label_selected(self, current):
+        """
+        Gère la sélection d'un label niveau 1.
+        CORRIGÉ: Affiche les classes, fonctions et variables DU FICHIER SÉLECTIONNÉ dans le niveau enfant.
+        """
         if current:
-            self.current_root_label_index = self.root_list_widget.row(current)
-            self.current_root_data = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            self.current_selected_label_uid = current.data(Qt.UserRole)
+            item_type = current.data(Qt.UserRole + 1)
+            item_uid = current.data(Qt.UserRole)
 
-            # Réinitialiser les sélections inférieures
-            self.current_level1_data = None
-            self.current_level2_data = None
-            self.current_level1_label_index = -1
-            self.current_level2_label_index = -1
+            if item_type in ["child", "class", "function", "variable", "file", "folder"]:
+                self.current_level1_label_index = self._get_child_index_by_uid(item_uid)
+                if self.current_level1_label_index >= 0:
+                    self.current_level1_data = self.current_root_data["children"][self.current_level1_label_index]
+                    self.current_selected_label_uid = item_uid
 
-            # Afficher les détails du root label
-            self._update_selected_details("Label Racine", self.current_root_data)
+                    # Réinitialiser niveau 2
+                    self.current_level2_data = None
+                    self.current_level2_label_index = -1
 
-            # Afficher uniquement les enfants de ce root label
-            self._populate_level1_list()
+                    # Afficher les détails
+                    self._update_selected_details(f"{item_type.capitalize()}", self.current_level1_data)
 
-            # Vider la liste des niveau 2
-            self.child_list_widget.clear()
+                    # CORRIGÉ: Peupler le niveau enfant UNIQUEMENT avec les classes/fonctions/variables DE CE FICHIER
+                    self._populate_children_for_file(self.current_level1_data, self.child_list_widget)
 
-            # Mettre à jour les relations et graphe
-            self.global_relations_config.update_current(self.current_selected_label_uid)
-            self.relations_graph.update_graph(self.current_selected_label_uid)
+                    # Mettre à jour relations et graphe
+                    self.global_relations_config.update_current(self.current_selected_label_uid)
+                    self.relations_graph.update_graph(self.current_selected_label_uid)
+            else:
+                logger.warning(f"Type d'item inconnu: {item_type}")
         else:
-            self.current_root_data = None
+            self.current_level1_data = None
             self.current_selected_label_uid = None
-            self.level1_list_widget.clear()
             self.child_list_widget.clear()
             self.global_relations_config.update_current(None)
             self.relations_graph.update_graph(None)
@@ -2625,76 +3111,441 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self._update_button_states()
 
     def _populate_level1_list(self):
-        """Peuple la liste des labels niveau 1 pour le root label sélectionné."""
+        """
+        Peuple TOUS les enfants du root label : 
+        - Hiérarchiques (fichiers/dossiers)
+        - Extraits (classes/fonctions/variables du fichier racine)
+        """
         self.level1_list_widget.clear()
-        if self.current_root_data:
-            for level1 in self.current_root_data.get("children", []):
-                display = level1['label']
-                item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, level1["uid"])
-                self.level1_list_widget.addItem(item)
+    
+        if not self.current_root_data:
+            return
+    
+        # 1. Afficher les enfants hiérarchiques
+        for level1 in self.current_root_data.get("children", []):
+            child_type = level1.get('type', 'folder')
+            icon = self._get_node_icon(child_type)
+            display = f"{icon} {level1.get('label', level1.get('name', 'Sans nom'))}"
+    
+            item = QListWidgetItem(display)
+            item.setData(Qt.UserRole, level1.get("uid", level1.get("id", "")))
+            item.setData(Qt.UserRole + 1, child_type)
+            item.setData(Qt.UserRole + 2, None)  # Pas de ligne
+            self.level1_list_widget.addItem(item)
+    
+        # 2. Afficher les classes du root label lui-même
+        classes = self.current_root_data.get('classes', [])
+        for cls in classes:
+            display = f"🛑 {cls.get('name', 'Classe')} (ligne {cls.get('line', '?')})"
+            item = QListWidgetItem(display)
+            
+            cls_uid = cls.get('uid', f"cls_{str(uuid.uuid4())}")
+            if 'uid' not in cls:
+                cls['uid'] = cls_uid
+            
+            item.setData(Qt.UserRole, cls_uid)
+            item.setData(Qt.UserRole + 1, "class")
+            item.setData(Qt.UserRole + 2, cls.get('line', 0))
+            item.setForeground(QtGui.QColor("#FF9800"))
+            self.level1_list_widget.addItem(item)
+    
+        # 3. Afficher les fonctions du root label lui-même
+        functions = self.current_root_data.get('functions', [])
+        for func in functions:
+            func_type = func.get('type', 'function')
+            icon = "⚙️" if func_type == "method" else "🔧"
+            display = f"{icon} {func.get('name', 'Fonction')} (ligne {func.get('line', '?')})"
+            item = QListWidgetItem(display)
+            
+            func_uid = func.get('uid', f"func_{str(uuid.uuid4())}")
+            if 'uid' not in func:
+                func['uid'] = func_uid
+            
+            item.setData(Qt.UserRole, func_uid)
+            item.setData(Qt.UserRole + 1, func_type)
+            item.setData(Qt.UserRole + 2, func.get('line', 0))
+            item.setForeground(QtGui.QColor("#2196F3"))
+            self.level1_list_widget.addItem(item)
+    
+        # 4. Afficher les variables du root label
+        variables = self.current_root_data.get('variables', [])
+        for var in variables:
+            display = f"📦 {var.get('name', 'Variable')} (ligne {var.get('line', '?')})"
+            item = QListWidgetItem(display)
+            
+            var_uid = var.get('uid', f"var_{str(uuid.uuid4())}")
+            if 'uid' not in var:
+                var['uid'] = var_uid
+            
+            item.setData(Qt.UserRole, var_uid)
+            item.setData(Qt.UserRole + 1, "variable")
+            item.setData(Qt.UserRole + 2, var.get('line', 0))
+            item.setForeground(QtGui.QColor("#4CAF50"))
+            self.level1_list_widget.addItem(item)
+    
         self._update_button_states()
 
     def _on_level1_label_selected(self, current):
-        """Gère la sélection d'un label niveau 1."""
+        """Gère la sélection d'un label niveau 1 (fichier, classe, fonction, variable)."""
         if current:
-            self.current_level1_label_index = self.level1_list_widget.row(current)
-            self.current_level1_data = self.current_root_data["children"][self.current_level1_label_index]
-            self.current_selected_label_uid = current.data(Qt.UserRole)
-
-            # Réinitialiser la sélection niveau 2
-            self.current_level2_data = None
-            self.current_level2_label_index = -1
-
-            # Afficher les détails du label niveau 1
-            self._update_selected_details("Label Niveau 1", self.current_level1_data)
-
-            # Afficher uniquement les enfants de ce label niveau 1
-            self._populate_child_list()
-
-            # Mettre à jour les relations et graphe
-            self.global_relations_config.update_current(self.current_selected_label_uid)
-            self.relations_graph.update_graph(self.current_selected_label_uid)
+            item_type = current.data(Qt.UserRole + 1)
+            item_uid = current.data(Qt.UserRole)
+            item_line = current.data(Qt.UserRole + 2)
+    
+            self.current_selected_label_uid = item_uid
+    
+            # Cas 1: Élément hiérarchique (sous-dossier/fichier)
+            if item_type in ["folder", "file"]:
+                self.current_level1_label_index = self._get_child_index_by_uid(item_uid)
+    
+                if self.current_level1_label_index >= 0:
+                    self.current_level1_data = self.current_root_data["children"][self.current_level1_label_index]
+                else:
+                    self.current_level1_data = None
+    
+                self.current_level2_data = None
+                self.current_level2_label_index = -1
+    
+                self._update_selected_details(f"Niveau 1 - {item_type.capitalize()}", 
+                                             self.current_level1_data if self.current_level1_data else {})
+    
+                if self.current_level1_data:
+                    self._populate_child_list()
+                else:
+                    self.child_list_widget.clear()
+    
+                self.global_relations_config.update_current(self.current_selected_label_uid)
+                self.relations_graph.update_graph(self.current_selected_label_uid)
+    
+            # Cas 2: Classe extraite
+            elif item_type == "class":
+                self.current_level1_data = None
+                self.current_level2_data = None
+    
+                class_info = next(
+                    (c for c in self.current_root_data.get('classes', []) 
+                     if c.get('uid') == item_uid),
+                    {}
+                )
+    
+                details = f"=== Classe ===\n\n"
+                details += f"Nom: {class_info.get('name', 'N/A')}\n"
+                details += f"Ligne: {item_line}\n"
+                details += f"Fichier: {self.current_root_data.get('label', 'N/A')}\n"
+                details += f"Description: {class_info.get('description', 'N/A')}\n"
+    
+                methods = class_info.get('methods', [])
+                if methods:
+                    details += f"\nMéthodes ({len(methods)}):\n"
+                    for method in methods[:10]:
+                        details += f"  - {method.get('name', 'N/A')} (ligne {method.get('line', '?')})\n"
+                    if len(methods) > 10:
+                        details += f"  ... et {len(methods) - 10} autres\n"
+    
+                self.details_text.setPlainText(details)
+                self.child_list_widget.clear()
+    
+                self.global_relations_config.update_current(self.current_selected_label_uid)
+                self.relations_graph.update_graph(self.current_selected_label_uid)
+    
+            # Cas 3: Fonction/Méthode extraite
+            elif item_type in ["function", "method"]:
+                self.current_level1_data = None
+                self.current_level2_data = None
+    
+                func_info = next(
+                    (f for f in self.current_root_data.get('functions', []) 
+                     if f.get('uid') == item_uid),
+                    {}
+                )
+    
+                details = f"=== {'Méthode' if item_type == 'method' else 'Fonction'} ===\n\n"
+                details += f"Nom: {func_info.get('name', 'N/A')}\n"
+                details += f"Type: {func_info.get('type', 'N/A')}\n"
+                details += f"Ligne: {item_line}\n"
+                details += f"Fichier: {self.current_root_data.get('label', 'N/A')}\n"
+                details += f"Description: {func_info.get('description', 'N/A')}\n"
+    
+                params = func_info.get('params', [])
+                if params:
+                    details += f"\nParamètres ({len(params)}):\n"
+                    for param in params:
+                        details += f"  - {param.get('name', 'param')}: {param.get('type', 'N/A')}\n"
+    
+                returns = func_info.get('returns', {})
+                if returns:
+                    details += f"\nRetour: {returns.get('type', 'N/A')}\n"
+    
+                self.details_text.setPlainText(details)
+                self.child_list_widget.clear()
+    
+                self.global_relations_config.update_current(self.current_selected_label_uid)
+                self.relations_graph.update_graph(self.current_selected_label_uid)
+    
+            # Cas 4: Variable extraite
+            elif item_type == "variable":
+                self.current_level1_data = None
+                self.current_level2_data = None
+    
+                var_info = next(
+                    (v for v in self.current_root_data.get('variables', []) 
+                     if v.get('uid') == item_uid),
+                    {}
+                )
+    
+                details = f"=== Variable ===\n\n"
+                details += f"Nom: {var_info.get('name', 'N/A')}\n"
+                details += f"Type: {var_info.get('type', 'N/A')}\n"
+                details += f"Ligne: {item_line}\n"
+                details += f"Fichier: {self.current_root_data.get('label', 'N/A')}\n"
+                details += f"Scope: {var_info.get('scope', 'N/A')}\n"
+                details += f"Description: {var_info.get('description', 'N/A')}\n"
+    
+                self.details_text.setPlainText(details)
+                self.child_list_widget.clear()
+    
+                self.global_relations_config.update_current(self.current_selected_label_uid)
+                self.relations_graph.update_graph(self.current_selected_label_uid)
+    
         else:
             self.current_level1_data = None
             self.current_selected_label_uid = None
             self.child_list_widget.clear()
             self.global_relations_config.update_current(None)
             self.relations_graph.update_graph(None)
-
+    
         self._update_button_states()
 
     def _populate_child_list(self):
-        """Peuple la liste des labels niveau 2 pour le label niveau 1 sélectionné."""
+        """
+        Peuple le niveau 2 avec les enfants hiérarchiques du level1 sélectionné,
+        y compris les sous-dossiers imbriqués.
+        """
         self.child_list_widget.clear()
-        if self.current_level1_data:
-            for child in self.current_level1_data.get("children", []):
-                display = child['label']
+
+        if not self.current_level1_data:
+            return
+
+        # Afficher tous les enfants de manière récursive avec indentation
+        for child in self.current_level1_data.get("children", []):
+            self._add_child_to_list(child, self.child_list_widget)
+
+        self._update_button_states()
+
+    def _add_child_to_list(self, child: Dict, list_widget, indent: str = ""):
+        """
+        Ajoute un enfant à la liste, récursivement pour les sous-dossiers.
+        SANS icônes.
+        """
+        child_type = child.get('type', 'folder')
+
+        # Afficher cet enfant
+        display = f"{indent}{child.get('label', child.get('name', 'Sans nom'))}"
+        item = QListWidgetItem(display)
+
+        child_uid = child.get('uid', child.get('id', str(uuid.uuid4())))
+        if 'uid' not in child:
+            child['uid'] = child_uid
+
+        item.setData(Qt.UserRole, child_uid)
+        item.setData(Qt.UserRole + 1, child_type)
+        list_widget.addItem(item)
+
+        # Si c'est un dossier, afficher aussi ses enfants de manière imbriquée
+        if child_type in ['folder', 'directory']:
+            for grandchild in child.get("children", []):
+                self._add_child_to_list(grandchild, list_widget, indent + "  ")
+
+    def _populate_children_for_file(self, file_data: Dict, list_widget):
+        """
+        Peuple la liste enfant avec la hiérarchie correcte:
+        - Classes (avec sous-items méthodes)
+        - Fonctions
+        - Variables
+
+        Chaque élément peut être sélectionné pour voir ses relations et détails.
+        """
+        list_widget.clear()
+        if not file_data:
+            return
+
+        children = file_data.get('children', [])
+
+        if not children:
+            list_widget.addItem(QListWidgetItem("(Aucun élément trouvé)"))
+            return
+
+        # Afficher les enfants organisés par type
+        for child in children:
+            child_type = child.get('type', 'unknown')
+            child_uid = child.get('uid')
+
+            if not child_uid:
+                child_uid = child.get('id', str(uuid.uuid4()))
+                child['uid'] = child_uid
+
+            # === CLASSE ===
+            if child_type == 'class':
+                icon = '[CLS]'
+                class_name = child.get('name', 'Class')
+                line_num = child.get('line', '?')
+                methods_count = len(child.get('children', []))
+
+                # Format: [CLS] ClassName (3 methods) - line 42
+                display = f"{icon} {class_name}"
+                if methods_count > 0:
+                    display += f" ({methods_count} methods)"
+                display += f" - ligne {line_num}"
+
                 item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, child["uid"])
-                self.child_list_widget.addItem(item)
+                item.setData(Qt.UserRole, child_uid)
+                item.setData(Qt.UserRole + 1, 'class')
+                item.setData(Qt.UserRole + 2, line_num)
+                item.setForeground(QtGui.QColor("#FF9800"))  # Orange
+                list_widget.addItem(item)
+
+                # Ajouter les méthodes comme sous-items indentés
+                for method in child.get('children', []):
+                    method_uid = method.get('uid')
+                    if not method_uid:
+                        method_uid = str(uuid.uuid4())
+                        method['uid'] = method_uid
+
+                    method_name = method.get('name', 'method')
+                    method_line = method.get('line', '?')
+
+                    # Indentation pour sous-item
+                    method_display = f"  ├─ {method_name} (ligne {method_line})"
+                    method_item = QListWidgetItem(method_display)
+                    method_item.setData(Qt.UserRole, method_uid)
+                    method_item.setData(Qt.UserRole + 1, 'method')
+                    method_item.setData(Qt.UserRole + 2, method_line)
+                    method_item.setForeground(QtGui.QColor("#FFA500"))  # Orange clair
+                    list_widget.addItem(method_item)
+
+            # === FONCTION ===
+            elif child_type in ['function', 'method']:
+                icon = '[FNC]'
+                func_name = child.get('name', 'Function')
+                line_num = child.get('line', '?')
+                func_type = child.get('type', 'function')
+
+                display = f"{icon} {func_name} - ligne {line_num}"
+
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, child_uid)
+                item.setData(Qt.UserRole + 1, func_type)
+                item.setData(Qt.UserRole + 2, line_num)
+                item.setForeground(QtGui.QColor("#2196F3"))  # Bleu
+                list_widget.addItem(item)
+
+            # === VARIABLE ===
+            elif child_type == 'variable':
+                icon = '[VAR]'
+                var_name = child.get('name', 'Variable')
+                var_type = child.get('var_type', 'local')
+                line_num = child.get('line', '?')
+
+                display = f"{icon} {var_name} ({var_type}) - ligne {line_num}"
+
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, child_uid)
+                item.setData(Qt.UserRole + 1, 'variable')
+                item.setData(Qt.UserRole + 2, line_num)
+                item.setForeground(QtGui.QColor("#4CAF50"))  # Vert
+                list_widget.addItem(item)
+
+            # === AUTRES (fichiers, dossiers, etc.) ===
+            else:
+                icon = self._get_node_icon(child_type)
+                child_name = child.get('label', child.get('name', 'unknown'))
+
+                display = f"{icon} {child_name}"
+
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, child_uid)
+                item.setData(Qt.UserRole + 1, child_type)
+                list_widget.addItem(item)
+
         self._update_button_states()
 
     def _on_child_label_selected(self, current):
-        """Gère la sélection d'un label niveau 2."""
+        """
+        Gère la sélection d'un enfant au niveau 2.
+        """
         if current:
-            self.current_level2_label_index = self.child_list_widget.row(current)
-            self.current_level2_data = self.current_level1_data["children"][self.current_level2_label_index]
-            self.current_selected_label_uid = current.data(Qt.UserRole)
+            item_type = current.data(Qt.UserRole + 1)
+            item_uid = current.data(Qt.UserRole)
 
-            # Afficher les détails du niveau 2
-            self._update_selected_details("Label Niveau 2", self.current_level2_data)
+            self.current_selected_label_uid = item_uid
 
-            # Mettre à jour les relations et graphe
-            self.global_relations_config.update_current(self.current_selected_label_uid)
-            self.relations_graph.update_graph(self.current_selected_label_uid)
+            # Chercher cet enfant dans la structure (peut être imbriqué)
+            child_data = self._find_child_by_uid(self.current_level1_data, item_uid)
+
+            if child_data:
+                self.current_level2_data = child_data
+
+                # Afficher les détails
+                details = f"Nom: {child_data.get('label', child_data.get('name', 'N/A'))}\n"
+                details += f"Type: {item_type}\n"
+                details += f"UID: {item_uid}\n"
+                details += f"Description: {child_data.get('description', 'N/A')}\n"
+
+                # Si c'est un fichier, afficher son contenu
+                files = child_data.get('files', [])
+                if files:
+                    details += f"\nFichiers: {len(files)}\n"
+                    for f in files[:5]:
+                        details += f"  - {f}\n"
+                    if len(files) > 5:
+                        details += f"  ... et {len(files) - 5} autres\n"
+
+                self.details_text.setPlainText(details)
+
+                # Mettre à jour relations et graphe
+                self.global_relations_config.update_current(self.current_selected_label_uid)
+                self.relations_graph.update_graph(self.current_selected_label_uid)
+            else:
+                self.details_text.clear()
+
         else:
             self.current_level2_data = None
             self.current_selected_label_uid = None
             self.global_relations_config.update_current(None)
             self.relations_graph.update_graph(None)
-    
+
         self._update_button_states()
+    
+    def _on_any_label_selected(self, current):
+        """
+        Handles selection of ANY label (root, level1, level2, child).
+        Updates relations config and graph for the selected node.
+
+        This is a unified handler to avoid code duplication across different
+        list widgets.
+        """
+        if current:
+            # Get UID from the selected item
+            uid = current.data(Qt.UserRole)
+
+            if not uid:
+                logger.warning("Selected item has no UID")
+                self.current_selected_label_uid = None
+                self.global_relations_config.update_current(None)
+                self.relations_graph.update_graph(None)
+                return
+
+            self.current_selected_label_uid = uid
+
+            # Update relations config and graph
+            self.global_relations_config.update_current(uid)
+            self.relations_graph.update_graph(uid)
+
+            logger.debug(f"Label sélectionné: {uid}")
+        else:
+            self.current_selected_label_uid = None
+            self.global_relations_config.update_current(None)
+            self.relations_graph.update_graph(None)
 
     def _on_any_label_selected(self, current):
         """Gère la sélection de n'importe quel label pour relations et graphe."""
@@ -2798,28 +3649,118 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.details_text.clear()
 
     def _collect_all_labels(self):
-        """Collecte tous les labels pour relations."""
+        """
+        MODIFIÉE: Collecte tous les labels ET les classes, fonctions, variables
+        pour les ajouter à label_uid_to_info.
+        """
         self.label_uid_to_info.clear()
         self.name_to_uid.clear()
+
         if not self.current_project_profile_data:
             return
-        for cluster in self.current_project_profile_data.get("turing_ontology", {}).get("clusters_detailed", []):
-            cluster_name = cluster.get('name', '')
-            for root in cluster.get("root_labels", []):
-                uid = root.get('uid', root['id'])
-                info = {'name': root.get('label', ''), 'cluster': cluster_name}
-                self.label_uid_to_info[uid] = info
-                self.name_to_uid[root['label']] = uid
-                self._collect_labels_recursive(root)
 
-    def _collect_labels_recursive(self, node):
-        """Collecte récursivement labels dans hierarchy."""
-        for child in node.get('children', []):
-            uid = child.get('uid', child['id'])
-            info = {'name': child.get('label', ''), 'cluster': self.label_uid_to_info.get(node['uid'], {}).get('cluster', '')}
+        ontology = self.current_project_profile_data.get("turing_ontology", {})
+        clusters_detailed = ontology.get("clusters_detailed", [])
+
+        for cluster in clusters_detailed:
+            cluster_name = cluster.get('name', '')
+            root_labels = cluster.get("root_labels", [])
+
+            for root in root_labels:
+                uid = root.get('uid') or root.get('id') or str(uuid.uuid4())
+
+                # S'assurer que uid est défini
+                if 'uid' not in root:
+                    root['uid'] = uid
+
+                info = {'name': root.get('label', ''), 'cluster': cluster_name, 'type': 'label'}
+                self.label_uid_to_info[uid] = info
+                self.name_to_uid[root.get('label', '')] = uid
+
+                # Collecter récursivement les enfants et les classes/fonctions/variables
+                self._collect_labels_recursive(root, cluster_name)
+
+    def _collect_labels_recursive(self, node, cluster_name=''):
+        """
+        MODIFIÉE: Collecte récursivement labels, classes, fonctions et variables
+        dans label_uid_to_info.
+        """
+        children = node.get('children', [])
+
+        for child in children:
+            # Safe fallback: priorité uid > id > générer nouveau
+            uid = child.get('uid')
+            if not uid:
+                uid = child.get('id')
+            if not uid:
+                uid = str(uuid.uuid4())
+
+            # S'assurer que uid est défini sur le nœud
+            if 'uid' not in child:
+                child['uid'] = uid
+
+            # Récupérer le cluster du parent
+            parent_uid = node.get('uid')
+            parent_cluster = self.label_uid_to_info.get(parent_uid, {}).get('cluster', cluster_name)
+
+            info = {
+                'name': child.get('label', ''),
+                'cluster': parent_cluster,
+                'type': child.get('type', 'label')
+            }
             self.label_uid_to_info[uid] = info
-            self.name_to_uid[child['label']] = uid
-            self._collect_labels_recursive(child)
+
+            label_name = child.get('label', '')
+            if label_name:
+                self.name_to_uid[label_name] = uid
+
+            # Appel récursif pour les enfants
+            self._collect_labels_recursive(child, parent_cluster)
+
+        # NOUVEAU: Collecter les classes du nœud courant
+        classes = node.get('classes', [])
+        for cls in classes:
+            cls_uid = cls.get('uid', f"cls_{cls.get('name', '')}_{str(uuid.uuid4())}")
+            if 'uid' not in cls:
+                cls['uid'] = cls_uid
+
+            info = {
+                'name': cls.get('name', ''),
+                'cluster': cluster_name,
+                'type': 'class',
+                'parent_label': node.get('label', '')
+            }
+            self.label_uid_to_info[cls_uid] = info
+
+        # NOUVEAU: Collecter les fonctions du nœud courant
+        functions = node.get('functions', [])
+        for func in functions:
+            func_uid = func.get('uid', f"func_{func.get('name', '')}_{str(uuid.uuid4())}")
+            if 'uid' not in func:
+                func['uid'] = func_uid
+
+            info = {
+                'name': func.get('name', ''),
+                'cluster': cluster_name,
+                'type': 'function',
+                'parent_label': node.get('label', '')
+            }
+            self.label_uid_to_info[func_uid] = info
+
+        # NOUVEAU: Collecter les variables du nœud courant
+        variables = node.get('variables', [])
+        for var in variables:
+            var_uid = var.get('uid', f"var_{var.get('name', '')}_{str(uuid.uuid4())}")
+            if 'uid' not in var:
+                var['uid'] = var_uid
+
+            info = {
+                'name': var.get('name', ''),
+                'cluster': cluster_name,
+                'type': 'variable',
+                'parent_label': node.get('label', '')
+            }
+            self.label_uid_to_info[var_uid] = info
 
     def _add_cluster(self):
         dialog = AddEditItemDialog("Ajouter Cluster", parent=self)
@@ -3693,8 +4634,1294 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.global_relations_config.edit_button.setEnabled(has_rel_selected)
         self.global_relations_config.remove_button.setEnabled(has_rel_selected)
 
+    def _on_browse_project(self):
+        """
+        Bouton 'Afficher les nœuds' – scanne le projet et analyse les fichiers.
+        CORRIGÉ: Appelle _collect_all_labels() APRÈS l'analyse.
+        """
+        if not self.current_project_profile_data:
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Erreur", 
+                "Aucun projet sélectionné dans la configuration."
+            )
+            return
+
+        project_name = self.current_project_profile_data.get("name", "Projet inconnu")
+        files = self.current_project_profile_data.get("files", [])
+        file_contents = self.current_project_profile_data.get("file_contents", {})
+
+        if not files:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Aucun fichier trouvé",
+                f"Aucun fichier enregistré pour le projet '{project_name}'."
+            )
+            return
+
+        logger.info(f"Analyse du projet '{project_name}' chargé depuis Dgraph/SQLite...")
+
+        progress = QtWidgets.QProgressDialog(
+            "Analyse des fichiers du projet...", 
+            "Annuler", 
+            0, 
+            len(files), 
+            self
+        )
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setValue(0)
+
+        # Mémoriser la sélection actuelle
+        current_cluster_row = self.cluster_list_widget.currentRow()
+        current_root_row = -1
+
+        if (current_cluster_row != -1 and self.current_cluster_data and 
+            not self.current_cluster_data.get('is_file_cluster')):
+            current_root_row = self.root_list_widget.currentRow()
+
+        try:
+            # Récupérer les clusters existants
+            clusters_detailed = self.current_project_profile_data.get('turing_ontology', {}).get('clusters_detailed', [])
+
+            if not clusters_detailed:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Aucun cluster",
+                    "Aucun cluster trouvé dans le projet. Créez d'abord des clusters."
+                )
+                return
+
+            # Mapper les fichiers aux clusters existants par chemin
+            file_to_cluster = {}
+
+            for cluster in clusters_detailed:
+                cluster_path = cluster.get('path', '')
+                cluster_name = cluster.get('name', '')
+
+                for file_path in files:
+                    if cluster_path and file_path.startswith(cluster_path):
+                        file_to_cluster[file_path] = cluster_name
+                    elif not cluster_path:
+                        first_dir = file_path.split(os.sep)[0] if os.sep in file_path else file_path
+                        if first_dir == cluster_name or cluster_name == first_dir:
+                            file_to_cluster[file_path] = cluster_name
+
+            # Analyser chaque fichier et l'attacher à son cluster
+            updated_clusters = {}
+
+            for i, file_path in enumerate(files, 1):
+                progress.setValue(i)
+                QtWidgets.QApplication.processEvents()
+
+                if progress.wasCanceled():
+                    break
+
+                abs_path = file_path
+                content = file_contents.get(file_path, "")
+
+                if not content and os.path.exists(abs_path):
+                    try:
+                        with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                    except Exception as e:
+                        logger.warning(f"Impossible de lire {abs_path}: {e}")
+                        content = ""
+
+                target_cluster_name = file_to_cluster.get(file_path)
+
+                if not target_cluster_name:
+                    target_cluster_name = clusters_detailed[0]['name']
+                    logger.warning(f"Aucun cluster trouvé pour {file_path}, utilisation de {target_cluster_name}")
+
+                try:
+                    classes = self.dependency_parser.extract_classes(content, abs_path) if content else []
+                    functions = self.dependency_parser.extract_functions(content, abs_path) if content else []
+                    variables = self.dependency_parser.extract_variables(content, abs_path) if content else []
+
+                    if target_cluster_name not in updated_clusters:
+                        updated_clusters[target_cluster_name] = {
+                            'classes': [],
+                            'functions': [],
+                            'variables': [],
+                            'files_processed': []
+                        }
+
+                    updated_clusters[target_cluster_name]['files_processed'].append(file_path)
+
+                    for cls in classes:
+                        cls_data = {
+                            'name': cls.get('name', 'Unknown'),
+                            'uid': cls.get('uid', str(uuid.uuid4())),
+                            'line': cls.get('line', 0),
+                            'file': file_path,
+                            'methods': cls.get('methods', []),
+                            'description': f"Classe dans {file_path}"
+                        }
+                        updated_clusters[target_cluster_name]['classes'].append(cls_data)
+
+                    for func in functions:
+                        func_data = {
+                            'name': func.get('name', 'Unknown'),
+                            'uid': func.get('uid', str(uuid.uuid4())),
+                            'type': func.get('type', 'function'),
+                            'line': func.get('line', 0),
+                            'file': file_path,
+                            'calls': func.get('calls', []),
+                            'description': f"Fonction dans {file_path}"
+                        }
+                        updated_clusters[target_cluster_name]['functions'].append(func_data)
+
+                    for var in variables:
+                        var_data = {
+                            'name': var.get('name', 'Unknown'),
+                            'uid': var.get('uid', str(uuid.uuid4())),
+                            'type': var.get('type', 'variable'),
+                            'line': var.get('line', 0),
+                            'file': file_path,
+                            'scope': var.get('scope', 'global'),
+                            'description': f"Variable dans {file_path}"
+                        }
+                        updated_clusters[target_cluster_name]['variables'].append(var_data)
+
+                except Exception as e:
+                    logger.warning(f"Erreur extraction enfants pour {abs_path}: {e}")
+
+            progress.setValue(len(files))
+
+            # Mettre à jour les clusters existants avec les données extraites
+            for cluster in clusters_detailed:
+                cluster_name = cluster.get('name', '')
+                if cluster_name in updated_clusters:
+                    cluster_updates = updated_clusters[cluster_name]
+
+                    for cls in cluster_updates['classes']:
+                        self._add_extracted_item_to_cluster(cluster, cls, 'class')
+
+                    for func in cluster_updates['functions']:
+                        self._add_extracted_item_to_cluster(cluster, func, 'function')
+
+                    for var in cluster_updates['variables']:
+                        self._add_extracted_item_to_cluster(cluster, var, 'variable')
+
+                    logger.info(
+                        f"Cluster '{cluster_name}': "
+                        f"{len(cluster_updates['classes'])} classes, "
+                        f"{len(cluster_updates['functions'])} fonctions, "
+                        f"{len(cluster_updates['variables'])} variables"
+                    )
+
+            # CORRIGÉ: Appeler _collect_all_labels() APRÈS l'ajout des éléments
+            self._collect_all_labels()
+
+            # Rafraîchir l'affichage
+            self._refresh_cluster_list()
+            self.relations_graph.update_graph(None)
+
+            # Re-sélectionner le cluster pour déclencher la mise à jour
+            if current_cluster_row != -1 and self.cluster_list_widget.count() > current_cluster_row:
+                self.cluster_list_widget.setCurrentRow(current_cluster_row)
+
+                if current_root_row != -1 and self.root_list_widget.count() > current_root_row:
+                    self.root_list_widget.setCurrentRow(current_root_row)
+
+            progress.close()
+
+            # Statistiques finales
+            total_classes = sum(len(u['classes']) for u in updated_clusters.values())
+            total_functions = sum(len(u['functions']) for u in updated_clusters.values())
+            total_variables = sum(len(u['variables']) for u in updated_clusters.values())
+
+            QtWidgets.QMessageBox.information(
+                self,
+                "Analyse terminée",
+                f"Projet '{project_name}' analysé avec succès.\n\n"
+                f"Fichiers analysés : {len(files)}\n"
+                f"Classes trouvées : {total_classes}\n"
+                f"Fonctions trouvées : {total_functions}\n"
+                f"Variables trouvées : {total_variables}"
+            )
+
+            logger.info(
+                f"Analyse terminée pour '{project_name}': "
+                f"{total_classes} classes, {total_functions} fonctions, {total_variables} variables"
+            )
+
+        except Exception as e:
+            progress.close()
+            logger.error(f"Erreur lors du scan du projet Dgraph: {str(e)}")
+            QtWidgets.QMessageBox.critical(
+                self, 
+                "Erreur", 
+                f"Erreur lors de l'analyse du projet :\n{str(e)}"
+            )
+
+    def _add_extracted_item_to_cluster(self, cluster: Dict, item: Dict, item_type: str):
+        """
+        Ajoute un élément extrait (classe, fonction, variable) comme nœud enfant dans la hiérarchie du cluster.
+
+        Args:
+            cluster: Dict du cluster
+            item: Dict de l'élément extrait (avec 'name', 'uid', 'line', 'file', etc.)
+            item_type: Type ('class', 'function', 'variable')
+        """
+        # Créer le nœud enfant
+        uid = item.get('uid', str(uuid.uuid4()))
+        child = {
+            'name': item['name'],
+            'uid': uid,
+            'type': item_type,
+            'line': item.get('line', 0),
+            'label': f"{item_type.capitalize()}: {item['name']}",
+            'children': [],
+            'outgoing_relations': item.get('calls', []) if item_type == 'function' else item.get('uses_vars', []) if item_type == 'class' else [],
+            'incoming_relations': [],
+            'parents': []  # Sera défini si target trouvé
+        }
+
+        # Chercher le root_label correspondant au fichier (utiliser nom de fichier pour matching, pas chemin complet)
+        file_name = os.path.basename(item.get('file', ''))
+        if not file_name:
+            logger.warning(f"Aucun fichier associé à l'élément {item['name']} ({item_type})")
+            return
+
+        target_label = None
+        for root_label in cluster.get('root_labels', []):
+            files_in_label = root_label.get('files', [])
+            if any(os.path.basename(f) == file_name for f in files_in_label):
+                target_label = root_label
+                break
+
+        if target_label:
+            # Ajouter comme enfant
+            target_label.setdefault('children', []).append(child)
+            child['parents'] = [target_label['uid']]
+
+            # Ajouter à label_uid_to_info pour cohérence (sera mis à jour dans _collect_all_labels)
+            self.label_uid_to_info[uid] = {
+                'name': child['name'],
+                'label': child['label'],
+                'type': item_type,
+                'cluster': cluster['name'],
+                'file': file_name  # Utiliser nom relatif
+            }
+
+            logger.debug(f"Ajouté {item_type} '{item['name']}' comme enfant de {target_label['label']}")
+        else:
+            # Fallback: ajouter au premier root_label
+            if cluster.get('root_labels'):
+                target_label = cluster['root_labels'][0]
+                target_label.setdefault('children', []).append(child)
+                child['parents'] = [target_label['uid']]
+                self.label_uid_to_info[uid] = {
+                    'name': child['name'],
+                    'label': child['label'],
+                    'type': item_type,
+                    'cluster': cluster['name'],
+                    'file': file_name
+                }
+                logger.warning(f"Fichier {file_name} non trouvé, ajouté au premier label de {cluster['name']}")
+            else:
+                logger.error(f"Aucun root_label dans cluster {cluster['name']} pour ajouter {item_type} '{item['name']}'")
+
+    def scan_dgraph_project(self, project_path: str):
+        """
+        Analyse le projet et intègre les éléments extraits (classes, fonctions, variables) dans la hiérarchie Dgraph.
+        Utilise le parser multi-langages pour extraire et mapper les éléments.
+
+        Args:
+            project_path: Chemin du projet à scanner
+        """
+        logger.info(f"📁 Scan du projet Dgraph: {project_path}")
+
+        # Charger la structure existante
+        structure = self._load_existing_structure(project_path)
+        clusters_detailed = structure.get("clusters_detailed", [])
+
+        if not clusters_detailed:
+            logger.warning("Aucune structure de clusters trouvée.")
+            return structure
+
+        # Mapper des relations global
+        relations_map = {}
+        scanner = ProjectStructureScanner()
+        files = scanner.get_all_files(structure)
+        for file_info in files:
+            if is_supported_file(file_info['path']):
+                relations = file_info.get('relations', {})
+                if relations:
+                    relations_map[file_info['path']] = relations
+
+        # Compteurs pour log par cluster
+        cluster_stats = {}
+
+        # Pour chaque cluster
+        for cluster in clusters_detailed:
+            cluster_name = cluster.get('name', '')
+            cluster_stats[cluster_name] = {'classes': 0, 'functions': 0, 'variables': 0}
+
+            logger.info(f"Traitement du cluster '{cluster_name}': {len(cluster.get('root_labels', []))} labels")
+
+            # Pour chaque root_label (fichier ou dossier de fichiers)
+            for root_label in cluster.get('root_labels', []):
+                files_in_label = root_label.get('files', [])
+                if not files_in_label:
+                    continue
+                
+                # Pour chaque fichier dans ce label
+                for file_path in files_in_label:
+                    if not os.path.exists(file_path):
+                        continue
+                    
+                    try:
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+
+                        parser = MultiLanguageDependencyParser()
+                        parsed_data = {
+                            "classes": parser.extract_classes(content, file_path),
+                            "functions": parser.extract_functions(content, file_path),
+                            "variables": parser.extract_variables(content, file_path)
+                        }
+
+                        # Mapper relations pour ce fichier (au niveau du root_label pour l'instant)
+                        relations = relations_map.get(file_path, {})
+                        if relations:
+                            # Ajouter les relations au root_label (simplifié)
+                            for rel_type, rel_list in relations.items():
+                                for rel in rel_list:
+                                    target = rel.get('target', '')
+                                    normalized_target = normalize_node_name(target)
+                                    if normalized_target:
+                                        target_uid = self._find_label_uid_by_name(normalized_target)
+                                        if target_uid:
+                                            relation_entry = {
+                                                'target_uid': target_uid,
+                                                'relation_type': rel_type,
+                                                'line': rel.get('line', 0)
+                                            }
+                                            root_label.setdefault('outgoing_relations', []).append(relation_entry)
+
+                        # Créer et ajouter les enfants pour ce fichier au root_label
+                        for cls in parsed_data.get("classes", []):
+                            cls['file'] = file_path
+                            child = self._create_child_node_from_item(cls, 'class')
+                            root_label.setdefault('children', []).append(child)
+                            cluster_stats[cluster_name]['classes'] += 1
+
+                        for func in parsed_data.get("functions", []):
+                            func['file'] = file_path
+                            child = self._create_child_node_from_item(func, 'function')
+                            root_label.setdefault('children', []).append(child)
+                            cluster_stats[cluster_name]['functions'] += 1
+
+                        for var in parsed_data.get("variables", []):
+                            var['file'] = file_path
+                            child = self._create_child_node_from_item(var, 'variable')
+                            root_label.setdefault('children', []).append(child)
+                            cluster_stats[cluster_name]['variables'] += 1
+
+                    except Exception as e:
+                        logger.error(f"Erreur lors du scan du fichier {file_path}: {e}")
+
+            # Log par cluster
+            stats = cluster_stats[cluster_name]
+            logger.info(f"Cluster '{cluster_name}': {stats['classes']} classes, {stats['functions']} fonctions, {stats['variables']} variables")
+
+        # Sauvegarder la structure mise à jour
+        structure_file = os.path.join(project_path, "turing_ontology.json")
+        try:
+            with open(structure_file, "w", encoding="utf-8") as f:
+                json.dump(structure, f, indent=2, ensure_ascii=False)
+            logger.info(f"Structure sauvegardée: {structure_file}")
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde: {e}")
+
+        # Mettre à jour les données locales
+        self.current_project_path = project_path
+        self.current_project_profile_data = structure
+        self._collect_all_labels()
+
+        return structure
+
+    def _create_child_node_from_item(self, item: Dict, item_type: str) -> Dict[str, Any]:
+        """
+        Crée un nœud enfant à partir d'un élément extrait (classe, fonction, variable).
+        
+        Args:
+            item: Dict de l'élément extrait
+            item_type: Type ('class', 'function', 'variable')
+        
+        Returns:
+            Dict du nœud enfant
+        """
+        uid = item.get('uid', str(uuid.uuid4()))
+        child = {
+            'name': item['name'],
+            'uid': uid,
+            'type': item_type,
+            'line': item.get('line', 0),
+            'label': f"{item_type.capitalize()}: {item['name']}",
+            'children': [],
+            'outgoing_relations': item.get('calls', []) if item_type == 'function' else item.get('uses_vars', []) if item_type == 'class' else [],
+            'incoming_relations': [],
+            'parents': []  # Sera mis à jour si nécessaire
+        }
+        
+        # Ajouter à label_uid_to_info
+        self.label_uid_to_info[uid] = {
+            'name': child['name'],
+            'label': child['label'],
+            'type': item_type,
+            'cluster': self.current_cluster_name if hasattr(self, 'current_cluster_name') else 'unknown',
+            'file': os.path.basename(item.get('file', ''))
+        }
+        
+        return child
+
+    def _collect_all_labels(self):
+        """
+        Collecte tous les labels et met à jour label_uid_to_info avec mapping Dgraph.
+        À appeler après scan pour rafraîchir.
+        """
+        self.label_uid_to_info = {}
+        if not self.current_project_profile_data:
+            return
+
+        def recurse(node, cluster_name=''):
+            if 'uid' in node:
+                uid = node['uid']
+                # Stocker mapping local -> Dgraph si présent
+                dgraph_uid = node.get('dgraph_uid', None)
+                if dgraph_uid:
+                    self.local_to_dgraph[uid] = dgraph_uid
+                    self.dgraph_to_local[dgraph_uid] = uid
+                self.label_uid_to_info[uid] = {
+                    'name': node.get('name', node.get('label', 'N/A')),
+                    'label': node.get('label', 'N/A'),
+                    'type': node.get('type', 'unknown'),
+                    'cluster': cluster_name,
+                    'file': node.get('file', 'N/A')
+                }
+
+            for child in node.get('children', []):
+                recurse(child, cluster_name)
+
+        for cluster in self.current_project_profile_data.get('clusters_detailed', []):
+            cluster_name = cluster.get('name', 'unknown')
+            for root_label in cluster.get('root_labels', []):
+                recurse(root_label, cluster_name)
+
+        # Charger mappings persistés depuis Dgraph si connector actif
+        if self.dgraph_connector:
+            self._load_mappings_from_dgraph()
+
+        logger.info(f"label_uid_to_info mis à jour: {len(self.label_uid_to_info)} entrées")
+
+    def _get_local_to_dgraph_mapping(self):
+        """Retourne {local_uuid: dgraph_hex}"""
+        if not hasattr(self, 'local_to_dgraph'):
+            self.local_to_dgraph = {}
+            self._collect_all_labels()  # Rafraîchir si besoin
+        return self.local_to_dgraph
+
+    def _get_dgraph_to_local_mapping(self):
+        """Retourne {dgraph_hex: local_uuid}"""
+        if not hasattr(self, 'dgraph_to_local'):
+            self.dgraph_to_local = {}
+            self._collect_all_labels()
+        return self.dgraph_to_local
+
+    def _load_mappings_from_dgraph(self):
+        """Charge les mappings depuis Dgraph pour sync."""
+        query = """
+        {
+          q(func: type(Node)) {
+            uid
+            local_id
+          }
+        }
+        """
+        try:
+            txn = self.dgraph_connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+            data = self.dgraph_connector._parse_response(resp)
+            for node in data.get("q", []):
+                local_id = node.get('local_id')
+                dgraph_uid = node['uid']
+                if local_id:
+                    self.local_to_dgraph[local_id] = dgraph_uid
+                    self.dgraph_to_local[dgraph_uid] = local_id
+        except Exception as e:
+            logger.error(f"Erreur chargement mappings Dgraph: {e}")
+
+    def _load_existing_structure(self, project_path: str) -> Dict[str, Any]:
+        """
+        Charge la structure existante du projet.
+        """
+        structure_file = os.path.join(project_path, "turing_ontology.json")
+        if os.path.exists(structure_file):
+            try:
+                with open(structure_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Erreur chargement structure: {e}")
+        return {"clusters_detailed": []}    
+    
+    def _integrate_scanned_structure(self, scanned_structure: Dict[str, Any], base_dir: str):
+            """
+            Intègre la structure scannée dans le projet, en calculant relations_map à l'intérieur.
+
+            Args:
+                scanned_structure: Structure scannée par le scanner
+                base_dir: Répertoire de base du projet
+            """
+            # Calculer relations_map ici pour matcher l'appel (3 args)
+            relations_map = self.project_scanner.get_relations_map(scanned_structure)
+
+            clusters_detailed = []
+            for cluster in scanned_structure.get('clusters', []):
+                new_cluster = {
+                    'name': cluster.get('name', 'Unknown'),
+                    'path': cluster.get('path', ''),
+                    'type': 'cluster',
+                    'root_labels': []
+                }
+
+                # Traiter chaque fichier avec force
+                all_files_in_cluster = self.project_scanner.get_all_files({'clusters': [cluster]})
+                for file_info in all_files_in_cluster:
+                    file_name = file_info.get('name', 'Unknown')
+                    file_path = file_info.get('path', '')
+                    rel_path = os.path.relpath(file_path, base_dir) if base_dir and file_path else file_path
+
+                    # Contenu déjà lu dans _scan_file, fallback si absent
+                    content = file_info.get('file_contents', {}).get(rel_path, '')
+                    if not content and file_path:
+                        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+                        for encoding in encodings:
+                            try:
+                                with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+                                    content = f.read()
+                                break
+                            except (UnicodeDecodeError, IOError):
+                                continue
+                        else:
+                            try:
+                                with open(file_path, 'rb') as f:
+                                    raw = f.read()
+                                    content = raw.decode('utf-8', errors='replace')
+                            except Exception:
+                                content = ''
+
+                    new_label = {
+                        'label': file_name,
+                        'id': str(uuid.uuid4()),
+                        'uid': file_info.get('uid', str(uuid.uuid4())),
+                        'type': 'file',
+                        'description': f"Fichier: {rel_path}",
+                        'category': ['file'],
+                        'files': [rel_path],
+                        'file_contents': {rel_path: content},
+                        'children': [],
+                        'parents': [],
+                        'outgoing_relations': [],
+                        'incoming_relations': [],
+                        'classes': file_info.get('classes', []),  # Forcé depuis scan
+                        'functions': file_info.get('functions', []),  # Forcé depuis scan
+                        'variables': file_info.get('variables', [])  # Forcé depuis scan
+                    }
+
+                    # Ajouter le fichier au projet global
+                    files_list = self.current_project_profile_data.get('files', [])
+                    if rel_path not in files_list:
+                        files_list.append(rel_path)
+                        self.current_project_profile_data['files'] = files_list
+                    file_contents = self.current_project_profile_data.get('file_contents', {})
+                    file_contents[rel_path] = content
+                    self.current_project_profile_data['file_contents'] = file_contents
+
+                    # Mapper relations
+                    relations = relations_map.get(file_path, {})
+                    if relations:
+                        for rel_type, rel_list in relations.items():
+                            for rel in rel_list:
+                                target = rel.get('target', '')
+                                normalized_target = normalize_node_name(target)
+
+                                if normalized_target:
+                                    target_uid = self._find_label_uid_by_name(normalized_target)
+
+                                    if target_uid:
+                                        relation_entry = {
+                                            'target_uid': target_uid,
+                                            'relation_type': rel_type,
+                                            'line': rel.get('line', 0)
+                                        }
+                                        new_label['outgoing_relations'].append(relation_entry)
+
+                                        pending_rels = self.pending_relations.get(new_label['uid'], [])
+                                        pending_rels.append({
+                                            'target_uid': target_uid,
+                                            'relation_type': rel_type
+                                        })
+                                        self.pending_relations[new_label['uid']] = pending_rels
+
+                    # Ajouter enfants depuis scan (classes, functions, variables)
+                    for child in file_info.get('children', []):
+                        if 'uid' not in child:
+                            child['uid'] = str(uuid.uuid4())
+                        new_label['children'].append(child)
+
+                    new_cluster['root_labels'].append(new_label)
+
+                clusters_detailed.append(new_cluster)
+
+            logger.info(f"{len(clusters_detailed)} clusters intégrés avec classes/fonctions/variables")
+            turing_ontology = self.current_project_profile_data.get('turing_ontology', {})
+            turing_ontology['clusters_detailed'] = clusters_detailed
+            self.current_project_profile_data['turing_ontology'] = turing_ontology
+
+    def _find_label_uid_by_name(self, name: str) -> Optional[str]:
+        """
+        Trouve l'UID d'un label par son nom (sans extension).
+        
+        Args:
+            name: Nom du label à chercher
+        
+        Returns:
+            UID du label ou None
+        """
+        if not name:
+            return None
+        
+        normalized_search = name.lower().strip()
+        
+        for uid, info in self.label_uid_to_info.items():
+            label_name = info.get('name', '')
+            normalized_label = normalize_node_name(label_name)
+            
+            if normalized_label and normalized_label.lower() == normalized_search:
+                return uid
+        
+        return None
+
+    def _on_root_label_selected(self, current):
+        """
+        Gère la sélection d'un root label.
+        """
+        if current:
+            self.current_root_label_index = self.root_list_widget.row(current)
+            self.current_root_data = self.current_cluster_data["root_labels"][self.current_root_label_index]
+            self.current_selected_label_uid = current.data(Qt.UserRole)
+
+            # Réinitialiser les sélections inférieures
+            self.current_level1_data = None
+            self.current_level2_data = None
+            self.current_level1_label_index = -1
+            self.current_level2_label_index = -1
+
+            # Afficher les détails du root label
+            self._update_selected_details("Label Racine", self.current_root_data)
+
+            # Peupler la liste level1 avec TOUS les enfants hiérarchiques
+            self._populate_level1_list()
+
+            # Vider la liste des niveau 2
+            self.child_list_widget.clear()
+
+            # Mettre à jour les relations et graphe
+            self.global_relations_config.update_current(self.current_selected_label_uid)
+            self.relations_graph.update_graph(self.current_selected_label_uid)
+        else:
+            self.current_root_data = None
+            self.current_selected_label_uid = None
+            self.level1_list_widget.clear()
+            self.child_list_widget.clear()
+            self.global_relations_config.update_current(None)
+            self.relations_graph.update_graph(None)
+
+        self._update_button_states()
+
+    def _populate_children_list(self, parent_data: Dict, list_widget=None):
+        """
+        MODIFIÉE: Ne peuple que les enfants hiérarchiques.
+        Les classes/fonctions/variables sont affichées via _populate_children_for_file().
+        """
+        if list_widget is None:
+            list_widget = self.level1_list_widget if hasattr(self, 'current_root_data') else self.child_list_widget
+
+        list_widget.clear()
+        if not parent_data:
+            return
+
+        # UNIQUEMENT les enfants hiérarchiques (fichiers, dossiers) 
+        # PAS les classes, fonctions, variables
+        for child in parent_data.get('children', []):
+            child_type = child.get('type', 'child')
+
+            # Filtrer: ne montrer que les vrais enfants hiérarchiques
+            if child_type not in ['class', 'function', 'variable']:
+                icon = self._get_node_icon(child_type)
+                display = f"{icon} {child.get('label', child.get('name', 'Sans nom'))}"
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, child.get('uid'))
+                item.setData(Qt.UserRole + 1, child_type)
+                list_widget.addItem(item)
+
+        self._update_button_states()
+
+    def _get_node_icon(self, node_type: str) -> str:
+        """
+        Retourne une icône selon le type de nœud.
+        
+        Args:
+            node_type: Type de nœud
+        
+        Returns:
+            Icône Unicode
+        """
+        icons = {
+            'class': '👨‍💻',
+            'function': '⚙️',
+            'variable': '🔹',  # NOUVEAU
+            'method': '🔧',
+            'child': ''
+        }
+        
+        return icons.get(node_type, '🔸')
+
+    def _get_relation_icon(self, rel_type: str) -> str:
+        """
+        Retourne une icône selon le type de relation.
+        
+        Args:
+            rel_type: Type de relation
+        
+        Returns:
+            Icône Unicode
+        """
+        icons = {
+            'import': '📦',
+            'from_import': '📦',
+            'require': '📦',
+            'include': '📦',
+            'heritage': '🔗',
+            'extends': '🔗',
+            'implements': '🔗',
+            'call': '📞',
+            'function_call': '📞',
+            'method_call': '📞',
+            'uses': '🔹',  # NOUVEAU pour variables
+            'variable_use': '🔹'
+        }
+        
+        return icons.get(rel_type, '🔸')
+
+    def _on_level1_label_selected(self, current):
+        """
+        Gère la sélection d'un label niveau 1.
+        Peut être un fichier ou un dossier contenant d'autres fichiers/dossiers.
+        """
+        if current:
+            item_type = current.data(Qt.UserRole + 1)
+            item_uid = current.data(Qt.UserRole)
+
+            self.current_selected_label_uid = item_uid
+
+            # Chercher cet enfant dans la structure (peut être imbriqué)
+            child_data = self._find_child_by_uid(self.current_root_data, item_uid)
+
+            if child_data:
+                self.current_level1_data = child_data
+                self.current_level1_label_index = self._get_child_index_by_uid(item_uid)
+
+                # Réinitialiser niveau 2
+                self.current_level2_data = None
+                self.current_level2_label_index = -1
+
+                # Afficher les détails
+                self._update_selected_details(f"Niveau 1 - {item_type.capitalize()}", self.current_level1_data)
+
+                # Peupler le niveau 2 avec les enfants de ce niveau 1
+                self._populate_child_list()
+
+                # Mettre à jour relations et graphe
+                self.global_relations_config.update_current(self.current_selected_label_uid)
+                self.relations_graph.update_graph(self.current_selected_label_uid)
+            else:
+                self.current_level1_data = None
+                self.child_list_widget.clear()
+
+        else:
+            self.current_level1_data = None
+            self.current_selected_label_uid = None
+            self.child_list_widget.clear()
+            self.global_relations_config.update_current(None)
+            self.relations_graph.update_graph(None)
+
+        self._update_button_states()
+
+    def _populate_children_for_file(self, file_data: Dict, list_widget):
+        """
+        MODIFIÉE: Peuple la liste enfant avec les classes, fonctions et variables
+        DU FICHIER SÉLECTIONNÉ. Les UIDs sont stockés correctement dans Qt.UserRole.
+        """
+        list_widget.clear()
+        if not file_data:
+            return
+
+        # Afficher d'abord les classes du fichier
+        classes = file_data.get('classes', [])
+        for cls in classes:
+            icon = '[CLS]'
+            display = f"{icon} {cls.get('name', 'Classe')} (ligne {cls.get('line', '?')})"
+            item = QListWidgetItem(display)
+
+            # S'assurer que le UID est généré
+            cls_uid = cls.get('uid')
+            if not cls_uid:
+                cls_uid = f"cls_{cls.get('name', '')}_{str(uuid.uuid4())}"
+                cls['uid'] = cls_uid
+
+            # Stocker le UID STRING, pas l'ID mémoire
+            item.setData(Qt.UserRole, cls_uid)
+            item.setData(Qt.UserRole + 1, "class")
+            item.setData(Qt.UserRole + 2, cls.get('line', 0))
+            item.setForeground(QtGui.QColor("#FF9800"))
+            list_widget.addItem(item)
+
+        # Afficher les fonctions du fichier
+        functions = file_data.get('functions', [])
+        for func in functions:
+            func_type = func.get('type', 'function')
+            icon = "[MTH]" if func_type == "method" else "[FNC]"
+            display = f"{icon} {func.get('name', 'Fonction')} (ligne {func.get('line', '?')})"
+            item = QListWidgetItem(display)
+
+            # S'assurer que le UID est généré
+            func_uid = func.get('uid')
+            if not func_uid:
+                func_uid = f"func_{func.get('name', '')}_{str(uuid.uuid4())}"
+                func['uid'] = func_uid
+
+            # Stocker le UID STRING
+            item.setData(Qt.UserRole, func_uid)
+            item.setData(Qt.UserRole + 1, func_type)
+            item.setData(Qt.UserRole + 2, func.get('line', 0))
+            item.setForeground(QtGui.QColor("#2196F3"))
+            list_widget.addItem(item)
+
+        # Afficher les variables du fichier
+        variables = file_data.get('variables', [])
+        for var in variables:
+            display = f"[VAR] {var.get('name', 'Variable')} (ligne {var.get('line', '?')})"
+            item = QListWidgetItem(display)
+
+            # S'assurer que le UID est généré
+            var_uid = var.get('uid')
+            if not var_uid:
+                var_uid = f"var_{var.get('name', '')}_{str(uuid.uuid4())}"
+                var['uid'] = var_uid
+
+            # Stocker le UID STRING
+            item.setData(Qt.UserRole, var_uid)
+            item.setData(Qt.UserRole + 1, "variable")
+            item.setData(Qt.UserRole + 2, var.get('line', 0))
+            item.setForeground(QtGui.QColor("#4CAF50"))
+            list_widget.addItem(item)
+
+        # Afficher les enfants hiérarchiques (sous-dossiers/fichiers) APRÈS les classes/foncs/vars
+        for child in file_data.get('children', []):
+            if child.get('type') in ['folder', 'file', 'child']:
+                icon = self._get_node_icon(child.get('type', 'child'))
+                display = f"{icon} {child.get('label', child.get('name', 'Sans nom'))}"
+                item = QListWidgetItem(display)
+
+                # Stocker le UID STRING de l'enfant
+                child_uid = child.get('uid')
+                if not child_uid:
+                    child_uid = child.get('id', str(uuid.uuid4()))
+                    child['uid'] = child_uid
+
+                item.setData(Qt.UserRole, child_uid)
+                item.setData(Qt.UserRole + 1, child.get('type', 'child'))
+                list_widget.addItem(item)
+
+        self._update_button_states()
+
+    def _format_child_details(self, child: Dict[str, Any]) -> str:
+        """
+        Formate les détails d'un enfant (classe, fonction, variable) pour affichage.
+        """
+        child_type = child.get('type', 'unknown')
+        details = ""
+
+        if child_type == 'class':
+            details = f"=== CLASSE ===\n\n"
+            details += f"Nom: {child.get('name', 'N/A')}\n"
+            details += f"UID: {child.get('uid', 'N/A')}\n"
+            details += f"Ligne: {child.get('line', 'N/A')}\n"
+            details += f"Description: {child.get('description', 'N/A')}\n"
+
+            bases = child.get('bases', [])
+            if bases:
+                details += f"\nHérite de:\n"
+                for base in bases:
+                    details += f"  - {base}\n"
+
+            methods = child.get('children', [])
+            if methods:
+                details += f"\nMéthodes ({len(methods)}):\n"
+                for method in methods[:10]:
+                    details += f"  - {method.get('name', 'N/A')} (ligne {method.get('line', '?')})\n"
+                if len(methods) > 10:
+                    details += f"  ... et {len(methods) - 10} autres\n"
+
+        elif child_type in ['function', 'method']:
+            details = f"=== {'MÉTHODE' if child_type == 'method' else 'FONCTION'} ===\n\n"
+            details += f"Nom: {child.get('name', 'N/A')}\n"
+            details += f"UID: {child.get('uid', 'N/A')}\n"
+            details += f"Type: {child.get('type', 'N/A')}\n"
+            details += f"Ligne: {child.get('line', 'N/A')}\n"
+            details += f"Description: {child.get('description', 'N/A')}\n"
+
+            params = child.get('params', [])
+            if params:
+                details += f"\nParamètres ({len(params)}):\n"
+                for param in params:
+                    param_name = param.get('name', 'param')
+                    param_type = param.get('type', 'unknown')
+                    details += f"  - {param_name}: {param_type}\n"
+
+            returns = child.get('returns', {})
+            if returns:
+                details += f"\nRetour: {returns.get('type', 'N/A')}\n"
+
+            calls = child.get('outgoing_relations', [])
+            if calls:
+                details += f"\nAppelle ({len(calls)}):\n"
+                for call in calls[:5]:
+                    details += f"  - {call}\n"
+                if len(calls) > 5:
+                    details += f"  ... et {len(calls) - 5} autres\n"
+
+        elif child_type == 'variable':
+            details = f"=== VARIABLE ===\n\n"
+            details += f"Nom: {child.get('name', 'N/A')}\n"
+            details += f"UID: {child.get('uid', 'N/A')}\n"
+            details += f"Type: {child.get('var_type', 'N/A')}\n"
+            details += f"Scope: {child.get('scope', 'N/A')}\n"
+            details += f"Ligne: {child.get('line', 'N/A')}\n"
+            details += f"Description: {child.get('description', 'N/A')}\n"
+
+        return details
+
+    def _populate_level1_list(self):
+        """
+        Peuple la liste niveau 1 avec TOUS les enfants hiérarchiques,
+        y compris les fichiers dans les sous-dossiers.
+        """
+        self.level1_list_widget.clear()
+
+        if not self.current_root_data:
+            return
+
+        # Afficher récursivement tous les enfants
+        for child in self.current_root_data.get("children", []):
+            self._add_child_to_level1_list(child, self.level1_list_widget)
+
+        self._update_button_states()
+
+    def _get_child_index_by_uid(self, uid: str) -> int:
+        """
+        Trouve l'index d'un enfant par son UID.
+        
+        Args:
+            uid: UID à chercher
+        
+        Returns:
+            Index ou -1
+        """
+        if not self.current_root_data:
+            return -1
+        
+        for i, child in enumerate(self.current_root_data.get('children', [])):
+            if child.get('uid') == uid:
+                return i
+        
+        return -1
+
+    def _find_label_by_uid(self, uid: str) -> Optional[Dict[str, Any]]:
+        """
+        Trouve un label par son UID dans toute la hiérarchie.
+        
+        Args:
+            uid: UID à chercher
+        
+        Returns:
+            Dictionnaire du label ou None
+        """
+        all_nodes = self._get_all_nodes()
+        return next((n for n in all_nodes if n.get('uid') == uid), None)
+
+    def _find_child_by_uid(self, parent: Dict, uid: str) -> Optional[Dict]:
+        """
+        Cherche récursivement un enfant par son UID dans la structure.
+        """
+        for child in parent.get("children", []):
+            if child.get('uid') == uid or child.get('id') == uid:
+                return child
+
+            # Chercher récursivement dans les sous-dossiers
+            result = self._find_child_by_uid(child, uid)
+            if result:
+                return result
+
+        return None
+
+    def _format_label_details(self, label: Dict[str, Any]) -> str:
+        """
+        Formate les détails d'un label pour affichage, incluant classes, fonctions et variables.
+        
+        Args:
+            label: Dictionnaire du label
+        
+        Returns:
+            String formaté
+        """
+        details = f"Nom: {label.get('label', 'N/A')}\n"
+        details += f"UID: {label.get('uid', 'N/A')}\n"
+        details += f"Type: {label.get('type', 'N/A')}\n"  # NOUVEAU
+        details += f"Description: {label.get('description', 'N/A')}\n\n"
+        
+        files = label.get('files', [])
+        if files:
+            details += f"Fichiers ({len(files)}):\n"
+            for f in files[:5]:
+                details += f"  - {f}\n"
+            if len(files) > 5:
+                details += f"  ... et {len(files) - 5} autres\n"
+        
+        # Ajouter classes si présentes
+        classes = label.get('classes', [])
+        if classes:
+            details += f"\nClasses ({len(classes)}):\n"
+            for cls in classes[:5]:
+                details += f"  - {cls['name']} (ligne {cls['line']})\n"
+            if len(classes) > 5:
+                details += f"  ... et {len(classes) - 5} autres\n"
+        
+        # Ajouter fonctions si présentes
+        functions = label.get('functions', [])
+        if functions:
+            details += f"\nFonctions/Méthodes ({len(functions)}):\n"
+            for func in functions[:5]:
+                details += f"  - {func['name']} ({func['type']}, ligne {func['line']})\n"
+            if len(functions) > 5:
+                details += f"  ... et {len(functions) - 5} autres\n"
+
+        # NOUVEAU : Ajouter variables si présentes
+        variables = label.get('variables', [])
+        if variables:
+            details += f"\nVariables ({len(variables)}):\n"
+            for var in variables[:5]:
+                details += f"  - {var['name']} ({var['type']}, ligne {var['line']})\n"
+            if len(variables) > 5:
+                details += f"  ... et {len(variables) - 5} autres\n"
+        
+        return details
+
+    def _on_double_click_label(self, item):
+        """
+        Double-clic sur un label - Affiche le contenu du fichier avec snippet highlighté.
+        MODIFIÉ: Centré sur ligne pour classes/foncs/vars.
+        """
+        if not item:
+            return
+        
+        uid = item.data(Qt.UserRole)
+        label = self._find_label_by_uid(uid)
+        
+        if not label:
+            return
+        
+        files = label.get('files', [])
+        if not files:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Aucun fichier",
+                "Ce label n'a pas de fichier associé."
+            )
+            return
+        
+        # Si plusieurs fichiers, demander lequel afficher
+        file_to_show = files[0]
+        if len(files) > 1:
+            file_to_show, ok = QInputDialog.getItem(
+                self,
+                "Sélectionner un fichier",
+                "Fichier à afficher:",
+                files,
+                0,
+                False
+            )
+            if not ok:
+                return
+        
+        # Récupérer le contenu
+        content = label.get('file_contents', {}).get(file_to_show, '')
+        
+        if not content:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Contenu vide",
+                f"Le fichier {file_to_show} est vide."
+            )
+            return
+        
+        # Afficher dans une fenêtre de dialogue avec highlight
+        self._show_file_content_dialog(file_to_show, content, label)
+
+    def _show_file_content_dialog(self, filename: str, content: str, label: Dict[str, Any]):
+        """
+        Affiche le contenu d'un fichier dans une fenêtre modale avec snippet highlighté.
+        
+        Args:
+            filename: Nom du fichier
+            content: Contenu du fichier
+            label: Label associé
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Contenu: {filename}")
+        dialog.setMinimumSize(800, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Info header
+        info_label = QLabel(f"<b>Fichier:</b> {filename}<br><b>Label:</b> {label.get('label', 'N/A')}")
+        layout.addWidget(info_label)
+        
+        # Éditeur de code (lecture seule)
+        code_editor = QPlainTextEdit()
+        code_editor.setReadOnly(True)
+        code_editor.setStyleSheet("""
+            QPlainTextEdit {
+                font-family: 'Courier New', monospace;
+                font-size: 10pt;
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3e3e3e;
+            }
+        """)
+
+        # NOUVEAU : Highlight si type spécifique (centrer sur ligne)
+        if label.get('type') in ['class', 'function', 'variable']:
+            line = label.get('line', 1)
+            # Slice approximatif autour de la ligne
+            lines = content.split('\n')
+            start_line = max(0, line - 10)
+            end_line = min(len(lines), line + 10)
+            highlighted = '\n'.join(lines[start_line:end_line])
+            # Ajouter marqueur
+            highlighted = f"--- Ligne {line} ---\n{highlighted}\n--- Fin snippet ---"
+            code_editor.setPlainText(highlighted)
+        else:
+            code_editor.setPlainText(content)
+        
+        layout.addWidget(code_editor)
+        
+        # Boutons
+        button_layout = QHBoxLayout()
+        
+        copy_button = QPushButton("📋 Copier tout")
+        copy_button.clicked.connect(lambda: self._copy_to_clipboard(content))
+        button_layout.addWidget(copy_button)
+        
+        snippet_button = QPushButton("✂️ Copier snippet (50 lignes)")
+        snippet_button.clicked.connect(lambda: self._copy_snippet(content))
+        button_layout.addWidget(snippet_button)
+        
+        close_button = QPushButton("Fermer")
+        close_button.clicked.connect(dialog.close)
+        button_layout.addWidget(close_button)
+        
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        dialog.exec_()
+
+    def _copy_to_clipboard(self, text: str):
+        """Copie le texte dans le presse-papier."""
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.setText(text)
+        
+        QtWidgets.QMessageBox.information(
+            self,
+            "Copié",
+            "Contenu copié dans le presse-papier."
+        )
+
+    def _copy_snippet(self, text: str, max_lines: int = 50):
+        """Copie un snippet (extrait) du texte."""
+        lines = text.split('\n')
+        snippet = '\n'.join(lines[:max_lines])
+        
+        if len(lines) > max_lines:
+            snippet += f"\n\n... ({len(lines) - max_lines} lignes supplémentaires)"
+        
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.setText(snippet)
+        
+        QtWidgets.QMessageBox.information(
+            self,
+            "Snippet copié",
+            f"Les {min(max_lines, len(lines))} premières lignes ont été copiées."
+        )
+
+    def _read_file_content(self, file_path: str) -> str:
+        """Lit un fichier en UTF-8 avec gestion d’erreur."""
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read()
+        except Exception as e:
+            logger.warning(f"Impossible de lire {file_path}: {e}")
+            return ""
+
+    def _map_relations_to_child_local(self, relations: Dict, child_label: Dict):
+        for rel_type, rels in relations.items():
+            for rel in rels:
+                if rel.get('target') == normalize_node_name(child_label['label']):
+                    child_label['outgoing_relations'].append({
+                        'target_uid': rel.get('target_uid', self._find_label_uid_by_name(rel['target'])),
+                        'relation_type': rel_type
+                    })
+
+    def _add_child_to_level1_list(self, child: Dict, list_widget, indent: str = ""):
+        """
+        Ajoute un enfant à la liste niveau 1, récursivement pour les sous-dossiers.
+        """
+        child_type = child.get('type', 'folder')
+
+        # Afficher cet enfant SANS icône
+        display = f"{indent}{child.get('label', child.get('name', 'Sans nom'))}"
+        item = QListWidgetItem(display)
+
+        child_uid = child.get('uid', child.get('id', str(uuid.uuid4())))
+        if 'uid' not in child:
+            child['uid'] = child_uid
+
+        item.setData(Qt.UserRole, child_uid)
+        item.setData(Qt.UserRole + 1, child_type)
+        list_widget.addItem(item)
+
+        # Si c'est un dossier, afficher aussi ses enfants de manière imbriquée
+        if child_type in ['folder', 'directory']:
+            for grandchild in child.get("children", []):
+                self._add_child_to_level1_list(grandchild, list_widget, indent + "  ")
+
     def closeEvent(self, event):
         """Ferme proprement le connector lors de la fermeture du widget."""
-        if self.dgraph_connector:
+        if self.dgraph_connector: 
             self.dgraph_connector.close()
         super().closeEvent(event)
