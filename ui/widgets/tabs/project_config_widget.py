@@ -17,6 +17,7 @@ from utils.logger import logger
 from ui.styles.platform_config_style import PlatformConfigStyle
 from ui.localization.translator import tr
 from utils.dgraph_connector import LirisDgraphConnector
+from ui.widgets.tabs.code_elements_popup import CodeElementsPopup
 from utils.multi_language_parser import (
     MultiLanguageDependencyParser, 
     ProjectStructureScanner,
@@ -2838,6 +2839,9 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         top_columns_layout.addLayout(right_column_layout, 5)
 
+        self.level1_list_widget.itemDoubleClicked.connect(self._on_double_click_item)
+        self.child_list_widget.itemDoubleClicked.connect(self._on_double_click_item)
+
     def _load_project_profiles(self):
         """Charge les profils depuis Dgraph."""
         query_result = self.dgraph_connector.query_workspaces()
@@ -2846,6 +2850,392 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 name = ws.get('name', '')
                 self.project_profiles[name] = self._workspace_to_profile(ws)
         self._update_project_combo()
+
+    def _get_file_content(self, file_path: str) -> str:
+        """
+        Récupère le contenu d'un fichier depuis la structure en mémoire ou le disque.
+        """
+        if not file_path:
+            return ""
+
+        # Essayer depuis current_root_data (pour les fichiers ouverts)
+        if self.current_root_data:
+            content = self.current_root_data.get('file_contents', {}).get(file_path, '')
+            if content:
+                return content
+
+        # Essayer depuis project_profile_data global
+        if self.current_project_profile_data:
+            content = self.current_project_profile_data.get('file_contents', {}).get(file_path, '')
+            if content:
+                return content
+
+        # Fallback : lecture directe du disque
+        return self._read_file_content(file_path)  # Méthode existante
+
+    #Interface a ameliorer
+    def _show_code_snippet_dialog(self, filename: str, full_content: str, item_type: str, line_num: int, item_text: str):
+        """
+        Affiche une fenêtre moderne et élégante contenant un extrait de code centré sur une ligne donnée.
+        """
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QTextCursor, QColor, QTextCharFormat, QFont
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton, QHBoxLayout
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Snippet — {item_text}")
+        dialog.setMinimumSize(1000, 600)
+        dialog.setMaximumSize(1400, 900)
+
+        # --- Palette de couleurs gris/blanc ---
+        stylesheet = """
+            QDialog {
+                background-color: #f8f8f8;
+                color: #1a1a1a;
+            }
+            QLabel {
+                color: #1a1a1a;
+                font-size: 10pt;
+            }
+            QPushButton {
+                background-color: #d0d0d0;
+                color: #1a1a1a;
+                padding: 8px 16px;
+                border-radius: 6px;
+                border: 1px solid #b0b0b0;
+                font-weight: bold;
+                font-size: 10pt;
+            }
+            QPushButton:hover {
+                background-color: #c0c0c0;
+                border: 1px solid #a0a0a0;
+            }
+            QPushButton:pressed {
+                background-color: #b0b0b0;
+            }
+            QPlainTextEdit {
+                font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+                font-size: 10pt;
+                background-color: #ffffff;
+                color: #1a1a1a;
+                border: 1px solid #d0d0d0;
+                border-radius: 8px;
+                padding: 12px;
+                line-height: 1.5;
+            }
+            QScrollBar:vertical {
+                background: #f0f0f0;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background: #b0b0b0;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #888888;
+            }
+        """
+        dialog.setStyleSheet(stylesheet)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # --- En-tête avec titre et informations ---
+        title_label = QLabel(f"<b style='font-size: 13pt; color: #1a1a1a'>{item_text}</b>")
+        title_label.setStyleSheet("margin-bottom: 8px;")
+        layout.addWidget(title_label)
+
+        # --- Information détaillée ---
+        info_parts = [
+            f"<span style='color: #333333'><b>Type :</b></span> <span style='color: #555555'>{item_type.capitalize()}</span>",
+            f"<span style='color: #333333'><b>Fichier :</b></span> <span style='color: #555555; font-family: monospace'>{os.path.basename(filename)}</span>",
+            f"<span style='color: #333333'><b>Ligne :</b></span> <span style='color: #555555'>{line_num}</span>"
+        ]
+        info_label = QLabel(" • ".join(info_parts))
+        info_label.setStyleSheet("""
+            QLabel {
+                background-color: #e8e8e8;
+                border-left: 3px solid #2a2a2a;
+                border-radius: 4px;
+                padding: 10px 12px;
+                color: #333333;
+                font-size: 9pt;
+            }
+        """)
+        layout.addWidget(info_label)
+
+        # --- Zone de code avec numérotation ---
+        code_editor = QPlainTextEdit()
+        code_editor.setReadOnly(True)
+
+        # Extraire le snippet
+        lines = full_content.splitlines()
+        snippet_start = max(0, line_num - 11)
+        snippet_end = min(len(lines), line_num + 10)
+        snippet_lines = lines[snippet_start:snippet_end]
+
+        # Construire le snippet avec numérotation
+        numbered_lines = []
+        for i, line_content in enumerate(snippet_lines):
+            actual_line_num = snippet_start + i + 1
+            numbered_lines.append(f"{actual_line_num:4d} │ {line_content}")
+
+        snippet = "\n".join(numbered_lines)
+        if snippet_start > 0:
+            snippet = f"     │ ... (lignes omises avant)\n{snippet}"
+        if snippet_end < len(lines):
+            snippet += f"\n     │ ... (lignes omises après)"
+
+        code_editor.setPlainText(snippet)
+        layout.addWidget(code_editor)
+
+        # --- Surlignage de la ligne ciblée ---
+        cursor = code_editor.textCursor()
+        target_line = line_num - snippet_start
+        if snippet_start > 0:
+            target_line += 1
+
+        for _ in range(target_line):
+            cursor.movePosition(QTextCursor.Down)
+        cursor.select(QTextCursor.LineUnderCursor)
+
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("#f0f0f0"))
+        fmt.setForeground(QColor("#1a1a1a"))
+        cursor.mergeCharFormat(fmt)
+        code_editor.setTextCursor(cursor)
+        code_editor.ensureCursorVisible()
+
+        # --- Boutons avec icônes textelles ---
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        button_layout.setContentsMargins(0, 8, 0, 0)
+
+        copy_button = QPushButton("📋 Copier le code")
+        copy_button.setMinimumHeight(36)
+        copy_button.clicked.connect(lambda: self._copy_to_clipboard(snippet))
+        button_layout.addWidget(copy_button)
+
+        full_button = QPushButton("📄 Fichier complet")
+        full_button.setMinimumHeight(36)
+        full_button.clicked.connect(lambda: self._show_file_content_dialog(filename, full_content, {'label': item_text, 'type': item_type, 'line': line_num}))
+        button_layout.addWidget(full_button)
+
+        button_layout.addStretch()
+
+        close_button = QPushButton("✕ Fermer")
+        close_button.setMinimumHeight(36)
+        close_button.setMaximumWidth(120)
+        close_button.clicked.connect(dialog.close)
+        button_layout.addWidget(close_button)
+
+        layout.addLayout(button_layout)
+        dialog.exec_()
+
+
+    def _show_file_content_dialog(self, filename: str, content: str, label: dict):
+        """
+        Affiche le contenu complet du fichier dans une fenêtre moderne et élégante.
+
+        Args:
+            filename: Nom du fichier
+            content: Contenu du fichier
+            label: Dictionnaire contenant 'label', 'type' et 'line'
+        """
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QTextCursor, QColor, QTextCharFormat
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton, QHBoxLayout
+        import os
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Fichier complet — {os.path.basename(filename)}")
+        dialog.setMinimumSize(1200, 700)
+
+        stylesheet = """
+            QDialog {
+                background-color: #f8f8f8;
+                color: #1a1a1a;
+            }
+            QLabel {
+                color: #1a1a1a;
+                font-size: 10pt;
+            }
+            QPushButton {
+                background-color: #d0d0d0;
+                color: #1a1a1a;
+                padding: 8px 16px;
+                border-radius: 6px;
+                border: 1px solid #b0b0b0;
+                font-weight: bold;
+                font-size: 10pt;
+            }
+            QPushButton:hover {
+                background-color: #c0c0c0;
+                border: 1px solid #a0a0a0;
+            }
+            QPushButton:pressed {
+                background-color: #b0b0b0;
+            }
+            QPlainTextEdit {
+                font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+                font-size: 9pt;
+                background-color: #ffffff;
+                color: #1a1a1a;
+                border: 1px solid #d0d0d0;
+                border-radius: 8px;
+                padding: 12px;
+                line-height: 1.5;
+            }
+            QScrollBar:vertical {
+                background: #f0f0f0;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background: #b0b0b0;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #888888;
+            }
+            QScrollBar:horizontal {
+                background: #f0f0f0;
+                height: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #b0b0b0;
+                border-radius: 6px;
+                min-width: 20px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #888888;
+            }
+        """
+        dialog.setStyleSheet(stylesheet)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # --- En-tête ---
+        title_label = QLabel(f"<b style='font-size: 13pt; color: #1a1a1a'>{label.get('label', 'Fichier')}</b>")
+        layout.addWidget(title_label)
+
+        # --- Information fichier ---
+        info_parts = [
+            f"<span style='color: #333333'><b>Fichier :</b></span> <span style='color: #555555; font-family: monospace'>{os.path.basename(filename)}</span>",
+            f"<span style='color: #333333'><b>Type :</b></span> <span style='color: #555555'>{label.get('type', 'N/A').capitalize()}</span>",
+            f"<span style='color: #333333'><b>Lignes totales :</b></span> <span style='color: #555555'>{len(content.splitlines())}</span>"
+        ]
+        file_info = QLabel(" • ".join(info_parts))
+        file_info.setStyleSheet("""
+            QLabel {
+                background-color: #e8e8e8;
+                border-left: 3px solid #888888;
+                border-radius: 4px;
+                padding: 10px 12px;
+                color: #333333;
+                font-size: 9pt;
+            }
+        """)
+        layout.addWidget(file_info)
+
+        # --- Zone de code avec numérotation complète ---
+        code_editor = QPlainTextEdit()
+        code_editor.setReadOnly(True)
+
+        lines = content.splitlines()
+        numbered_lines = []
+        for i, line_content in enumerate(lines):
+            line_num = i + 1
+            numbered_lines.append(f"{line_num:5d} │ {line_content}")
+
+        full_snippet = "\n".join(numbered_lines)
+        code_editor.setPlainText(full_snippet)
+        layout.addWidget(code_editor)
+
+        # --- Surlignage de la ligne ciblée (si type spécifique) ---
+        if label.get('type') in ['class', 'function', 'variable']:
+            target_line_num = label.get('line', 1)
+            cursor = code_editor.textCursor()
+
+            for _ in range(target_line_num):
+                cursor.movePosition(QTextCursor.Down)
+            cursor.select(QTextCursor.LineUnderCursor)
+
+            fmt = QTextCharFormat()
+            fmt.setBackground(QColor("#fff9c4"))
+            fmt.setForeground(QColor("#1a1a1a"))
+            cursor.mergeCharFormat(fmt)
+            code_editor.setTextCursor(cursor)
+            code_editor.ensureCursorVisible()
+
+        # --- Boutons ---
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        button_layout.setContentsMargins(0, 8, 0, 0)
+
+        copy_all_button = QPushButton("📋 Copier tout")
+        copy_all_button.setMinimumHeight(36)
+        copy_all_button.clicked.connect(lambda: self._copy_to_clipboard(content))
+        button_layout.addWidget(copy_all_button)
+
+        button_layout.addStretch()
+
+        close_button = QPushButton("✕ Fermer")
+        close_button.setMinimumHeight(36)
+        close_button.setMaximumWidth(120)
+        close_button.clicked.connect(dialog.close)
+        button_layout.addWidget(close_button)
+
+        layout.addLayout(button_layout)
+        dialog.exec_()
+
+    def _on_double_click_item(self, item):
+        """
+        Gère le double-clic sur un item de liste.
+        - Pour classes/fonctions/variables : Affiche un snippet du fichier centré sur la ligne.
+        - Pour fichiers/labels : Réutilise l'affichage existant (_on_double_click_label).
+        """
+        if not item:
+            return
+
+        item_type = item.data(Qt.UserRole + 1)  # Type stocké (ex. 'class', 'function', 'variable', 'file')
+
+        if item_type in ['class', 'function', 'variable', 'method']:
+            # Cas spécifique : snippet pour élément de code
+            file_path = item.data(Qt.UserRole + 2)  # Chemin du fichier stocké
+            line_num = item.data(Qt.UserRole + 3) or 1  # Numéro de ligne (int)
+
+            # Récupérer le contenu du fichier (depuis current_root_data ou project_profile_data)
+            content = self._get_file_content(file_path)
+            if not content:
+                QtWidgets.QMessageBox.warning(self, "Erreur", f"Impossible de charger le fichier {file_path}.")
+                return
+
+            # Extraire et afficher le snippet
+            self._show_code_snippet_dialog(file_path, content, item_type, line_num, item.text())
+
+        elif item_type in ['file', 'root_file', 'level1_file']:
+            # Fallback : affichage complet du fichier (comme existant)
+            uid = item.data(Qt.UserRole)
+            label = self._find_label_by_uid(uid)
+            if label:
+                self._on_double_click_label(item)  # Réutilise la méthode existante si applicable
+            else:
+                # Ou directement afficher le fichier
+                content = self._get_file_content(file_path)
+                if content:
+                    self._show_file_content_dialog(file_path, content, {'label': item.text()})
+
+        else:
+            # Pour les dossiers/labels généraux : affichage existant
+            self._on_double_click_label(item)
 
     def _label_to_data(self, label):
         """Convertit un label Dgraph en data local."""
@@ -3017,96 +3407,110 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         for cluster in clusters:
             self.cluster_list_widget.addItem(cluster["name"])
 
-    def _on_cluster_selected(self, current):    
-        """Gère la sélection d'un cluster. Adaptation pour clusters-fichiers."""
-        if current:
-            self.current_cluster_index = self.cluster_list_widget.row(current)
-            self.current_cluster_data = self.current_project_profile_data["turing_ontology"]["clusters_detailed"][self.current_cluster_index]
-
-            self.current_root_data = None
-            self.current_level1_data = None
-            self.current_level2_data = None
-            self.current_root_label_index = -1
-            self.current_level1_label_index = -1
-            self.current_level2_label_index = -1
-
-            self.level1_list_widget.clear()
-            self.child_list_widget.clear()
-
-            is_file_cluster = self.current_cluster_data.get('is_file_cluster', False)
-            if is_file_cluster:
-                self.root_list_widget.clear()
-                self.root_list_widget.setEnabled(False)
-                self._update_selected_details("Cluster-Fichier", self.current_cluster_data)
-                self.global_relations_config.update_current(None)
-                self.relations_graph.update_graph(None)
-            else:
-                self.root_list_widget.setEnabled(True)
-                self._populate_root_list()
-                details = f"Cluster: {self.current_cluster_data.get('name', '')}\n"
-                details += f"Description: {self.current_cluster_data.get('description', '')}\n"
-                details += f"Root Labels: {len(self.current_cluster_data.get('root_labels', []))}\n"
-                details += f"Fichiers cluster: {len(self.current_cluster_data.get('files', []))}"
-                self.details_text.setPlainText(details)
-
-            self._update_button_states()
-        else:
+    def _on_cluster_selected(self, current):
+        """
+        Gère la sélection d'un cluster.
+        Affiche les root labels + classes/fonctions/variables des fichiers du cluster.
+        """
+        if not current:
             self.current_cluster_data = None
             self._reset_hierarchy_ui()
+            return
 
-        self._update_button_states()
+        self.current_cluster_index = self.cluster_list_widget.row(current)
 
-    def _populate_root_list(self):
-        """Peuple la liste des root labels pour le cluster sélectionné. Adaptation pour file-clusters."""
-        self.root_list_widget.clear()
-        if self.current_cluster_data:
-            is_file_cluster = self.current_cluster_data.get('is_file_cluster', False)
-            if is_file_cluster:
-                pass
-            else:
-                for root in self.current_cluster_data.get("root_labels", []):
-                    display = root['label']
-                    item = QListWidgetItem(display)
-                    item.setData(Qt.UserRole, root["uid"])
-                    self.root_list_widget.addItem(item)
+        clusters = self.current_project_profile_data.get("turing_ontology", {}).get("clusters_detailed", [])
+        if self.current_cluster_index < 0 or self.current_cluster_index >= len(clusters):
+            self.current_cluster_data = None
+            self._reset_hierarchy_ui()
+            return
+
+        self.current_cluster_data = clusters[self.current_cluster_index]
+
+        # Réinitialiser niveaux inférieurs
+        self.current_root_data = None
+        self.current_level1_data = None
+        self.current_level2_data = None
+
+        # Afficher root labels + éléments de code des fichiers du cluster
+        self._populate_root_list_with_cluster_files()
+
+        self.level1_list_widget.clear()
+        self.child_list_widget.clear()
+
+        # Afficher détails
+        details = f"Cluster: {self.current_cluster_data.get('name', '')}\n"
+        details += f"Description: {self.current_cluster_data.get('description', '')}\n"
+        details += f"Root Labels: {len(self.current_cluster_data.get('root_labels', []))}\n"
+        details += f"Fichiers: {len(self.current_cluster_data.get('files', []))}\n"
+        self.details_text.setPlainText(details)
+
         self._update_button_states()
 
     def _on_level1_label_selected(self, current):
         """
-        Gère la sélection d'un label niveau 1.
-        CORRIGÉ: Affiche les classes, fonctions et variables DU FICHIER SÉLECTIONNÉ dans le niveau enfant.
+        Gère la sélection dans level1_list (fichiers, children OU éléments de code).
         """
-        if current:
-            item_type = current.data(Qt.UserRole + 1)
-            item_uid = current.data(Qt.UserRole)
-
-            if item_type in ["child", "class", "function", "variable", "file", "folder"]:
-                self.current_level1_label_index = self._get_child_index_by_uid(item_uid)
-                if self.current_level1_label_index >= 0:
-                    self.current_level1_data = self.current_root_data["children"][self.current_level1_label_index]
-                    self.current_selected_label_uid = item_uid
-
-                    # Réinitialiser niveau 2
-                    self.current_level2_data = None
-                    self.current_level2_label_index = -1
-
-                    # Afficher les détails
-                    self._update_selected_details(f"{item_type.capitalize()}", self.current_level1_data)
-
-                    # CORRIGÉ: Peupler le niveau enfant UNIQUEMENT avec les classes/fonctions/variables DE CE FICHIER
-                    self._populate_children_for_file(self.current_level1_data, self.child_list_widget)
-
-                    # Mettre à jour relations et graphe
-                    self.global_relations_config.update_current(self.current_selected_label_uid)
-                    self.relations_graph.update_graph(self.current_selected_label_uid)
-            else:
-                logger.warning(f"Type d'item inconnu: {item_type}")
-        else:
+        if not current:
             self.current_level1_data = None
-            self.current_selected_label_uid = None
             self.child_list_widget.clear()
-            self.global_relations_config.update_current(None)
-            self.relations_graph.update_graph(None)
+            return
+
+        item_type = current.data(Qt.UserRole + 1)
+
+        # === CAS 1 : Fichier sélectionné → afficher ses éléments dans child_list ===
+        if item_type == 'root_file':
+            file_path = current.data(Qt.UserRole + 2)
+            content = self.current_project_profile_data.get('file_contents', {}).get(file_path, '')
+
+            classes = self.dependency_parser.extract_classes(content, file_path)
+            functions = self.dependency_parser.extract_functions(content, file_path)
+            variables = self.dependency_parser.extract_variables(content, file_path)
+
+            self._display_code_elements_in_list(
+                self.child_list_widget,
+                classes,
+                functions,
+                variables,
+                file_path
+            )
+
+            details = f"📄 Fichier: {os.path.basename(file_path)}\n\n"
+            details += f"Classes: {len(classes)}\n"
+            details += f"Fonctions: {len(functions)}\n"
+            details += f"Variables: {len(variables)}\n"
+            self.details_text.setPlainText(details)
+
+            self.current_selected_label_uid = None
+            self.current_level1_data = None
+
+        # === CAS 2 : Child sélectionné → afficher ses fichiers + children + éléments ===
+        elif item_type in ['folder', 'file', 'child']:
+            item_uid = current.data(Qt.UserRole)
+            self.current_selected_label_uid = item_uid
+
+            child_data = self._find_child_by_uid(self.current_root_data, item_uid)
+
+            if child_data:
+                self.current_level1_data = child_data
+                self._update_selected_details("Niveau 1", child_data)
+
+                self._populate_child_list_with_parent_files()
+
+                self.global_relations_config.update_current(self.current_selected_label_uid)
+                self.relations_graph.update_graph(self.current_selected_label_uid)
+
+        # === CAS 3 : Élément de code sélectionné ===
+        elif item_type in ['class', 'function', 'variable']:
+            file_path = current.data(Qt.UserRole + 2)
+            line = current.data(Qt.UserRole + 3)
+
+            details = f"Type: {item_type.upper()}\n"
+            details += f"Fichier: {os.path.basename(file_path)}\n"
+            details += f"Ligne: {line}\n"
+            self.details_text.setPlainText(details)
+
+            self.child_list_widget.clear()
 
         self._update_button_states()
 
@@ -3185,153 +3589,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
     
         self._update_button_states()
 
-    def _on_level1_label_selected(self, current):
-        """Gère la sélection d'un label niveau 1 (fichier, classe, fonction, variable)."""
-        if current:
-            item_type = current.data(Qt.UserRole + 1)
-            item_uid = current.data(Qt.UserRole)
-            item_line = current.data(Qt.UserRole + 2)
-    
-            self.current_selected_label_uid = item_uid
-    
-            # Cas 1: Élément hiérarchique (sous-dossier/fichier)
-            if item_type in ["folder", "file"]:
-                self.current_level1_label_index = self._get_child_index_by_uid(item_uid)
-    
-                if self.current_level1_label_index >= 0:
-                    self.current_level1_data = self.current_root_data["children"][self.current_level1_label_index]
-                else:
-                    self.current_level1_data = None
-    
-                self.current_level2_data = None
-                self.current_level2_label_index = -1
-    
-                self._update_selected_details(f"Niveau 1 - {item_type.capitalize()}", 
-                                             self.current_level1_data if self.current_level1_data else {})
-    
-                if self.current_level1_data:
-                    self._populate_child_list()
-                else:
-                    self.child_list_widget.clear()
-    
-                self.global_relations_config.update_current(self.current_selected_label_uid)
-                self.relations_graph.update_graph(self.current_selected_label_uid)
-    
-            # Cas 2: Classe extraite
-            elif item_type == "class":
-                self.current_level1_data = None
-                self.current_level2_data = None
-    
-                class_info = next(
-                    (c for c in self.current_root_data.get('classes', []) 
-                     if c.get('uid') == item_uid),
-                    {}
-                )
-    
-                details = f"=== Classe ===\n\n"
-                details += f"Nom: {class_info.get('name', 'N/A')}\n"
-                details += f"Ligne: {item_line}\n"
-                details += f"Fichier: {self.current_root_data.get('label', 'N/A')}\n"
-                details += f"Description: {class_info.get('description', 'N/A')}\n"
-    
-                methods = class_info.get('methods', [])
-                if methods:
-                    details += f"\nMéthodes ({len(methods)}):\n"
-                    for method in methods[:10]:
-                        details += f"  - {method.get('name', 'N/A')} (ligne {method.get('line', '?')})\n"
-                    if len(methods) > 10:
-                        details += f"  ... et {len(methods) - 10} autres\n"
-    
-                self.details_text.setPlainText(details)
-                self.child_list_widget.clear()
-    
-                self.global_relations_config.update_current(self.current_selected_label_uid)
-                self.relations_graph.update_graph(self.current_selected_label_uid)
-    
-            # Cas 3: Fonction/Méthode extraite
-            elif item_type in ["function", "method"]:
-                self.current_level1_data = None
-                self.current_level2_data = None
-    
-                func_info = next(
-                    (f for f in self.current_root_data.get('functions', []) 
-                     if f.get('uid') == item_uid),
-                    {}
-                )
-    
-                details = f"=== {'Méthode' if item_type == 'method' else 'Fonction'} ===\n\n"
-                details += f"Nom: {func_info.get('name', 'N/A')}\n"
-                details += f"Type: {func_info.get('type', 'N/A')}\n"
-                details += f"Ligne: {item_line}\n"
-                details += f"Fichier: {self.current_root_data.get('label', 'N/A')}\n"
-                details += f"Description: {func_info.get('description', 'N/A')}\n"
-    
-                params = func_info.get('params', [])
-                if params:
-                    details += f"\nParamètres ({len(params)}):\n"
-                    for param in params:
-                        details += f"  - {param.get('name', 'param')}: {param.get('type', 'N/A')}\n"
-    
-                returns = func_info.get('returns', {})
-                if returns:
-                    details += f"\nRetour: {returns.get('type', 'N/A')}\n"
-    
-                self.details_text.setPlainText(details)
-                self.child_list_widget.clear()
-    
-                self.global_relations_config.update_current(self.current_selected_label_uid)
-                self.relations_graph.update_graph(self.current_selected_label_uid)
-    
-            # Cas 4: Variable extraite
-            elif item_type == "variable":
-                self.current_level1_data = None
-                self.current_level2_data = None
-    
-                var_info = next(
-                    (v for v in self.current_root_data.get('variables', []) 
-                     if v.get('uid') == item_uid),
-                    {}
-                )
-    
-                details = f"=== Variable ===\n\n"
-                details += f"Nom: {var_info.get('name', 'N/A')}\n"
-                details += f"Type: {var_info.get('type', 'N/A')}\n"
-                details += f"Ligne: {item_line}\n"
-                details += f"Fichier: {self.current_root_data.get('label', 'N/A')}\n"
-                details += f"Scope: {var_info.get('scope', 'N/A')}\n"
-                details += f"Description: {var_info.get('description', 'N/A')}\n"
-    
-                self.details_text.setPlainText(details)
-                self.child_list_widget.clear()
-    
-                self.global_relations_config.update_current(self.current_selected_label_uid)
-                self.relations_graph.update_graph(self.current_selected_label_uid)
-    
-        else:
-            self.current_level1_data = None
-            self.current_selected_label_uid = None
-            self.child_list_widget.clear()
-            self.global_relations_config.update_current(None)
-            self.relations_graph.update_graph(None)
-    
-        self._update_button_states()
-
-    def _populate_child_list(self):
-        """
-        Peuple le niveau 2 avec les enfants hiérarchiques du level1 sélectionné,
-        y compris les sous-dossiers imbriqués.
-        """
-        self.child_list_widget.clear()
-
-        if not self.current_level1_data:
-            return
-
-        # Afficher tous les enfants de manière récursive avec indentation
-        for child in self.current_level1_data.get("children", []):
-            self._add_child_to_list(child, self.child_list_widget)
-
-        self._update_button_states()
-
     def _add_child_to_list(self, child: Dict, list_widget, indent: str = ""):
         """
         Ajoute un enfant à la liste, récursivement pour les sous-dossiers.
@@ -3355,6 +3612,66 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         if child_type in ['folder', 'directory']:
             for grandchild in child.get("children", []):
                 self._add_child_to_list(grandchild, list_widget, indent + "  ")
+
+    def _show_code_elements_popup(self, file_name, classes, functions, variables, file_path):
+        """
+        Affiche une popup avec les classes/fonctions/variables d'un fichier.
+        Utilisé pour les fichiers des labels enfants (plus de place dans l'UI).
+
+        Args:
+            file_name: Nom du fichier
+            classes: Liste des classes
+            functions: Liste des fonctions
+            variables: Liste des variables
+            file_path: Chemin complet du fichier
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Éléments de code : {file_name}")
+        dialog.setMinimumSize(600, 500)
+
+        layout = QVBoxLayout(dialog)
+
+        # Header
+        header = QLabel(f"<b>Fichier :</b> {file_name}<br><b>Chemin :</b> {file_path}")
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        # Stats
+        stats = QLabel(
+            f"<b>Classes :</b> {len(classes)} | "
+            f"<b>Fonctions :</b> {len(functions)} | "
+            f"<b>Variables :</b> {len(variables)}"
+        )
+        stats.setStyleSheet("color: #34495e; font-size: 11pt; padding: 5px;")
+        layout.addWidget(stats)
+
+        # Liste
+        list_widget = QListWidget()
+        list_widget.setStyleSheet(self._get_improved_list_style())
+        self._display_code_elements_in_list(list_widget, classes, functions, variables, file_path)
+        layout.addWidget(list_widget)
+
+        # Boutons
+        button_layout = QHBoxLayout()
+
+        view_file_button = QPushButton("📄 Voir le fichier")
+        view_file_button.clicked.connect(
+            lambda: self._show_file_content_dialog(
+                file_name,
+                self.current_project_profile_data.get('file_contents', {}).get(file_path, ''),
+                {'label': file_name, 'uid': str(uuid.uuid4())}
+            )
+        )
+        button_layout.addWidget(view_file_button)
+
+        close_button = QPushButton("Fermer")
+        close_button.clicked.connect(dialog.close)
+        button_layout.addWidget(close_button)
+
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        dialog.exec_()
 
     def _populate_children_for_file(self, file_data: Dict, list_widget):
         """
@@ -3471,51 +3788,151 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
     def _on_child_label_selected(self, current):
         """
-        Gère la sélection d'un enfant au niveau 2.
+        Gère la sélection dans child_list.
+        Si fichier → POPUP avec éléments de code
+        Si child → met à jour les détails
+        Si élément de code → affiche détails
         """
-        if current:
-            item_type = current.data(Qt.UserRole + 1)
-            item_uid = current.data(Qt.UserRole)
+        if not current:
+            self.current_level2_data = None
+            return
 
+        item_type = current.data(Qt.UserRole + 1)
+
+        # === CAS 1 : Fichier sélectionné → POPUP ===
+        if item_type == 'level1_file':
+            file_path = current.data(Qt.UserRole + 2)
+            content = self.current_project_profile_data.get('file_contents', {}).get(file_path, '')
+
+            # Pré-extraire les éléments pour passer à la popup (optionnel ; la popup peut extraire elle-même)
+            classes = self.dependency_parser.extract_classes(content, file_path)
+            functions = self.dependency_parser.extract_functions(content, file_path)
+            variables = self.dependency_parser.extract_variables(content, file_path)
+
+            # Créer parent_data avec les éléments extraits
+            parent_data = {
+                'classes': classes,
+                'functions': functions,
+                'variables': variables,
+                'children': self.current_level1_data.get('children', []) if self.current_level1_data else []
+            }
+
+            # Instancier la popup (remplace l'appel à _show_code_elements_popup)
+            popup = CodeElementsPopup(
+                os.path.basename(file_path),
+                file_path,
+                content,  # file_content
+                parent_data,
+                self  # parent widget pour accès aux méthodes comme _show_code_snippet_dialog
+            )
+            popup.exec_()  # Ouvre la popup modale
+
+        # === CAS 2 : Child sélectionné ===
+        elif item_type in ['folder', 'file', 'child']:
+            item_uid = current.data(Qt.UserRole)
             self.current_selected_label_uid = item_uid
 
-            # Chercher cet enfant dans la structure (peut être imbriqué)
             child_data = self._find_child_by_uid(self.current_level1_data, item_uid)
 
             if child_data:
                 self.current_level2_data = child_data
+                self._update_selected_details("Niveau 2", child_data)
 
-                # Afficher les détails
-                details = f"Nom: {child_data.get('label', child_data.get('name', 'N/A'))}\n"
-                details += f"Type: {item_type}\n"
-                details += f"UID: {item_uid}\n"
-                details += f"Description: {child_data.get('description', 'N/A')}\n"
-
-                # Si c'est un fichier, afficher son contenu
-                files = child_data.get('files', [])
-                if files:
-                    details += f"\nFichiers: {len(files)}\n"
-                    for f in files[:5]:
-                        details += f"  - {f}\n"
-                    if len(files) > 5:
-                        details += f"  ... et {len(files) - 5} autres\n"
-
-                self.details_text.setPlainText(details)
-
-                # Mettre à jour relations et graphe
                 self.global_relations_config.update_current(self.current_selected_label_uid)
                 self.relations_graph.update_graph(self.current_selected_label_uid)
-            else:
-                self.details_text.clear()
 
-        else:
-            self.current_level2_data = None
-            self.current_selected_label_uid = None
-            self.global_relations_config.update_current(None)
-            self.relations_graph.update_graph(None)
+        # === CAS 3 : Élément de code sélectionné ===
+        elif item_type in ['class', 'function', 'variable']:
+            file_path = current.data(Qt.UserRole + 2)
+            line = current.data(Qt.UserRole + 3)
+
+            details = f"Type: {item_type.upper()}\n"
+            details += f"Fichier: {os.path.basename(file_path)}\n"
+            details += f"Ligne: {line}\n"
+            self.details_text.setPlainText(details)
 
         self._update_button_states()
-    
+
+    def _display_code_elements_in_list(self, list_widget, classes, functions, variables, file_path):
+        """
+        Affiche classes/fonctions/variables dans une liste avec préfixes distinctifs.
+
+        Args:
+            list_widget: QListWidget cible
+            classes: Liste des classes
+            functions: Liste des fonctions
+            variables: Liste des variables
+            file_path: Chemin du fichier source
+        """
+        list_widget.clear()
+
+        if not classes and not functions and not variables:
+            empty_item = QListWidgetItem("(Aucun élément trouvé)")
+            empty_item.setForeground(QtGui.QColor("#95a5a6"))
+            list_widget.addItem(empty_item)
+            return
+
+        # === CLASSES ===
+        for cls in classes:
+            cls_uid = cls.get('uid', str(uuid.uuid4()))
+            if 'uid' not in cls:
+                cls['uid'] = cls_uid
+
+            item = QListWidgetItem(f"[CLASS] {cls['name']} (ligne {cls.get('line', '?')})")
+            item.setData(Qt.UserRole, cls_uid)
+            item.setData(Qt.UserRole + 1, 'class')
+            item.setData(Qt.UserRole + 2, cls.get('line', 0))
+            item.setData(Qt.UserRole + 3, file_path)
+            item.setForeground(QtGui.QColor("#e74c3c"))  # Rouge
+            item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+            list_widget.addItem(item)
+
+            # Méthodes indentées
+            for method in cls.get('methods', []):
+                method_item = QListWidgetItem(f"  ↳ {method.get('name', 'method')} (ligne {method.get('line', '?')})")
+                method_item.setData(Qt.UserRole, str(uuid.uuid4()))
+                method_item.setData(Qt.UserRole + 1, 'method')
+                method_item.setData(Qt.UserRole + 2, method.get('line', 0))
+                method_item.setForeground(QtGui.QColor("#c0392b"))
+                list_widget.addItem(method_item)
+
+        # === FONCTIONS ===
+        for func in functions:
+            func_uid = func.get('uid', str(uuid.uuid4()))
+            if 'uid' not in func:
+                func['uid'] = func_uid
+
+            func_type = func.get('type', 'function')
+            prefix = "[METH]" if func_type == 'method' else "[FUNC]"
+
+            item = QListWidgetItem(f"{prefix} {func['name']} (ligne {func.get('line', '?')})")
+            item.setData(Qt.UserRole, func_uid)
+            item.setData(Qt.UserRole + 1, func_type)
+            item.setData(Qt.UserRole + 2, func.get('line', 0))
+            item.setData(Qt.UserRole + 3, file_path)
+            item.setForeground(QtGui.QColor("#3498db"))  # Bleu
+            item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+            list_widget.addItem(item)
+
+        # === VARIABLES ===
+        for var in variables:
+            var_uid = var.get('uid', str(uuid.uuid4()))
+            if 'uid' not in var:
+                var['uid'] = var_uid
+
+            var_type = var.get('type', 'local')
+
+            item = QListWidgetItem(f"[VAR] {var['name']} ({var_type}, ligne {var.get('line', '?')})")
+            item.setData(Qt.UserRole, var_uid)
+            item.setData(Qt.UserRole + 1, 'variable')
+            item.setData(Qt.UserRole + 2, var.get('line', 0))
+            item.setData(Qt.UserRole + 3, file_path)
+            item.setForeground(QtGui.QColor("#2ecc71"))  # Vert
+            item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+            list_widget.addItem(item)
+
+        logger.info(f"Affiché {len(classes)} classes, {len(functions)} fonctions, {len(variables)} variables")
+
     def _on_any_label_selected(self, current):
         """
         Handles selection of ANY label (root, level1, level2, child).
@@ -5308,88 +5725,245 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
     def _on_root_label_selected(self, current):
         """
-        Gère la sélection d'un root label.
+        Gère la sélection dans root_list.
+        - Si FICHIER → affiche directement classes/fonctions/variables dans level1_list
+        - Si DOSSIER → affiche fichiers + children dans level1_list
         """
-        if current:
-            self.current_root_label_index = self.root_list_widget.row(current)
-            self.current_root_data = self.current_cluster_data["root_labels"][self.current_root_label_index]
-            self.current_selected_label_uid = current.data(Qt.UserRole)
-
-            # Réinitialiser les sélections inférieures
-            self.current_level1_data = None
-            self.current_level2_data = None
-            self.current_level1_label_index = -1
-            self.current_level2_label_index = -1
-
-            # Afficher les détails du root label
-            self._update_selected_details("Label Racine", self.current_root_data)
-
-            # Peupler la liste level1 avec TOUS les enfants hiérarchiques
-            self._populate_level1_list()
-
-            # Vider la liste des niveau 2
-            self.child_list_widget.clear()
-
-            # Mettre à jour les relations et graphe
-            self.global_relations_config.update_current(self.current_selected_label_uid)
-            self.relations_graph.update_graph(self.current_selected_label_uid)
-        else:
+        if not current:
             self.current_root_data = None
-            self.current_selected_label_uid = None
             self.level1_list_widget.clear()
             self.child_list_widget.clear()
-            self.global_relations_config.update_current(None)
-            self.relations_graph.update_graph(None)
+            return
+
+        item_type = current.data(Qt.UserRole + 1)
+        self.current_root_label_index = self.root_list_widget.row(current)
+
+        root_labels = self.current_cluster_data.get("root_labels", [])
+
+        if self.current_root_label_index < 0 or self.current_root_label_index >= len(root_labels):
+            self.current_root_data = None
+            self.level1_list_widget.clear()
+            self.child_list_widget.clear()
+            return
+
+        self.current_root_data = root_labels[self.current_root_label_index]
+        self.current_selected_label_uid = current.data(Qt.UserRole)
+
+        # Réinitialiser niveaux inférieurs
+        self.current_level1_data = None
+        self.current_level2_data = None
+        self.child_list_widget.clear()
+
+        # Logique selon le type
+        if item_type == 'file':
+            # FICHIER : afficher détails + éléments de code directement
+            self._update_selected_details("Fichier", self.current_root_data)
+            self._populate_level1_with_file_elements(self.current_root_data)
+        else:
+            # DOSSIER : afficher détails + hiérarchie
+            self._update_selected_details("Label Racine", self.current_root_data)
+            self._populate_level1_list_with_root_files()
+
+        # Mettre à jour relations
+        self.global_relations_config.update_current(self.current_selected_label_uid)
+        self.relations_graph.update_graph(self.current_selected_label_uid)
 
         self._update_button_states()
 
     def _populate_children_list(self, parent_data: Dict, list_widget=None):
         """
-        MODIFIÉE: Ne peuple que les enfants hiérarchiques.
-        Les classes/fonctions/variables sont affichées via _populate_children_for_file().
+        Corrigée : 
+        - Les fichiers .ts/.py/... s'affichent directement avec icône 📄
+        - Seuls les sous-dossiers apparaissent comme 📁
+        - Plus de double affichage du fichier lors du clic
         """
         if list_widget is None:
-            list_widget = self.level1_list_widget if hasattr(self, 'current_root_data') else self.child_list_widget
+            list_widget = (
+                self.level1_list_widget
+                if hasattr(self, 'current_root_data')
+                else self.child_list_widget
+            )
 
         list_widget.clear()
         if not parent_data:
             return
 
-        # UNIQUEMENT les enfants hiérarchiques (fichiers, dossiers) 
-        # PAS les classes, fonctions, variables
         for child in parent_data.get('children', []):
             child_type = child.get('type', 'child')
+            label = child.get('label', child.get('name', 'Sans nom'))
+            uid = child.get('uid', str(uuid.uuid4()))
+            child['uid'] = uid
 
-            # Filtrer: ne montrer que les vrais enfants hiérarchiques
-            if child_type not in ['class', 'function', 'variable']:
-                icon = self._get_node_icon(child_type)
-                display = f"{icon} {child.get('label', child.get('name', 'Sans nom'))}"
+            # === CAS 1 : Sous-dossier ===
+            if child_type in ['folder', 'directory']:
+                icon = self._get_node_icon('folder')
+                display = f"{icon} {label}"
                 item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, child.get('uid'))
+                item.setData(Qt.UserRole, uid)
+                item.setData(Qt.UserRole + 1, 'folder')
+                list_widget.addItem(item)
+
+            # === CAS 2 : Fichier ===
+            elif child_type == 'file' or label.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net')):
+                icon = self._get_node_icon('file')
+                display = f"{icon} {label}"
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, uid)
+                item.setData(Qt.UserRole + 1, 'file')
+                list_widget.addItem(item)
+
+            # === CAS 3 : Éléments de code internes (classe, fonction, variable) ===
+            elif child_type in ['class', 'function', 'variable']:
+                # Ces éléments ne sont pas affichés ici : ils seront dans la partie inférieure
+                continue
+
+            # === Autres types (fallback générique) ===
+            else:
+                icon = self._get_node_icon(child_type)
+                display = f"{icon} {label}"
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, uid)
                 item.setData(Qt.UserRole + 1, child_type)
                 list_widget.addItem(item)
+
+        self._update_button_states()
+
+    def _populate_level1_with_file_elements(self, file_data: Dict):
+        """
+        Affiche UNIQUEMENT les classes/fonctions/variables d'un fichier dans level1_list.
+        PAS de réaffichage du fichier lui-même.
+
+        Args:
+            file_data: Dictionnaire du fichier (root_data)
+        """
+        self.level1_list_widget.clear()
+
+        if not file_data:
+            return
+
+        # Récupérer le contenu du fichier
+        files = file_data.get('files', [])
+        if not files:
+            self.level1_list_widget.addItem(QListWidgetItem("(Aucun contenu)"))
+            return
+
+        file_path = files[0]  # Fichier principal
+        content = file_data.get('file_contents', {}).get(file_path, '')
+
+        if not content:
+            content = self.current_project_profile_data.get('file_contents', {}).get(file_path, '')
+
+        if not content:
+            self.level1_list_widget.addItem(QListWidgetItem("(Contenu vide)"))
+            return
+
+        # Extraire les éléments de code
+        classes = self.dependency_parser.extract_classes(content, file_path)
+        functions = self.dependency_parser.extract_functions(content, file_path)
+        variables = self.dependency_parser.extract_variables(content, file_path)
+
+        # === Afficher les CLASSES ===
+        for cls in classes:
+            cls_uid = cls.get('uid', str(uuid.uuid4()))
+            if 'uid' not in cls:
+                cls['uid'] = cls_uid
+
+            item = QListWidgetItem(f"[CLASS] {cls['name']} (ligne {cls.get('line', '?')})")
+            item.setData(Qt.UserRole, cls_uid)
+            item.setData(Qt.UserRole + 1, 'class')
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setData(Qt.UserRole + 3, cls.get('line', 0))
+            item.setForeground(QtGui.QColor("#e74c3c"))  # Rouge
+            self.level1_list_widget.addItem(item)
+
+        # === Afficher les FONCTIONS ===
+        for func in functions:
+            func_uid = func.get('uid', str(uuid.uuid4()))
+            if 'uid' not in func:
+                func['uid'] = func_uid
+
+            func_type = func.get('type', 'function')
+            prefix = "[METH]" if func_type == 'method' else "[FUNC]"
+
+            item = QListWidgetItem(f"{prefix} {func['name']} (ligne {func.get('line', '?')})")
+            item.setData(Qt.UserRole, func_uid)
+            item.setData(Qt.UserRole + 1, func_type)
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setData(Qt.UserRole + 3, func.get('line', 0))
+            item.setForeground(QtGui.QColor("#3498db"))  # Bleu
+            self.level1_list_widget.addItem(item)
+
+        # === Afficher les VARIABLES ===
+        for var in variables:
+            var_uid = var.get('uid', str(uuid.uuid4()))
+            if 'uid' not in var:
+                var['uid'] = var_uid
+
+            var_type = var.get('type', 'variable')
+
+            item = QListWidgetItem(f"[VAR] {var['name']} (ligne {var.get('line', '?')})")
+            item.setData(Qt.UserRole, var_uid)
+            item.setData(Qt.UserRole + 1, 'variable')
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setData(Qt.UserRole + 3, var.get('line', 0))
+            item.setForeground(QtGui.QColor("#2ecc71"))  # Vert
+            self.level1_list_widget.addItem(item)
+
+        # Message si aucun élément trouvé
+        if not classes and not functions and not variables:
+            self.level1_list_widget.addItem(QListWidgetItem("(Aucun élément de code trouvé)"))
+
+        self._update_button_states()
+
+    def _populate_root_list(self):
+        """
+        Affiche la liste des root labels avec détection automatique fichier/dossier.
+        """
+        self.root_list_widget.clear()
+
+        if not self.current_cluster_data:
+            return
+
+        for root in self.current_cluster_data.get("root_labels", []):
+            root_type = root.get('type', 'folder')
+            root_label = root.get('label', root.get('name', 'Sans nom'))
+
+            # Détection automatique : si le label se termine par une extension, c'est un fichier
+            is_file = root_type == 'file' or root_label.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net', '.c', '.h'))
+
+            if is_file:
+                icon = "📄"
+                item_type = 'file'
+                color = QtGui.QColor("#7f8c8d")
+            else:
+                icon = "📂"
+                item_type = 'root_label'
+                color = QtGui.QColor("#2980b9")
+
+            display = f"{icon} {root_label}"
+            root_item = QListWidgetItem(display)
+            root_item.setData(Qt.UserRole, root.get("uid"))
+            root_item.setData(Qt.UserRole + 1, item_type)
+            root_item.setForeground(color)
+            self.root_list_widget.addItem(root_item)
 
         self._update_button_states()
 
     def _get_node_icon(self, node_type: str) -> str:
         """
         Retourne une icône selon le type de nœud.
-        
-        Args:
-            node_type: Type de nœud
-        
-        Returns:
-            Icône Unicode
+        ÉTENDU pour supporter class, function, variable.
         """
         icons = {
-            'class': '👨‍💻',
-            'function': '⚙️',
-            'variable': '🔹',  # NOUVEAU
-            'method': '🔧',
-            'child': ''
+            'folder': '📁',
+            'file': '📄',
+            'class': '[CLASS]',
+            'function': '[FUNC]',
+            'method': '[METH]',
+            'variable': '[VAR]',
+            'child': '📂'
         }
-        
-        return icons.get(node_type, '🔸')
+        return icons.get(node_type, '📦')
 
     def _get_relation_icon(self, rel_type: str) -> str:
         """
@@ -5417,50 +5991,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         }
         
         return icons.get(rel_type, '🔸')
-
-    def _on_level1_label_selected(self, current):
-        """
-        Gère la sélection d'un label niveau 1.
-        Peut être un fichier ou un dossier contenant d'autres fichiers/dossiers.
-        """
-        if current:
-            item_type = current.data(Qt.UserRole + 1)
-            item_uid = current.data(Qt.UserRole)
-
-            self.current_selected_label_uid = item_uid
-
-            # Chercher cet enfant dans la structure (peut être imbriqué)
-            child_data = self._find_child_by_uid(self.current_root_data, item_uid)
-
-            if child_data:
-                self.current_level1_data = child_data
-                self.current_level1_label_index = self._get_child_index_by_uid(item_uid)
-
-                # Réinitialiser niveau 2
-                self.current_level2_data = None
-                self.current_level2_label_index = -1
-
-                # Afficher les détails
-                self._update_selected_details(f"Niveau 1 - {item_type.capitalize()}", self.current_level1_data)
-
-                # Peupler le niveau 2 avec les enfants de ce niveau 1
-                self._populate_child_list()
-
-                # Mettre à jour relations et graphe
-                self.global_relations_config.update_current(self.current_selected_label_uid)
-                self.relations_graph.update_graph(self.current_selected_label_uid)
-            else:
-                self.current_level1_data = None
-                self.child_list_widget.clear()
-
-        else:
-            self.current_level1_data = None
-            self.current_selected_label_uid = None
-            self.child_list_widget.clear()
-            self.global_relations_config.update_current(None)
-            self.relations_graph.update_graph(None)
-
-        self._update_button_states()
 
     def _populate_children_for_file(self, file_data: Dict, list_widget):
         """
@@ -5617,22 +6147,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         return details
 
-    def _populate_level1_list(self):
-        """
-        Peuple la liste niveau 1 avec TOUS les enfants hiérarchiques,
-        y compris les fichiers dans les sous-dossiers.
-        """
-        self.level1_list_widget.clear()
-
-        if not self.current_root_data:
-            return
-
-        # Afficher récursivement tous les enfants
-        for child in self.current_root_data.get("children", []):
-            self._add_child_to_level1_list(child, self.level1_list_widget)
-
-        self._update_button_states()
-
     def _get_child_index_by_uid(self, uid: str) -> int:
         """
         Trouve l'index d'un enfant par son UID.
@@ -5783,74 +6297,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         # Afficher dans une fenêtre de dialogue avec highlight
         self._show_file_content_dialog(file_to_show, content, label)
 
-    def _show_file_content_dialog(self, filename: str, content: str, label: Dict[str, Any]):
-        """
-        Affiche le contenu d'un fichier dans une fenêtre modale avec snippet highlighté.
-        
-        Args:
-            filename: Nom du fichier
-            content: Contenu du fichier
-            label: Label associé
-        """
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Contenu: {filename}")
-        dialog.setMinimumSize(800, 600)
-        
-        layout = QVBoxLayout(dialog)
-        
-        # Info header
-        info_label = QLabel(f"<b>Fichier:</b> {filename}<br><b>Label:</b> {label.get('label', 'N/A')}")
-        layout.addWidget(info_label)
-        
-        # Éditeur de code (lecture seule)
-        code_editor = QPlainTextEdit()
-        code_editor.setReadOnly(True)
-        code_editor.setStyleSheet("""
-            QPlainTextEdit {
-                font-family: 'Courier New', monospace;
-                font-size: 10pt;
-                background-color: #1e1e1e;
-                color: #d4d4d4;
-                border: 1px solid #3e3e3e;
-            }
-        """)
-
-        # NOUVEAU : Highlight si type spécifique (centrer sur ligne)
-        if label.get('type') in ['class', 'function', 'variable']:
-            line = label.get('line', 1)
-            # Slice approximatif autour de la ligne
-            lines = content.split('\n')
-            start_line = max(0, line - 10)
-            end_line = min(len(lines), line + 10)
-            highlighted = '\n'.join(lines[start_line:end_line])
-            # Ajouter marqueur
-            highlighted = f"--- Ligne {line} ---\n{highlighted}\n--- Fin snippet ---"
-            code_editor.setPlainText(highlighted)
-        else:
-            code_editor.setPlainText(content)
-        
-        layout.addWidget(code_editor)
-        
-        # Boutons
-        button_layout = QHBoxLayout()
-        
-        copy_button = QPushButton("📋 Copier tout")
-        copy_button.clicked.connect(lambda: self._copy_to_clipboard(content))
-        button_layout.addWidget(copy_button)
-        
-        snippet_button = QPushButton("✂️ Copier snippet (50 lignes)")
-        snippet_button.clicked.connect(lambda: self._copy_snippet(content))
-        button_layout.addWidget(snippet_button)
-        
-        close_button = QPushButton("Fermer")
-        close_button.clicked.connect(dialog.close)
-        button_layout.addWidget(close_button)
-        
-        button_layout.addStretch()
-        layout.addLayout(button_layout)
-        
-        dialog.exec_()
-
     def _copy_to_clipboard(self, text: str):
         """Copie le texte dans le presse-papier."""
         clipboard = QtWidgets.QApplication.clipboard()
@@ -5919,6 +6365,197 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         if child_type in ['folder', 'directory']:
             for grandchild in child.get("children", []):
                 self._add_child_to_level1_list(grandchild, list_widget, indent + "  ")
+
+    def _populate_cluster_list(self):
+        """
+        CORRIGÉ : Affiche UNIQUEMENT les clusters (pas leurs fichiers).
+        """
+        self.cluster_list_widget.clear()
+
+        if not self.current_project_profile_data:
+            return
+
+        clusters = self.current_project_profile_data.get("turing_ontology", {}).get("clusters_detailed", [])
+
+        for cluster in clusters:
+            cluster_item = QListWidgetItem(f"📁 {cluster['name']}")
+            cluster_item.setData(Qt.UserRole, cluster['uid'])
+            cluster_item.setData(Qt.UserRole + 1, 'cluster')
+            cluster_item.setForeground(QtGui.QColor("#2c3e50"))
+            self.cluster_list_widget.addItem(cluster_item)
+
+    def _populate_root_list_with_cluster_files(self):   
+        """
+        Affiche dans root_list :
+        1. Les root labels du cluster (fichiers ET dossiers détectés automatiquement)
+        """
+        self.root_list_widget.clear()
+    
+        if not self.current_cluster_data:
+            return
+    
+        # Afficher tous les root labels avec détection automatique
+        for root in self.current_cluster_data.get("root_labels", []):
+            root_label = root.get('label', root.get('name', 'Sans nom'))
+            root_uid = root.get("uid")
+            
+            # Détection automatique par extension OU par type
+            root_type = root.get('type', 'folder')
+            is_file = (
+                root_type == 'file' or 
+                root_label.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net', '.c', '.h', '.tsx', '.jsx'))
+            )
+            
+            if is_file:
+                # C'est un fichier
+                icon = "📄"
+                item_type = 'file'
+                color = QtGui.QColor("#7f8c8d")
+            else:
+                # C'est un dossier
+                icon = "📂"
+                item_type = 'root_label'
+                color = QtGui.QColor("#2980b9")
+            
+            display = f"{icon} {root_label}"
+            root_item = QListWidgetItem(display)
+            root_item.setData(Qt.UserRole, root_uid)
+            root_item.setData(Qt.UserRole + 1, item_type)
+            root_item.setForeground(color)
+            self.root_list_widget.addItem(root_item)
+    
+        self._update_button_states()
+
+    def _populate_level1_list_with_root_files(self):
+        """
+        Affiche dans level1_list (pour les DOSSIERS uniquement) :
+        1. Les fichiers du root label avec icône fichier
+        2. Les children (sous-dossiers) du root label
+
+        NE PAS afficher les classes/fonctions/variables ici (réservé aux fichiers directs)
+        """
+        self.level1_list_widget.clear()
+
+        if not self.current_root_data:
+            return
+
+        # 1. Afficher les FICHIERS du root label
+        for file_path in self.current_root_data.get('files', []):
+            file_name = os.path.basename(file_path)
+            file_item = QListWidgetItem(f"📄 {file_name}")
+            file_item.setData(Qt.UserRole, f"root_file_{file_path}")
+            file_item.setData(Qt.UserRole + 1, 'root_file')
+            file_item.setData(Qt.UserRole + 2, file_path)
+            file_item.setForeground(QtGui.QColor("#7f8c8d"))
+            self.level1_list_widget.addItem(file_item)
+
+        # 2. Afficher les CHILDREN (sous-dossiers/fichiers hiérarchiques)
+        for child in self.current_root_data.get("children", []):
+            child_type = child.get('type', 'folder')
+
+            # SKIP les éléments de code (ils seront affichés via les fichiers)
+            if child_type in ['class', 'function', 'variable', 'method']:
+                continue
+            
+            # Déterminer l'icône selon le type
+            if child_type == 'file' or child.get('label', '').endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net')):
+                icon = "📄"
+                display_type = 'file'
+            else:
+                icon = self._get_node_icon(child_type)
+                display_type = child_type
+
+            display = f"{icon} {child.get('label', child.get('name', 'Sans nom'))}"
+
+            item = QListWidgetItem(display)
+            item.setData(Qt.UserRole, child.get("uid"))
+            item.setData(Qt.UserRole + 1, display_type)
+            item.setForeground(QtGui.QColor("#16a085"))
+            self.level1_list_widget.addItem(item)
+
+        self._update_button_states()
+
+    def _populate_child_list_with_parent_files(self):
+        """
+        Affiche dans child_list :
+        1. Les fichiers du parent label
+        2. Les children du parent label
+        3. Les classes/fonctions/variables des fichiers du parent label
+        """
+        self.child_list_widget.clear()
+
+        if not self.current_level1_data:
+            return
+
+        # 1. Afficher les fichiers
+        for file_path in self.current_level1_data.get('files', []):
+            file_name = os.path.basename(file_path)
+            file_item = QListWidgetItem(f"📄 {file_name}")
+            file_item.setData(Qt.UserRole, f"level1_file_{file_path}")
+            file_item.setData(Qt.UserRole + 1, 'level1_file')
+            file_item.setData(Qt.UserRole + 2, file_path)
+            file_item.setForeground(QtGui.QColor("#7f8c8d"))
+            self.child_list_widget.addItem(file_item)
+
+        # 2. Afficher les children hiérarchiques
+        for child in self.current_level1_data.get("children", []):
+            child_type = child.get('type', 'folder')
+
+            if child_type in ['class', 'function', 'variable', 'method']:
+                continue
+            
+            icon = self._get_node_icon(child_type)
+            display = f"{icon} {child.get('label', child.get('name', 'Sans nom'))}"
+
+            item = QListWidgetItem(display)
+            item.setData(Qt.UserRole, child.get("uid"))
+            item.setData(Qt.UserRole + 1, child_type)
+            item.setForeground(QtGui.QColor("#27ae60"))
+            self.child_list_widget.addItem(item)
+
+        # 3. Afficher les éléments de code des fichiers du parent label
+        parent_files = self.current_level1_data.get('files', [])
+        file_contents = self.current_level1_data.get('file_contents', {})
+
+        for file_path in parent_files:
+            content = file_contents.get(file_path, '')
+            if not content:
+                content = self.current_project_profile_data.get('file_contents', {}).get(file_path, '')
+
+            if content:
+                classes = self.dependency_parser.extract_classes(content, file_path)
+                functions = self.dependency_parser.extract_functions(content, file_path)
+                variables = self.dependency_parser.extract_variables(content, file_path)
+
+                # Ajouter classes
+                for cls in classes:
+                    item = QListWidgetItem(f"[CLASS] {cls['name']} (📄 {os.path.basename(file_path)})")
+                    item.setData(Qt.UserRole, cls.get('uid', str(uuid.uuid4())))
+                    item.setData(Qt.UserRole + 1, 'class')
+                    item.setData(Qt.UserRole + 2, file_path)
+                    item.setData(Qt.UserRole + 3, cls.get('line', 0))
+                    item.setForeground(QtGui.QColor("#e74c3c"))
+                    self.child_list_widget.addItem(item)
+
+                # Ajouter fonctions
+                for func in functions:
+                    item = QListWidgetItem(f"[FUNC] {func['name']} (📄 {os.path.basename(file_path)})")
+                    item.setData(Qt.UserRole, func.get('uid', str(uuid.uuid4())))
+                    item.setData(Qt.UserRole + 1, 'function')
+                    item.setData(Qt.UserRole + 2, file_path)
+                    item.setData(Qt.UserRole + 3, func.get('line', 0))
+                    item.setForeground(QtGui.QColor("#3498db"))
+                    self.child_list_widget.addItem(item)
+
+                # Ajouter variables
+                for var in variables:
+                    item = QListWidgetItem(f"[VAR] {var['name']} (📄 {os.path.basename(file_path)})")
+                    item.setData(Qt.UserRole, var.get('uid', str(uuid.uuid4())))
+                    item.setData(Qt.UserRole + 1, 'variable')
+                    item.setData(Qt.UserRole + 2, file_path)
+                    item.setData(Qt.UserRole + 3, var.get('line', 0))
+                    item.setForeground(QtGui.QColor("#2ecc71"))
+                    self.child_list_widget.addItem(item)
 
     def closeEvent(self, event):
         """Ferme proprement le connector lors de la fermeture du widget."""
