@@ -406,12 +406,17 @@ class RelationsConfig(QtWidgets.QWidget):
             logger.info(f"Relation supprimée: {src_uid} → {tgt_uid}")
 
     def _update_relations_list(self, source_uid):
-        """Met à jour la liste des relations avec affichage source/target cohérent."""
+        """
+        Met à jour la liste des relations avec TOUTES les sources :
+        - Relations custom (outgoing/incoming_relations)
+        - Relations parsées (node['relations'])
+        - Hiérarchie (children/parents)
+        """
         self.relations_list.clear()
         if not source_uid:
             return
 
-        # Mapping Dgraph -> local pour résolution
+        # Mapping Dgraph -> local
         dgraph_to_local = self.parent_widget._get_dgraph_to_local_mapping()
 
         all_nodes = self.parent_widget._get_all_nodes()
@@ -419,81 +424,143 @@ class RelationsConfig(QtWidgets.QWidget):
         if not node:
             return
 
-        # === 1. Relations sortantes (custom) ===
+        # Compteur pour debug
+        relations_added = {'custom': 0, 'parsed': 0, 'hierarchy': 0}
+
+        # === 1. Relations sortantes CUSTOM (outgoing_relations) ===
         for r in node.get('outgoing_relations', []):
             target_uid = r['target_uid']
+
+            # Skip UIDs temporaires non résolus
+            if target_uid.startswith('temp_'):
+                logger.debug(f"Skip UID temporaire: {target_uid}")
+                continue
             
             # Mapper si hex Dgraph
             if target_uid.startswith('0x') and len(target_uid) == 6:
                 target_uid = dgraph_to_local.get(target_uid, target_uid)
-            
+
             target_name = self._get_node_name(target_uid)
             if not target_name:
-                continue  # Skip si nom introuvable
-            
+                target_name = r.get('target_name', 'Unknown')
+
             rel_type = r.get('relation_type', 'relation')
-            
-            # Affichage: Source → (type) → Target
+            category = r.get('category', 'custom')
+
+            # Source name
             source_name = self._get_node_name(source_uid) or 'Source'
-            
-            display = f"{source_name} →({rel_type})→ {target_name}"
-            
+
+            # Affichage selon la catégorie
+            if category == 'parsed':
+                display = f"{source_name} →({rel_type})→ {target_name} [CODE]"
+                color = QtGui.QColor("#E74C3C")  # Rouge pour code
+            else:
+                display = f"{source_name} →({rel_type})→ {target_name}"
+                color = QtGui.QColor("#2196F3")  # Bleu pour custom
+
             item = QListWidgetItem(display)
             item.setData(Qt.UserRole, {
-                "category": "custom",
+                "category": category,
                 "direction": "out",
                 "source": source_uid,
-                "target": r['target_uid'],  # Garder original
+                "target": r['target_uid'],
                 "type": rel_type
             })
-            item.setForeground(QtGui.QColor("#2196F3"))  # Bleu pour sortantes
+            item.setForeground(color)
             self.relations_list.addItem(item)
+            relations_added['custom' if category == 'custom' else 'parsed'] += 1
 
-        # === 2. Relations entrantes (custom) ===
+        # === 2. Relations PARSÉES du dictionnaire 'relations' ===
+        # NOUVEAU : Traiter les relations brutes du parser
+        parsed_relations = node.get('relations', {})
+        if parsed_relations:
+            for rel_type, rel_list in parsed_relations.items():
+                for rel in rel_list:
+                    target_name = rel.get('target', '')
+                    if not target_name:
+                        continue
+                    
+                    # Normaliser et chercher l'UID
+                    normalized = normalize_node_name(target_name)
+                    target_uid = None
+
+                    if normalized:
+                        target_uid = self.parent_widget._find_label_uid_by_name(normalized)
+
+                    # Si pas trouvé, utiliser le nom brut
+                    if not target_uid:
+                        target_uid = f"unresolved_{normalized or target_name}"
+
+                    source_name = self._get_node_name(source_uid) or node.get('label', 'Source')
+
+                    # Affichage spécial pour relations parsées
+                    line_info = f" (L{rel.get('line', '?')})" if rel.get('line') else ""
+                    display = f"{source_name} →({rel_type})→ {target_name}{line_info} [PARSED]"
+
+                    item = QListWidgetItem(display)
+                    item.setData(Qt.UserRole, {
+                        "category": "parsed_raw",
+                        "direction": "out",
+                        "source": source_uid,
+                        "target": target_uid,
+                        "target_name": target_name,
+                        "type": rel_type,
+                        "line": rel.get('line', 0)
+                    })
+                    item.setForeground(QtGui.QColor("#E67E22"))  # Orange pour parsed brut
+                    self.relations_list.addItem(item)
+                    relations_added['parsed'] += 1
+
+        # === 3. Relations entrantes CUSTOM (incoming_relations) ===
         for r in node.get('incoming_relations', []):
             source_uid_rel = r['source_uid']
+
+            if source_uid_rel.startswith('temp_'):
+                continue
             
-            # Mapper si hex
             if source_uid_rel.startswith('0x') and len(source_uid_rel) == 6:
                 source_uid_rel = dgraph_to_local.get(source_uid_rel, source_uid_rel)
-            
+
             source_name = self._get_node_name(source_uid_rel)
             if not source_name:
-                continue  # Skip si nom introuvable
-            
+                source_name = r.get('source_name', 'Unknown')
+
             rel_type = r.get('relation_type', 'relation')
-            
-            # Affichage: Source → (type) → Target (current node)
+            category = r.get('category', 'custom')
             target_name = self._get_node_name(source_uid) or 'Target'
-            
-            display = f"{source_name} →({rel_type})→ {target_name}"
-            
+
+            if category == 'parsed':
+                display = f"{source_name} →({rel_type})→ {target_name} [CODE IN]"
+                color = QtGui.QColor("#C0392B")  # Rouge foncé
+            else:
+                display = f"{source_name} →({rel_type})→ {target_name}"
+                color = QtGui.QColor("#FF9800")  # Orange
+
             item = QListWidgetItem(display)
             item.setData(Qt.UserRole, {
-                "category": "custom",
+                "category": category,
                 "direction": "in",
-                "source": r['source_uid'],  # Original
+                "source": r['source_uid'],
                 "target": source_uid,
                 "type": rel_type
             })
-            item.setForeground(QtGui.QColor("#FF9800"))  # Orange pour entrantes
+            item.setForeground(color)
             self.relations_list.addItem(item)
+            relations_added['custom' if category == 'custom' else 'parsed'] += 1
 
-        # === 3. Hiérarchie: Enfants ===
+        # === 4. Hiérarchie: Enfants ===
         children = node.get('children', [])
-        if children:  # Afficher seulement s'il y a des enfants
+        if children:
             for child in children:
                 child_uid = child['uid']
                 child_name = child.get('label') or child.get('name')
-                
+
                 if not child_name:
-                    continue  # Skip si pas de nom
+                    continue
                 
-                # Affichage: Source → (child) → Target
                 source_name = self._get_node_name(source_uid) or 'Source'
-                
                 display = f"{source_name} →(child)→ {child_name}"
-                
+
                 item = QListWidgetItem(display)
                 item.setData(Qt.UserRole, {
                     "category": "hierarchy",
@@ -502,38 +569,55 @@ class RelationsConfig(QtWidgets.QWidget):
                     "target": child_uid,
                     "type": "child"
                 })
-                item.setForeground(QtGui.QColor("#4CAF50"))  # Vert pour hiérarchie
+                item.setForeground(QtGui.QColor("#4CAF50"))  # Vert
                 self.relations_list.addItem(item)
+                relations_added['hierarchy'] += 1
 
-        # === 4. Hiérarchie: Parents ===
+        # === 5. Hiérarchie: Parents ===
         parents = node.get('parents', [])
-        if parents:  # Afficher seulement s'il y a des parents
+        if parents:
             for p_uid in parents:
-                # Mapper si hex
                 if p_uid.startswith('0x') and len(p_uid) == 6:
                     p_uid_mapped = dgraph_to_local.get(p_uid, p_uid)
                 else:
                     p_uid_mapped = p_uid
-                
+
                 parent_name = self._get_node_name(p_uid_mapped)
                 if not parent_name:
-                    continue  # Skip si nom introuvable
+                    continue
                 
-                # Affichage: Parent → (parent) → Current
                 source_name = self._get_node_name(source_uid) or 'Current'
-                
                 display = f"{parent_name} →(parent)→ {source_name}"
-                
+
                 item = QListWidgetItem(display)
                 item.setData(Qt.UserRole, {
                     "category": "hierarchy",
                     "direction": "in",
-                    "source": p_uid,  # Original
+                    "source": p_uid,
                     "target": source_uid,
                     "type": "parent"
                 })
-                item.setForeground(QtGui.QColor("#9C27B0"))  # Violet pour parents
+                item.setForeground(QtGui.QColor("#9C27B0"))  # Violet
                 self.relations_list.addItem(item)
+                relations_added['hierarchy'] += 1
+
+        # Log pour debug
+        total = sum(relations_added.values())
+        logger.info(f"Relations affichées pour {node.get('label', source_uid)}: "
+                    f"{relations_added['parsed']} parsées, "
+                    f"{relations_added['custom']} custom, "
+                    f"{relations_added['hierarchy']} hiérarchie "
+                    f"(Total: {total})")
+
+        if total == 0:
+            logger.warning(f"⚠️ Aucune relation trouvée pour {source_uid}")
+            # Debug: afficher la structure du nœud
+            logger.debug(f"Nœud: {node.get('label')}, Type: {node.get('type')}")
+            logger.debug(f"  outgoing_relations: {len(node.get('outgoing_relations', []))}")
+            logger.debug(f"  incoming_relations: {len(node.get('incoming_relations', []))}")
+            logger.debug(f"  relations dict: {list(node.get('relations', {}).keys())}")
+            logger.debug(f"  children: {len(node.get('children', []))}")
+            logger.debug(f"  parents: {len(node.get('parents', []))}")
 
     def _on_add_new_relation(self):
         """Ajoute une nouvelle relation custom."""
@@ -899,8 +983,7 @@ class RelationsGraphWidget(QtWidgets.QWidget):
 
     def _collect_related_items(self, central_uid, max_depth=1, max_nodes=50):
         """
-        Collecte TOUTES les relations d'un nœud (hiérarchiques, imports, héritage, etc.)
-        Version améliorée avec mapping UID local <-> Dgraph pour éviter mismatches
+        Version enrichie qui collecte TOUTES les relations (hiérarchiques + parsées + dict relations).
         """
         if not self.parent_widget.current_project_profile_data:
             return []
@@ -912,114 +995,144 @@ class RelationsGraphWidget(QtWidgets.QWidget):
 
         related = []
         visited = set([central_uid])
-
-        # Mapping pour résolution Dgraph -> local
         dgraph_to_local = self.parent_widget._get_dgraph_to_local_mapping()
 
-        # 1. Relations sortantes locales (outgoing_relations)
-        for rel in central_node.get('outgoing_relations', [])[:max_nodes]:
+        # === 1. RELATIONS SORTANTES (CUSTOM + PARSÉES depuis outgoing_relations) ===
+        for rel in central_node.get('outgoing_relations', []):
             target_uid = rel.get('target_uid', rel.get('target_id', ''))
+
+            # Skip temporaires
+            if target_uid.startswith('temp_'):
+                continue
+
             # Mapper si hex Dgraph
-            if target_uid.startswith('0x') and len(target_uid) == 6:  # Format hex court
+            if target_uid.startswith('0x') and len(target_uid) == 6:
                 target_uid = dgraph_to_local.get(target_uid, target_uid)
+
             if target_uid in visited:
                 continue
-            
+
             target_node = next((n for n in all_nodes if n['uid'] == target_uid), None)
             if target_node:
+                rel_type = rel['relation_type']
+                category = rel.get('category', 'custom')
+
+                display_type = f"{rel_type} [{'code' if category == 'parsed' else 'custom'}]"
+
                 related.append({
-                    'name': target_node['label'],
-                    'type': rel['relation_type'],
-                    'uid': target_uid,  # UID local mappé
-                    'direction': 'out'
+                    'name': target_node.get('label', target_node.get('name', 'Unknown')),
+                    'type': display_type,
+                    'uid': target_uid,
+                    'direction': 'out',
+                    'category': category
                 })
                 visited.add(target_uid)
 
-        # 2. Relations entrantes locales (incoming_relations)
-        for rel in central_node.get('incoming_relations', [])[:max_nodes]:
+        # === 2. RELATIONS PARSÉES depuis le dict 'relations' ===
+        parsed_relations = central_node.get('relations', {})
+        for rel_type, rel_list in parsed_relations.items():
+            for rel in rel_list:
+                target_name = rel.get('target', '')
+                if not target_name:
+                    continue
+                
+                # Essayer de trouver le nœud cible
+                normalized = normalize_node_name(target_name)
+                target_node = None
+
+                if normalized:
+                    target_node = next(
+                        (n for n in all_nodes 
+                         if normalize_node_name(n.get('name', '')) == normalized or 
+                            normalize_node_name(n.get('label', '')) == normalized),
+                        None
+                    )
+
+                if target_node:
+                    target_uid = target_node['uid']
+                    if target_uid not in visited:
+                        related.append({
+                            'name': target_node.get('label', target_node.get('name', target_name)),
+                            'type': f"{rel_type} [parsed]",
+                            'uid': target_uid,
+                            'direction': 'out',
+                            'category': 'parsed',
+                            'line': rel.get('line', 0)
+                        })
+                        visited.add(target_uid)
+                else:
+                    # Si non trouvé, ajouter quand même pour visualisation
+                    related.append({
+                        'name': target_name,
+                        'type': f"{rel_type} [unresolved]",
+                        'uid': f"unresolved_{target_name}",
+                        'direction': 'out',
+                        'category': 'parsed',
+                        'line': rel.get('line', 0)
+                    })
+
+        # === 3. RELATIONS ENTRANTES ===
+        for rel in central_node.get('incoming_relations', []):
             source_uid = rel.get('source_uid', rel.get('source_id', ''))
-            # Mapper si hex Dgraph
+
             if source_uid.startswith('0x') and len(source_uid) == 6:
                 source_uid = dgraph_to_local.get(source_uid, source_uid)
-            if source_uid in visited:
+
+            if source_uid in visited or source_uid.startswith('temp_'):
                 continue
-            
+
             source_node = next((n for n in all_nodes if n['uid'] == source_uid), None)
             if source_node:
+                rel_type = rel.get('relation_type', 'relation')
+                category = rel.get('category', 'custom')
+                display_type = f"{rel_type} (in) [{'code' if category == 'parsed' else 'custom'}]"
+
                 related.append({
-                    'name': source_node['label'],
-                    'type': rel['relation_type'] + ' (inverse)',
+                    'name': source_node.get('label', source_node.get('name', 'Unknown')),
+                    'type': display_type,
                     'uid': source_uid,
-                    'direction': 'in'
+                    'direction': 'in',
+                    'category': category
                 })
                 visited.add(source_uid)
 
-        # 3. Enfants hiérarchiques locaux
-        for child in central_node.get('children', [])[:max_nodes]:
+        # === 4. HIÉRARCHIE : ENFANTS ===
+        for child in central_node.get('children', []):
             child_uid = child['uid']
             if child_uid in visited:
                 continue
-            
+
             related.append({
-                'name': child['label'],
-                'type': 'child',
+                'name': child.get('label', child.get('name', 'Child')),
+                'type': 'child [hierarchy]',
                 'uid': child_uid,
-                'direction': 'out'
+                'direction': 'out',
+                'category': 'hierarchy'
             })
             visited.add(child_uid)
 
-        # 4. Parents hiérarchiques locaux (si présents)
-        for parent_uid in central_node.get('parents', [])[:max_nodes]:
-            # Mapper si hex
+        # === 5. HIÉRARCHIE : PARENTS ===
+        for parent_uid in central_node.get('parents', []):
             if parent_uid.startswith('0x') and len(parent_uid) == 6:
                 parent_uid = dgraph_to_local.get(parent_uid, parent_uid)
+
             if parent_uid in visited:
                 continue
-            
+
             parent_info = self.parent_widget.label_uid_to_info.get(parent_uid)
             if parent_info:
                 related.append({
                     'name': parent_info['name'],
-                    'type': 'parent',
+                    'type': 'parent [hierarchy]',
                     'uid': parent_uid,
-                    'direction': 'in'
+                    'direction': 'in',
+                    'category': 'hierarchy'
                 })
                 visited.add(parent_uid)
 
-        # 5. Relations supplémentaires depuis Dgraph (mappées vers local)
-        dgraph_rels = self._query_relations_for_node(central_uid)
-        for rel in dgraph_rels:
-            if rel['source']['uid'] == central_uid:  # Utiliser local central_uid
-                target_dgraph_uid = rel['target']['uid']
-                target_uid = dgraph_to_local.get(target_dgraph_uid, target_dgraph_uid)
-                if target_uid in visited:
-                    continue
-                target_name = rel['target']['name']
-                related.append({
-                    'name': target_name,
-                    'type': rel['relationType'],
-                    'uid': target_uid,  # Mappé local
-                    'direction': 'out'
-                })
-                visited.add(target_uid)
-            elif rel['target']['uid'] == central_uid:
-                source_dgraph_uid = rel['source']['uid']
-                source_uid = dgraph_to_local.get(source_dgraph_uid, source_dgraph_uid)
-                if source_uid in visited:
-                    continue
-                source_name = rel['source']['name']
-                related.append({
-                    'name': source_name,
-                    'type': rel['relationType'] + ' (inverse)',
-                    'uid': source_uid,
-                    'direction': 'in'
-                })
-                visited.add(source_uid)
-
-        # Limiter le nombre total pour la performance
         related = related[:max_nodes]
+        logger.info(f"Collecté {len(related)} relations pour {central_node.get('label', central_uid)}")
 
-        logger.info(f"Collecté {len(related)} relations pour {central_node['label']}")
         return related
 
     def _draw_empty_graph(self):
@@ -1206,24 +1319,23 @@ class RelationsGraphWidget(QtWidgets.QWidget):
 
     def _get_color_for_type(self, rel_type):
         """
-        Retourne une couleur selon le type de relation
-        Version étendue avec plus de types
+        Retourne une couleur selon le type de relation.
+        Ajoute support pour les types parsés.
         """
-        # Normaliser le type (retirer "(inverse)" si présent)
-        rel_lower = rel_type.lower().replace(' (inverse)', '')
+        rel_lower = rel_type.lower().replace(' (inverse)', '').replace('[code]', '').replace('[custom]', '').replace('[hierarchy]', '').strip()
 
         colors = {
-            'import': '#FF9800',
-            'heritage': '#2196F3',
-            'extend': '#4CAF50',
-            'implement': '#9C27B0',
-            'depends_on': '#FF5722',
-            'calls': '#00BCD4',
-            'uses': '#795548',
-            'references': '#607D8B',
-            'child': '#00BCD4',
-            'parent': '#3F51B5',
-            'relation': '#E91E63',
+            'import': '#FF9800',           # Orange pour imports
+            'heritage': '#2196F3',         # Bleu pour héritage
+            'extends': '#4CAF50',          # Vert pour extends
+            'implement': '#9C27B0',        # Violet pour implement
+            'depends_on': '#FF5722',       # Rouge pour dépendances
+            'calls': '#00BCD4',            # Cyan pour appels
+            'uses': '#795548',             # Marron pour usages
+            'references': '#607D8B',       # Gris-bleu pour références
+            'child': '#00BCD4',            # Cyan pour hiérarchie
+            'parent': '#3F51B5',           # Bleu foncé pour parents
+            'relation': '#E91E63',         # Rose pour relations génériques
         }
 
         # Recherche exacte puis partielle
@@ -1234,7 +1346,7 @@ class RelationsGraphWidget(QtWidgets.QWidget):
             if key in rel_lower:
                 return color
 
-        return '#999999'  # Couleur par défaut
+        return '#999999'
 
     def _update_legend_with_types(self, relation_types):
         """
@@ -3034,7 +3146,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         layout.addLayout(button_layout)
         dialog.exec_()
-
 
     def _show_file_content_dialog(self, filename: str, content: str, label: dict):
         """
@@ -5052,237 +5163,210 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.global_relations_config.remove_button.setEnabled(has_rel_selected)
 
     def _on_browse_project(self):
-        """
-        Bouton 'Afficher les nœuds' – scanne le projet et analyse les fichiers.
-        CORRIGÉ: Appelle _collect_all_labels() APRÈS l'analyse.
-        """
+        """Version avec logs ultra-détaillés pour debug."""
         if not self.current_project_profile_data:
-            QtWidgets.QMessageBox.warning(
-                self, 
-                "Erreur", 
-                "Aucun projet sélectionné dans la configuration."
-            )
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Aucun projet sélectionné")
             return
-
+    
         project_name = self.current_project_profile_data.get("name", "Projet inconnu")
         files = self.current_project_profile_data.get("files", [])
         file_contents = self.current_project_profile_data.get("file_contents", {})
-
+    
+        print("\n" + "="*80)
+        print(f"🔍 DEBUG SCAN PROJET: {project_name}")
+        print("="*80)
+        print(f"Nombre de fichiers dans project_profile_data: {len(files)}")
+        print(f"Nombre de contenus dans file_contents: {len(file_contents)}")
+        print(f"Fichiers disponibles: {files[:3]}..." if len(files) > 3 else f"Fichiers: {files}")
+        print("="*80 + "\n")
+    
         if not files:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Aucun fichier trouvé",
-                f"Aucun fichier enregistré pour le projet '{project_name}'."
-            )
+            QtWidgets.QMessageBox.warning(self, "Aucun fichier trouvé", 
+                f"Aucun fichier enregistré pour le projet '{project_name}'.")
             return
-
-        logger.info(f"Analyse du projet '{project_name}' chargé depuis Dgraph/SQLite...")
-
+    
+        logger.info(f"🔍 Analyse du projet '{project_name}'...")
+    
+        self.parsed_relations_cache = {}
         progress = QtWidgets.QProgressDialog(
-            "Analyse des fichiers du projet...", 
-            "Annuler", 
-            0, 
-            len(files), 
-            self
-        )
+            "Analyse des fichiers du projet...", "Annuler", 0, len(files), self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setValue(0)
-
-        # Mémoriser la sélection actuelle
-        current_cluster_row = self.cluster_list_widget.currentRow()
-        current_root_row = -1
-
-        if (current_cluster_row != -1 and self.current_cluster_data and 
-            not self.current_cluster_data.get('is_file_cluster')):
-            current_root_row = self.root_list_widget.currentRow()
-
+    
+        files_processed = 0
+        files_with_content = 0
+        files_with_relations = 0
+    
         try:
-            # Récupérer les clusters existants
-            clusters_detailed = self.current_project_profile_data.get('turing_ontology', {}).get('clusters_detailed', [])
-
-            if not clusters_detailed:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Aucun cluster",
-                    "Aucun cluster trouvé dans le projet. Créez d'abord des clusters."
-                )
-                return
-
-            # Mapper les fichiers aux clusters existants par chemin
-            file_to_cluster = {}
-
-            for cluster in clusters_detailed:
-                cluster_path = cluster.get('path', '')
-                cluster_name = cluster.get('name', '')
-
-                for file_path in files:
-                    if cluster_path and file_path.startswith(cluster_path):
-                        file_to_cluster[file_path] = cluster_name
-                    elif not cluster_path:
-                        first_dir = file_path.split(os.sep)[0] if os.sep in file_path else file_path
-                        if first_dir == cluster_name or cluster_name == first_dir:
-                            file_to_cluster[file_path] = cluster_name
-
-            # Analyser chaque fichier et l'attacher à son cluster
-            updated_clusters = {}
-
             for i, file_path in enumerate(files, 1):
                 progress.setValue(i)
                 QtWidgets.QApplication.processEvents()
-
+    
                 if progress.wasCanceled():
                     break
-
-                abs_path = file_path
+                
+                print(f"\n📄 Traitement fichier {i}/{len(files)}: {file_path}")
+    
+                # Récupérer le contenu
                 content = file_contents.get(file_path, "")
-
-                if not content and os.path.exists(abs_path):
-                    try:
-                        with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
-                            content = f.read()
-                    except Exception as e:
-                        logger.warning(f"Impossible de lire {abs_path}: {e}")
-                        content = ""
-
-                target_cluster_name = file_to_cluster.get(file_path)
-
-                if not target_cluster_name:
-                    target_cluster_name = clusters_detailed[0]['name']
-                    logger.warning(f"Aucun cluster trouvé pour {file_path}, utilisation de {target_cluster_name}")
-
-                try:
-                    classes = self.dependency_parser.extract_classes(content, abs_path) if content else []
-                    functions = self.dependency_parser.extract_functions(content, abs_path) if content else []
-                    variables = self.dependency_parser.extract_variables(content, abs_path) if content else []
-
-                    if target_cluster_name not in updated_clusters:
-                        updated_clusters[target_cluster_name] = {
-                            'classes': [],
-                            'functions': [],
-                            'variables': [],
-                            'files_processed': []
-                        }
-
-                    updated_clusters[target_cluster_name]['files_processed'].append(file_path)
-
+                
+                # DEBUG: Vérifier la récupération du contenu
+                if content:
+                    print(f"   ✅ Contenu récupéré de file_contents ({len(content)} chars)")
+                    files_with_content += 1
+                else:
+                    print(f"   ⚠️  Pas de contenu dans file_contents, tentative lecture fichier...")
+                    if os.path.exists(file_path):
+                        try:
+                            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                                content = f.read()
+                            print(f"   ✅ Contenu lu depuis disque ({len(content)} chars)")
+                            files_with_content += 1
+                        except Exception as e:
+                            print(f"   ❌ Erreur lecture: {e}")
+                            logger.warning(f"Impossible de lire {file_path}: {e}")
+                            continue
+                    else:
+                        print(f"   ❌ Fichier n'existe pas sur disque")
+                        continue
+                    
+                if not content:
+                    print(f"   ⚠️  Contenu vide, skip")
+                    continue
+                
+                # Afficher un aperçu du contenu
+                preview = content[:200].replace('\n', ' ')
+                print(f"   📝 Aperçu: {preview}...")
+    
+                # Parser les relations
+                print(f"   🔍 Parsing avec extension: {os.path.splitext(file_path)[1]}")
+                parsed_rels = self.dependency_parser.parse_content(content, file_path)
+                
+                # DEBUG: Afficher les relations détectées
+                if parsed_rels:
+                    total_rels = sum(len(v) for v in parsed_rels.values())
+                    print(f"   ✅ {total_rels} relations détectées:")
+                    for rel_type, rel_list in parsed_rels.items():
+                        if rel_list:
+                            print(f"      • {rel_type}: {len(rel_list)}")
+                            for rel in rel_list[:2]:  # Max 2 exemples
+                                print(f"         - {rel.get('target', 'Unknown')} (ligne {rel.get('line', '?')})")
+                    files_with_relations += 1
+                    self.parsed_relations_cache[file_path] = parsed_rels
+                else:
+                    print(f"   ⚠️  Aucune relation détectée")
+                
+                # Extraire classes/fonctions/variables
+                classes = self.dependency_parser.extract_classes(content, file_path)
+                functions = self.dependency_parser.extract_functions(content, file_path)
+                variables = self.dependency_parser.extract_variables(content, file_path)
+                
+                print(f"   📦 Éléments extraits: {len(classes)} classes, {len(functions)} fonctions, {len(variables)} variables")
+    
+                # Trouver le label correspondant
+                target_label = self._find_label_by_file_path(file_path)
+                
+                if target_label:
+                    print(f"   ✅ Label trouvé: {target_label.get('label', 'Unknown')} (UID: {target_label.get('uid')})")
+                    
+                    # STOCKER LE DICT RELATIONS DIRECTEMENT
+                    target_label['relations'] = parsed_rels
+                    print(f"      → relations dict stocké: {list(parsed_rels.keys())}")
+                    
+                    # Intégrer dans outgoing_relations
+                    if parsed_rels:
+                        print(f"   🔗 Intégration dans outgoing_relations...")
+                        before_count = len(target_label.get('outgoing_relations', []))
+                        self._integrate_parsed_relations_to_label(target_label, parsed_rels, file_path)
+                        after_count = len(target_label.get('outgoing_relations', []))
+                        print(f"      → outgoing_relations: {before_count} → {after_count} (+{after_count - before_count})")
+                    
+                    # Stocker les éléments
+                    target_label['classes'] = classes
+                    target_label['functions'] = functions
+                    target_label['variables'] = variables
+                    
+                    # Créer les enfants
                     for cls in classes:
-                        cls_data = {
-                            'name': cls.get('name', 'Unknown'),
-                            'uid': cls.get('uid', str(uuid.uuid4())),
-                            'line': cls.get('line', 0),
-                            'file': file_path,
-                            'methods': cls.get('methods', []),
-                            'description': f"Classe dans {file_path}"
-                        }
-                        updated_clusters[target_cluster_name]['classes'].append(cls_data)
-
+                        cls['file'] = file_path
+                        if 'uid' not in cls:
+                            cls['uid'] = str(uuid.uuid4())
+                        child = self._create_child_node_from_extracted(cls, 'class')
+                        target_label.setdefault('children', []).append(child)
+    
                     for func in functions:
-                        func_data = {
-                            'name': func.get('name', 'Unknown'),
-                            'uid': func.get('uid', str(uuid.uuid4())),
-                            'type': func.get('type', 'function'),
-                            'line': func.get('line', 0),
-                            'file': file_path,
-                            'calls': func.get('calls', []),
-                            'description': f"Fonction dans {file_path}"
-                        }
-                        updated_clusters[target_cluster_name]['functions'].append(func_data)
-
+                        func['file'] = file_path
+                        if 'uid' not in func:
+                            func['uid'] = str(uuid.uuid4())
+                        child = self._create_child_node_from_extracted(func, 'function')
+                        target_label.setdefault('children', []).append(child)
+    
                     for var in variables:
-                        var_data = {
-                            'name': var.get('name', 'Unknown'),
-                            'uid': var.get('uid', str(uuid.uuid4())),
-                            'type': var.get('type', 'variable'),
-                            'line': var.get('line', 0),
-                            'file': file_path,
-                            'scope': var.get('scope', 'global'),
-                            'description': f"Variable dans {file_path}"
-                        }
-                        updated_clusters[target_cluster_name]['variables'].append(var_data)
-
-                except Exception as e:
-                    logger.warning(f"Erreur extraction enfants pour {abs_path}: {e}")
-
-            progress.setValue(len(files))
-
-            # Mettre à jour les clusters existants avec les données extraites
-            for cluster in clusters_detailed:
-                cluster_name = cluster.get('name', '')
-                if cluster_name in updated_clusters:
-                    cluster_updates = updated_clusters[cluster_name]
-
-                    for cls in cluster_updates['classes']:
-                        self._add_extracted_item_to_cluster(cluster, cls, 'class')
-
-                    for func in cluster_updates['functions']:
-                        self._add_extracted_item_to_cluster(cluster, func, 'function')
-
-                    for var in cluster_updates['variables']:
-                        self._add_extracted_item_to_cluster(cluster, var, 'variable')
-
-                    logger.info(
-                        f"Cluster '{cluster_name}': "
-                        f"{len(cluster_updates['classes'])} classes, "
-                        f"{len(cluster_updates['functions'])} fonctions, "
-                        f"{len(cluster_updates['variables'])} variables"
-                    )
-
-            # CORRIGÉ: Appeler _collect_all_labels() APRÈS l'ajout des éléments
-            self._collect_all_labels()
-
-            # Rafraîchir l'affichage
-            self._refresh_cluster_list()
-            self.relations_graph.update_graph(None)
-
-            # Re-sélectionner le cluster pour déclencher la mise à jour
-            if current_cluster_row != -1 and self.cluster_list_widget.count() > current_cluster_row:
-                self.cluster_list_widget.setCurrentRow(current_cluster_row)
-
-                if current_root_row != -1 and self.root_list_widget.count() > current_root_row:
-                    self.root_list_widget.setCurrentRow(current_root_row)
-
+                        var['file'] = file_path
+                        if 'uid' not in var:
+                            var['uid'] = str(uuid.uuid4())
+                        child = self._create_child_node_from_extracted(var, 'variable')
+                        target_label.setdefault('children', []).append(child)
+                    
+                    files_processed += 1
+                else:
+                    print(f"   ❌ PROBLÈME: Aucun label trouvé pour ce fichier!")
+                    print(f"      Fichier: {file_path}")
+                    print(f"      Nom: {os.path.basename(file_path)}")
+                    # Debug: afficher les labels disponibles
+                    print(f"      Labels disponibles dans cluster:")
+                    if self.current_cluster_data:
+                        for root in self.current_cluster_data.get('root_labels', [])[:5]:
+                            print(f"         • {root.get('label', 'N/A')} - Files: {root.get('files', [])}")
+    
             progress.close()
-
-            # Statistiques finales
-            total_classes = sum(len(u['classes']) for u in updated_clusters.values())
-            total_functions = sum(len(u['functions']) for u in updated_clusters.values())
-            total_variables = sum(len(u['variables']) for u in updated_clusters.values())
-
-            QtWidgets.QMessageBox.information(
-                self,
-                "Analyse terminée",
-                f"Projet '{project_name}' analysé avec succès.\n\n"
-                f"Fichiers analysés : {len(files)}\n"
-                f"Classes trouvées : {total_classes}\n"
-                f"Fonctions trouvées : {total_functions}\n"
-                f"Variables trouvées : {total_variables}"
-            )
-
-            logger.info(
-                f"Analyse terminée pour '{project_name}': "
-                f"{total_classes} classes, {total_functions} fonctions, {total_variables} variables"
-            )
-
+    
+            print("\n" + "="*80)
+            print("📊 RÉSUMÉ DU SCAN")
+            print("="*80)
+            print(f"Fichiers totaux: {len(files)}")
+            print(f"Fichiers avec contenu: {files_with_content}")
+            print(f"Fichiers avec relations détectées: {files_with_relations}")
+            print(f"Fichiers traités avec succès: {files_processed}")
+            print(f"Relations dans cache: {len(self.parsed_relations_cache)}")
+            print("="*80 + "\n")
+    
+            # Construction du graphe
+            logger.info("🔗 Construction du graphe de relations...")
+            self._build_complete_relations_graph()
+    
+            # Validation
+            logger.info("🔍 Validation des relations parsées...")
+            validation_stats = self._validate_parsed_relations()
+    
+            # Rafraîchir l'UI
+            self._collect_all_labels()
+            self._refresh_cluster_list()
+            
+            # Message de succès
+            success_msg = f"Projet '{project_name}' analysé:\n\n"
+            success_msg += f"📁 {files_processed}/{len(files)} fichiers traités\n"
+            success_msg += f"🔗 {validation_stats['total_parsed_in_dict']} relations détectées\n"
+            success_msg += f"✅ {validation_stats['total_parsed_in_outgoing']} relations intégrées"
+            
+            QtWidgets.QMessageBox.information(self, "Succès", success_msg)
+    
         except Exception as e:
             progress.close()
-            logger.error(f"Erreur lors du scan du projet Dgraph: {str(e)}")
-            QtWidgets.QMessageBox.critical(
-                self, 
-                "Erreur", 
-                f"Erreur lors de l'analyse du projet :\n{str(e)}"
-            )
+            logger.error(f"Erreur lors du scan: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur : {str(e)}")
 
     def _add_extracted_item_to_cluster(self, cluster: Dict, item: Dict, item_type: str):
         """
-        Ajoute un élément extrait (classe, fonction, variable) comme nœud enfant dans la hiérarchie du cluster.
-
-        Args:
-            cluster: Dict du cluster
-            item: Dict de l'élément extrait (avec 'name', 'uid', 'line', 'file', etc.)
-            item_type: Type ('class', 'function', 'variable')
+        Ajoute un élément extrait (classe, fonction, variable) comme nœud enfant 
+        avec relations parsées intégrées.
         """
-        # Créer le nœud enfant
         uid = item.get('uid', str(uuid.uuid4()))
+        file_path = item.get('file', '')
+
+        # Créer le nœud enfant
         child = {
             'name': item['name'],
             'uid': uid,
@@ -5292,15 +5376,12 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             'children': [],
             'outgoing_relations': item.get('calls', []) if item_type == 'function' else item.get('uses_vars', []) if item_type == 'class' else [],
             'incoming_relations': [],
-            'parents': []  # Sera défini si target trouvé
+            'parents': [],
+            'file': file_path  # NOUVEAU : tracer le fichier source
         }
 
-        # Chercher le root_label correspondant au fichier (utiliser nom de fichier pour matching, pas chemin complet)
-        file_name = os.path.basename(item.get('file', ''))
-        if not file_name:
-            logger.warning(f"Aucun fichier associé à l'élément {item['name']} ({item_type})")
-            return
-
+        # Chercher le root_label correspondant au fichier
+        file_name = os.path.basename(file_path)
         target_label = None
         for root_label in cluster.get('root_labels', []):
             files_in_label = root_label.get('files', [])
@@ -5309,36 +5390,36 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 break
 
         if target_label:
-            # Ajouter comme enfant
             target_label.setdefault('children', []).append(child)
             child['parents'] = [target_label['uid']]
 
-            # Ajouter à label_uid_to_info pour cohérence (sera mis à jour dans _collect_all_labels)
+            # NOUVEAU : Ajouter les relations parsées du fichier au nœud
+            if file_path in self.parsed_relations_cache:
+                self._integrate_parsed_relations_to_node(
+                    child, 
+                    self.parsed_relations_cache[file_path],
+                    item_type
+                )
+
             self.label_uid_to_info[uid] = {
                 'name': child['name'],
                 'label': child['label'],
                 'type': item_type,
                 'cluster': cluster['name'],
-                'file': file_name  # Utiliser nom relatif
+                'file': file_name
             }
-
-            logger.debug(f"Ajouté {item_type} '{item['name']}' comme enfant de {target_label['label']}")
+            logger.debug(f"Ajouté {item_type} '{item['name']}' avec relations intégrées")
         else:
-            # Fallback: ajouter au premier root_label
             if cluster.get('root_labels'):
                 target_label = cluster['root_labels'][0]
                 target_label.setdefault('children', []).append(child)
                 child['parents'] = [target_label['uid']]
-                self.label_uid_to_info[uid] = {
-                    'name': child['name'],
-                    'label': child['label'],
-                    'type': item_type,
-                    'cluster': cluster['name'],
-                    'file': file_name
-                }
-                logger.warning(f"Fichier {file_name} non trouvé, ajouté au premier label de {cluster['name']}")
-            else:
-                logger.error(f"Aucun root_label dans cluster {cluster['name']} pour ajouter {item_type} '{item['name']}'")
+                self._integrate_parsed_relations_to_node(
+                    child,
+                    self.parsed_relations_cache.get(file_path, {}),
+                    item_type
+                )
+                logger.warning(f"Fichier {file_name} non trouvé, ajouté au premier label")
 
     def scan_dgraph_project(self, project_path: str):
         """
@@ -5748,6 +5829,39 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         self.current_root_data = root_labels[self.current_root_label_index]
         self.current_selected_label_uid = current.data(Qt.UserRole)
+
+        # 🔍 LOG: Vérifier les relations du fichier sélectionné
+        file_name = self.current_root_data.get('label', 'Unknown')
+        logger.info(f"📂 Fichier sélectionné: {file_name} (UID: {self.current_selected_label_uid})")
+        
+        # Log des relations sortantes
+        outgoing = self.current_root_data.get('outgoing_relations', [])
+        logger.info(f"   → Relations sortantes: {len(outgoing)}")
+        for rel in outgoing:
+            target_uid = rel.get('target_uid', 'N/A')
+            rel_type = rel.get('relation_type', 'N/A')
+            category = rel.get('category', 'unknown')
+            target_name = self.label_uid_to_info.get(target_uid, {}).get('name', 'Unknown')
+            logger.debug(f"      • {rel_type} [{category}] → {target_name} (UID: {target_uid})")
+        
+        # Log des relations entrantes
+        incoming = self.current_root_data.get('incoming_relations', [])
+        logger.info(f"   ← Relations entrantes: {len(incoming)}")
+        for rel in incoming:
+            source_uid = rel.get('source_uid', 'N/A')
+            rel_type = rel.get('relation_type', 'N/A')
+            category = rel.get('category', 'unknown')
+            source_name = self.label_uid_to_info.get(source_uid, {}).get('name', 'Unknown')
+            logger.debug(f"      • {source_name} (UID: {source_uid}) {rel_type} [{category}] →")
+        
+        # Log des relations en attente (pending_relations)
+        pending = self.pending_relations.get(self.current_selected_label_uid, [])
+        logger.info(f"   ⏳ Relations en attente: {len(pending)}")
+        for rel in pending:
+            target_uid = rel.get('target_uid', 'N/A')
+            rel_type = rel.get('relation_type', 'N/A')
+            target_name = self.label_uid_to_info.get(target_uid, {}).get('name', 'Unknown')
+            logger.debug(f"      • {rel_type} → {target_name} (UID: {target_uid})")
 
         # Réinitialiser niveaux inférieurs
         self.current_level1_data = None
@@ -6556,6 +6670,357 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     item.setData(Qt.UserRole + 3, var.get('line', 0))
                     item.setForeground(QtGui.QColor("#2ecc71"))
                     self.child_list_widget.addItem(item)
+
+    def _integrate_parsed_relations_to_node(self, node: Dict, parsed_relations: Dict, node_type: str):
+        """
+        Intègre les relations parsées (import, extends, calls, uses) au nœud.
+
+        Args:
+            node: Nœud cible (classe, fonction, variable)
+            parsed_relations: Dict avec clés 'import', 'heritage', 'call', 'uses'
+            node_type: Type du nœud ('class', 'function', 'variable')
+        """
+        if not parsed_relations:
+            return
+
+        # Pour les CLASSES : les héritages (extends)
+        if node_type == 'class':
+            for base_rel in parsed_relations.get('heritage', []):
+                target_name = base_rel.get('target', '')
+                normalized = normalize_node_name(target_name)
+                if normalized:
+                    target_uid = self._find_label_uid_by_name(normalized)
+                    if target_uid:
+                        node['outgoing_relations'].append({
+                            'target_uid': target_uid,
+                            'relation_type': 'extends',
+                            'category': 'parsed',
+                            'line': base_rel.get('line', 0)
+                        })
+
+            # Usages de variables par la classe
+            for use_rel in parsed_relations.get('uses', []):
+                target_name = use_rel.get('target', '')
+                normalized = normalize_node_name(target_name)
+                if normalized:
+                    target_uid = self._find_label_uid_by_name(normalized)
+                    if target_uid:
+                        node['outgoing_relations'].append({
+                            'target_uid': target_uid,
+                            'relation_type': 'uses',
+                            'category': 'parsed',
+                            'line': use_rel.get('line', 0)
+                        })
+
+        # Pour les FONCTIONS : les appels (calls)
+        elif node_type == 'function':
+            for call_rel in parsed_relations.get('call', []):
+                target_name = call_rel.get('target', '')
+                normalized = normalize_node_name(target_name)
+                if normalized:
+                    target_uid = self._find_label_uid_by_name(normalized)
+                    if target_uid:
+                        node['outgoing_relations'].append({
+                            'target_uid': target_uid,
+                            'relation_type': 'calls',
+                            'category': 'parsed',
+                            'line': call_rel.get('line', 0)
+                        })
+
+        # Pour les FICHIERS (root_labels) : imports
+        if 'import' in parsed_relations:
+            for import_rel in parsed_relations['import']:
+                target_name = import_rel.get('target', '')
+                normalized = normalize_node_name(target_name)
+                if normalized:
+                    target_uid = self._find_label_uid_by_name(normalized)
+                    if target_uid:
+                        node['outgoing_relations'].append({
+                            'target_uid': target_uid,
+                            'relation_type': 'import',
+                            'category': 'parsed',
+                            'line': import_rel.get('line', 0)
+                        })
+
+    def _validate_parsed_relations(self):
+        """
+        Méthode de debug pour vérifier que les relations parsées sont bien présentes.
+        """
+        all_nodes = self._get_all_nodes()
+
+        stats = {
+            'nodes_with_relations_dict': 0,
+            'nodes_with_outgoing': 0,
+            'total_parsed_in_dict': 0,
+            'total_parsed_in_outgoing': 0
+        }
+
+        for node in all_nodes:
+            node_name = node.get('label', node.get('name', 'Unknown'))
+
+            # Vérifier dict 'relations'
+            relations_dict = node.get('relations', {})
+            if relations_dict:
+                stats['nodes_with_relations_dict'] += 1
+                for rel_type, rel_list in relations_dict.items():
+                    stats['total_parsed_in_dict'] += len(rel_list)
+                    logger.debug(f"  {node_name} - relations['{rel_type}']: {len(rel_list)} items")
+
+            # Vérifier outgoing_relations
+            outgoing = node.get('outgoing_relations', [])
+            if outgoing:
+                stats['nodes_with_outgoing'] += 1
+                parsed_out = [r for r in outgoing if r.get('category') == 'parsed']
+                stats['total_parsed_in_outgoing'] += len(parsed_out)
+                if parsed_out:
+                    logger.debug(f"  {node_name} - outgoing_relations (parsed): {len(parsed_out)}")
+
+        logger.info(f"\n📊 VALIDATION RELATIONS PARSÉES:")
+        logger.info(f"  Nœuds avec 'relations' dict: {stats['nodes_with_relations_dict']}")
+        logger.info(f"  Nœuds avec outgoing_relations: {stats['nodes_with_outgoing']}")
+        logger.info(f"  Total relations dans dict: {stats['total_parsed_in_dict']}")
+        logger.info(f"  Total relations parsées dans outgoing: {stats['total_parsed_in_outgoing']}")
+
+        return stats
+
+    def _find_label_by_file_path(self, file_path: str) -> Optional[Dict]:
+        """
+        Trouve le label correspondant à un fichier dans la structure.
+        """
+        if not self.current_project_profile_data:
+            return None
+
+        file_name = os.path.basename(file_path)
+
+        for cluster in self.current_project_profile_data.get('turing_ontology', {}).get('clusters_detailed', []):
+            for root_label in cluster.get('root_labels', []):
+                # Vérifier si c'est le bon label
+                if root_label.get('label') == file_name:
+                    return root_label
+
+                # Chercher dans les fichiers du label
+                if file_path in root_label.get('files', []):
+                    return root_label
+
+                # Chercher récursivement dans les enfants
+                result = self._find_label_in_children(root_label, file_path, file_name)
+                if result:
+                    return result
+
+        return None
+    
+    def _find_label_in_children(self, parent: Dict, file_path: str, file_name: str) -> Optional[Dict]:
+        """Cherche récursivement un label par fichier."""
+        for child in parent.get('children', []):
+            if child.get('label') == file_name or file_path in child.get('files', []):
+                return child
+
+            result = self._find_label_in_children(child, file_path, file_name)
+            if result:
+                return result
+
+        return None
+
+    def _integrate_parsed_relations_to_label(self, label: Dict, parsed_relations: Dict, file_path: str):
+        """
+        Args:
+            label: Label cible (fichier)
+            parsed_relations: Relations parsées du fichier
+            file_path: Chemin du fichier source
+        """
+        label_uid = label.get('uid')
+        if not label_uid:
+            return
+
+        for rel_type, rel_list in parsed_relations.items():
+            for rel in rel_list:
+                target_name = rel.get('target', '')
+                if not target_name:
+                    continue
+                
+                # Normaliser le nom de la cible
+                normalized_target = normalize_node_name(target_name)
+                if not normalized_target:
+                    continue
+                
+                # Essayer de trouver l'UID de la cible
+                target_uid = self._find_label_uid_by_name(normalized_target)
+
+                # Si pas trouvé, générer un UID temporaire
+                if not target_uid:
+                    target_uid = f"temp_{normalized_target}_{str(uuid.uuid4())[:8]}"
+                    logger.debug(f"UID temporaire créé pour {normalized_target}: {target_uid}")
+
+                # Créer l'entrée de relation
+                relation_entry = {
+                    'target_uid': target_uid,
+                    'target_name': target_name,  # Garder le nom original
+                    'relation_type': rel_type,
+                    'category': 'parsed',
+                    'line': rel.get('line', 0),
+                    'intra_file': rel.get('intra_file', False)
+                }
+
+                # Ajouter à outgoing_relations si pas déjà présent
+                outgoing = label.setdefault('outgoing_relations', [])
+                if not any(r['target_uid'] == target_uid and r['relation_type'] == rel_type for r in outgoing):
+                    outgoing.append(relation_entry)
+                    logger.debug(f"Relation ajoutée: {label.get('label')} --{rel_type}--> {target_name}")
+
+                # Ajouter aussi aux pending_relations pour synchronisation Dgraph
+                pending = self.pending_relations.get(label_uid, [])
+                pending_entry = {
+                    'target_uid': target_uid,
+                    'relation_type': rel_type
+                }
+                if pending_entry not in pending:
+                    pending.append(pending_entry)
+                    self.pending_relations[label_uid] = pending
+
+    def _create_child_node_from_extracted(self, item: Dict, item_type: str) -> Dict:
+        """
+        Crée un nœud enfant à partir d'un élément extrait (classe, fonction, variable).
+        VERSION CORRIGÉE : Intègre aussi les relations internes (calls, bases, uses_vars)
+        """
+        uid = item.get('uid', str(uuid.uuid4()))
+        child = {
+            'name': item['name'],
+            'uid': uid,
+            'type': item_type,
+            'line': item.get('line', 0),
+            'label': f"{item_type.capitalize()}: {item['name']}",
+            'children': [],
+            'outgoing_relations': [],
+            'incoming_relations': [],
+            'parents': []
+        }
+
+        if item_type == 'class':
+            # Héritage (bases)
+            for base_name in item.get('bases', []):
+                base_uid = self._find_label_uid_by_name(normalize_node_name(base_name))
+                if not base_uid:
+                    base_uid = f"temp_class_{base_name}_{str(uuid.uuid4())[:8]}"
+
+                child['outgoing_relations'].append({
+                    'target_uid': base_uid,
+                    'target_name': base_name,
+                    'relation_type': 'extends',
+                    'category': 'parsed'
+                })
+
+            # Usages de variables
+            for var_name in item.get('uses_vars', []):
+                var_uid = self._find_label_uid_by_name(normalize_node_name(var_name))
+                if not var_uid:
+                    var_uid = f"temp_var_{var_name}_{str(uuid.uuid4())[:8]}"
+
+                child['outgoing_relations'].append({
+                    'target_uid': var_uid,
+                    'target_name': var_name,
+                    'relation_type': 'uses',
+                    'category': 'parsed'
+                })
+
+        elif item_type == 'function':
+            # Appels de fonction
+            for call_name in item.get('calls', []):
+                call_uid = self._find_label_uid_by_name(normalize_node_name(call_name))
+                if not call_uid:
+                    call_uid = f"temp_func_{call_name}_{str(uuid.uuid4())[:8]}"
+
+                child['outgoing_relations'].append({
+                    'target_uid': call_uid,
+                    'target_name': call_name,
+                    'relation_type': 'calls',
+                    'category': 'parsed'
+                })
+
+        # Ajouter aux infos globales
+        self.label_uid_to_info[uid] = {
+            'name': child['name'],
+            'label': child['label'],
+            'type': item_type,
+            'cluster': self.current_cluster_data.get('name', 'unknown') if self.current_cluster_data else 'unknown',
+            'file': item.get('file', 'N/A')
+        }
+
+        return child
+
+    def _build_complete_relations_graph(self):
+        """
+        - Résout les UIDs temporaires
+        - Crée les relations inverses
+        - Valide la cohérence
+        """
+        logger.info("🔗 Construction du graphe de relations...")
+
+        all_nodes = self._get_all_nodes()
+        resolved_count = 0
+        inverse_count = 0
+
+        # Étape 1 : Résoudre les UIDs temporaires
+        logger.info("📝 Résolution des UIDs temporaires...")
+        for node in all_nodes:
+            node_uid = node.get('uid')
+            if not node_uid:
+                continue
+            
+            for rel in node.get('outgoing_relations', []):
+                target_uid = rel.get('target_uid', '')
+
+                # Si c'est un UID temporaire, essayer de le résoudre
+                if target_uid.startswith('temp_'):
+                    target_name = rel.get('target_name', '')
+                    normalized = normalize_node_name(target_name)
+
+                    if normalized:
+                        real_uid = self._find_label_uid_by_name(normalized)
+                        if real_uid:
+                            rel['target_uid'] = real_uid
+                            resolved_count += 1
+                            logger.debug(f"✅ UID résolu: {target_uid} -> {real_uid}")
+
+        logger.info(f"✅ {resolved_count} UIDs temporaires résolus")
+
+        # Étape 2 : Créer les relations inverses
+        logger.info("🔄 Création des relations inverses...")
+        node_by_uid = {n['uid']: n for n in all_nodes if 'uid' in n}
+
+        for node in all_nodes:
+            node_uid = node.get('uid')
+            if not node_uid:
+                continue
+            
+            for rel in node.get('outgoing_relations', []):
+                target_uid = rel.get('target_uid')
+
+                # Skip si c'est toujours un UID temporaire
+                if not target_uid or target_uid.startswith('temp_'):
+                    continue
+                
+                target_node = node_by_uid.get(target_uid)
+                if not target_node:
+                    continue
+                
+                # Créer la relation inverse
+                inverse = {
+                    'source_uid': node_uid,
+                    'relation_type': rel['relation_type'],
+                    'category': rel.get('category', 'custom'),
+                    'source_name': node.get('label', node.get('name', 'Unknown'))
+                }
+
+                incoming = target_node.setdefault('incoming_relations', [])
+                if not any(r['source_uid'] == node_uid and r['relation_type'] == rel['relation_type'] for r in incoming):
+                    incoming.append(inverse)
+                    inverse_count += 1
+
+        logger.info(f"✅ {inverse_count} relations inverses créées")
+
+        # Étape 3 : Log statistiques
+        total_relations = sum(len(n.get('outgoing_relations', [])) for n in all_nodes)
+        logger.info(f"📊 Graphe complet: {len(all_nodes)} nœuds, {total_relations} relations")
 
     def closeEvent(self, event):
         """Ferme proprement le connector lors de la fermeture du widget."""

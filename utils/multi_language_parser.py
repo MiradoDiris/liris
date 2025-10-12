@@ -2,7 +2,7 @@
 import os
 import re
 import ast
-from typing import List, Dict, Set, Tuple, Any
+from typing import List, Dict, Optional, Set, Tuple, Any
 from collections import defaultdict
 import copy
 import uuid
@@ -71,8 +71,17 @@ class MultiLanguageDependencyParser:
             logger.warning(f"Langage non supporté pour {ext}, utilisation de parsing générique.")
             return self._parse_generic(content, file_path)
         
+        result = parser_func(content, file_path)
+        total_rels = sum(len(v) for v in result.values())
+        if total_rels > 0:
+            logger.info(f"✅ {file_path}: {total_rels} relations parsées - {dict((k, len(v)) for k, v in result.items())}")
+        else:
+            logger.warning(f"⚠️ {file_path}: Aucune relation détectée")
+        
+            return result
+        
         return parser_func(content, file_path)
-
+    
     def extract_classes(self, content: str, file_path: str) -> List[Dict[str, Any]]:
         """
         Extrait les classes définies dans le fichier.
@@ -907,33 +916,27 @@ class ProjectStructureScanner:
     
     def _scan_file(self, file_path: str, file_name: str) -> Dict[str, Any]:
         """
-        Scanne un fichier et crée une hiérarchie correcte:
-        - Fichier (root_label) 
-          - Classes (enfants)
-          - Fonctions (enfants)
-          - Variables (enfants)
-
-        Avec UIDs UUID cohérents pour la taxonomie d'ontologie Turing.
+        Version corrigée de _scan_file avec intégration complète des relations.
         """
         file_info = {
             'name': file_name,
-            'label': file_name,  # Pour affichage cohérent
+            'label': file_name,
             'path': file_path,
-            'uid': str(uuid.uuid4()),  # UID unique pour ce fichier
+            'uid': str(uuid.uuid4()),
             'type': 'file',
             'extension': os.path.splitext(file_name)[1],
             'size': 0,
             'relations': {},
-            'children': [],  # Les classes, fonctions, variables du fichier
-            'classes': [],   # Liste brute pour référence
-            'functions': [], # Liste brute pour référence
-            'variables': [], # Liste brute pour référence
-            'outgoing_relations': [],
-            'incoming_relations': [],
+            'children': [],
+            'classes': [],
+            'functions': [],
+            'variables': [],
+            'outgoing_relations': [],  # ✅ Relations sortantes
+            'incoming_relations': [],  # ✅ Relations entrantes
             'parents': []
         }
 
-        # Lecture forcée avec fallbacks d'encodage
+        # Lecture du contenu
         content = ''
         encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
         for encoding in encodings:
@@ -946,21 +949,23 @@ class ProjectStructureScanner:
             except (UnicodeDecodeError, IOError) as e:
                 logger.warning(f"Échec lecture {file_path} avec {encoding}: {e}")
                 continue
-        else:
-            # Ultime fallback: lecture binaire
-            try:
-                with open(file_path, 'rb') as f:
-                    raw = f.read()
-                    content = raw.decode('utf-8', errors='replace')
-                    file_info['size'] = len(raw)
-                logger.warning(f"Lecture binaire fallback pour {file_path}")
-            except Exception as e:
-                logger.error(f"Impossible de lire {file_path}: {e}")
-                return file_info
 
-        # Extraire relations au niveau fichier
+        # Extraire relations au niveau fichier (imports, heritage, etc.)
         relations = self.parser.parse_content(content, file_path)
         file_info['relations'] = relations
+
+        for rel_type, rel_list in relations.items():
+            for rel in rel_list:
+                target_name = rel.get('target', '')
+                normalized = normalize_node_name(target_name)
+                if normalized:
+                    file_info['outgoing_relations'].append({
+                        'target_uid': f"temp_{normalized}_{str(uuid.uuid4())[:8]}",
+                        'target_name': target_name,
+                        'relation_type': rel_type,
+                        'category': 'parsed',
+                        'line': rel.get('line', 0)
+                    })
 
         # Extraire les éléments (classes, fonctions, variables)
         try:
@@ -972,9 +977,7 @@ class ProjectStructureScanner:
             file_info['functions'] = functions
             file_info['variables'] = variables
 
-            # === CRÉATION DE LA HIÉRARCHIE: Fichier → Classes/Fonctions/Variables ===
-
-            # 1. Ajouter les classes comme enfants du fichier
+            # Créer la hiérarchie : Fichier → Classes/Fonctions/Variables
             for cls in classes:
                 if not cls.get('uid'):
                     cls['uid'] = str(uuid.uuid4())
@@ -985,16 +988,33 @@ class ProjectStructureScanner:
                     'uid': cls['uid'],
                     'type': 'class',
                     'line': cls.get('line', 0),
-                    'description': f"Classe définissable dans {file_name}",
-                    'children': [],  # Les méthodes comme enfants
-                    'parents': [file_info['uid']],  # Parent = le fichier
+                    'description': f"Classe définie dans {file_name}",
+                    'children': [],
+                    'parents': [file_info['uid']],
                     'outgoing_relations': [],
                     'incoming_relations': [],
                     'methods': cls.get('methods', []),
                     'bases': cls.get('bases', [])
                 }
 
-                # Ajouter les méthodes comme sous-enfants de la classe
+                # ✅ Ajouter relations d'héritage
+                for base in cls.get('bases', []):
+                    base_uid = f"temp_class_{base}_{str(uuid.uuid4())[:8]}"
+                    class_node['outgoing_relations'].append({
+                        'target_uid': base_uid,
+                        'relation_type': 'extends',
+                        'category': 'parsed',
+                        'target_name': base
+                    })
+
+                # ✅ Ajouter relation hiérarchique parent-enfant
+                file_info['outgoing_relations'].append({
+                    'target_uid': cls['uid'],
+                    'relation_type': 'child',
+                    'category': 'hierarchy'
+                })
+
+                # Ajouter méthodes comme enfants de la classe
                 for method in cls.get('methods', []):
                     method_uid = str(uuid.uuid4())
                     method_node = {
@@ -1009,11 +1029,19 @@ class ProjectStructureScanner:
                         'outgoing_relations': [],
                         'incoming_relations': []
                     }
+
+                    # ✅ Relation hiérarchique classe → méthode
+                    class_node['outgoing_relations'].append({
+                        'target_uid': method_uid,
+                        'relation_type': 'child',
+                        'category': 'hierarchy'
+                    })
+
                     class_node['children'].append(method_node)
 
                 file_info['children'].append(class_node)
 
-            # 2. Ajouter les fonctions comme enfants du fichier
+            # Fonctions
             for func in functions:
                 if not func.get('uid'):
                     func['uid'] = str(uuid.uuid4())
@@ -1022,19 +1050,37 @@ class ProjectStructureScanner:
                     'name': func['name'],
                     'label': f"Function: {func['name']}",
                     'uid': func['uid'],
-                    'type': func.get('type', 'function'),  # 'function' ou 'method'
+                    'type': func.get('type', 'function'),
                     'line': func.get('line', 0),
                     'description': f"Fonction définie dans {file_name}",
-                    'children': [],  # Pas d'enfants pour les fonctions normalement
-                    'parents': [file_info['uid']],  # Parent = le fichier
-                    'outgoing_relations': func.get('calls', []),  # Appels détectés
+                    'children': [],
+                    'parents': [file_info['uid']],
+                    'outgoing_relations': [],
                     'incoming_relations': [],
                     'params': func.get('params', []),
                     'returns': func.get('returns', {})
                 }
+
+                # ✅ Ajouter relations d'appel
+                for call in func.get('calls', []):
+                    call_uid = f"temp_func_{call}_{str(uuid.uuid4())[:8]}"
+                    func_node['outgoing_relations'].append({
+                        'target_uid': call_uid,
+                        'relation_type': 'calls',
+                        'category': 'parsed',
+                        'target_name': call
+                    })
+
+                # ✅ Relation hiérarchique fichier → fonction
+                file_info['outgoing_relations'].append({
+                    'target_uid': func['uid'],
+                    'relation_type': 'child',
+                    'category': 'hierarchy'
+                })
+
                 file_info['children'].append(func_node)
 
-            # 3. Ajouter les variables comme enfants du fichier
+            # Variables
             for var in variables:
                 if not var.get('uid'):
                     var['uid'] = str(uuid.uuid4())
@@ -1046,28 +1092,33 @@ class ProjectStructureScanner:
                     'type': 'variable',
                     'line': var.get('line', 0),
                     'description': f"Variable définie dans {file_name}",
-                    'children': [],  # Pas d'enfants pour les variables
-                    'parents': [file_info['uid']],  # Parent = le fichier
+                    'children': [],
+                    'parents': [file_info['uid']],
                     'outgoing_relations': [],
                     'incoming_relations': [],
                     'var_type': var.get('type', 'local'),
                     'scope': var.get('scope', 'global')
                 }
+
+                # ✅ Relation hiérarchique fichier → variable
+                file_info['outgoing_relations'].append({
+                    'target_uid': var['uid'],
+                    'relation_type': 'child',
+                    'category': 'hierarchy'
+                })
+
                 file_info['children'].append(var_node)
 
-            # Compter et logger
-            total_children = len(classes) + len(functions) + len(variables)
             logger.info(
                 f"Fichier {file_name}: "
                 f"{len(classes)} classes, "
                 f"{len(functions)} fonctions, "
-                f"{len(variables)} variables "
-                f"(Total: {total_children} enfants)"
+                f"{len(variables)} variables, "
+                f"{len(file_info['outgoing_relations'])} relations sortantes"
             )
 
         except Exception as e:
             logger.error(f"Erreur extraction pour {file_path}: {e}")
-            file_info['relations'] = {}
 
         return file_info
 
@@ -1190,6 +1241,11 @@ class ProjectStructureScanner:
         for cluster in structure.get("clusters_detailed", []):
             for label_root in cluster.get("root_labels", []):
                 self._scan_label(label_root, cluster, project_path)
+
+        # === AJOUT : Intégrer les relations après scan ===
+        self.build_relations_graph(structure)
+        logger.info("Relations graph built after scan.")
+
         return structure
 
     def _find_parent_label(self, label, cluster):
@@ -1257,7 +1313,7 @@ class ProjectStructureScanner:
         """
         Intègre les enfants du fichier (classes, fonctions, variables) 
         directement dans le label du fichier au lieu de créer une hiérarchie supplémentaire.
-        
+
         Args:
             file_info: Information du fichier avec ses classes/fonctions/variables
             label: Le label (fichier racine) où intégrer
@@ -1265,16 +1321,236 @@ class ProjectStructureScanner:
         # Assurer que le label a la structure correcte
         if 'children' not in label:
             label['children'] = []
-        
+
         # Ajouter tous les enfants du fichier au label
         label['children'].extend(file_info.get('children', []))
-        
+
         # Copier aussi les listes brutes pour référence
         label['classes'] = file_info.get('classes', [])
         label['functions'] = file_info.get('functions', [])
         label['variables'] = file_info.get('variables', [])
-        
+
         logger.info(f"Intégré {len(file_info.get('children', []))} enfants dans le label {label.get('label', 'unknown')}")
+
+    def build_relations_graph(self, structure: Dict[str, Any]) -> None:
+        """
+        Version corrigée qui intègre TOUTES les relations :
+        - Hiérarchie (parent-child)
+        - Parsées (import, extends, calls, uses)
+        - Inverses (incoming)
+        """
+        all_nodes = self._get_all_nodes_from_structure(structure)
+        logger.info(f"🔗 Construction du graphe avec {len(all_nodes)} nœuds")
+
+        # Étape 1 : Intégrer les relations hiérarchiques explicites
+        logger.info("📊 Étape 1 : Intégration hiérarchie (parent-child)")
+        hierarchy_count = self._integrate_hierarchy_into_relations_corrected(structure)
+        logger.info(f"✅ {hierarchy_count} relations hiérarchiques ajoutées")
+
+        # Étape 2 : Traiter les relations au niveau fichier (imports, etc.)
+        logger.info("📊 Étape 2 : Traitement relations fichiers (import, heritage)")
+        file_rel_count = self._process_file_level_relations_corrected(structure, all_nodes)
+        logger.info(f"✅ {file_rel_count} relations fichiers ajoutées")
+
+        # Étape 3 : Traiter les relations au niveau éléments (extends, calls, uses)
+        logger.info("📊 Étape 3 : Traitement relations code (extends, calls, uses)")
+        code_rel_count = self._process_child_level_relations_corrected(structure, all_nodes)
+        logger.info(f"✅ {code_rel_count} relations code ajoutées")
+
+        # Étape 4 : Créer les relations inverses (incoming depuis outgoing)
+        logger.info("📊 Étape 4 : Création relations inverses")
+        inverse_count = self._create_inverse_relations(all_nodes)
+        logger.info(f"✅ {inverse_count} relations inverses créées")
+
+        logger.info("✅ Graphe complet construit avec succès")
+
+    def _get_all_nodes_from_structure(self, structure: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Flatten all nodes from the structure."""
+        all_nodes = []
+        def recurse(node: Dict[str, Any]):
+            all_nodes.append(node)
+            for child in node.get('children', []):
+                recurse(child)
+        try:
+            clusters_key = 'clusters_detailed' if 'clusters_detailed' in structure else 'clusters'
+            for cluster in structure.get(clusters_key, []):
+                recurse(cluster)
+            logger.info(f"Flattened {len(all_nodes)} nodes from structure.")
+        except Exception as e:
+            logger.error(f"Erreur lors du flattening des nœuds: {e}")
+        return all_nodes
+    
+    def _get_all_labels(self, cluster: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Get all labels (files, folders, code elements) recursively."""
+        labels = []
+        def recurse(node: Dict[str, Any]):
+            if node.get('type') in ['folder', 'file', 'class', 'function', 'method', 'variable']:
+                labels.append(node)
+            for child in node.get('children', []):
+                recurse(child)
+        recurse(cluster)
+        return labels
+
+    def _integrate_hierarchy_into_relations(self, structure: Dict[str, Any]) -> None:
+        """Add hierarchy (children/parents) to outgoing/incoming_relations."""
+        count = 0
+    
+        def process_hierarchy(node: Dict[str, Any]):
+            nonlocal count
+            node_uid = node.get('uid')
+            if not node_uid:
+                return
+
+            # Pour chaque enfant, créer la relation bidirectionnelle
+            for child in node.get('children', []):
+                child_uid = child.get('uid')
+                if not child_uid:
+                    continue
+                
+                # Outgoing : parent → child
+                outgoing = {
+                    'target_uid': child_uid,
+                    'relation_type': 'child',
+                    'category': 'hierarchy'
+                }
+                if outgoing not in node.setdefault('outgoing_relations', []):
+                    node['outgoing_relations'].append(outgoing)
+                    count += 1
+
+                # Incoming : child ← parent
+                incoming = {
+                    'source_uid': node_uid,
+                    'relation_type': 'child',
+                    'category': 'hierarchy'
+                }
+                if incoming not in child.setdefault('incoming_relations', []):
+                    child['incoming_relations'].append(incoming)
+
+                # Récursif
+                process_hierarchy(child)
+
+        clusters_key = 'clusters_detailed' if 'clusters_detailed' in structure else 'clusters'
+        for cluster in structure.get(clusters_key, []):
+            process_hierarchy(cluster)
+            for root_label in cluster.get('root_labels', []):
+                process_hierarchy(root_label)
+
+        return count
+
+    def _process_file_level_relations(self, structure: Dict[str, Any], all_nodes: List[Dict[str, Any]]) -> None:
+        """Process relations from node['relations'] (e.g., imports, heritage at file level)."""
+        clusters_key = 'clusters_detailed' if 'clusters_detailed' in structure else 'clusters'
+        for cluster in structure.get(clusters_key, []):
+            for label in self._get_all_labels(cluster):
+                if label.get('type') != 'file':
+                    continue
+                file_uid = label['uid']
+                relations = label.get('relations', {})
+                for rel_type, rel_list in relations.items():
+                    for rel in rel_list:
+                        target_name = rel['target']
+                        target_norm = normalize_node_name(target_name)
+                        if not target_norm:
+                            continue
+                        target_node = self._find_node_by_name(all_nodes, target_norm)
+                        if target_node:
+                            target_uid = target_node['uid']
+                            outgoing = {'target_uid': target_uid, 'relation_type': rel_type, 'category': 'parsed'}
+                            if outgoing not in label.get('outgoing_relations', []):
+                                label.setdefault('outgoing_relations', []).append(outgoing)
+                            incoming = {'source_uid': file_uid, 'relation_type': rel_type, 'category': 'parsed'}
+                            if incoming not in target_node.get('incoming_relations', []):
+                                target_node.setdefault('incoming_relations', []).append(incoming)
+                        else:
+                            logger.debug(f"File-level target '{target_name}' not found from {file_uid} ({rel_type})")
+
+    def _process_child_level_relations(self, structure: Dict[str, Any], all_nodes: List[Dict[str, Any]]) -> None:
+        """Process intra/inter relations for code elements (bases, calls, uses_vars)."""
+        clusters_key = 'clusters_detailed' if 'clusters_detailed' in structure else 'clusters'
+        for cluster in structure.get(clusters_key, []):
+            for label in self._get_all_labels(cluster):
+                if label.get('type') != 'file':
+                    continue
+                for child in label.get('children', []):
+                    child_uid = child['uid']
+                    child_type = child['type']
+                    # Classes: bases (extends), uses_vars (uses)
+                    if child_type == 'class':
+                        for base_name in child.get('bases', []):
+                            target_norm = normalize_node_name(base_name)
+                            if target_norm:
+                                target_node = self._find_node_by_name(all_nodes, target_norm)
+                                if target_node:
+                                    outgoing = {'target_uid': target_node['uid'], 'relation_type': 'extends', 'category': 'parsed'}
+                                    if outgoing not in child.get('outgoing_relations', []):
+                                        child.setdefault('outgoing_relations', []).append(outgoing)
+                                    incoming = {'source_uid': child_uid, 'relation_type': 'extends', 'category': 'parsed'}
+                                    if incoming not in target_node.get('incoming_relations', []):
+                                        target_node.setdefault('incoming_relations', []).append(incoming)
+                        for var_name in child.get('uses_vars', []):
+                            target_norm = normalize_node_name(var_name)
+                            if target_norm:
+                                target_node = self._find_node_by_name(all_nodes, target_norm)
+                                if target_node and target_node['type'] == 'variable':
+                                    outgoing = {'target_uid': target_node['uid'], 'relation_type': 'uses', 'category': 'parsed'}
+                                    if outgoing not in child.get('outgoing_relations', []):
+                                        child.setdefault('outgoing_relations', []).append(outgoing)
+                                    incoming = {'source_uid': child_uid, 'relation_type': 'uses', 'category': 'parsed'}
+                                    if incoming not in target_node.get('incoming_relations', []):
+                                        target_node.setdefault('incoming_relations', []).append(incoming)
+                    # Functions/Methods: calls
+                    elif child_type in ['function', 'method']:
+                        for call_name in child.get('calls', []):
+                            target_norm = normalize_node_name(call_name)
+                            if target_norm:
+                                target_node = self._find_node_by_name(all_nodes, target_norm)
+                                if target_node:
+                                    outgoing = {'target_uid': target_node['uid'], 'relation_type': 'call', 'category': 'parsed'}
+                                    if outgoing not in child.get('outgoing_relations', []):
+                                        child.setdefault('outgoing_relations', []).append(outgoing)
+                                    incoming = {'source_uid': child_uid, 'relation_type': 'call', 'category': 'parsed'}
+                                    if incoming not in target_node.get('incoming_relations', []):
+                                        target_node.setdefault('incoming_relations', []).append(incoming)
+
+    def _find_node_by_name(self, all_nodes: List[Dict[str, Any]], target_norm: str) -> Optional[Dict[str, Any]]:
+        """Find node by normalized name (exact on 'name' or ends with on 'label')."""
+        exact_matches = [n for n in all_nodes if normalize_node_name(n.get('name', '')) == target_norm]
+        if exact_matches:
+            return exact_matches[0]
+        label_matches = [n for n in all_nodes if normalize_node_name(n.get('label', '')) and normalize_node_name(n.get('label', '')).endswith(target_norm)]
+        return label_matches[0] if label_matches else None
+
+    def _create_inverse_relations(self, all_nodes: List[Dict[str, Any]]) -> int:
+        """
+        Crée les relations inverses (incoming) depuis les outgoing existantes.
+        """
+        count = 0
+        node_by_uid = {n['uid']: n for n in all_nodes if 'uid' in n}
+        
+        for node in all_nodes:
+            node_uid = node.get('uid')
+            if not node_uid:
+                continue
+            
+            for rel in node.get('outgoing_relations', []):
+                target_uid = rel.get('target_uid')
+                if not target_uid or target_uid not in node_by_uid:
+                    continue
+                
+                target_node = node_by_uid[target_uid]
+                
+                # Créer l'inverse
+                inverse = {
+                    'source_uid': node_uid,
+                    'relation_type': rel['relation_type'],
+                    'category': rel.get('category', 'custom')
+                }
+                
+                if inverse not in target_node.setdefault('incoming_relations', []):
+                    target_node['incoming_relations'].append(inverse)
+                    count += 1
+        
+        return count
 
 # ============================================================================
 # FONCTIONS UTILITAIRES
