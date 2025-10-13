@@ -79,11 +79,13 @@ class RelationsConfig(QtWidgets.QWidget):
         super().__init__()
         self.parent_widget = parent_widget
         self.level = level
+        self.show_hierarchy = True
+        self.show_dependencies = True
         self._init_ui()
 
     def _init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setSpacing(5)
+        layout.setSpacing(8)
         layout.setContentsMargins(10, 10, 10, 10)
 
         title = QtWidgets.QLabel(f"Relations {self.level.capitalize()}")
@@ -94,75 +96,72 @@ class RelationsConfig(QtWidgets.QWidget):
         """)
         layout.addWidget(title)
 
-        # Tableau Source/Target (horizontal, sans bordure)
-        table_layout = QHBoxLayout()
-        table_layout.setSpacing(20)
+        # === SECTION FILTRAGE ===
+        filter_layout = QHBoxLayout()
+        filter_layout.setSpacing(8)
 
-        # Colonne Source
-        source_container = QVBoxLayout()
-        source_header = QLabel("Source")
+        relations_label = QtWidgets.QLabel("Filtres :")
+        relations_label.setStyleSheet("color: black; font-weight: bold; font-size: 11px;")
+        filter_layout.addWidget(relations_label)
+
+        # Bouton Hiérarchie
+        self.hierarchy_btn = QPushButton("🔗 Hiérarchie")
+        self.hierarchy_btn.setCheckable(True)
+        self.hierarchy_btn.setChecked(True)
+        self.hierarchy_btn.setStyleSheet(self._get_filter_button_style())
+        self.hierarchy_btn.clicked.connect(self._on_filter_hierarchy)
+        filter_layout.addWidget(self.hierarchy_btn)
+
+        # Bouton Dépendances
+        self.dependencies_btn = QPushButton("📊 Dépendances")
+        self.dependencies_btn.setCheckable(True)
+        self.dependencies_btn.setChecked(True)
+        self.dependencies_btn.setStyleSheet(self._get_filter_button_style())
+        self.dependencies_btn.clicked.connect(self._on_filter_dependencies)
+        filter_layout.addWidget(self.dependencies_btn)
+
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
+
+        # === AFFICHAGE SOURCE / TARGET ===
+        info_layout = QHBoxLayout()
+        info_layout.setSpacing(0)
+
+        source_header = QLabel("Source: ")
         source_header.setStyleSheet("""
             font-weight: bold;
             font-size: 11px;
             color: #333;
-            padding: 5px;
         """)
-        source_container.addWidget(source_header)
+        info_layout.addWidget(source_header)
 
-        self.source_label = QLabel("Aucun sélectionné")
+        self.source_label = QLabel("")
         self.source_label.setStyleSheet("""
-            color: black;
+            color: #2196F3;
             font-weight: bold;
-            padding: 8px;
-            background-color: #f2f2f2;
-            border-radius: 4px;
-            min-width: 150px;
+            font-size: 11px;
         """)
-        self.source_label.setAlignment(Qt.AlignCenter)
-        source_container.addWidget(self.source_label)
+        info_layout.addWidget(self.source_label)
 
-        # Flèche
-        arrow_container = QVBoxLayout()
-        arrow_container.addWidget(QLabel(""))  # Spacer pour header
-        arrow_label = QLabel("→")
-        arrow_label.setStyleSheet("""
-            font-size: 20px;
-            font-weight: bold;
-            color: #666;
-            padding: 8px;
-        """)
-        arrow_label.setAlignment(Qt.AlignCenter)
-        arrow_container.addWidget(arrow_label)
+        info_layout.addStretch()
 
-        # Colonne Target
-        target_container = QVBoxLayout()
-        target_header = QLabel("Target")
+        target_header = QLabel("Target: ")
         target_header.setStyleSheet("""
             font-weight: bold;
             font-size: 11px;
             color: #333;
-            padding: 5px;
         """)
-        target_container.addWidget(target_header)
+        info_layout.addWidget(target_header)
 
-        self.target_label = QLabel("—")
+        self.target_label = QLabel("")
         self.target_label.setStyleSheet("""
-            color: black;
+            color: #4CAF50;
             font-weight: bold;
-            padding: 8px;
-            background-color: #f2f2f2;
-            border-radius: 4px;
-            min-width: 150px;
+            font-size: 11px;
         """)
-        self.target_label.setAlignment(Qt.AlignCenter)
-        target_container.addWidget(self.target_label)
+        info_layout.addWidget(self.target_label)
 
-        table_layout.addLayout(source_container)
-        table_layout.addLayout(arrow_container)
-        table_layout.addLayout(target_container)
-        table_layout.addStretch()
-
-        layout.addLayout(table_layout)
+        layout.addLayout(info_layout)
 
         # Séparateur
         separator = QtWidgets.QFrame()
@@ -170,14 +169,7 @@ class RelationsConfig(QtWidgets.QWidget):
         separator.setStyleSheet("background-color: #ccc; max-height: 1px;")
         layout.addWidget(separator)
 
-        # Liste des relations
-        relations_label_layout = QHBoxLayout()
-        relations_label = QtWidgets.QLabel("Relations :")
-        relations_label.setStyleSheet("color: black; font-weight: bold;")
-        relations_label_layout.addWidget(relations_label)
-        relations_label_layout.addStretch()
-        layout.addLayout(relations_label_layout)
-
+        # === LISTE DES RELATIONS ===
         self.relations_list = QtWidgets.QListWidget()
         self.relations_list.setMaximumHeight(200)
         self.relations_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -188,70 +180,133 @@ class RelationsConfig(QtWidgets.QWidget):
                 border: 1px solid #d0d0d0;
                 border-radius: 4px;
                 padding: 5px;
-                color: black;
             }
             QListWidget::item {
                 padding: 6px;
                 border-radius: 3px;
                 margin: 2px 0px;
+                color: black;
             }
             QListWidget::item:selected {
-                background-color: #dcdcdc;
+                background-color: #e0e0e0;
+                color: black;
+                border: 1px solid #999;
             }
             QListWidget::item:hover {
-                background-color: #eaeaea;
+                background-color: #ffffff;
+                color: black;
             }
         """)
         layout.addWidget(self.relations_list)
 
-        # Boutons d’action
+        # === BOUTONS D'ACTION ===
         buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(8)
 
         button_style = """
             QPushButton {
-                background-color: #f2f2f2;
+                background-color: #e8e8e8;
                 color: black;
                 border: 1px solid #ccc;
                 border-radius: 4px;
                 padding: 6px 12px;
+                font-weight: bold;
             }
-            QPushButton:hover {
-                background-color: #e0e0e0;
+            QPushButton:hover:!pressed {
+                background-color: #ffffff;
+                color: black;
+                border: 1px solid #666;
             }
             QPushButton:pressed {
                 background-color: #d0d0d0;
             }
+            QPushButton:disabled {
+                background-color: #d5d5d5;
+                color: #888888;
+                border: 1px solid #bbb;
+            }
         """
 
-        self.add_button = QtWidgets.QPushButton("Nouvelle relation")
+        self.add_button = QtWidgets.QPushButton("➕ Nouvelle relation")
         self.add_button.setStyleSheet(button_style)
-        self.add_button.setMaximumWidth(150)
+        self.add_button.setMaximumWidth(160)
         self.add_button.clicked.connect(self._on_add_new_relation)
+        self.add_button.setEnabled(False)
         buttons_layout.addWidget(self.add_button)
 
-        self.edit_button = QtWidgets.QPushButton("Modifier")
+        self.edit_button = QtWidgets.QPushButton("✏️ Modifier")
         self.edit_button.setStyleSheet(button_style)
-        self.edit_button.setMaximumWidth(100)
+        self.edit_button.setMaximumWidth(110)
         self.edit_button.clicked.connect(self._on_edit)
+        self.edit_button.setEnabled(False)
         buttons_layout.addWidget(self.edit_button)
 
-        self.remove_button = QtWidgets.QPushButton("Supprimer")
+        self.remove_button = QtWidgets.QPushButton("🗑️ Supprimer")
         self.remove_button.setStyleSheet(button_style)
-        self.remove_button.setMaximumWidth(100)
+        self.remove_button.setMaximumWidth(110)
         self.remove_button.clicked.connect(self._on_remove)
+        self.remove_button.setEnabled(False)
         buttons_layout.addWidget(self.remove_button)
 
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
+        layout.addStretch()
+
+    def _get_filter_button_style(self):
+        """Style pour les boutons de filtrage - gris clair avec texte noir."""
+        return """
+            QPushButton {
+                background-color: #e8e8e8;
+                color: black;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-size: 10px;
+                font-weight: normal;
+            }
+            QPushButton:checked {
+                background-color: #b3d9ff;
+                color: black;
+                border: 1px solid #0066cc;
+                font-weight: bold;
+            }
+            QPushButton:hover:!pressed {
+                background-color: #ffffff;
+                color: black;
+                border: 1px solid #666;
+            }
+            QPushButton:pressed {
+                background-color: #c0c0c0;
+            }
+        """
+
+    def _on_filter_hierarchy(self):
+        """Toggle affichage relations hiérarchiques."""
+        self.show_hierarchy = self.hierarchy_btn.isChecked()
+        self._refresh_relations_list()
+
+    def _on_filter_dependencies(self):
+        """Toggle affichage relations de dépendances."""
+        self.show_dependencies = self.dependencies_btn.isChecked()
+        self._refresh_relations_list()
+
+    def _refresh_relations_list(self):
+        """Rafraîchit la liste avec les filtres appliqués."""
+        if hasattr(self.parent_widget, 'current_selected_label_uid') and self.parent_widget.current_selected_label_uid:
+            self._update_relations_list(self.parent_widget.current_selected_label_uid)
 
     def _on_relation_selected(self, current):
         """Gère la sélection d'une relation pour afficher source/target."""
         if not current:
-            self.target_label.setText("—")
+            self.target_label.clear()
+            self.edit_button.setEnabled(False)
+            self.remove_button.setEnabled(False)
             return
         
         rel = current.data(Qt.UserRole)
         if not rel:
+            self.edit_button.setEnabled(False)
+            self.remove_button.setEnabled(False)
             return
         
         # Récupérer les infos source et target
@@ -261,44 +316,98 @@ class RelationsConfig(QtWidgets.QWidget):
         source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
         target_info = self.parent_widget.label_uid_to_info.get(target_uid, {})
         
-        source_name = source_info.get('name', source_info.get('label', 'Inconnu'))
-        target_name = target_info.get('name', target_info.get('label', 'Inconnu'))
+        source_name = source_info.get('name', source_info.get('label', ''))
+        target_name = target_info.get('name', target_info.get('label', ''))
         
         # Mettre à jour l'affichage
         self.source_label.setText(source_name)
         self.target_label.setText(target_name)
 
+        # Activer les boutons de modification et suppression
+        rel_category = rel.get('category', 'custom')
+        if rel_category == 'hierarchy':
+            self.edit_button.setEnabled(False)
+            self.remove_button.setEnabled(False)
+        else:
+            self.edit_button.setEnabled(True)
+            self.remove_button.setEnabled(True)
+
+    def _on_relation_selected(self, current):
+        """Gère la sélection d'une relation pour afficher source/target."""
+        if not current:
+            self.target_label.clear()
+            self.edit_button.setEnabled(False)
+            self.remove_button.setEnabled(False)
+            return
+        
+        rel = current.data(Qt.UserRole)
+        if not rel:
+            self.edit_button.setEnabled(False)
+            self.remove_button.setEnabled(False)
+            return
+        
+        # Récupérer les infos source et target
+        source_uid = rel.get('source')
+        target_uid = rel.get('target')
+        
+        source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
+        target_info = self.parent_widget.label_uid_to_info.get(target_uid, {})
+        
+        source_name = source_info.get('name', source_info.get('label', ''))
+        target_name = target_info.get('name', target_info.get('label', ''))
+        
+        # Mettre à jour l'affichage
+        self.source_label.setText(source_name)
+        self.target_label.setText(target_name)
+
+        # Activer les boutons de modification et suppression
+        rel_category = rel.get('category', 'custom')
+        if rel_category == 'hierarchy':
+            self.edit_button.setEnabled(False)
+            self.remove_button.setEnabled(False)
+        else:
+            self.edit_button.setEnabled(True)
+            self.remove_button.setEnabled(True)
+
     def update_current(self, source_uid):
         """Met à jour l'affichage pour le nœud source sélectionné."""
         self.relations_list.clear()
-        self.target_label.setText("—")
+        self.target_label.clear()
+        self.edit_button.setEnabled(False)
+        self.remove_button.setEnabled(False)
         
         if source_uid:
             source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
-            source_name = source_info.get('name', source_info.get('label', 'Inconnu'))
+            source_name = source_info.get('name', source_info.get('label', ''))
             self.source_label.setText(source_name)
             self._update_relations_list(source_uid)
+            
+            # Activer le bouton "Nouvelle relation" si au moins 2 nœuds existent
+            if len(self.parent_widget.label_uid_to_info) > 1:
+                self.add_button.setEnabled(True)
         else:
-            self.source_label.setText("Aucun sélectionné")
-            self.relations_list.clear()
+            self.source_label.clear()
+            self.add_button.setEnabled(False)
 
     def _get_node_name(self, uid):
         """Récupère le nom d'un nœud par son UID avec fallback robuste."""
         if not uid:
-            return None
+            return ""
         
         # Chercher dans label_uid_to_info
         info = self.parent_widget.label_uid_to_info.get(uid)
         if info:
-            return info.get('name') or info.get('label')
+            name = info.get('name') or info.get('label')
+            return name if name else ""
         
         # Fallback: chercher directement dans les nœuds
         all_nodes = self.parent_widget._get_all_nodes()
         node = next((n for n in all_nodes if n.get('uid') == uid), None)
         if node:
-            return node.get('label') or node.get('name')
+            name = node.get('label') or node.get('name')
+            return name if name else ""
         
-        return None
+        return ""
 
     def _on_edit(self):
         """Modifie une relation existante (change la target)."""
@@ -407,199 +516,221 @@ class RelationsConfig(QtWidgets.QWidget):
 
     def _update_relations_list(self, source_uid):
         """
-        Met à jour la liste des relations avec TOUTES les sources :
-        - Relations custom (outgoing/incoming_relations)
-        - Relations parsées (node['relations'])
-        - Hiérarchie (children/parents)
+        Met à jour la liste des relations avec TOUTES les sources.
+        CORRIGÉ: Les flèches pointent maintenant vers la SOURCE
         """
         self.relations_list.clear()
         if not source_uid:
             return
 
-        # Mapping Dgraph -> local
         dgraph_to_local = self.parent_widget._get_dgraph_to_local_mapping()
-
         all_nodes = self.parent_widget._get_all_nodes()
         node = next((n for n in all_nodes if n['uid'] == source_uid), None)
         if not node:
             return
 
-        # Compteur pour debug
         relations_added = {'custom': 0, 'parsed': 0, 'hierarchy': 0}
 
-        # === 1. Relations sortantes CUSTOM (outgoing_relations) ===
-        for r in node.get('outgoing_relations', []):
-            target_uid = r['target_uid']
+        # === 1. Relations sortantes CUSTOM ===
+        # CHANGEMENT: source ← target (la flèche pointe vers source_uid)
+        if self.show_dependencies:
+            for r in node.get('outgoing_relations', []):
+                target_uid = r['target_uid']
 
-            # Skip UIDs temporaires non résolus
-            if target_uid.startswith('temp_'):
-                logger.debug(f"Skip UID temporaire: {target_uid}")
-                continue
-            
-            # Mapper si hex Dgraph
-            if target_uid.startswith('0x') and len(target_uid) == 6:
-                target_uid = dgraph_to_local.get(target_uid, target_uid)
+                if target_uid.startswith('temp_'):
+                    continue
+                
+                if target_uid.startswith('0x') and len(target_uid) == 6:
+                    target_uid = dgraph_to_local.get(target_uid, target_uid)
 
-            target_name = self._get_node_name(target_uid)
-            if not target_name:
-                target_name = r.get('target_name', 'Unknown')
-
-            rel_type = r.get('relation_type', 'relation')
-            category = r.get('category', 'custom')
-
-            # Source name
-            source_name = self._get_node_name(source_uid) or 'Source'
-
-            # Affichage selon la catégorie
-            if category == 'parsed':
-                display = f"{source_name} →({rel_type})→ {target_name} [CODE]"
-                color = QtGui.QColor("#E74C3C")  # Rouge pour code
-            else:
-                display = f"{source_name} →({rel_type})→ {target_name}"
-                color = QtGui.QColor("#2196F3")  # Bleu pour custom
-
-            item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, {
-                "category": category,
-                "direction": "out",
-                "source": source_uid,
-                "target": r['target_uid'],
-                "type": rel_type
-            })
-            item.setForeground(color)
-            self.relations_list.addItem(item)
-            relations_added['custom' if category == 'custom' else 'parsed'] += 1
-
-        # === 2. Relations PARSÉES du dictionnaire 'relations' ===
-        # NOUVEAU : Traiter les relations brutes du parser
-        parsed_relations = node.get('relations', {})
-        if parsed_relations:
-            for rel_type, rel_list in parsed_relations.items():
-                for rel in rel_list:
-                    target_name = rel.get('target', '')
+                target_name = self._get_node_name(target_uid)
+                if not target_name:
+                    target_name = r.get('target_name', '')
                     if not target_name:
                         continue
+
+                rel_type = r.get('relation_type', 'relation')
+                category = r.get('category', 'custom')
+
+                source_name = self._get_node_name(source_uid)
+                if not source_name:
+                    continue
+
+                # CHANGEMENT: Inversion de la flèche
+                if category == 'parsed':
+                    display = f"{target_name} →({rel_type})→ {source_name} [CODE]"
+                else:
+                    display = f"{target_name} →({rel_type})→ {source_name}"
+
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, {
+                    "category": category,
+                    "direction": "out",
+                    "source": source_uid,  # source_uid EST la vraie source
+                    "target": r['target_uid'],  # target est d'où vient la relation
+                    "type": rel_type
+                })
+                item.setForeground(QtGui.QColor("#2196F3"))
+                self.relations_list.addItem(item)
+                relations_added['custom' if category == 'custom' else 'parsed'] += 1
+
+        # === 2. Relations PARSÉES du dictionnaire 'relations' ===
+        if self.show_dependencies:
+            parsed_relations = node.get('relations', {})
+            if parsed_relations:
+                for rel_type, rel_list in parsed_relations.items():
+                    for rel in rel_list:
+                        target_name = rel.get('target', '')
+                        if not target_name:
+                            continue
+                        
+                        normalized = normalize_node_name(target_name)
+                        target_uid = None
+
+                        if normalized:
+                            target_uid = self.parent_widget._find_label_uid_by_name(normalized)
+
+                        if not target_uid or target_uid.startswith('unresolved_'):
+                            continue
+
+                        source_name = self._get_node_name(source_uid) or node.get('label', '')
+                        if not source_name:
+                            continue
+
+                        line_info = f" (L{rel.get('line', '?')})" if rel.get('line') else ""
+
+                        # CHANGEMENT: Inversion de la flèche
+                        display = f"{target_name} →({rel_type})→ {source_name}{line_info} [PARSED]"
+
+                        item = QListWidgetItem(display)
+                        item.setData(Qt.UserRole, {
+                            "category": "parsed_raw",
+                            "direction": "out",
+                            "source": source_uid,
+                            "target": target_uid,
+                            "target_name": target_name,
+                            "type": rel_type,
+                            "line": rel.get('line', 0)
+                        })
+                        item.setForeground(QtGui.QColor("#FF9800"))
+                        self.relations_list.addItem(item)
+                        relations_added['parsed'] += 1
+
+        # === 3. Relations entrantes CUSTOM ===
+        # CHANGEMENT: target ← source (la flèche pointe vers source_uid qui est la cible ici)
+        if self.show_dependencies:
+            for r in node.get('incoming_relations', []):
+                source_uid_rel = r['source_uid']
+
+                if source_uid_rel.startswith('temp_'):
+                    continue
+                
+                if source_uid_rel.startswith('0x') and len(source_uid_rel) == 6:
+                    source_uid_rel = dgraph_to_local.get(source_uid_rel, source_uid_rel)
+
+                source_name = self._get_node_name(source_uid_rel)
+                if not source_name:
+                    source_name = r.get('source_name', '')
+                    if not source_name:
+                        continue
+
+                rel_type = r.get('relation_type', 'relation')
+                category = r.get('category', 'custom')
+                target_name = self._get_node_name(source_uid)
+                if not target_name:
+                    continue
+
+                # CHANGEMENT: Inversion de la flèche
+                if category == 'parsed':
+                    display = f"{target_name} ←({rel_type})← {source_name} [CODE IN]"
+                else:
+                    display = f"{target_name} ←({rel_type})← {source_name}"
+
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, {
+                    "category": category,
+                    "direction": "in",
+                    "source": r['source_uid'],
+                    "target": source_uid,
+                    "type": rel_type
+                })
+                item.setForeground(QtGui.QColor("#4CAF50"))
+                self.relations_list.addItem(item)
+                relations_added['custom' if category == 'custom' else 'parsed'] += 1
+
+        # === 4. Hiérarchie: Enfants ===
+        if self.show_hierarchy:
+            children = node.get('children', [])
+            if children:
+                for child in children:
+                    child_uid = child.get('uid')
+                    if not child_uid:
+                        continue
+
+                    child_name = child.get('label') or child.get('name')
+                    if not child_name:
+                        continue
                     
-                    # Normaliser et chercher l'UID
-                    normalized = normalize_node_name(target_name)
-                    target_uid = None
+                    source_name = self._get_node_name(source_uid)
+                    if not source_name:
+                        source_name = node.get('label', node.get('name', ''))
 
-                    if normalized:
-                        target_uid = self.parent_widget._find_label_uid_by_name(normalized)
-
-                    # Si pas trouvé, utiliser le nom brut
-                    if not target_uid:
-                        target_uid = f"unresolved_{normalized or target_name}"
-
-                    source_name = self._get_node_name(source_uid) or node.get('label', 'Source')
-
-                    # Affichage spécial pour relations parsées
-                    line_info = f" (L{rel.get('line', '?')})" if rel.get('line') else ""
-                    display = f"{source_name} →({rel_type})→ {target_name}{line_info} [PARSED]"
+                    if not source_name:
+                        continue
+                    
+                    # CHANGEMENT: child pointe vers parent
+                    display = f"{child_name} →(child)→ {source_name}"
 
                     item = QListWidgetItem(display)
                     item.setData(Qt.UserRole, {
-                        "category": "parsed_raw",
+                        "category": "hierarchy",
                         "direction": "out",
                         "source": source_uid,
-                        "target": target_uid,
-                        "target_name": target_name,
-                        "type": rel_type,
-                        "line": rel.get('line', 0)
+                        "target": child_uid,
+                        "type": "child"
                     })
-                    item.setForeground(QtGui.QColor("#E67E22"))  # Orange pour parsed brut
+                    item.setForeground(QtGui.QColor("#9C27B0"))
                     self.relations_list.addItem(item)
-                    relations_added['parsed'] += 1
-
-        # === 3. Relations entrantes CUSTOM (incoming_relations) ===
-        for r in node.get('incoming_relations', []):
-            source_uid_rel = r['source_uid']
-
-            if source_uid_rel.startswith('temp_'):
-                continue
-            
-            if source_uid_rel.startswith('0x') and len(source_uid_rel) == 6:
-                source_uid_rel = dgraph_to_local.get(source_uid_rel, source_uid_rel)
-
-            source_name = self._get_node_name(source_uid_rel)
-            if not source_name:
-                source_name = r.get('source_name', 'Unknown')
-
-            rel_type = r.get('relation_type', 'relation')
-            category = r.get('category', 'custom')
-            target_name = self._get_node_name(source_uid) or 'Target'
-
-            if category == 'parsed':
-                display = f"{source_name} →({rel_type})→ {target_name} [CODE IN]"
-                color = QtGui.QColor("#C0392B")  # Rouge foncé
-            else:
-                display = f"{source_name} →({rel_type})→ {target_name}"
-                color = QtGui.QColor("#FF9800")  # Orange
-
-            item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, {
-                "category": category,
-                "direction": "in",
-                "source": r['source_uid'],
-                "target": source_uid,
-                "type": rel_type
-            })
-            item.setForeground(color)
-            self.relations_list.addItem(item)
-            relations_added['custom' if category == 'custom' else 'parsed'] += 1
-
-        # === 4. Hiérarchie: Enfants ===
-        children = node.get('children', [])
-        if children:
-            for child in children:
-                child_uid = child['uid']
-                child_name = child.get('label') or child.get('name')
-
-                if not child_name:
-                    continue
-                
-                source_name = self._get_node_name(source_uid) or 'Source'
-                display = f"{source_name} →(child)→ {child_name}"
-
-                item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, {
-                    "category": "hierarchy",
-                    "direction": "out",
-                    "source": source_uid,
-                    "target": child_uid,
-                    "type": "child"
-                })
-                item.setForeground(QtGui.QColor("#4CAF50"))  # Vert
-                self.relations_list.addItem(item)
-                relations_added['hierarchy'] += 1
+                    relations_added['hierarchy'] += 1
 
         # === 5. Hiérarchie: Parents ===
-        parents = node.get('parents', [])
-        if parents:
-            for p_uid in parents:
-                if p_uid.startswith('0x') and len(p_uid) == 6:
-                    p_uid_mapped = dgraph_to_local.get(p_uid, p_uid)
-                else:
-                    p_uid_mapped = p_uid
+        if self.show_hierarchy:
+            parents = node.get('parents', [])
+            if parents:
+                for p_uid in parents:
+                    if not p_uid:
+                        continue
 
-                parent_name = self._get_node_name(p_uid_mapped)
-                if not parent_name:
-                    continue
-                
-                source_name = self._get_node_name(source_uid) or 'Current'
-                display = f"{parent_name} →(parent)→ {source_name}"
+                    if p_uid.startswith('0x') and len(p_uid) == 6:
+                        p_uid_mapped = dgraph_to_local.get(p_uid, p_uid)
+                    else:
+                        p_uid_mapped = p_uid
 
-                item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, {
-                    "category": "hierarchy",
-                    "direction": "in",
-                    "source": p_uid,
-                    "target": source_uid,
-                    "type": "parent"
-                })
-                item.setForeground(QtGui.QColor("#9C27B0"))  # Violet
-                self.relations_list.addItem(item)
-                relations_added['hierarchy'] += 1
+                    parent_name = self._get_node_name(p_uid_mapped)
+                    if not parent_name:
+                        continue
+                    
+                    source_name = self._get_node_name(source_uid)
+                    if not source_name:
+                        source_name = node.get('label', node.get('name', ''))
+
+                    if not source_name:
+                        continue
+                    
+                    # CHANGEMENT: source pointe vers parent
+                    display = f"{source_name} →(parent)→ {parent_name}"
+
+                    item = QListWidgetItem(display)
+                    item.setData(Qt.UserRole, {
+                        "category": "hierarchy",
+                        "direction": "in",
+                        "source": p_uid,
+                        "target": source_uid,
+                        "type": "parent"
+                    })
+                    item.setForeground(QtGui.QColor("#9C27B0"))
+                    self.relations_list.addItem(item)
+                    relations_added['hierarchy'] += 1
 
         # Log pour debug
         total = sum(relations_added.values())
@@ -610,14 +741,9 @@ class RelationsConfig(QtWidgets.QWidget):
                     f"(Total: {total})")
 
         if total == 0:
-            logger.warning(f"⚠️ Aucune relation trouvée pour {source_uid}")
-            # Debug: afficher la structure du nœud
-            logger.debug(f"Nœud: {node.get('label')}, Type: {node.get('type')}")
-            logger.debug(f"  outgoing_relations: {len(node.get('outgoing_relations', []))}")
-            logger.debug(f"  incoming_relations: {len(node.get('incoming_relations', []))}")
-            logger.debug(f"  relations dict: {list(node.get('relations', {}).keys())}")
-            logger.debug(f"  children: {len(node.get('children', []))}")
-            logger.debug(f"  parents: {len(node.get('parents', []))}")
+            no_rel_item = QListWidgetItem("(Aucune relation)")
+            no_rel_item.setForeground(QtGui.QColor("#999"))
+            self.relations_list.addItem(no_rel_item)
 
     def _on_add_new_relation(self):
         """Ajoute une nouvelle relation custom."""
@@ -680,7 +806,7 @@ class RelationsConfig(QtWidgets.QWidget):
                 "Type de relation:",
                 rel_types,
                 0,
-                True  # Editable
+                True
             )
             
             if not ok2 or not rel_type:
@@ -738,8 +864,8 @@ class RelationsGraphWidget(QtWidgets.QWidget):
 
     def update_graph(self, central_uid=None):
         """
-        Updates the graph for the selected central node.
-        Improved version with better Dgraph UID mapping and fallback handling.
+        Met à jour le graphe pour le nœud central sélectionné.
+        Version corrigée : affiche toujours le NOM du nœud central au lieu de l'UID.
         """
         if not central_uid:
             self._draw_empty_graph()
@@ -747,44 +873,50 @@ class RelationsGraphWidget(QtWidgets.QWidget):
             self.legend_label.setText("Aucun nœud sélectionné")
             return
 
-        # Try to get the node info (local first, then Dgraph)
+        # 🔸 1. Récupérer les infos du nœud central
         central_info = self.parent_widget.label_uid_to_info.get(central_uid)
 
         if not central_info:
-            # Fallback: try Dgraph query
+            # Fallback : essayer via Dgraph
             central_info = self._query_node_info_from_dgraph(central_uid)
 
             if central_info:
-                # Cache it locally for next time
+                # Mettre en cache local pour réutilisation
                 self.parent_widget.label_uid_to_info[central_uid] = central_info
             else:
-                # If still not found, use minimal info
+                # Si toujours rien, utiliser fallback minimal
                 logger.warning(f"Nœud {central_uid} introuvable, utilisation de fallback")
                 central_info = {
-                    'name': central_uid if len(central_uid) < 20 else central_uid[:17] + '...',
-                    'cluster': 'unknown',
+                    'name': f"Nœud {central_uid[:10]}..." if len(central_uid) > 10 else central_uid,
+                    'label': f"Nœud {central_uid[:10]}..." if len(central_uid) > 10 else central_uid,
+                    'cluster': 'inconnu',
                     'type': 'unknown'
                 }
-                # Don't cache fallback info
 
-        central_name = central_info.get('name', central_uid)
+        # 🔸 2. Déterminer le nom à afficher
+        central_name = (
+            central_info.get('name') 
+            or central_info.get('label') 
+            or self.parent_widget.name_to_uid.get(central_uid) 
+            or f"Nœud {central_uid[:10]}..." if len(central_uid) > 10 else central_uid
+        )
 
-        # Collect related items
         related_items = self._collect_related_items(central_uid, max_depth=1, max_nodes=50)
 
         if not related_items:
-            self.title_label.setText(f"Graphe: {central_name}")
+            self.title_label.setText(f"Graphe des relations : {central_name}")
             self.legend_label.setText("Aucune relation trouvée")
             self._draw_empty_graph_with_message(
-                f"Le nœud '{central_name}' n'a aucune relation"
+                f"Le nœud « {central_name} » n'a aucune relation"
             )
             logger.info(f"Aucune relation pour {central_name}")
             return
 
-        # Display the graph
-        logger.info(f"Affichage graphe pour {central_name}: {len(related_items)} relations")
-        self.title_label.setText(f"Graphe: {central_name}")
+        # 🔸 4. Affichage du graphe
+        logger.info(f"Affichage du graphe pour {central_name}: {len(related_items)} relations")
+        self.title_label.setText(f"Graphe des relations : {central_name}")
         self._draw_graph(central_uid, central_name, related_items)
+
 
     def _query_node_info_from_dgraph(self, central_uid):
         """
@@ -1149,8 +1281,7 @@ class RelationsGraphWidget(QtWidgets.QWidget):
 
     def _draw_graph(self, central_uid, central_name, related_items):
         """
-        Dessine le graphe avec NetworkX - Version améliorée avec tous types de relations
-        Utilise les UIDs comme identifiants de nœuds pour éviter les doublons de noms
+        Dessine le graphe avec NetworkX - Version corrigée avec flèches pointant vers la source
         """
         self.figure.clear()
         G = nx.DiGraph()
@@ -1182,15 +1313,16 @@ class RelationsGraphWidget(QtWidgets.QWidget):
             G.add_node(rel_uid, node_type='related', label=rel_name)
             seen_nodes.add(rel_uid)
 
-            # Ajouter arête selon direction
+            # CHANGEMENT CRITIQUE: Inverser le sens des arêtes
             if direction == 'in':
-                # Relation entrante : de rel_uid vers central
+                # Relation entrante : central ← rel_uid devient rel_uid → central
                 G.add_edge(rel_uid, central_uid, type=rel_type)
                 edge_labels[(rel_uid, central_uid)] = rel_type[:6]
             else:
-                # Relation sortante ou hiérarchique : de central vers rel_uid
-                G.add_edge(central_uid, rel_uid, type=rel_type)
-                edge_labels[(central_uid, rel_uid)] = rel_type[:6]
+                # Relation sortante : central → rel_uid devient rel_uid → central
+                # CHANGEMENT: Inverser pour que la flèche pointe vers central
+                G.add_edge(rel_uid, central_uid, type=rel_type)
+                edge_labels[(rel_uid, central_uid)] = rel_type[:6]
 
             # Couleur selon type
             edge_colors.append(self._get_color_for_type(rel_type))

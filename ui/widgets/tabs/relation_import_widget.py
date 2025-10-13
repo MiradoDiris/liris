@@ -4,11 +4,11 @@ import re
 import ast
 import json
 import time
-from typing import List, Dict, Set, Tuple, Any
+from typing import List, Dict, Set, Any
 from collections import defaultdict
 from threading import Thread
 
-from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtGui import QColor
 
@@ -748,23 +748,6 @@ class RelationImportWidget(QtWidgets.QWidget):
         
         toolbar_layout.addStretch()
     
-        # Boutons TOUJOURS VISIBLES
-        self.analyze_btn = QtWidgets.QPushButton(qta.icon('fa5s.sitemap', color='white'), " Analyser Projet")
-        self.analyze_btn.setMinimumHeight(32)
-        self.analyze_btn.setMinimumWidth(140)
-        self.analyze_btn.setToolTip("Analyser tous les fichiers du projet")
-        self.analyze_btn.setCursor(QtGui.QCursor(Qt.PointingHandCursor))
-        self.analyze_btn.clicked.connect(self._start_dependency_analysis)
-        toolbar_layout.addWidget(self.analyze_btn)
-    
-        self.analyze_selection_btn = QtWidgets.QPushButton(qta.icon('fa5s.file-code', color='white'), " Analyser Sélection")
-        self.analyze_selection_btn.setMinimumHeight(32)
-        self.analyze_selection_btn.setMinimumWidth(150)
-        self.analyze_selection_btn.setToolTip("Analyser la sélection")
-        self.analyze_selection_btn.setCursor(QtGui.QCursor(Qt.PointingHandCursor))
-        self.analyze_selection_btn.clicked.connect(self._start_selection_analysis)
-        toolbar_layout.addWidget(self.analyze_selection_btn)
-    
         center_layout.addWidget(toolbar)
     
         # Canvas du graphe
@@ -938,40 +921,8 @@ class RelationImportWidget(QtWidgets.QWidget):
             recurse(root.child(i))
         return file_items
     
-    def _start_selection_analysis(self):
-        """Lance l'analyse de la sélection dans l'arbre."""
-        items = self.tree_widget.selectedItems()
-        if not items:
-            self._update_status("Sélectionnez un élément")
-            return
-        
-        item = items[0]
-        file_items = self._get_subtree_file_items(item)
-        
-        if not file_items:
-            self._update_status("Aucun fichier trouvé")
-            return
-        
-        self.analyze_selection_btn.setEnabled(False)
-        self.analyze_btn.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat(f"Analyse de {len(file_items)} fichier(s)...")
-        self._update_status(f"Analyse en cours...")
-        
-        if self.dependency_thread and self.dependency_thread.isRunning():
-            self.dependency_thread.requestInterruption()
-            self.dependency_thread.wait()
-
-        self.dependency_thread = DependencyFinderWorker(file_items, self.dgraph_connector, self)
-        self.dependency_thread.progress_updated.connect(self._update_progress_bar)
-        self.dependency_thread.finished.connect(self._on_selection_analysis_finished)
-        self.dependency_thread.error.connect(self._on_analysis_error)
-        self.dependency_thread.start()
-        
     def _on_selection_analysis_finished(self, dependency_map: Dict[str, Dict[str, List[Dict]]]):
         """Traite les résultats de l'analyse de sélection."""
-        self.analyze_selection_btn.setEnabled(True)
-        self.analyze_btn.setEnabled(True)
         self.progress_bar.setValue(100)
         self.progress_bar.setFormat("Analyse terminée ✓")
         
@@ -1362,38 +1313,8 @@ class RelationImportWidget(QtWidgets.QWidget):
 
         self.canvas.draw()
     
-    def _start_dependency_analysis(self):
-        """Lance l'analyse des dépendances pour tout le projet."""
-        if not self.current_project_data:
-            self._update_status("Sélectionnez un projet")
-            return
-
-        file_items = self._collect_all_file_items()
-        
-        if not file_items:
-            self._update_status("Aucun fichier trouvé")
-            return
-            
-        self.analyze_btn.setEnabled(False)
-        self.analyze_selection_btn.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat(f"Analyse de {len(file_items)} fichier(s)...")
-        self._update_status(f"Analyse en cours...")
-        
-        if self.dependency_thread and self.dependency_thread.isRunning():
-            self.dependency_thread.requestInterruption()
-            self.dependency_thread.wait()
-
-        self.dependency_thread = DependencyFinderWorker(file_items, self.dgraph_connector, self)
-        self.dependency_thread.progress_updated.connect(self._update_progress_bar)
-        self.dependency_thread.finished.connect(self._on_project_analysis_finished)
-        self.dependency_thread.error.connect(self._on_analysis_error)
-        self.dependency_thread.start()
-        
     def _on_project_analysis_finished(self, dependency_map: Dict[str, Dict[str, List[Dict]]]):
         """Traite les résultats une fois l'analyse du projet terminée."""
-        self.analyze_btn.setEnabled(True)
-        self.analyze_selection_btn.setEnabled(True)
         self.progress_bar.setValue(100)
         self.progress_bar.setFormat("Analyse terminée ✓")
         
@@ -1417,8 +1338,6 @@ class RelationImportWidget(QtWidgets.QWidget):
         
     def _on_analysis_error(self, message: str):
         """Gère les erreurs du thread."""
-        self.analyze_btn.setEnabled(True)
-        self.analyze_selection_btn.setEnabled(True)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("Erreur")
         self._update_status(f"Erreur: {message}")
