@@ -1598,14 +1598,40 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             logger.error(f"Erreur lors de l'initialisation : {str(e)}")
 
     def _init_sqlite_db(self):
-        """Initialise la base de données SQLite avec schéma aligné à Dgraph."""
+        """Initialise ou met à jour la base SQLite avec schéma aligné à Dgraph."""
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
-            # Table des Workspaces (correspond à type Workspace en Dgraph)
+
+            # === 1️⃣ Vérifier si la table relations existe déjà ===
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='relations';
+            """)
+            table_exists = cursor.fetchone() is not None
+
+            if table_exists:
+                cursor.execute("PRAGMA table_info(relations);")
+                existing_cols = [row[1] for row in cursor.fetchall()]
+
+                # Si l'ancienne structure est détectée (pas de colonne 'uid' ou noms différents)
+                if 'uid' not in existing_cols or 'relationType' not in existing_cols:
+                    logger.warning("Structure obsolète détectée pour la table 'relations'. Reconstruction en cours...")
+
+                    # Sauvegarde des anciennes données minimales (si possible)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS relations_backup AS
+                        SELECT * FROM relations;
+                    """)
+
+                    # Supprimer l'ancienne table
+                    cursor.execute("DROP TABLE relations;")
+
+            # === 2️⃣ Création / recréation des tables ===
+
+            # Table des Workspaces
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS workspaces (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1620,8 +1646,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
-            # Table ClusterManagement (correspond à type ClusterManagement en Dgraph)
+
+            # Table ClusterManagement
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS cluster_management (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1633,8 +1659,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     FOREIGN KEY (workspace_uid) REFERENCES workspaces(uid)
                 )
             """)
-            
-            # Table des Clusters (correspond à type Cluster en Dgraph)
+
+            # Table Clusters
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS clusters (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1655,8 +1681,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     FOREIGN KEY (cluster_management_uid) REFERENCES cluster_management(uid)
                 )
             """)
-            
-            # Table des Labels (correspond à type Label en Dgraph)
+
+            # Table Labels
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS labels (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1681,8 +1707,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     FOREIGN KEY (parent_uid) REFERENCES labels(uid)
                 )
             """)
-            
-            # Table des Relations (correspond à type Relation implicite en Dgraph)
+
+            # 🧩 Table Relations corrigée (structure alignée)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS relations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1696,8 +1722,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     FOREIGN KEY (target_uid) REFERENCES labels(uid)
                 )
             """)
-            
-            # Table des Functions (correspond à type Function en Dgraph)
+
+            # Table Functions
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS functions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1709,8 +1735,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     FOREIGN KEY (label_uid) REFERENCES labels(uid)
                 )
             """)
-            
-            # Table des Imports (relations de type import)
+
+            # Table Imports
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS imports (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1722,8 +1748,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     FOREIGN KEY (target_uid) REFERENCES labels(uid)
                 )
             """)
-            
-            # Créer des index pour améliorer les performances
+
+            # === 3️⃣ Création d’index ===
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clusters_cm ON clusters(cluster_management_uid)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_labels_cluster ON labels(cluster_uid)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_labels_parent ON labels(parent_uid)")
@@ -1731,13 +1757,14 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_uid)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_imports_source ON imports(source_uid)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_imports_target ON imports(target_uid)")
-            
+
             conn.commit()
             conn.close()
-            logger.info(f"Base de données SQLite initialisée : {self.db_path}")
-            
+
+            logger.info(f"Base de données SQLite initialisée et synchronisée : {self.db_path}")
+
         except Exception as e:
-            logger.error(f"Erreur lors de l'initialisation SQLite : {e}")
+            logger.error(f"Erreur lors de l'initialisation ou mise à jour SQLite : {e}")
 
     def _create_workspace_in_sqlite(self, project_data):
         """CRUD Create: Crée un nouveau workspace en évitant les doublons via uid unique."""
@@ -5481,7 +5508,40 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             success_msg += f"🔗 {validation_stats['total_parsed_in_dict']} relations détectées\n"
             success_msg += f"✅ {validation_stats['total_parsed_in_outgoing']} relations intégrées"
             
-            QtWidgets.QMessageBox.information(self, "Succès", success_msg)
+            QtWidgets.QMessageBox.information(
+                self,
+                "Scan terminé",
+                f"Scan complété!\n\n"
+                f"📊 {files_processed} fichiers traités\n"
+                f"📝 {validation_stats['total_parsed_in_dict']} relations détectées\n"
+                f"✓ {validation_stats['total_parsed_in_outgoing']} relations intégrées\n\n"
+                f"Sauvegarde en cours dans SQLite et Dgraph..."
+            )
+            
+            # AJOUT CRITIQUE: Sauvegarder les résultats du scan
+            logger.info("\n" + "="*80)
+            logger.info("🔄 Démarrage de la sauvegarde des résultats du scan...")
+            logger.info("="*80)
+            
+            save_success = self._save_scan_results_to_storage()
+            
+            if save_success:
+                logger.info("✅ Sauvegarde complète réussie!")
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Sauvegarde réussie",
+                    "Tous les résultats du scan (classes, fonctions, variables, relations)\n"
+                    "ont été sauvegardés dans SQLite et Dgraph!"
+                )
+            else:
+                logger.error("❌ Échec de la sauvegarde")
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Avertissement",
+                    "Le scan a réussi mais la sauvegarde a échoué.\n"
+                    "Les données sont en mémoire mais ne sont pas persistées.\n\n"
+                    "Vérifiez que SQLite et Dgraph sont accessibles."
+                )
     
         except Exception as e:
             progress.close()
@@ -7153,6 +7213,424 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         # Étape 3 : Log statistiques
         total_relations = sum(len(n.get('outgoing_relations', [])) for n in all_nodes)
         logger.info(f"📊 Graphe complet: {len(all_nodes)} nœuds, {total_relations} relations")
+
+    def _save_scan_results_to_storage(self):
+        """
+        Sauvegarde les résultats du scan (classes, fonctions, variables, relations)
+        dans SQLite ET Dgraph.
+
+        À appeler après _on_browse_project() pour persister les nouveaux nœuds.
+        """
+        if not self.current_project_name or not self.current_project_profile_data:
+            logger.error("Aucun projet sélectionné pour la sauvegarde.")
+            return False
+
+        logger.info("=" * 80)
+        logger.info("💾 SAUVEGARDE DES RÉSULTATS DE SCAN")
+        logger.info("=" * 80)
+
+        try:
+            # ÉTAPE 1: Mettre à jour les structures en mémoire
+            logger.info("\n📝 Étape 1: Mise à jour des structures en mémoire...")
+            self._finalize_project_data_after_scan()
+
+            # ÉTAPE 2: Sauvegarder dans SQLite
+            logger.info("\n💾 Étape 2: Sauvegarde dans SQLite...")
+            sqlite_success = self._save_project_to_sqlite(self.current_project_profile_data)
+            if not sqlite_success:
+                logger.error("❌ Échec sauvegarde SQLite")
+                return False
+            logger.info("✅ Sauvegarde SQLite réussie")
+
+            # ÉTAPE 3: Générer et insérer mutations Dgraph
+            logger.info("\n🔄 Étape 3: Insertion dans Dgraph...")
+            mutations = self._transform_profile_to_dgraph_mutations()
+
+            if not mutations:
+                logger.error("❌ Aucune mutation générée")
+                return False
+
+            logger.info(f"📊 {len(mutations)} mutations à insérer")
+
+            dgraph_success = self.dgraph_connector.insert_mutations(mutations)
+            if not dgraph_success:
+                logger.error("❌ Échec insertion Dgraph")
+                return False
+
+            logger.info("✅ Insertion Dgraph réussie")
+
+            # ÉTAPE 4: Rafraîchir les données depuis Dgraph
+            logger.info("\n🔄 Étape 4: Rafraîchissement des données...")
+            self._load_project_profiles()  # Recharger depuis Dgraph
+            self._load_projects_from_sqlite()  # Recharger depuis SQLite
+
+            # ÉTAPE 5: Réafficher le projet dans l'UI
+            if self.current_project_name in self.project_profiles:
+                self.project_combo.setCurrentText(self.current_project_name)
+                self._on_project_selected(self.project_combo.currentIndex())
+
+            logger.info("\n" + "=" * 80)
+            logger.info("✅ SAUVEGARDE COMPLÈTE: Scan enregistré dans SQLite ET Dgraph")
+            logger.info("=" * 80 + "\n")
+
+            QtWidgets.QMessageBox.information(
+                self,
+                "Succès",
+                "Résultats du scan sauvegardés dans SQLite et Dgraph avec succès!"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Erreur sauvegarde: {e}")
+            import traceback
+            traceback.print_exc()
+
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Erreur lors de la sauvegarde: {str(e)}"
+            )
+            return False
+
+    def _finalize_project_data_after_scan(self):
+        """
+        Finalise les données du projet après le scan:
+        - Résout les UIDs temporaires
+        - Synchronise pending_relations
+        - Valide la cohérence
+        """
+        logger.info("Finalisation des données du projet...")
+
+        if not self.current_project_profile_data:
+            return
+
+        all_nodes = self._get_all_nodes()
+
+        # 1. Assurer que tous les nœuds ont des UIDs valides (pas temporaires)
+        logger.info("✓ Résolution des UIDs temporaires...")
+        uid_mapping = {}  # Mapping temp_uid -> real_uid
+
+        for node in all_nodes:
+            uid = node.get('uid')
+            if not uid or uid.startswith('temp_'):
+                # Générer un UID permanent
+                new_uid = str(uuid.uuid4())
+                if uid:
+                    uid_mapping[uid] = new_uid
+                node['uid'] = new_uid
+                logger.debug(f"  UID généré: {new_uid[:8]}... pour {node.get('label', 'unknown')}")
+
+        # 2. Mettre à jour les références d'UIDs dans les relations
+        logger.info("✓ Mise à jour des références aux UIDs...")
+        for node in all_nodes:
+            for rel in node.get('outgoing_relations', []):
+                old_target = rel.get('target_uid')
+                if old_target in uid_mapping:
+                    rel['target_uid'] = uid_mapping[old_target]
+                    logger.debug(f"  Relation mise à jour: {old_target} -> {uid_mapping[old_target]}")
+
+        # 3. Synchroniser pending_relations avec les relations actuelles
+        logger.info("✓ Synchronisation pending_relations...")
+        self.pending_relations.clear()
+
+        for node in all_nodes:
+            node_uid = node.get('uid')
+            if not node_uid:
+                continue
+            
+            relations_list = []
+            for rel in node.get('outgoing_relations', []):
+                relations_list.append({
+                    'target_uid': rel.get('target_uid'),
+                    'relation_type': rel.get('relation_type', 'relation')
+                })
+
+            if relations_list:
+                self.pending_relations[node_uid] = relations_list
+                logger.debug(f"  {len(relations_list)} relations pour {node.get('label', 'unknown')}")
+
+        # 4. Valider la cohérence
+        logger.info("✓ Validation de la cohérence...")
+        validation_stats = self._validate_parsed_relations()
+        logger.info(f"  Validation: {validation_stats['total_parsed_in_outgoing']} relations validées")
+
+        # 5. Construire le graphe complet
+        logger.info("✓ Construction du graphe complet...")
+        self._build_complete_relations_graph()
+
+        logger.info("Finalisation terminée ✓")
+
+    def _save_project_to_sqlite_after_scan(self, project_data):
+        """
+        MODIFIÉ: Sauvegarde complète du projet avec les classes/fonctions/variables
+        en tant que nœuds enfants dans SQLite (via CRUD).
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            project_uid = project_data.get('uid', str(uuid.uuid4()))
+            project_data['uid'] = project_uid
+
+            # 1. Upsert Workspace
+            logger.info(f"  📁 Sauvegarde workspace: {project_data.get('name')}")
+            cursor.execute("""
+                INSERT OR REPLACE INTO workspaces 
+                (uid, name, id_field, ownerId, description, files, fileContents, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                project_uid,
+                project_data.get('name', ''),
+                project_data.get('name', str(uuid.uuid4())),
+                'user1',
+                project_data.get('description', ''),
+                json.dumps(project_data.get('files', [])),
+                json.dumps(project_data.get('file_contents', {})),
+                datetime.now().isoformat()
+            ))
+
+            # 2. Upsert ClusterManagement
+            cluster_management_uid = f"cm_{project_uid}"
+            cursor.execute("""
+                INSERT OR REPLACE INTO cluster_management 
+                (uid, workspace_uid, lastUpdated, version)
+                VALUES (?, ?, ?, ?)
+            """, (
+                cluster_management_uid,
+                project_uid,
+                datetime.now().isoformat(),
+                '1.0'
+            ))
+
+            # 3. Upsert Clusters et Labels
+            ontology = project_data.get('turing_ontology', {})
+            clusters = ontology.get('clusters_detailed', [])
+
+            for cluster_data in clusters:
+                cluster_uid = cluster_data.get('uid', str(uuid.uuid4()))
+                cluster_data['uid'] = cluster_uid
+
+                logger.info(f"    📦 Sauvegarde cluster: {cluster_data.get('name')}")
+
+                # Upsert cluster
+                cursor.execute("""
+                    INSERT OR REPLACE INTO clusters 
+                    (uid, cluster_management_uid, name, id_field, userId, nodeType, 
+                     description, codeContent, files, fileContents, is_file_cluster, 
+                     createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    cluster_uid,
+                    cluster_management_uid,
+                    cluster_data.get('name', ''),
+                    cluster_data.get('uid', str(uuid.uuid4())),
+                    'user1',
+                    'cluster',
+                    cluster_data.get('description', ''),
+                    '',
+                    json.dumps(cluster_data.get('files', [])),
+                    json.dumps(cluster_data.get('file_contents', {})),
+                    1 if cluster_data.get('is_file_cluster') else 0,
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat()
+                ))
+
+                # Upsert labels et leurs enfants (classes/fonctions/variables)
+                root_labels = cluster_data.get('root_labels', [])
+                for root_label in root_labels:
+                    self._save_label_and_children_recursive(
+                        cursor, root_label, cluster_uid, None, 0
+                    )
+
+            # 4. Upsert Relations
+            logger.info(f"  🔗 Sauvegarde relations")
+            for source_uid, relations in self.pending_relations.items():
+                for rel in relations:
+                    rel_uid = f"rel_{str(uuid.uuid4())}"
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO relations 
+                        (uid, name, relationType, source_uid, target_uid, createdAt)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        rel_uid,
+                        f"{rel['relation_type']}_relation",
+                        rel['relation_type'],
+                        source_uid,
+                        rel.get('target_uid', ''),
+                        datetime.now().isoformat()
+                    ))
+
+            conn.commit()
+            conn.close()
+
+            logger.info("✅ Sauvegarde SQLite complète")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Erreur sauvegarde SQLite: {e}")
+            return False
+
+    def _save_label_and_children_recursive(self, cursor, label_data, cluster_uid, parent_uid, level):
+        """
+        MODIFIÉ: Sauvegarde récursive d'un label ET de ses enfants (y compris classes/fonctions/variables).
+        """
+        label_uid = label_data.get('uid', str(uuid.uuid4()))
+        label_data['uid'] = label_uid
+
+        # Sauvegarder le label lui-même
+        cursor.execute("""
+            INSERT OR REPLACE INTO labels 
+            (uid, cluster_uid, parent_uid, name, id_field, level, path, parentId, 
+             nodeType, category, description, codeContent, files, fileContents, 
+             createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            label_uid,
+            cluster_uid,
+            parent_uid,
+            label_data.get('label', ''),
+            label_data.get('id', label_uid),
+            level,
+            '',  # path
+            parent_uid,  # parentId
+            label_data.get('type', 'label'),
+            json.dumps(label_data.get('category', [])),
+            label_data.get('description', ''),
+            '',  # codeContent
+            json.dumps(label_data.get('files', [])),
+            json.dumps(label_data.get('file_contents', {})),
+            datetime.now().isoformat(),
+            datetime.now().isoformat()
+        ))
+
+        # NOUVEAU: Sauvegarder les classes du label
+        for cls in label_data.get('classes', []):
+            cls_uid = cls.get('uid', str(uuid.uuid4()))
+            cls['uid'] = cls_uid
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO labels 
+                (uid, cluster_uid, parent_uid, name, id_field, level, path, parentId, 
+                 nodeType, category, description, codeContent, files, fileContents, 
+                 createdAt, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cls_uid,
+                cluster_uid,
+                label_uid,
+                cls.get('name', ''),
+                cls.get('uid', cls_uid),
+                level + 1,
+                '',
+                label_uid,
+                'class',
+                json.dumps(['code_element', 'class']),
+                cls.get('description', ''),
+                '',
+                json.dumps(cls.get('files', [])),
+                json.dumps({}),
+                datetime.now().isoformat(),
+                datetime.now().isoformat()
+            ))
+
+            # Ajouter les relations de la classe
+            for rel in cls.get('outgoing_relations', []):
+                rel_uid = f"rel_{str(uuid.uuid4())}"
+                cursor.execute("""
+                    INSERT OR IGNORE INTO relations 
+                    (uid, name, relationType, source_uid, target_uid, createdAt)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    rel_uid,
+                    f"{rel['relation_type']}_relation",
+                    rel['relation_type'],
+                    cls_uid,
+                    rel.get('target_uid', ''),
+                    datetime.now().isoformat()
+                ))
+
+        # NOUVEAU: Sauvegarder les fonctions du label
+        for func in label_data.get('functions', []):
+            func_uid = func.get('uid', str(uuid.uuid4()))
+            func['uid'] = func_uid
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO labels 
+                (uid, cluster_uid, parent_uid, name, id_field, level, path, parentId, 
+                 nodeType, category, description, codeContent, files, fileContents, 
+                 createdAt, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                func_uid,
+                cluster_uid,
+                label_uid,
+                func.get('name', ''),
+                func.get('uid', func_uid),
+                level + 1,
+                '',
+                label_uid,
+                func.get('type', 'function'),
+                json.dumps(['code_element', 'function']),
+                func.get('description', ''),
+                '',
+                json.dumps(func.get('files', [])),
+                json.dumps({}),
+                datetime.now().isoformat(),
+                datetime.now().isoformat()
+            ))
+
+            # Ajouter les relations de la fonction
+            for rel in func.get('outgoing_relations', []):
+                rel_uid = f"rel_{str(uuid.uuid4())}"
+                cursor.execute("""
+                    INSERT OR IGNORE INTO relations 
+                    (uid, name, relationType, source_uid, target_uid, createdAt)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    rel_uid,
+                    f"{rel['relation_type']}_relation",
+                    rel['relation_type'],
+                    func_uid,
+                    rel.get('target_uid', ''),
+                    datetime.now().isoformat()
+                ))
+
+        # NOUVEAU: Sauvegarder les variables du label
+        for var in label_data.get('variables', []):
+            var_uid = var.get('uid', str(uuid.uuid4()))
+            var['uid'] = var_uid
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO labels 
+                (uid, cluster_uid, parent_uid, name, id_field, level, path, parentId, 
+                 nodeType, category, description, codeContent, files, fileContents, 
+                 createdAt, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                var_uid,
+                cluster_uid,
+                label_uid,
+                var.get('name', ''),
+                var.get('uid', var_uid),
+                level + 1,
+                '',
+                label_uid,
+                'variable',
+                json.dumps(['code_element', 'variable']),
+                var.get('description', ''),
+                '',
+                json.dumps(var.get('files', [])),
+                json.dumps({}),
+                datetime.now().isoformat(),
+                datetime.now().isoformat()
+            ))
+
+        # Sauvegarder récursivement les enfants hiérarchiques
+        for child in label_data.get('children', []):
+            if child.get('type') not in ['class', 'function', 'variable']:
+                self._save_label_and_children_recursive(
+                    cursor, child, cluster_uid, label_uid, level + 1
+                )
 
     def closeEvent(self, event):
         """Ferme proprement le connector lors de la fermeture du widget."""
