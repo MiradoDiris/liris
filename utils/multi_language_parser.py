@@ -232,7 +232,8 @@ class MultiLanguageDependencyParser:
         try:
             tree = ast.parse(content)
             for node in ast.walk(tree):
-                if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                if isinstance(node, ast.Assign):
+                    # CORRECTION: targets au pluriel
                     for target in node.targets:
                         if isinstance(target, ast.Name):
                             var_type = 'global' if any(isinstance(g, ast.Global) for g in ast.walk(node.parent if hasattr(node, 'parent') else tree)) else 'local'
@@ -245,6 +246,19 @@ class MultiLanguageDependencyParser:
                             }
                             if var_info not in variables:
                                 variables.append(var_info)
+                elif isinstance(node, ast.AnnAssign):
+                    # CORRECTION: Pour AnnAssign, c'est target (singulier)
+                    if isinstance(node.target, ast.Name):
+                        var_type = 'global' if any(isinstance(g, ast.Global) for g in ast.walk(node.parent if hasattr(node, 'parent') else tree)) else 'local'
+                        var_info = {
+                            'name': node.target.id,
+                            'line': node.lineno,
+                            'type': var_type,
+                            'scope': 'global',
+                            'uid': f"var_{node.target.id}_{node.lineno}"
+                        }
+                        if var_info not in variables:
+                            variables.append(var_info)
                 # Pour attributs de classe
                 elif isinstance(node, ast.ClassDef):
                     for body in node.body:

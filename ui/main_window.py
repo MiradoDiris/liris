@@ -210,11 +210,11 @@ class MainWindow(QMainWindow):
         """Configure l'interface utilisateur"""
         central_widget = QtWidgets.QWidget()
         self.setCentralWidget(central_widget)
-
+    
         main_layout = QtWidgets.QVBoxLayout(central_widget)
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
-
+    
         # En-tête
         header_widget = QtWidgets.QWidget()
         header_widget.setStyleSheet(f"""
@@ -223,57 +223,46 @@ class MainWindow(QMainWindow):
         """)
         header_layout = QtWidgets.QHBoxLayout(header_widget)
         header_layout.setContentsMargins(30, 20, 30, 20)
-
+    
         # Logo et titre
         logo_layout = QtWidgets.QHBoxLayout()
-        logo_layout.setSpacing(15)
-
+        logo_layout.setSpacing(20)
+        logo_layout.setContentsMargins(0, 0, 0, 0)
+    
         logo_path = os.path.join("ui", "resources", "icons", "logo.png")
         if os.path.exists(logo_path):
             logo_label = QtWidgets.QLabel()
             pixmap = QtGui.QPixmap(logo_path)
             scaled_pixmap = pixmap.scaled(
-                40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                50, 50, Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
             logo_label.setPixmap(scaled_pixmap)
-            logo_layout.addWidget(logo_label)
-
-        title_layout = QtWidgets.QVBoxLayout()
-
+            logo_layout.addWidget(logo_label, 0, Qt.AlignVCenter)
+    
         title_label = QtWidgets.QLabel("Liris")
         title_label.setStyleSheet(f"""
-            font-size: {Theme.FONT_SIZE_TITLE}px;
+            font-size: 32px;
             font-weight: bold;
             color: {Theme.PRIMARY_COLOR};
             margin: 0;
             padding: 0;
         """)
-        title_layout.addWidget(title_label)
-
-        subtitle_label = QtWidgets.QLabel(tr("app_title"))
-        subtitle_label.setObjectName("subtitle_label")
-        subtitle_label.setStyleSheet(f"""
-            font-size: {Theme.FONT_SIZE_HEADER}px;
-            color: {Theme.SECONDARY_COLOR};
-            margin: 0;
-            padding: 0;
-        """)
-        title_layout.addWidget(subtitle_label)
-
-        logo_layout.addLayout(title_layout)
+        logo_layout.addWidget(title_label, 0, Qt.AlignVCenter)
+    
         header_layout.addLayout(logo_layout)
-
-        # Switch à 2 états
+        header_layout.addStretch()
+    
+        # Switch à 2 états (à droite du stretch, avant le status)
         self.mode_switch = GlassSwitch()
         header_layout.addWidget(self.mode_switch)
-
-        header_layout.addStretch()
-
+        header_layout.addSpacing(30)  # Espace supplémentaire entre le switch et le status
+    
         # Indicateur de statut système
         system_status_widget = QtWidgets.QWidget()
         system_status_layout = QtWidgets.QHBoxLayout(system_status_widget)
         system_status_layout.setContentsMargins(0, 0, 0, 0)
-
+        system_status_layout.setSpacing(10)
+    
         self.connection_indicator = QtWidgets.QLabel()
         self.connection_indicator.setFixedSize(12, 12)
         self.connection_indicator.setStyleSheet("""
@@ -281,21 +270,21 @@ class MainWindow(QMainWindow):
             border-radius: 6px;
         """)
         system_status_layout.addWidget(self.connection_indicator)
-
+    
         self.connection_label = QtWidgets.QLabel("Système en attente")
         self.connection_label.setStyleSheet(
             f"color: {Theme.TEXT_COLOR}; margin-left: 5px;"
         )
         system_status_layout.addWidget(self.connection_label)
-
+    
         header_layout.addWidget(system_status_widget)
-
+    
         main_layout.addWidget(header_widget)
-
+    
         # Zone principale avec onglets
         self.tab_widget = QtWidgets.QTabWidget()
         self.tab_widget.setTabsClosable(False)
-
+    
         tab_stylesheet = f"""
         QTabBar::tab {{
             background: {Theme.ACCENT_COLOR};
@@ -310,30 +299,30 @@ class MainWindow(QMainWindow):
             font-size: {Theme.FONT_SIZE_HEADER}px;
             min-height: 30px;
         }}
-
+    
         QTabBar::tab:selected {{
             background: {Theme.PRIMARY_COLOR};
             color: white;
             border-bottom: 1px solid white;
         }}
-
+    
         QTabBar::tab:hover {{
             background: {Theme.SECONDARY_COLOR};
             color: white;
         }}
         """
         self.tab_widget.setStyleSheet(tab_stylesheet)
-
+    
         # Onglets par défaut (mode Dev)
         self.tab_widget.addTab(self.coding_panel, tr("coding_tab"))
         self.tab_widget.addTab(self.audit_panel, "Audit")
-
+    
         self.tab_widget.setTabPosition(QtWidgets.QTabWidget.North)
         self.tab_widget.setDocumentMode(True)
         self.tab_widget.setMovable(False)
-
+    
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
-
+    
         main_layout.addWidget(self.tab_widget)
 
     def _update_tab_texts(self):
@@ -614,10 +603,6 @@ class MainWindow(QMainWindow):
             self._update_tab_texts()
             self._update_menus()
             self.update_status(tr("status.ready"))
-
-            subtitle_label = self.findChild(QtWidgets.QLabel, "subtitle_label")
-            if subtitle_label:
-                subtitle_label.setText(tr("app_title"))
 
             self._notify_language_change()
 

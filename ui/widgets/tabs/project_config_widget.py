@@ -18,6 +18,7 @@ from ui.styles.platform_config_style import PlatformConfigStyle
 from ui.localization.translator import tr
 from utils.dgraph_connector import LirisDgraphConnector
 from ui.widgets.tabs.code_elements_popup import CodeElementsPopup
+from utils.progress_dialog import ModernProgressDialog, SpinnerDialog
 from utils.multi_language_parser import (
     MultiLanguageDependencyParser, 
     ProjectStructureScanner,
@@ -296,71 +297,35 @@ class RelationsConfig(QtWidgets.QWidget):
             self._update_relations_list(self.parent_widget.current_selected_label_uid)
 
     def _on_relation_selected(self, current):
-        """Gère la sélection d'une relation pour afficher source/target."""
+        """Gùre la sélection d'une relation pour afficher source/target."""
         if not current:
+            self.source_label.clear()
             self.target_label.clear()
             self.edit_button.setEnabled(False)
             self.remove_button.setEnabled(False)
             return
-        
+
         rel = current.data(Qt.UserRole)
         if not rel:
             self.edit_button.setEnabled(False)
             self.remove_button.setEnabled(False)
             return
-        
+
         # Récupérer les infos source et target
         source_uid = rel.get('source')
         target_uid = rel.get('target')
-        
+
         source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
         target_info = self.parent_widget.label_uid_to_info.get(target_uid, {})
-        
-        source_name = source_info.get('name', source_info.get('label', ''))
-        target_name = target_info.get('name', target_info.get('label', ''))
-        
+
+        source_name = source_info.get('name', source_info.get('label', 'Inconnu'))
+        target_name = target_info.get('name', target_info.get('label', 'Inconnu'))
+
         # Mettre à jour l'affichage
         self.source_label.setText(source_name)
         self.target_label.setText(target_name)
 
-        # Activer les boutons de modification et suppression
-        rel_category = rel.get('category', 'custom')
-        if rel_category == 'hierarchy':
-            self.edit_button.setEnabled(False)
-            self.remove_button.setEnabled(False)
-        else:
-            self.edit_button.setEnabled(True)
-            self.remove_button.setEnabled(True)
-
-    def _on_relation_selected(self, current):
-        """Gère la sélection d'une relation pour afficher source/target."""
-        if not current:
-            self.target_label.clear()
-            self.edit_button.setEnabled(False)
-            self.remove_button.setEnabled(False)
-            return
-        
-        rel = current.data(Qt.UserRole)
-        if not rel:
-            self.edit_button.setEnabled(False)
-            self.remove_button.setEnabled(False)
-            return
-        
-        # Récupérer les infos source et target
-        source_uid = rel.get('source')
-        target_uid = rel.get('target')
-        
-        source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
-        target_info = self.parent_widget.label_uid_to_info.get(target_uid, {})
-        
-        source_name = source_info.get('name', source_info.get('label', ''))
-        target_name = target_info.get('name', target_info.get('label', ''))
-        
-        # Mettre à jour l'affichage
-        self.source_label.setText(source_name)
-        self.target_label.setText(target_name)
-
-        # Activer les boutons de modification et suppression
+        # Activer boutons selon catégorie
         rel_category = rel.get('category', 'custom')
         if rel_category == 'hierarchy':
             self.edit_button.setEnabled(False)
@@ -516,65 +481,80 @@ class RelationsConfig(QtWidgets.QWidget):
 
     def _update_relations_list(self, source_uid):
         """
-        Met à jour la liste des relations avec TOUTES les sources.
-        CORRIGÉ: Les flèches pointent maintenant vers la SOURCE
+        CORRIGÉ : Met à jour la liste avec TOUTES les relations.
+        FlÚches corrigées : source → target
         """
         self.relations_list.clear()
         if not source_uid:
             return
-
+    
+        # Initialiser mapping si nécessaire
+        if not hasattr(self.parent_widget, 'dgraph_to_local'):
+            self.parent_widget.dgraph_to_local = {}
+        
         dgraph_to_local = self.parent_widget._get_dgraph_to_local_mapping()
         all_nodes = self.parent_widget._get_all_nodes()
         node = next((n for n in all_nodes if n['uid'] == source_uid), None)
+        
         if not node:
+            logger.warning(f"Noeud {source_uid} non trouvé")
             return
-
+    
         relations_added = {'custom': 0, 'parsed': 0, 'hierarchy': 0}
-
-        # === 1. Relations sortantes CUSTOM ===
-        # CHANGEMENT: source ← target (la flèche pointe vers source_uid)
+        seen_relations = set()  # Pour éviter les doublons
+    
+        # === 1. Relations sortantes CUSTOM + PARSED ===
         if self.show_dependencies:
             for r in node.get('outgoing_relations', []):
-                target_uid = r['target_uid']
-
-                if target_uid.startswith('temp_'):
+                target_uid = r.get('target_uid')
+                
+                if not target_uid or target_uid.startswith('temp_'):
                     continue
                 
-                if target_uid.startswith('0x') and len(target_uid) == 6:
+                # Mapper Dgraph UID si nécessaire
+                if target_uid.startswith('0x') and len(target_uid) <= 10:
                     target_uid = dgraph_to_local.get(target_uid, target_uid)
-
+    
                 target_name = self._get_node_name(target_uid)
                 if not target_name:
-                    target_name = r.get('target_name', '')
-                    if not target_name:
+                    target_name = r.get('target_name', 'Inconnu')
+                    if not target_name or target_name == 'Inconnu':
                         continue
-
+                    
                 rel_type = r.get('relation_type', 'relation')
                 category = r.get('category', 'custom')
-
+                
+                # Créer clé unique pour détecter doublons
+                rel_key = f"{source_uid}->{target_uid}:{rel_type}"
+                if rel_key in seen_relations:
+                    continue
+                seen_relations.add(rel_key)
+    
                 source_name = self._get_node_name(source_uid)
                 if not source_name:
                     continue
-
-                # CHANGEMENT: Inversion de la flèche
+                
+                # CORRECTION : FlÚche dans le bon sens
                 if category == 'parsed':
-                    display = f"{target_name} →({rel_type})→ {source_name} [CODE]"
+                    display = f"{source_name} →[{rel_type}]→ {target_name} [CODE]"
                 else:
-                    display = f"{target_name} →({rel_type})→ {source_name}"
-
+                    display = f"{source_name} →[{rel_type}]→ {target_name}"
+    
                 item = QListWidgetItem(display)
                 item.setData(Qt.UserRole, {
                     "category": category,
                     "direction": "out",
-                    "source": source_uid,  # source_uid EST la vraie source
-                    "target": r['target_uid'],  # target est d'où vient la relation
+                    "source": source_uid,
+                    "target": target_uid,
                     "type": rel_type
                 })
-                item.setForeground(QtGui.QColor("#2196F3"))
+                
+                color = "#FF9800" if category == 'parsed' else "#2196F3"
+                item.setForeground(QtGui.QColor(color))
                 self.relations_list.addItem(item)
                 relations_added['custom' if category == 'custom' else 'parsed'] += 1
-
-        # === 2. Relations PARSÉES du dictionnaire 'relations' ===
+    
+        # === 2. Relations PARSÉES depuis dict 'relations' (si non déjà ajoutées) ===
         if self.show_dependencies:
             parsed_relations = node.get('relations', {})
             if parsed_relations:
@@ -584,24 +564,49 @@ class RelationsConfig(QtWidgets.QWidget):
                         if not target_name:
                             continue
                         
-                        normalized = normalize_node_name(target_name)
+                        # Trouver l'UID de la cible
+                        normalized = self.parent_widget.dependency_parser.normalize_node_name(target_name)
                         target_uid = None
-
+    
                         if normalized:
                             target_uid = self.parent_widget._find_label_uid_by_name(normalized)
-
+    
                         if not target_uid or target_uid.startswith('unresolved_'):
+                            # Relation non résolue
+                            rel_key = f"{source_uid}->unresolved:{target_name}:{rel_type}"
+                            if rel_key in seen_relations:
+                                continue
+                            seen_relations.add(rel_key)
+                            
+                            line_info = f" (L{rel.get('line', '?')})" if rel.get('line') else ""
+                            display = f"{self._get_node_name(source_uid)} →[{rel_type}]→ {target_name}{line_info} [NON RÉSOLU]"
+                            
+                            item = QListWidgetItem(display)
+                            item.setData(Qt.UserRole, {
+                                "category": "parsed_raw",
+                                "direction": "out",
+                                "source": source_uid,
+                                "target": f"unresolved_{target_name}",
+                                "target_name": target_name,
+                                "type": rel_type,
+                                "line": rel.get('line', 0)
+                            })
+                            item.setForeground(QtGui.QColor("#95a5a6"))  # Gris pour non résolu
+                            self.relations_list.addItem(item)
                             continue
-
+                        
+                        # Vérifier si déjà ajoutée
+                        rel_key = f"{source_uid}->{target_uid}:{rel_type}"
+                        if rel_key in seen_relations:
+                            continue
+                        seen_relations.add(rel_key)
+    
                         source_name = self._get_node_name(source_uid) or node.get('label', '')
-                        if not source_name:
-                            continue
-
                         line_info = f" (L{rel.get('line', '?')})" if rel.get('line') else ""
-
-                        # CHANGEMENT: Inversion de la flèche
-                        display = f"{target_name} →({rel_type})→ {source_name}{line_info} [PARSED]"
-
+    
+                        # CORRECTION : FlÚche dans le bon sens
+                        display = f"{source_name} →[{rel_type}]→ {target_name}{line_info} [PARSED]"
+    
                         item = QListWidgetItem(display)
                         item.setData(Qt.UserRole, {
                             "category": "parsed_raw",
@@ -615,131 +620,136 @@ class RelationsConfig(QtWidgets.QWidget):
                         item.setForeground(QtGui.QColor("#FF9800"))
                         self.relations_list.addItem(item)
                         relations_added['parsed'] += 1
-
-        # === 3. Relations entrantes CUSTOM ===
-        # CHANGEMENT: target ← source (la flèche pointe vers source_uid qui est la cible ici)
+    
+        # === 3. Relations entrantes ===
         if self.show_dependencies:
             for r in node.get('incoming_relations', []):
-                source_uid_rel = r['source_uid']
-
-                if source_uid_rel.startswith('temp_'):
+                source_uid_rel = r.get('source_uid')
+    
+                if not source_uid_rel or source_uid_rel.startswith('temp_'):
                     continue
                 
-                if source_uid_rel.startswith('0x') and len(source_uid_rel) == 6:
+                if source_uid_rel.startswith('0x') and len(source_uid_rel) <= 10:
                     source_uid_rel = dgraph_to_local.get(source_uid_rel, source_uid_rel)
-
+    
                 source_name = self._get_node_name(source_uid_rel)
                 if not source_name:
-                    source_name = r.get('source_name', '')
-                    if not source_name:
+                    source_name = r.get('source_name', 'Inconnu')
+                    if not source_name or source_name == 'Inconnu':
                         continue
-
+                    
                 rel_type = r.get('relation_type', 'relation')
                 category = r.get('category', 'custom')
                 target_name = self._get_node_name(source_uid)
+                
                 if not target_name:
                     continue
-
-                # CHANGEMENT: Inversion de la flèche
+                
+                rel_key = f"{source_uid_rel}->{source_uid}:{rel_type}"
+                if rel_key in seen_relations:
+                    continue
+                seen_relations.add(rel_key)
+    
+                # CORRECTION : FlÚche dans le bon sens (inversée pour entrante)
                 if category == 'parsed':
-                    display = f"{target_name} ←({rel_type})← {source_name} [CODE IN]"
+                    display = f"{source_name} →[{rel_type}]→ {target_name} [CODE IN]"
                 else:
-                    display = f"{target_name} ←({rel_type})← {source_name}"
-
+                    display = f"{source_name} →[{rel_type}]→ {target_name}"
+    
                 item = QListWidgetItem(display)
                 item.setData(Qt.UserRole, {
                     "category": category,
                     "direction": "in",
-                    "source": r['source_uid'],
+                    "source": source_uid_rel,
                     "target": source_uid,
                     "type": rel_type
                 })
                 item.setForeground(QtGui.QColor("#4CAF50"))
                 self.relations_list.addItem(item)
                 relations_added['custom' if category == 'custom' else 'parsed'] += 1
-
+    
         # === 4. Hiérarchie: Enfants ===
         if self.show_hierarchy:
             children = node.get('children', [])
-            if children:
-                for child in children:
-                    child_uid = child.get('uid')
-                    if not child_uid:
-                        continue
-
-                    child_name = child.get('label') or child.get('name')
-                    if not child_name:
-                        continue
-                    
-                    source_name = self._get_node_name(source_uid)
-                    if not source_name:
-                        source_name = node.get('label', node.get('name', ''))
-
-                    if not source_name:
-                        continue
-                    
-                    # CHANGEMENT: child pointe vers parent
-                    display = f"{child_name} →(child)→ {source_name}"
-
-                    item = QListWidgetItem(display)
-                    item.setData(Qt.UserRole, {
-                        "category": "hierarchy",
-                        "direction": "out",
-                        "source": source_uid,
-                        "target": child_uid,
-                        "type": "child"
-                    })
-                    item.setForeground(QtGui.QColor("#9C27B0"))
-                    self.relations_list.addItem(item)
-                    relations_added['hierarchy'] += 1
-
+            for child in children:
+                child_uid = child.get('uid')
+                if not child_uid:
+                    continue
+                
+                child_name = child.get('label') or child.get('name')
+                if not child_name:
+                    continue
+                
+                source_name = self._get_node_name(source_uid)
+                if not source_name:
+                    source_name = node.get('label', node.get('name', ''))
+    
+                rel_key = f"{source_uid}->child:{child_uid}"
+                if rel_key in seen_relations:
+                    continue
+                seen_relations.add(rel_key)
+                
+                display = f"{source_name} →[child]→ {child_name}"
+    
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, {
+                    "category": "hierarchy",
+                    "direction": "out",
+                    "source": source_uid,
+                    "target": child_uid,
+                    "type": "child"
+                })
+                item.setForeground(QtGui.QColor("#9C27B0"))
+                self.relations_list.addItem(item)
+                relations_added['hierarchy'] += 1
+    
         # === 5. Hiérarchie: Parents ===
         if self.show_hierarchy:
             parents = node.get('parents', [])
-            if parents:
-                for p_uid in parents:
-                    if not p_uid:
-                        continue
-
-                    if p_uid.startswith('0x') and len(p_uid) == 6:
-                        p_uid_mapped = dgraph_to_local.get(p_uid, p_uid)
-                    else:
-                        p_uid_mapped = p_uid
-
-                    parent_name = self._get_node_name(p_uid_mapped)
-                    if not parent_name:
-                        continue
-                    
-                    source_name = self._get_node_name(source_uid)
-                    if not source_name:
-                        source_name = node.get('label', node.get('name', ''))
-
-                    if not source_name:
-                        continue
-                    
-                    # CHANGEMENT: source pointe vers parent
-                    display = f"{source_name} →(parent)→ {parent_name}"
-
-                    item = QListWidgetItem(display)
-                    item.setData(Qt.UserRole, {
-                        "category": "hierarchy",
-                        "direction": "in",
-                        "source": p_uid,
-                        "target": source_uid,
-                        "type": "parent"
-                    })
-                    item.setForeground(QtGui.QColor("#9C27B0"))
-                    self.relations_list.addItem(item)
-                    relations_added['hierarchy'] += 1
-
+            for p_uid in parents:
+                if not p_uid:
+                    continue
+                
+                if p_uid.startswith('0x') and len(p_uid) <= 10:
+                    p_uid_mapped = dgraph_to_local.get(p_uid, p_uid)
+                else:
+                    p_uid_mapped = p_uid
+    
+                parent_name = self._get_node_name(p_uid_mapped)
+                if not parent_name:
+                    continue
+                
+                source_name = self._get_node_name(source_uid)
+                if not source_name:
+                    source_name = node.get('label', node.get('name', ''))
+    
+                rel_key = f"{source_uid}->parent:{p_uid_mapped}"
+                if rel_key in seen_relations:
+                    continue
+                seen_relations.add(rel_key)
+                
+                display = f"{source_name} →[parent]→ {parent_name}"
+    
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, {
+                    "category": "hierarchy",
+                    "direction": "in",
+                    "source": p_uid,
+                    "target": source_uid,
+                    "type": "parent"
+                })
+                item.setForeground(QtGui.QColor("#9C27B0"))
+                self.relations_list.addItem(item)
+                relations_added['hierarchy'] += 1
+    
         # Log pour debug
         total = sum(relations_added.values())
-        logger.info(f"Relations affichées pour {node.get('label', source_uid)}: "
+        logger.info(f"✅ Relations affichées pour {node.get('label', source_uid)}: "
                     f"{relations_added['parsed']} parsées, "
                     f"{relations_added['custom']} custom, "
                     f"{relations_added['hierarchy']} hiérarchie "
-                    f"(Total: {total})")
-
+                    f"(Total: {total}, Uniques: {len(seen_relations)})")
+    
         if total == 0:
             no_rel_item = QListWidgetItem("(Aucune relation)")
             no_rel_item.setForeground(QtGui.QColor("#999"))
@@ -1589,11 +1599,16 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             if self.dgraph_connector.client:
                 schema = self.dgraph_connector.get_current_schema()
                 if schema and '@reverse' not in schema:
-                    logger.warning("Le schéma ne contient pas de @reverse. Mise à jour recommandée.")
-
+                    logger.warning("Le schéma ne contient pas de @reverse...")
+    
             self._init_ui()
-            self._load_project_profiles()  # Load from Dgraph
-            self._load_projects_from_sqlite()  # Load from SQLite, avoiding duplicates
+            self._load_project_profiles()  
+            self._load_projects_from_sqlite()
+            
+            # ← NOUVELLE LIGNE :
+            self._update_project_combo()
+            logger.debug(f"Initialisation : {len(self.project_profiles)} projets affichés")
+        
         except Exception as e:
             logger.error(f"Erreur lors de l'initialisation : {str(e)}")
 
@@ -3508,7 +3523,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self._on_double_click_label(item)
 
     def _label_to_data(self, label):
-        """Convertit un label Dgraph en data local."""
+        """Convertit un label Dgraph en data local avec parsing robuste."""
         data = {
             'label': label.get('name', ''),
             'id': label.get('id', ''),
@@ -3516,12 +3531,28 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             'description': label.get('description', ''),
             'category': label.get('category', []),
             'files': label.get('files', []),
-            'file_contents': json.loads(label.get('fileContents', '{}')),
+            'file_contents': {},  # Parsing séparé
             'parents': [],
             'children': [],
             'outgoing_relations': [],
             'incoming_relations': []
         }
+
+        # 🔹 Parser fileContents du label
+        label_file_contents_raw = label.get('fileContents', '{}')
+        try:
+            if isinstance(label_file_contents_raw, dict):
+                data['file_contents'] = label_file_contents_raw
+            elif isinstance(label_file_contents_raw, str):
+                data['file_contents'] = json.loads(label_file_contents_raw.strip() or '{}')
+            elif isinstance(label_file_contents_raw, bytes):
+                data['file_contents'] = json.loads(label_file_contents_raw.decode('utf-8').strip() or '{}')
+            else:
+                data['file_contents'] = {}
+        except json.JSONDecodeError:
+            logger.warning(f"Erreur parsing fileContents pour label '{label.get('name')}'")
+            data['file_contents'] = {}
+
         # Outgoing relations
         for rel in label.get('relations', []):
             target = rel.get('target', {})
@@ -3530,6 +3561,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 'target_id': target.get('id', ''),
                 'relation_type': rel.get('relationType')
             })
+
         # Incoming relations
         for rel in label.get('~relations', []):
             source = rel.get('source', {})
@@ -3538,6 +3570,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 'source_id': source.get('id', ''),
                 'relation_type': rel.get('relationType')
             })
+
         return data
 
     def _fill_hierarchy(self, data, label_node):
@@ -3574,18 +3607,53 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         profile['pending_relations'] = dict(pending)
 
     def _workspace_to_profile(self, ws):
-        """Convertit un workspace Dgraph en profil local."""
+        """Convertit un workspace Dgraph en profil local avec parsing robuste."""
         profile = {
             'uid': ws.get('uid', ''),
             'name': ws.get('name', ''),
             'description': ws.get('description', ''),
             'files': ws.get('files', []),
-            'file_contents': json.loads(ws.get('fileContents', '{}')),
+            'file_contents': {},  # Initialisation par défaut
             'turing_ontology': {
                 'clusters_detailed': []
             },
             'pending_relations': defaultdict(list)
         }
+
+        # 🔹 PARSING ROBUSTE DE fileContents
+        file_contents_raw = ws.get('fileContents', '{}')
+
+        try:
+            # Cas 1 : Déjà un dict (pas besoin de parser)
+            if isinstance(file_contents_raw, dict):
+                profile['file_contents'] = file_contents_raw
+
+            # Cas 2 : String JSON valide
+            elif isinstance(file_contents_raw, str):
+                # Nettoyer les espaces et vérifier si vide
+                file_contents_raw = file_contents_raw.strip()
+
+                if not file_contents_raw or file_contents_raw == '{}':
+                    profile['file_contents'] = {}
+                else:
+                    # Tenter le parsing
+                    profile['file_contents'] = json.loads(file_contents_raw)
+
+            # Cas 3 : Bytes (conversion puis parsing)
+            elif isinstance(file_contents_raw, bytes):
+                file_contents_str = file_contents_raw.decode('utf-8').strip()
+                profile['file_contents'] = json.loads(file_contents_str) if file_contents_str else {}
+
+            else:
+                logger.warning(f"Type inattendu pour fileContents: {type(file_contents_raw)}")
+                profile['file_contents'] = {}
+
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Erreur parsing fileContents pour workspace '{ws.get('name')}': {e}")
+            logger.debug(f"   Données brutes (50 premiers chars): {str(file_contents_raw)[:50]}")
+            profile['file_contents'] = {}
+
+        # Reste du code inchangé
         cm = ws.get('clusterManagement', {})
         for cluster in cm.get('clusters', []):
             cluster_data = {
@@ -3593,15 +3661,33 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 'uid': cluster.get('uid', ''),
                 'description': cluster.get('description', ''),
                 'files': cluster.get('files', []),
-                'file_contents': json.loads(cluster.get('fileContents', '{}')),
+                'file_contents': {},  # Parser aussi ici si nécessaire
                 'root_labels': []
             }
+
+            # 🔹 Parser fileContents du cluster de la même manière
+            cluster_file_contents_raw = cluster.get('fileContents', '{}')
+            try:
+                if isinstance(cluster_file_contents_raw, dict):
+                    cluster_data['file_contents'] = cluster_file_contents_raw
+                elif isinstance(cluster_file_contents_raw, str):
+                    cluster_data['file_contents'] = json.loads(cluster_file_contents_raw.strip() or '{}')
+                elif isinstance(cluster_file_contents_raw, bytes):
+                    cluster_data['file_contents'] = json.loads(cluster_file_contents_raw.decode('utf-8').strip() or '{}')
+                else:
+                    cluster_data['file_contents'] = {}
+            except json.JSONDecodeError:
+                logger.warning(f"Erreur parsing fileContents pour cluster '{cluster.get('name')}'")
+                cluster_data['file_contents'] = {}
+
             for root_label in cluster.get('root_labels', []):
                 root_data = self._label_to_data(root_label)
                 cluster_data['root_labels'].append(root_data)
                 # Remplir enfants récursivement
                 self._fill_hierarchy(root_data, root_label)
+
             profile['turing_ontology']['clusters_detailed'].append(cluster_data)
+
         # Collect relations
         self._collect_relations(profile)
         return profile
@@ -5322,7 +5408,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.global_relations_config.remove_button.setEnabled(has_rel_selected)
 
     def _on_browse_project(self):
-        """Version avec logs ultra-détaillés pour debug."""
+        """Version avec barre de progression moderne."""
         if not self.current_project_profile_data:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Aucun projet sélectionné")
             return
@@ -5331,114 +5417,106 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         files = self.current_project_profile_data.get("files", [])
         file_contents = self.current_project_profile_data.get("file_contents", {})
     
-        print("\n" + "="*80)
-        print(f"🔍 DEBUG SCAN PROJET: {project_name}")
-        print("="*80)
-        print(f"Nombre de fichiers dans project_profile_data: {len(files)}")
-        print(f"Nombre de contenus dans file_contents: {len(file_contents)}")
-        print(f"Fichiers disponibles: {files[:3]}..." if len(files) > 3 else f"Fichiers: {files}")
-        print("="*80 + "\n")
-    
         if not files:
-            QtWidgets.QMessageBox.warning(self, "Aucun fichier trouvé", 
-                f"Aucun fichier enregistré pour le projet '{project_name}'.")
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Aucun fichier trouvé", 
+                f"Aucun fichier enregistré pour le projet '{project_name}'."
+            )
             return
     
         logger.info(f"🔍 Analyse du projet '{project_name}'...")
     
-        self.parsed_relations_cache = {}
-        progress = QtWidgets.QProgressDialog(
-            "Analyse des fichiers du projet...", "Annuler", 0, len(files), self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setValue(0)
+        # 🎨 CRÉER LE DIALOGUE DE PROGRESSION
+        progress = ModernProgressDialog(
+            title=f"Analyse du projet : {project_name}",
+            parent=self,
+            show_log=True,  # Activer le log détaillé
+            cancelable=True
+        )
+        progress.set_title(f"📊 Scan du projet {project_name}")
+        progress.set_status(f"Analyse de {len(files)} fichiers...")
+        progress.set_progress(0, len(files))
+        progress.show()
     
+        self.parsed_relations_cache = {}
         files_processed = 0
         files_with_content = 0
         files_with_relations = 0
     
         try:
             for i, file_path in enumerate(files, 1):
-                progress.setValue(i)
+                # 🔄 MISE À JOUR DE LA PROGRESSION
+                progress.set_progress(i, len(files))
+                progress.set_status(f"Traitement du fichier {i}/{len(files)}")
+                progress.set_details(f"📄 {os.path.basename(file_path)}")
+                progress.add_log(f"[{i}/{len(files)}] Traitement: {file_path}")
+                
                 QtWidgets.QApplication.processEvents()
     
-                if progress.wasCanceled():
-                    break
-                
-                print(f"\n📄 Traitement fichier {i}/{len(files)}: {file_path}")
+                # Vérifier annulation
+                if progress.is_cancelled:
+                    progress.add_log("❌ Opération annulée par l'utilisateur")
+                    logger.warning("Scan annulé par l'utilisateur")
+                    progress.reject()
+                    return
     
                 # Récupérer le contenu
                 content = file_contents.get(file_path, "")
                 
-                # DEBUG: Vérifier la récupération du contenu
                 if content:
-                    print(f"   ✅ Contenu récupéré de file_contents ({len(content)} chars)")
                     files_with_content += 1
+                    progress.add_log(f"   ✅ Contenu récupéré ({len(content)} chars)")
                 else:
-                    print(f"   ⚠️  Pas de contenu dans file_contents, tentative lecture fichier...")
                     if os.path.exists(file_path):
                         try:
                             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                                 content = f.read()
-                            print(f"   ✅ Contenu lu depuis disque ({len(content)} chars)")
                             files_with_content += 1
+                            progress.add_log(f"   ✅ Contenu lu depuis disque ({len(content)} chars)")
                         except Exception as e:
-                            print(f"   ❌ Erreur lecture: {e}")
+                            progress.add_log(f"   ⚠️ Erreur lecture: {e}")
                             logger.warning(f"Impossible de lire {file_path}: {e}")
                             continue
                     else:
-                        print(f"   ❌ Fichier n'existe pas sur disque")
+                        progress.add_log(f"   ❌ Fichier introuvable sur disque")
                         continue
                     
                 if not content:
-                    print(f"   ⚠️  Contenu vide, skip")
+                    progress.add_log(f"   ⚠️ Contenu vide, skip")
                     continue
                 
-                # Afficher un aperçu du contenu
-                preview = content[:200].replace('\n', ' ')
-                print(f"   📝 Aperçu: {preview}...")
-    
                 # Parser les relations
-                print(f"   🔍 Parsing avec extension: {os.path.splitext(file_path)[1]}")
                 parsed_rels = self.dependency_parser.parse_content(content, file_path)
                 
-                # DEBUG: Afficher les relations détectées
                 if parsed_rels:
                     total_rels = sum(len(v) for v in parsed_rels.values())
-                    print(f"   ✅ {total_rels} relations détectées:")
-                    for rel_type, rel_list in parsed_rels.items():
-                        if rel_list:
-                            print(f"      • {rel_type}: {len(rel_list)}")
-                            for rel in rel_list[:2]:  # Max 2 exemples
-                                print(f"         - {rel.get('target', 'Unknown')} (ligne {rel.get('line', '?')})")
+                    progress.add_log(f"   ✅ {total_rels} relations détectées")
                     files_with_relations += 1
                     self.parsed_relations_cache[file_path] = parsed_rels
                 else:
-                    print(f"   ⚠️  Aucune relation détectée")
+                    progress.add_log(f"   ℹ️ Aucune relation détectée")
                 
                 # Extraire classes/fonctions/variables
                 classes = self.dependency_parser.extract_classes(content, file_path)
                 functions = self.dependency_parser.extract_functions(content, file_path)
                 variables = self.dependency_parser.extract_variables(content, file_path)
                 
-                print(f"   📦 Éléments extraits: {len(classes)} classes, {len(functions)} fonctions, {len(variables)} variables")
+                progress.add_log(
+                    f"   📦 Extraits: {len(classes)} classes, "
+                    f"{len(functions)} fonctions, {len(variables)} variables"
+                )
     
                 # Trouver le label correspondant
                 target_label = self._find_label_by_file_path(file_path)
                 
                 if target_label:
-                    print(f"   ✅ Label trouvé: {target_label.get('label', 'Unknown')} (UID: {target_label.get('uid')})")
-                    
-                    # STOCKER LE DICT RELATIONS DIRECTEMENT
+                    # Stocker le dict relations
                     target_label['relations'] = parsed_rels
-                    print(f"      → relations dict stocké: {list(parsed_rels.keys())}")
                     
                     # Intégrer dans outgoing_relations
                     if parsed_rels:
-                        print(f"   🔗 Intégration dans outgoing_relations...")
-                        before_count = len(target_label.get('outgoing_relations', []))
                         self._integrate_parsed_relations_to_label(target_label, parsed_rels, file_path)
-                        after_count = len(target_label.get('outgoing_relations', []))
-                        print(f"      → outgoing_relations: {before_count} → {after_count} (+{after_count - before_count})")
                     
                     # Stocker les éléments
                     target_label['classes'] = classes
@@ -5469,86 +5547,59 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     
                     files_processed += 1
                 else:
-                    print(f"   ❌ PROBLÈME: Aucun label trouvé pour ce fichier!")
-                    print(f"      Fichier: {file_path}")
-                    print(f"      Nom: {os.path.basename(file_path)}")
-                    # Debug: afficher les labels disponibles
-                    print(f"      Labels disponibles dans cluster:")
-                    if self.current_cluster_data:
-                        for root in self.current_cluster_data.get('root_labels', [])[:5]:
-                            print(f"         • {root.get('label', 'N/A')} - Files: {root.get('files', [])}")
-    
-            progress.close()
-    
-            print("\n" + "="*80)
-            print("📊 RÉSUMÉ DU SCAN")
-            print("="*80)
-            print(f"Fichiers totaux: {len(files)}")
-            print(f"Fichiers avec contenu: {files_with_content}")
-            print(f"Fichiers avec relations détectées: {files_with_relations}")
-            print(f"Fichiers traités avec succès: {files_processed}")
-            print(f"Relations dans cache: {len(self.parsed_relations_cache)}")
-            print("="*80 + "\n")
+                    progress.add_log(f"   ⚠️ Aucun label trouvé pour ce fichier")
     
             # Construction du graphe
-            logger.info("🔗 Construction du graphe de relations...")
+            progress.set_indeterminate(True)
+            progress.set_status("🔗 Construction du graphe de relations...")
+            progress.add_log("\n🔗 Construction du graphe de relations...")
+            QtWidgets.QApplication.processEvents()
+            
             self._build_complete_relations_graph()
+            
+            progress.set_indeterminate(False)
     
             # Validation
-            logger.info("🔍 Validation des relations parsées...")
+            progress.set_status("🔍 Validation des relations...")
+            progress.add_log("🔍 Validation des relations parsées...")
             validation_stats = self._validate_parsed_relations()
     
             # Rafraîchir l'UI
+            progress.set_status("♻️ Rafraîchissement de l'interface...")
+            progress.add_log("♻️ Rafraîchissement de l'interface...")
             self._collect_all_labels()
             self._refresh_cluster_list()
             
-            # Message de succès
-            success_msg = f"Projet '{project_name}' analysé:\n\n"
-            success_msg += f"📁 {files_processed}/{len(files)} fichiers traités\n"
-            success_msg += f"🔗 {validation_stats['total_parsed_in_dict']} relations détectées\n"
-            success_msg += f"✅ {validation_stats['total_parsed_in_outgoing']} relations intégrées"
-            
-            QtWidgets.QMessageBox.information(
-                self,
-                "Scan terminé",
-                f"Scan complété!\n\n"
-                f"📊 {files_processed} fichiers traités\n"
-                f"📝 {validation_stats['total_parsed_in_dict']} relations détectées\n"
-                f"✓ {validation_stats['total_parsed_in_outgoing']} relations intégrées\n\n"
-                f"Sauvegarde en cours dans SQLite et Dgraph..."
-            )
-            
-            # AJOUT CRITIQUE: Sauvegarder les résultats du scan
-            logger.info("\n" + "="*80)
-            logger.info("🔄 Démarrage de la sauvegarde des résultats du scan...")
-            logger.info("="*80)
+            # Sauvegarde
+            progress.set_status("💾 Sauvegarde dans SQLite et Dgraph...")
+            progress.add_log("\n💾 Démarrage de la sauvegarde...")
             
             save_success = self._save_scan_results_to_storage()
             
             if save_success:
-                logger.info("✅ Sauvegarde complète réussie!")
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Sauvegarde réussie",
-                    "Tous les résultats du scan (classes, fonctions, variables, relations)\n"
-                    "ont été sauvegardés dans SQLite et Dgraph!"
+                progress.finish(
+                    success=True,
+                    message=f"✅ {files_processed} fichiers traités, "
+                            f"{validation_stats['total_parsed_in_dict']} relations détectées"
                 )
+                progress.add_log("\n✅ Sauvegarde complète réussie!")
             else:
-                logger.error("❌ Échec de la sauvegarde")
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Avertissement",
-                    "Le scan a réussi mais la sauvegarde a échoué.\n"
-                    "Les données sont en mémoire mais ne sont pas persistées.\n\n"
-                    "Vérifiez que SQLite et Dgraph sont accessibles."
+                progress.finish(
+                    success=False,
+                    message="Le scan a réussi mais la sauvegarde a échoué"
                 )
+                progress.add_log("\n❌ Échec de la sauvegarde")
     
         except Exception as e:
-            progress.close()
             logger.error(f"Erreur lors du scan: {str(e)}")
             import traceback
             traceback.print_exc()
-            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur : {str(e)}")
+            
+            progress.finish(
+                success=False,
+                message=f"Erreur : {str(e)}"
+            )
+            progress.add_log(f"\n❌ ERREUR: {str(e)}")
 
     def _add_extracted_item_to_cluster(self, cluster: Dict, item: Dict, item_type: str):
         """
