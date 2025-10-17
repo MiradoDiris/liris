@@ -50,7 +50,7 @@ class GeminiWorker(QThread):
             
             # Utiliser gemini-2.5-flash (modèle actuel pour API gratuite)
             response = client.models.generate_content(
-                model=" ",
+                model="gemini-2.5-flash",
                 contents=prompt,
             )
             

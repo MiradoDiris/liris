@@ -48,7 +48,7 @@ class CodingPanel(QtWidgets.QWidget):
         self.orchestrator = None
         self.dgraph_connector = LirisDgraphConnector(auto_reset=False)
         self.api_config = APIConfigManager()  # Gestionnaire de configuration API
-        self.gemini_api_key = "AIzaSyDkGrbEGhQmThZQAmGS88v_GBQwpqbSoT0"
+        self.gemini_api_key = ""
         self.current_project_data = None
         self.selected_taxonomy = []
 
