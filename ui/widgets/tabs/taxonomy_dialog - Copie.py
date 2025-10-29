@@ -1,9 +1,14 @@
 # taxonomy_dialog.py - Version intégrée avec GraphWidget et Loader Professionnel
+from datetime import datetime, timedelta
 import os
+import json
 import uuid
-from PyQt5 import QtWidgets, QtGui
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QSize, QThread, pyqtSlot
+from PyQt5 import QtWidgets, QtGui, QtCore
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QThread, pyqtSlot
 from typing import List, Dict, Optional
+
+import self
+from utils.dgraph_connector import LirisDgraphConnector
 from ui.widgets.tabs.graph_widget import GraphWidget
 
 from utils.logger import logger
@@ -11,7 +16,7 @@ from ui.localization.translator import tr
 from .taxonomy_item import TaxonomyItem
 
 
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt, QTimer
 
 class LoadingOverlay(QtWidgets.QWidget):
@@ -267,7 +272,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
         self._uid_set = set()      # UIDs déjà affichés
         
         self.setWindowTitle("Définir les Bornes - Taxonomies")
-        self.resize(1200, 800)
+        self.resize(900, 600)
         self.setModal(True)
         
         self._init_ui()
@@ -3840,7 +3845,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
         main_splitter = QtWidgets.QSplitter(Qt.Horizontal)
         main_splitter.setStyleSheet("background-color: white;")
 
-        # === PANNEAU ARBRE ===
         tree_container = QtWidgets.QWidget()
         tree_container.setStyleSheet("background-color: white;")
         tree_layout = QtWidgets.QVBoxLayout(tree_container)
@@ -3877,7 +3881,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
         tree_layout.addWidget(self.tree_widget)
         main_splitter.addWidget(tree_container)
 
-        # === PANNEAU DESCRIPTION + SÉLECTION ===
         desc_container = QtWidgets.QWidget()
         desc_container.setStyleSheet("background-color: white;")
         desc_layout = QtWidgets.QVBoxLayout(desc_container)
@@ -3901,48 +3904,16 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 color: #333333;
             }
         """)
-        self.description_text.setMinimumHeight(200)
-        # ✅ MODIFIÉ : Stretch factor 1 (égal à selected_list)
-        desc_layout.addWidget(self.description_text, stretch=1)
-
-        # Header avec bouton "Vider"
-        selected_header_layout = QtWidgets.QHBoxLayout()
-        selected_header_layout.setSpacing(8)
+        desc_layout.addWidget(self.description_text)
 
         selected_label = QtWidgets.QLabel("Éléments sélectionnés:")
         selected_label.setStyleSheet(
-            "font-weight: bold; font-size: 13px; background-color: white;"
+            "font-weight: bold; font-size: 13px; margin-top: 10px; background-color: white;"
         )
-        selected_header_layout.addWidget(selected_label)
-
-        selected_header_layout.addStretch()
-
-        self.clear_selection_button = QtWidgets.QPushButton("🗑️ Vider")
-        self.clear_selection_button.clicked.connect(self.clear_selection)
-        self.clear_selection_button.setStyleSheet("""
-            QPushButton {
-                background-color: #E0E0E0;
-                color: #666666;
-                border: 1px solid #BDBDBD;
-                padding: 4px 10px;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 10px;
-            }
-            QPushButton:hover {
-                background-color: #BDBDBD;
-                border-color: #9E9E9E;
-            }
-        """)
-        self.clear_selection_button.setMaximumWidth(80)
-        selected_header_layout.addWidget(self.clear_selection_button)
-
-        desc_layout.addLayout(selected_header_layout)
+        desc_layout.addWidget(selected_label)
 
         self.selected_list = QtWidgets.QListWidget()
-        # ✅ MODIFIÉ : Hauteur minimum ajustée
-        self.selected_list.setMinimumHeight(150)
-        self.selected_list.setMaximumHeight(9999)  # ✅ Pas de limite haute
+        self.selected_list.setMaximumHeight(120)
         self.selected_list.setStyleSheet("""
             QListWidget {
                 border: 2px solid #E8E0DF;
@@ -3961,18 +3932,13 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 color: #333333;
             }
         """)
-        # ✅ MODIFIÉ : Stretch factor 1 (égal à description_text)
-        desc_layout.addWidget(self.selected_list, stretch=1)
+        desc_layout.addWidget(self.selected_list)
 
         main_splitter.addWidget(desc_container)
+        main_splitter.setSizes([300, 400, 300])
 
-        main_splitter.setSizes([400, 800])
-        main_splitter.setStretchFactor(0, 1)
-        main_splitter.setStretchFactor(1, 2)
+        layout.addWidget(main_splitter)
 
-        layout.addWidget(main_splitter, stretch=1)
-
-        # === BOUTONS VALIDATION ===
         button_layout = QtWidgets.QHBoxLayout()
         button_layout.addStretch()
 
@@ -4051,140 +4017,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
         super().resizeEvent(event)
         if hasattr(self, 'loading_overlay'):
             self.loading_overlay.setGeometry(self.rect())
-
-    def _add_item_to_selected_list(self, item: TaxonomyItem):
-        """✅ CORRIGÉ : Ajoute un item à la liste avec espacement et bouton X"""
-        if not isinstance(item, TaxonomyItem):
-            return
-
-        item_name = item.text(0)
-        item_type = item.item_type
-
-        # Vérifier si déjà présent
-        for i in range(self.selected_list.count()):
-            list_item = self.selected_list.item(i)
-            if list_item and list_item.data(Qt.UserRole) == item_name:
-                return
-
-        icon_map = {
-            'file': '📄', 'folder': '📁', 'function': '⚙️',
-            'class': '🔷', 'variable': '🏷️', 'dependency': '🔗',
-            'unknown': '❓'
-        }
-        icon = icon_map.get(item_type, '•')
-
-        list_item = QtWidgets.QListWidgetItem()
-        list_item.setData(Qt.UserRole, item_name)
-        list_item.setData(Qt.UserRole + 1, item_type)
-        list_item.setData(Qt.UserRole + 2, item)
-
-        item_widget = QtWidgets.QWidget()
-        item_layout = QtWidgets.QHBoxLayout(item_widget)
-        item_layout.setContentsMargins(8, 6, 8, 6)
-        item_layout.setSpacing(8)
-
-        label = QtWidgets.QLabel(f"{icon} {item_name}")
-        label.setStyleSheet("color: #333333; font-size: 12px;")
-        item_layout.addWidget(label)
-        item_layout.addStretch()
-
-        remove_btn = QtWidgets.QPushButton("✕")
-        remove_btn.setFixedSize(20, 20)
-        remove_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #999999;
-                border: none;
-                border-radius: 10px;
-                font-weight: bold;
-                font-size: 14px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background-color: #FFCDD2;
-                color: #C62828;
-            }
-        """)
-        remove_btn.clicked.connect(lambda: self._remove_item_from_list(item))
-        item_layout.addWidget(remove_btn)
-
-        # ✅ MODIFIÉ : Hauteur fixe pour espacement vertical
-        item_widget.setMinimumHeight(32)
-        list_item.setSizeHint(QSize(item_widget.sizeHint().width(), 32))
-
-        self.selected_list.addItem(list_item)
-        self.selected_list.setItemWidget(list_item, item_widget)
-
-        logger.info(f"✅ '{item_name}' ajouté à la liste ({len(self.selected_items)} total)")
-
-    def _remove_item_from_list(self, item: TaxonomyItem):
-        """✅ NOUVEAU : Retire un item de la liste et de la sélection"""
-        if not isinstance(item, TaxonomyItem):
-            return
-
-        item_name = item.text(0)
-        logger.info(f"🗑️ Retrait de '{item_name}' via bouton X")
-
-        # Retirer de selected_items
-        if item in self.selected_items:
-            self.selected_items.remove(item)
-            logger.info(f"  ✓ Retiré de selected_items ({len(self.selected_items)} restants)")
-
-        # Retirer de la liste d'affichage
-        for i in range(self.selected_list.count()):
-            list_item = self.selected_list.item(i)
-            if list_item and list_item.data(Qt.UserRole) == item_name:
-                self.selected_list.takeItem(i)
-                logger.info(f"  ✓ Retiré de selected_list")
-                break
-
-        item.setSelected(False)
-        logger.info(f"  ✓ Désélectionné dans l'arbre")
-
-        if len(self.selected_items) > 0:
-            self._update_description_only()
-        else:
-            self.description_text.clear()
-            self.description_text.setPlaceholderText("Sélectionnez un élément dans l'arbre")
-            self.graph_update_signal.emit("", "", [], {})
-
-        logger.info(f"✅ '{item_name}' complètement retiré")
-
-
-    def _update_description_only(self):
-        """✅ NOUVEAU : Met à jour uniquement la description"""
-        if not self.selected_items:
-            self.description_text.clear()
-            return
-
-        if len(self.selected_items) == 1:
-            item = self.selected_items[0]
-            self._display_single_item_summary(item)
-        else:
-            self._display_multiple_selection_summary()
-
-        def _update_description_only(self):
-            if not self.selected_items:
-                self.description_text.clear()
-                return
-
-            if len(self.selected_items) == 1:
-                item = self.selected_items[0]
-                self._display_single_item_summary(item)
-            else:
-                self._display_multiple_selection_summary()
-
-    def _display_single_item_summary(self, item: TaxonomyItem):
-        """✅ NOUVEAU : Affiche un résumé rapide d'un item"""
-        details_html = "<div style='line-height: 1.6;'>"
-        details_html += f"<h3 style='color: #A23B2D;'>📋 {item.text(0)}</h3>"
-        details_html += f"<p><b>Type:</b> {item.item_type}</p>"
-        details_html += f"<p><b>Niveau:</b> {item.level}</p>"
-        details_html += "<p style='color: #666; font-style: italic; margin-top: 15px;'>"
-        details_html += "Chargement des relations en cours..."
-        details_html += "</p>"
-        details_html += "</div>"
-        self.description_text.setHtml(details_html)
     
     def _on_node_selected_in_graph(self, node_name: str, node_details: dict):
         """Gère la sélection d'un nœud dans le graphe et affiche ses détails."""
@@ -4325,68 +4157,34 @@ class TaxonomyDialog(QtWidgets.QDialog):
     
     @pyqtSlot()
     def _on_selection_changed(self):
-        """✅ VERSION CORRIGÉE : Force TOUJOURS la recherche de relations externes"""
-
-        # Vider le cache
+        selected_items = self.tree_widget.selectedItems()
         if hasattr(self.graph_helper, 'query_cache'):
             self.graph_helper.query_cache.clear()
         logger.info("🗑️ Cache vidé avant nouvelle sélection")
+    
+        selected_items = self.tree_widget.selectedItems()
 
-        selected_items_tree = self.tree_widget.selectedItems()
-
-        if not selected_items_tree:
+        if not selected_items:
             self.description_text.clear()
             self.selected_list.clear()
-            self.selected_items.clear()
             self.graph_update_signal.emit("", "", [], {})
             return
 
-        # ✅ ÉTAPE 1 : Afficher immédiatement tous les éléments sélectionnés
-        newly_selected = []
-
-        for item in selected_items_tree:
-            if isinstance(item, TaxonomyItem):
-                # Ajouter à la liste d'affichage si pas déjà présent
-                self._add_item_to_selected_list(item)
-
-                # Identifier les nouveaux éléments
-                if item not in self.selected_items:
-                    newly_selected.append(item)
-                    self.selected_items.append(item)
-
-        # ✅ ÉTAPE 2 : Mettre à jour la description (résumé rapide)
-        if len(self.selected_items) == 1:
-            self._display_single_item_summary(self.selected_items[0])
-        else:
-            self._display_multiple_selection_summary()
-
-        # ✅ ÉTAPE 3 : Si nouveaux éléments, charger leurs relations en arrière-plan
-        if not newly_selected:
-            return
-
-        last_item = newly_selected[-1]
+        last_item = selected_items[-1]
 
         if not isinstance(last_item, TaxonomyItem):
+            logger.warning("⚠️ Élément sélectionné non reconnu comme TaxonomyItem.")
             return
 
-        data = last_item.item_data or {}
-        item_type = last_item.item_type or "unknown"
-
-        logger.info(f"\n{'='*70}")
-        logger.info(f"🔗 CHARGEMENT RELATIONS : {last_item.text(0)}")
-        logger.info(f"  Type: {item_type}")
-        logger.info(f"{'='*70}")
-
-        # ✅ MODE SÉLECTION MULTIPLE
-        if len(self.selected_items) > 1:
+        if len(selected_items) > 1:
             logger.info(f"\n{'='*70}")
-            logger.info(f"🎯 MODE SÉLECTION MULTIPLE : {len(self.selected_items)} éléments")
+            logger.info(f"🎯 MODE SÉLECTION MULTIPLE : {len(selected_items)} éléments")
             logger.info(f"{'='*70}")
 
             selected_data = []
             selected_uids = []
 
-            for item in self.selected_items:
+            for item in selected_items:
                 if isinstance(item, TaxonomyItem):
                     item_uid = item.item_data.get('uid')
                     item_name = self.normalize_node_name(
@@ -4411,11 +4209,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 logger.warning("⚠️ Aucun UID valide dans la sélection")
                 return
 
-            # ✅ AFFICHER LE LOADER
-            self.loading_overlay.show_loading(
-                f"Recherche des relations multiples...",
-                f"Analyse de {len(selected_uids)} éléments"
-            )
+            self._display_multiple_selection_details(selected_items)
 
             relations = self._get_multi_selection_relations(selected_uids)
 
@@ -4426,13 +4220,12 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     'uid': item_data['uid'],
                     'type': item_data['type'],
                     'taxonomy_level': item_data['level'],
-                    'search_depth': 1,
+                    'search_depth': 1,  # Multi-sélection = niveau 1
                     'relations': relations
                 })
 
-            QTimer.singleShot(300, self.loading_overlay.hide_loading)
-
-            # ✅ SUPPRIMÉ : import local redondant
+            # Émettre signal
+            from PyQt5.QtCore import QTimer
             QTimer.singleShot(100, lambda: self.graph_update_signal.emit(
                 "Relations Multiples",
                 "",
@@ -4440,9 +4233,51 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 self.project_data
             ))
 
+            for item in selected_items:
+                if isinstance(item, TaxonomyItem) and item not in self.selected_items:
+                    self.selected_items.append(item)
+
             return
 
-        # ✅ MODE SÉLECTION SIMPLE
+        data = last_item.item_data or {}
+        item_type = last_item.item_type or "unknown"
+
+        has_internal_structure = (
+            item_type == 'file' and (
+                len(data.get('classes', [])) > 0 or
+                len(data.get('functions', [])) > 0 or
+                len(data.get('variables', [])) > 0
+            )
+        )
+
+        if has_internal_structure:
+            logger.info(f"\n{'='*70}")
+            logger.info(f"📂 MODE STRUCTURE INTERNE : {last_item.text(0)}")
+            logger.info(f"{'='*70}")
+
+            self._display_internal_structure_details(last_item, data)
+
+            self.current_central_uid = data.get('uid')
+            self.current_central_name = self.normalize_node_name(
+                data.get('name') or data.get('label', 'N/A')
+            )
+
+            self.graph_update_signal.emit(
+                self.current_central_name,
+                self.current_central_uid,
+                [{'mode': 'internal_structure', 'data': data}],
+                self.project_data
+            )
+
+            if last_item not in self.selected_items:
+                self.selected_items.append(last_item)
+
+            return
+
+        logger.info(f"\n{'='*70}")
+        logger.info(f"🔗 MODE RELATIONS EXTERNES : {last_item.text(0)}")
+        logger.info(f"{'='*70}")
+
         selected_level = self.level_combo.currentData()
 
         self.current_central_uid = data.get('uid')
@@ -4463,13 +4298,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
         logger.info(f"  UID: {self.current_central_uid}")
         logger.info(f"  Niveau: {selected_level}")
 
-        # ✅ AFFICHER LE LOADER
-        self.loading_overlay.show_loading(
-            f"Recherche des relations...",
-            f"Analyse de {self.current_central_name}"
-        )
-
-        # ✅ LANCER LE THREAD DE CHARGEMENT
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
             self.loader_thread.wait()
@@ -4480,24 +4308,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
         self.loader_thread.loading_error.connect(self._on_loading_error)
         self.loader_thread.start()
 
-    def _display_multiple_selection_summary(self):
-        """✅ NOUVEAU : Affiche un résumé de la sélection multiple"""
-        details_html = "<div style='line-height: 1.6;'>"
-        details_html += f"<h3 style='color: #A23B2D;'>🕸️ Sélection Multiple</h3>"
-        details_html += f"<p><b>{len(self.selected_items)} éléments sélectionnés :</b></p>"
-        details_html += "<ul style='margin: 10px 0; padding-left: 20px;'>"
-
-        for item in self.selected_items:
-            if isinstance(item, TaxonomyItem):
-                icon = self._get_icon_for_type(item.item_type)
-                details_html += f"<li>{icon} {item.text(0)} <i>({item.item_type})</i></li>"
-
-        details_html += "</ul>"
-        details_html += "<p style='color: #666; font-style: italic; margin-top: 15px;'>"
-        details_html += "Chargement des relations entre ces éléments..."
-        details_html += "</p>"
-        details_html += "</div>"
-        self.description_text.setHtml(details_html)
+        if last_item not in self.selected_items:
+            self.selected_items.append(last_item)
 
     def _display_multiple_selection_details(self, selected_items):
         """✅ NOUVELLE MÉTHODE : Affiche les détails de la sélection multiple"""
@@ -4521,17 +4333,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
         details_html += "</div>"
         self.description_text.setHtml(details_html)
 
-    def clear_selection(self):
-        """✅ MODIFIÉ : Vide complètement la sélection"""
-        self.tree_widget.clearSelection()
-        self.selected_items.clear()
-        self.selected_list.clear()
-        self.description_text.clear()
-        self.description_text.setPlaceholderText("Sélectionnez un élément dans l'arbre")
-        self.current_central_uid = None
-        self.current_central_name = None
-        self.graph_update_signal.emit("", "", [], {})
-
     def _get_icon_for_type(self, item_type: str) -> str:
         """✅ Helper pour icônes par type"""
         icon_map = {
@@ -4544,35 +4345,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
             'unknown': '❓'
         }
         return icon_map.get(item_type, '•')
-    
-    def remove_selected_item(self, item_to_remove):
-        if not isinstance(item_to_remove, TaxonomyItem):
-            return
-
-        item_name = item_to_remove.text(0)
-        logger.info(f"🗑️ Retrait de '{item_name}' de la sélection")
-
-        # Retirer de selected_items
-        if item_to_remove in self.selected_items:
-            self.selected_items.remove(item_to_remove)
-
-        # Retirer de la liste d'affichage
-        for i in range(self.selected_list.count()):
-            list_item = self.selected_list.item(i)
-            if list_item and list_item.data(Qt.UserRole) == item_name:
-                self.selected_list.takeItem(i)
-                break
-            
-        # Déselectionner dans l'arbre
-        item_to_remove.setSelected(False)
-
-        # Mettre à jour le graphe si nécessaire
-        if len(self.selected_items) > 0:
-            self._on_selection_changed()
-        else:
-            self.clear_selection()
-
-        logger.info(f"'{item_name}' retiré, {len(self.selected_items)} éléments restants")
 
 
     def _display_internal_structure_details(self, item: TaxonomyItem, data: Dict):
@@ -4614,48 +4386,53 @@ class TaxonomyDialog(QtWidgets.QDialog):
     
     @pyqtSlot(int, str, str)
     def _on_loading_progress(self, value, message, detail):
-        """✅ MODIFIÉ : Met à jour la progression du chargement."""
-        self.loading_overlay.update_progress(value, message, detail)
-
+        """Met à jour la progression du chargement."""
+        #self.loading_overlay.update_progress(value, message, detail)
+        pass
 
     @pyqtSlot(dict)
     def _on_loading_complete(self, results):
-        """✅ MODIFIÉ : Appelé quand le chargement est terminé."""
+        """Appelé quand le chargement est terminé."""
         relations_list = results.get('relations', [])
         related_items = results.get('related_items', [])
-
-        logger.info(f"✅ Chargement terminé: {len(relations_list)} relations")
-
-        # ✅ Masquer le loader avec un petit délai pour fluidité
-        QTimer.singleShot(300, self.loading_overlay.hide_loading)
-
-        # ✅ Mettre à jour l'affichage des détails
+        
+        logger.info(f"Chargement terminé: {len(relations_list)} relations")
+        
+        #QTimer.singleShot(500, self.loading_overlay.hide_loading)
+        
         selected_items_tree = self.tree_widget.selectedItems()
         if selected_items_tree:
             last_item = selected_items_tree[-1]
             if isinstance(last_item, TaxonomyItem):
                 self._display_tree_item_details(last_item, relations_list)
-
-        # ✅ Émettre le signal pour mettre à jour le graphe
+                
+                if last_item not in self.selected_items:
+                    self.selected_items.append(last_item)
+        
         self.graph_update_signal.emit(
             self.current_central_name,
             self.current_central_uid,
             related_items,
             self.project_data
         )
-
+        
+        if selected_items_tree:
+            last_item = selected_items_tree[-1]
+            if isinstance(last_item, TaxonomyItem):
+                self._add_to_selected_list(self.current_central_name, last_item.item_type)
+    
     @pyqtSlot(str)
     def _on_loading_error(self, error_message):
-        """✅ MODIFIÉ : Appelé en cas d'erreur pendant le chargement."""
+        """Appelé en cas d'erreur pendant le chargement."""
         logger.error(f"Erreur de chargement: {error_message}")
         self.loading_overlay.hide_loading()
-
+        
         QtWidgets.QMessageBox.critical(
             self,
             "Erreur de chargement",
             f"Une erreur s'est produite lors du chargement des données:\n\n{error_message}"
         )
-        
+    
     def _find_taxonomy_item_by_name(self, node_name: str):
         """Parcourt récursivement l'arbre pour trouver un TaxonomyItem par son nom."""
         def search_item(parent):

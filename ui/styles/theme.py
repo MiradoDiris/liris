@@ -60,7 +60,8 @@ class Theme:
 
         /* Menu Bar */
         QMenuBar {{
-            background-color: {Theme.PRIMARY_COLOR};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
             color: white;
             padding: {Theme.PADDING_SMALL}px;
             border: none;
@@ -100,34 +101,48 @@ class Theme:
 
         /* Tabs */
         QTabWidget::pane {{
-            border: {Theme.BORDER_WIDTH}px solid {Theme.ACCENT_COLOR};
-            top: -2px;
-            border-radius: {Theme.BORDER_RADIUS}px;
-            background-color: white;
+            border: 1px solid #E0E0E0;
+            border-radius: 8px;
+            background: white;
+            margin-top: 0px;
+            padding: 10px;
+        }}
+
+        QTabBar {{
+            background: transparent;
         }}
 
         QTabBar::tab {{
-            background: {Theme.ACCENT_COLOR};
+            background: #F5F5F5;
             color: {Theme.TEXT_COLOR};
-            border: {Theme.BORDER_WIDTH}px solid #C0C0C0;
-            padding: 12px 20px;
-            margin-right: 2px;
-            border-top-left-radius: {Theme.BORDER_RADIUS}px;
-            border-top-right-radius: {Theme.BORDER_RADIUS}px;
-            font-weight: bold;
-            min-width: 80px;
-            font-size: {Theme.FONT_SIZE_HEADER}px; 
+            border: none;
+            border-radius: 6px;
+            padding: 10px 24px;
+            margin-right: 8px;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            font-weight: 500;
+            font-size: 13px;
+            min-width: 90px;
+            min-height: 36px;
+            max-height: 36px;
         }}
 
         QTabBar::tab:selected {{
-            background: {Theme.PRIMARY_COLOR};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                         stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
             color: white;
-            border-bottom: {Theme.BORDER_WIDTH}px solid white;
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
         }}
 
-        QTabBar::tab:hover {{
-            background: {Theme.SECONDARY_COLOR};
-            color: white;
+        QTabBar::tab:hover:!selected {{
+            background: #EBEBEB;
+            color: {Theme.PRIMARY_COLOR};
+        }}
+
+        QTabBar::tab:first {{
+            margin-left: 15px;
         }}
 
         /* Group Box */
@@ -148,7 +163,8 @@ class Theme:
 
         /* Buttons */
         QPushButton {{
-            background-color: {Theme.PRIMARY_COLOR};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
             color: white;
             border: none;
             padding: {Theme.BUTTON_PADDING};
@@ -158,11 +174,13 @@ class Theme:
         }}
 
         QPushButton:hover {{
-            background-color: {Theme.SECONDARY_COLOR};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 {Theme.SECONDARY_COLOR}, stop:1 #C84F3F);
         }}
 
         QPushButton:pressed {{
-            background-color: #922E23;
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 #922E23, stop:1 #7A2519);
         }}
 
         QPushButton:disabled {{
@@ -197,7 +215,8 @@ class Theme:
         }}
 
         QListWidget::item:selected {{
-            background-color: {Theme.PRIMARY_COLOR};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
             color: white;
         }}
 
@@ -214,7 +233,8 @@ class Theme:
         }}
 
         QHeaderView::section {{
-            background-color: {Theme.PRIMARY_COLOR};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
             color: white;
             padding: 8px;
             border: none;
@@ -231,7 +251,8 @@ class Theme:
         }}
 
         QProgressBar::chunk {{
-            background-color: {Theme.PRIMARY_COLOR};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
             border-radius: {Theme.BORDER_RADIUS}px;
         }}
 
@@ -253,9 +274,11 @@ class Theme:
     def get_button_style(color=None):
         """Retourne un style spécifique pour les boutons"""
         color = color or Theme.PRIMARY_COLOR
+        secondary = Theme.SECONDARY_COLOR
         return f"""
         QPushButton {{
-            background-color: {color};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 {color}, stop:1 {secondary});
             color: white;
             border: none;
             padding: {Theme.BUTTON_PADDING};

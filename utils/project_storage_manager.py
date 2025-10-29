@@ -1,3 +1,4 @@
+
 from datetime import datetime
 import json
 from pathlib import Path
@@ -6,12 +7,18 @@ import uuid
 from venv import logger
 
 
-class SQLiteManager:
-    def __init__(self, db_path: str):
+class ProjectStorageManager:
+    def __init__(self, parent_widget, db_path: str, dgraph_connector):
+        """
+        Args:
+            parent_widget: Instance de ProjectConfigWidget
+            db_path: Chemin vers la base SQLite
+            dgraph_connector: Instance de LirisDgraphConnector
+        """
+        self.parent = parent_widget
         self.db_path = db_path
-        self._init_sqlite_db()
-    
-    # Initialisation
+        self.dgraph_connector = dgraph_connector
+
     def _init_sqlite_db(self):
         """Initialise ou met à jour la base SQLite avec schéma aligné à Dgraph."""
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -19,6 +26,12 @@ class SQLiteManager:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            cursor.execute("PRAGMA max_page_count = 2147483646")  # ~140 TB
+            cursor.execute("PRAGMA page_size = 65536")  # 64KB par page (max)
+            cursor.execute("PRAGMA cache_size = -2000000")  # 2GB cache
+            cursor.execute("PRAGMA temp_store = MEMORY")  # Temp en RAM
+            cursor.execute("PRAGMA journal_mode = WAL")  # Write-Ahead Logging
+            cursor.execute("PRAGMA synchronous = NORMAL")  # Performance
 
             # === 1️⃣ Vérifier si la table relations existe déjà ===
             cursor.execute("""
@@ -173,23 +186,13 @@ class SQLiteManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_imports_source ON imports(source_uid)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_imports_target ON imports(target_uid)")
 
-            conn.commit()
+            conn.commit()   
             conn.close()
 
             logger.info(f"Base de données SQLite initialisée et synchronisée : {self.db_path}")
 
         except Exception as e:
             logger.error(f"Erreur lors de l'initialisation ou mise à jour SQLite : {e}")
-
-    def _normalize_dict_case(self, data, to_snake=True):
-        """Convertit entre camelCase (SQLite) et snake_case (Python)"""
-        if not to_snake:
-            return data  # Dbath normal
-
-        normalized = dict(data)
-        if 'fileContents' in normalized:
-            normalized['file_contents'] = normalized.pop('fileContents')
-        return normalized
 
     def _create_workspace_in_sqlite(self, project_data):
         """CRUD Create: Crée un nouveau workspace en évitant les doublons via uid unique."""
@@ -231,37 +234,7 @@ class SQLiteManager:
         except Exception as e:
             logger.error(f"Erreur lors de la création du workspace SQLite : {e}")
             return False
-
-    def _read_cluster_from_sqlite(self, cluster_uid):
-        """CRUD Read: Lit un cluster spécifique avec ses données."""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT * FROM clusters WHERE uid = ?", (cluster_uid,))
-            row = cursor.fetchone()
-            if not row:
-                conn.close()
-                return None
-
-            data = dict(row)
-
-            # CORRECTION: Convertir fileContents (SQLite) en file_contents (Python)
-            data['file_contents'] = json.loads(data.get('fileContents', '{}'))
-            data['files'] = json.loads(data.get('files', '[]'))
-
-            # Supprimer la clé camelCase
-            if 'fileContents' in data:
-                del data['fileContents']
-
-            conn.close()
-            return data
-
-        except Exception as e:
-            logger.error(f"Erreur lecture cluster SQLite : {e}")
-            return None
-
+        
     def _read_workspace_from_sqlite(self, workspace_uid):
         """CRUD Read: Lit un workspace spécifique."""
         try:
@@ -325,15 +298,51 @@ class SQLiteManager:
         except Exception as e:
             logger.error(f"Erreur lors de la mise à jour du workspace SQLite : {e}")
             return False
-
+        
     def _delete_workspace_in_sqlite(self, workspace_uid):
+        """CRUD Delete: Supprime un workspace et ses dépendances en cascade."""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Requête pour trouver tous les labels du workspace
-            get_labels_query = """
-                SELECT uid FROM labels 
+            # Vérifier existence
+            cursor.execute("SELECT uid FROM workspaces WHERE uid = ?", (workspace_uid,))
+            if not cursor.fetchone():
+                logger.warning(f"Workspace {workspace_uid} non trouvé pour suppression.")
+                conn.close()
+                return False
+            
+            # Supprimer en cascade (ordre inverse des FK)
+            # Functions
+            cursor.execute("""
+                DELETE FROM functions 
+                WHERE label_uid IN (
+                    SELECT uid FROM labels 
+                    WHERE cluster_uid IN (
+                        SELECT uid FROM clusters 
+                        WHERE cluster_management_uid IN (
+                            SELECT uid FROM cluster_management 
+                            WHERE workspace_uid = ?
+                        )
+                    )
+                )
+            """, (workspace_uid,))
+            
+            # Imports
+            cursor.execute("""
+                DELETE FROM imports 
+                WHERE source_uid IN (...) OR target_uid IN (...)
+            """, (workspace_uid, workspace_uid))  # Remplacer ... par la sous-requête ci-dessus
+            
+            # Relations
+            cursor.execute("""
+                DELETE FROM relations 
+                WHERE source_uid IN (...) OR target_uid IN (...)
+            """, (workspace_uid, workspace_uid))
+            
+            # Labels
+            cursor.execute("""
+                DELETE FROM labels 
                 WHERE cluster_uid IN (
                     SELECT uid FROM clusters 
                     WHERE cluster_management_uid IN (
@@ -341,38 +350,33 @@ class SQLiteManager:
                         WHERE workspace_uid = ?
                     )
                 )
-            """
+            """, (workspace_uid,))
             
-            cursor.execute(get_labels_query, (workspace_uid,))
-            label_uids = [row[0] for row in cursor.fetchall()]
+            # Clusters
+            cursor.execute("""
+                DELETE FROM clusters 
+                WHERE cluster_management_uid IN (
+                    SELECT uid FROM cluster_management 
+                    WHERE workspace_uid = ?
+                )
+            """, (workspace_uid,))
             
-            if label_uids:
-                placeholders = ','.join(['?' for _ in label_uids])
-                
-                # Maintenant utiliser les UIDs réels
-                cursor.execute(f"""
-                    DELETE FROM functions 
-                    WHERE label_uid IN ({placeholders})
-                """, label_uids)
-                
-                cursor.execute(f"""
-                    DELETE FROM relations 
-                    WHERE source_uid IN ({placeholders}) 
-                       OR target_uid IN ({placeholders})
-                """, label_uids + label_uids)
-                
-                cursor.execute(f"""
-                    DELETE FROM imports 
-                    WHERE source_uid IN ({placeholders}) 
-                       OR target_uid IN ({placeholders})
-                """, label_uids + label_uids)
+            # Cluster Management
+            cursor.execute("""
+                DELETE FROM cluster_management 
+                WHERE workspace_uid = ?
+            """, (workspace_uid,))
             
-            # Reste du DELETE en cascade...
+            # Workspace
+            cursor.execute("DELETE FROM workspaces WHERE uid = ?", (workspace_uid,))
+            
             conn.commit()
+            conn.close()
+            logger.info(f"Workspace supprimé de SQLite : {workspace_uid}")
             return True
             
         except Exception as e:
-            logger.error(f"Erreur suppression: {e}")
+            logger.error(f"Erreur lors de la suppression du workspace SQLite : {e}")
             return False
 
     def _create_cluster_in_sqlite(self, cluster_data, workspace_uid):
@@ -471,7 +475,7 @@ class SQLiteManager:
         except Exception as e:
             logger.error(f"Erreur mise à jour cluster SQLite : {e}")
             return False
-
+        
     def _delete_cluster_in_sqlite(self, cluster_uid):
         """CRUD Delete: Supprime un cluster et ses dépendances."""
         try:
@@ -533,7 +537,7 @@ class SQLiteManager:
         except Exception as e:
             logger.error(f"Erreur suppression cluster SQLite : {e}")
             return False
-
+        
     def _create_label_in_sqlite(self, label_data, cluster_uid, parent_uid=None, level=0):
         """CRUD Create: Crée un label en évitant doublons."""
         try:
@@ -583,7 +587,7 @@ class SQLiteManager:
         except Exception as e:
             logger.error(f"Erreur création label SQLite : {e}")
             return False
-
+        
     def _read_label_from_sqlite(self, label_uid):
         """CRUD Read: Lit un label spécifique et ses enfants récursivement."""
         try:
@@ -662,7 +666,7 @@ class SQLiteManager:
         except Exception as e:
             logger.error(f"Erreur mise à jour label SQLite : {e}")
             return False
-
+        
     def _delete_label_in_sqlite(self, label_uid):
         """CRUD Delete: Supprime un label et ses dépendances."""
         try:
@@ -745,7 +749,7 @@ class SQLiteManager:
         except Exception as e:
             logger.error(f"Erreur création relation SQLite : {e}")
             return False
-
+        
     def _read_relation_from_sqlite(self, rel_uid):
         """CRUD Read: Lit une relation spécifique."""
         try:
@@ -809,7 +813,7 @@ class SQLiteManager:
         except Exception as e:
             logger.error(f"Erreur mise à jour relation SQLite : {e}")
             return False
-
+        
     def _delete_relation_in_sqlite(self, rel_uid):
         """CRUD Delete: Supprime une relation."""
         try:
@@ -833,15 +837,12 @@ class SQLiteManager:
         except Exception as e:
             logger.error(f"Erreur suppression relation SQLite : {e}")
             return False
-
-    def _save_project_to_sqlite(self, project_data, pending_relations=None):
+        
+    def _save_project_to_sqlite(self, project_data):
         """Sauvegarde le projet complet dans SQLite avec schéma aligné à Dgraph (Upsert)."""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-
-            if pending_relations is None:
-                pending_relations = {}
             
             project_uid = project_data.get('uid', str(uuid.uuid4()))
             project_data['uid'] = project_uid  # Ensure uid is set
@@ -910,29 +911,30 @@ class SQLiteManager:
                     )
             
             # Upsert relations
-                for source_uid, relations in pending_relations.items():
-                            for rel in relations:
-                                rel_uid = f"rel_{str(uuid.uuid4())}"
-                                relation_type = rel.get('relation_type', 'relation')
-
-                                cursor.execute("""
-                                    INSERT OR IGNORE INTO relations 
-                                    (uid, name, relationType, source_uid, target_uid, createdAt)
-                                    VALUES (?, ?, ?, ?, ?, ?)
-                                """, (
-                                    rel_uid,
-                                    f"{relation_type}_relation",
-                                    relation_type,
-                                    source_uid,
-                                    rel.get('target_uid', ''),
-                                    datetime.now().isoformat()
-                                ))
-
-                conn.commit()
-                conn.close()
-
-                logger.info(f"Projet sauvegardé dans SQLite : {project_data.get('name')}")
-                return True
+            for source_uid, relations in self.parent.pending_relations.items():
+                for rel in relations:
+                    rel_uid = f"rel_{str(uuid.uuid4())}"
+                    relation_type = rel.get('relation_type', 'relation')
+                    
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO relations 
+                        (uid, name, relationType, source_uid, target_uid, createdAt)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        rel_uid,
+                        f"{relation_type}_relation",
+                        relation_type,
+                        source_uid,
+                        rel.get('target_uid', ''),
+                        datetime.now().isoformat()
+                    ))
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"Projet sauvegardé dans SQLite : {project_data.get('name')}")
+            return True
+            
         except Exception as e:
             logger.error(f"Erreur lors de la sauvegarde SQLite : {e}")
             return False
@@ -981,90 +983,78 @@ class SQLiteManager:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
+
             cursor.execute("SELECT * FROM workspaces")
             workspaces = cursor.fetchall()
-            
-            logger.info(f"📂 Chargement de {len(workspaces)} workspaces depuis SQLite...")
-            
+
+            loaded_count = 0
+            skipped_count = 0
+
             for ws_row in workspaces:
                 workspace_uid = ws_row['uid']
                 project_name = ws_row['name']
-                
-                # Éviter doublon : skip si déjà chargé (de Dgraph)
-                if project_name in self.project_profiles:
-                    logger.info(f"Projet {project_name} déjà chargé (Dgraph), skip SQLite.")
+
+                # ✅ ÉVITER DOUBLON : skip si déjà chargé (de Dgraph)
+                if project_name in self.parent.project_profiles:
+                    logger.debug(f"   ⏭️ Projet déjà chargé (Dgraph), skip SQLite: {project_name}")
+                    skipped_count += 1
                     continue
                 
-                # CORRECTION: Utiliser CRUD Read pour workspace
+                # ✅ CHARGER VIA CRUD READ
                 ws_data = self._read_workspace_from_sqlite(workspace_uid)
                 if not ws_data:
-                    logger.warning(f"Échec lecture workspace {workspace_uid}")
                     continue
                 
-                # Créer la structure du projet
                 project_data = {
                     'uid': ws_data['uid'],
                     'name': ws_data['name'],
-                    'description': ws_data.get('description', ''),
+                    'description': ws_data['description'],
                     'files': ws_data['files'],
-                    'file_contents': ws_data['fileContents'],  # CORRECTION: mapping correct
+                    'file_contents': ws_data['fileContents'],
                     'turing_ontology': {'clusters_detailed': []},
                     'pending_relations': {}
                 }
-                
-                # Charger les clusters via CRUD Read
+
+                # Charger clusters via Read
                 cursor.execute("""
                     SELECT c.* FROM clusters c 
                     JOIN cluster_management cm ON c.cluster_management_uid = cm.uid 
                     WHERE cm.workspace_uid = ?
                 """, (workspace_uid,))
-                
-                cluster_rows = cursor.fetchall()
-                logger.info(f"  📦 {len(cluster_rows)} clusters trouvés pour {project_name}")
-                
-                for cluster_row in cluster_rows:
+
+                for cluster_row in cursor.fetchall():
                     cluster_uid = cluster_row['uid']
-                    
-                    # CORRECTION: Utiliser la méthode CRUD correcte
                     cluster_data = self._read_cluster_from_sqlite(cluster_uid)
                     if not cluster_data:
-                        logger.warning(f"Échec lecture cluster {cluster_uid}")
                         continue
-                    
                     cluster_data['root_labels'] = []
-                    
+
                     # Charger labels racines
                     cursor.execute("""
                         SELECT * FROM labels 
                         WHERE cluster_uid = ? AND parent_uid IS NULL
                     """, (cluster_uid,))
-                    
-                    root_labels = cursor.fetchall()
-                    logger.info(f"    📁 {len(root_labels)} root labels pour cluster {cluster_data.get('name')}")
-                    
-                    for label_row in root_labels:
+
+                    for label_row in cursor.fetchall():
                         root_label = self._read_label_from_sqlite(label_row['uid'])
                         if root_label:
                             cluster_data['root_labels'].append(root_label)
-                    
+
                     project_data['turing_ontology']['clusters_detailed'].append(cluster_data)
-                
-                # Charger les relations
+
+                # Charger relations
                 cursor.execute("""
-                    SELECT r.* FROM relations r
-                    JOIN labels l ON r.source_uid = l.uid
-                    JOIN clusters c ON l.cluster_uid = c.uid
-                    JOIN cluster_management cm ON c.cluster_management_uid = cm.uid
-                    WHERE cm.workspace_uid = ?
-                    ORDER BY r.source_uid
+                    SELECT * FROM relations WHERE source_uid IN (
+                        SELECT uid FROM labels WHERE cluster_uid IN (
+                            SELECT uid FROM clusters WHERE cluster_management_uid IN (
+                                SELECT uid FROM cluster_management WHERE workspace_uid = ?
+                            )
+                        )
+                    )
                 """, (workspace_uid,))
-                
-                relations_rows = cursor.fetchall()
-                logger.info(f"  🔗 {len(relations_rows)} relations trouvées")
-                
+
                 relations_by_source = {}
-                for rel_row in relations_rows:
+                for rel_row in cursor.fetchall():
                     source_uid = rel_row['source_uid']
                     if source_uid not in relations_by_source:
                         relations_by_source[source_uid] = []
@@ -1072,24 +1062,47 @@ class SQLiteManager:
                         'target_uid': rel_row['target_uid'],
                         'relation_type': rel_row['relationType']
                     })
-                
+
                 project_data['pending_relations'] = relations_by_source
-                
-                # Ajouter au profil
-                self.project_profiles[project_name] = project_data
-                logger.info(f"✅ Projet '{project_name}' chargé avec succès")
-            
+
+                # ✅ STOCKER
+                self.parent.project_profiles[project_name] = project_data
+                loaded_count += 1
+                logger.debug(f"   ✅ Chargé depuis SQLite: {project_name}")
+
             conn.close()
-            logger.info(f"📊 Total: {len(self.project_profiles)} projets chargés (Dgraph + SQLite)")
-            
-            # Mettre à jour la combo box
-            self._update_project_combo()
-            
+            logger.info(f"✅ Chargé depuis SQLite: {loaded_count} projet(s) (ignoré {skipped_count} doublon(s))")
+
         except Exception as e:
             logger.error(f"❌ Erreur lors du chargement SQLite : {e}")
             import traceback
             traceback.print_exc()
 
+    def _read_cluster_from_sqlite(self, cluster_uid):
+        """CRUD Read: Lit un cluster spécifique."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT * FROM clusters WHERE uid = ?", (cluster_uid,))
+            row = cursor.fetchone()
+            if not row:
+                conn.close()
+                return None
+
+            data = dict(row)
+            data['files'] = json.loads(data['files'])
+            data['file_contents'] = json.loads(data['fileContents'])
+            data['root_labels'] = []  # Sera rempli par l'appelant
+
+            conn.close()
+            return data
+
+        except Exception as e:
+            logger.error(f"Erreur lecture cluster SQLite : {e}")
+            return None
+        
     def _load_label_from_sqlite(self, cursor, label_row):
         """Charge un label et ses enfants depuis SQLite."""
         label_uid = label_row['uid']

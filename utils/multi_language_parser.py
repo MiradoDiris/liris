@@ -227,64 +227,80 @@ class MultiLanguageDependencyParser:
         return functions
 
     def _extract_python_variables(self, content: str) -> List[Dict[str, Any]]:
-        """Extrait les variables Python avec AST."""
+        """
+        ✅ CORRIGÉ : Extrait les variables Python avec AST.
+        
+        Correction de l'erreur targets vs target pour ast.Assign vs ast.AnnAssign.
+        """
         variables = []
         try:
             tree = ast.parse(content)
+            
+            # ✅ Parcourir l'AST pour trouver les assignments
             for node in ast.walk(tree):
+                # ✅ CORRECTION : ast.Assign utilise node.targets (PLURIEL)
                 if isinstance(node, ast.Assign):
-                    # CORRECTION: targets au pluriel
-                    for target in node.targets:
+                    for target in node.targets:  # ✅ Correct : targets au pluriel
                         if isinstance(target, ast.Name):
-                            var_type = 'global' if any(isinstance(g, ast.Global) for g in ast.walk(node.parent if hasattr(node, 'parent') else tree)) else 'local'
                             var_info = {
                                 'name': target.id,
                                 'line': node.lineno,
-                                'type': var_type,
-                                'scope': 'global',  # À affiner
+                                'type': 'local',  # Simplifié
+                                'scope': 'global',
                                 'uid': f"var_{target.id}_{node.lineno}"
                             }
-                            if var_info not in variables:
+                            # Éviter doublons
+                            if not any(v['name'] == target.id and v['line'] == node.lineno for v in variables):
                                 variables.append(var_info)
+                
+                # ✅ CORRECTION : ast.AnnAssign utilise node.target (SINGULIER)
                 elif isinstance(node, ast.AnnAssign):
-                    # CORRECTION: Pour AnnAssign, c'est target (singulier)
-                    if isinstance(node.target, ast.Name):
-                        var_type = 'global' if any(isinstance(g, ast.Global) for g in ast.walk(node.parent if hasattr(node, 'parent') else tree)) else 'local'
+                    if isinstance(node.target, ast.Name):  # ✅ Correct : target au singulier
                         var_info = {
                             'name': node.target.id,
                             'line': node.lineno,
-                            'type': var_type,
+                            'type': 'annotated',
                             'scope': 'global',
                             'uid': f"var_{node.target.id}_{node.lineno}"
                         }
-                        if var_info not in variables:
+                        if not any(v['name'] == node.target.id and v['line'] == node.lineno for v in variables):
                             variables.append(var_info)
-                # Pour attributs de classe
+                
+                # ✅ Pour attributs de classe (self.x = ...)
                 elif isinstance(node, ast.ClassDef):
-                    for body in node.body:
-                        if isinstance(body, ast.Assign) and len(body.targets) == 1 and isinstance(body.targets[0], ast.Attribute):
-                            attr_info = {
-                                'name': body.targets[0].attr,
-                                'line': body.lineno,
-                                'type': 'attribute',
-                                'scope': node.name,
-                                'uid': f"attr_{body.targets[0].attr}_{body.lineno}"
-                            }
-                            if attr_info not in variables:
-                                variables.append(attr_info)
-        except SyntaxError:
-            # Fallback regex amélioré pour = sans mots-clés
-            var_pattern = r'^(\s*[\w_][\w\d_]*)\s*=\s*(?!(?:def|class|import|from|if|for|while|try|with|async|def\s|class\s|import\s|from\s))'
+                    for body_node in node.body:
+                        if isinstance(body_node, ast.Assign):
+                            for target in body_node.targets:
+                                if isinstance(target, ast.Attribute):
+                                    attr_info = {
+                                        'name': target.attr,
+                                        'line': body_node.lineno,
+                                        'type': 'attribute',
+                                        'scope': node.name,
+                                        'uid': f"attr_{target.attr}_{body_node.lineno}"
+                                    }
+                                    if not any(v['name'] == target.attr and v['line'] == body_node.lineno for v in variables):
+                                        variables.append(attr_info)
+            
+            logger.debug(f"✅ {len(variables)} variables extraites avec succès")
+            
+        except SyntaxError as e:
+            logger.warning(f"⚠️ Syntaxe Python invalide, fallback regex: {e}")
+            # Fallback regex amélioré
+            var_pattern = r'^(\s*[\w_][\w\d_]*)\s*=\s*(?!(?:def|class|import|from|if|for|while|try|with|async)\s)'
             for match in re.finditer(var_pattern, content, re.MULTILINE):
+                var_name = match.group(1).strip()
+                line = content[:match.start()].count('\n') + 1
                 var_info = {
-                    'name': match.group(1).strip(),
-                    'line': content[:match.start()].count('\n') + 1,
+                    'name': var_name,
+                    'line': line,
                     'type': 'local',
                     'scope': 'global',
-                    'uid': f"var_{match.group(1).strip()}_approx"
+                    'uid': f"var_{var_name}_approx_{line}"
                 }
-                if var_info not in variables:
+                if not any(v['name'] == var_name and v['line'] == line for v in variables):
                     variables.append(var_info)
+        
         return variables
 
     def _extract_java_classes(self, content: str) -> List[Dict[str, Any]]:
@@ -830,102 +846,91 @@ class ProjectStructureScanner:
         self.parser = parser or MultiLanguageDependencyParser()
     
     def scan_directory(self, directory: str, max_depth: int = None) -> Dict[str, Any]:
-        """
-        Scanne un répertoire et construit une structure hiérarchique.
-        Parcours infini si max_depth est None.
-        
-        Args:
-            directory: Chemin du répertoire à scanner
-            max_depth: Profondeur maximale de récursion (None pour illimité)
-        
-        Returns:
-            Dictionnaire avec la structure du projet:
-            {
-                'name': 'nom_projet',
-                'path': '/chemin/complet',
-                'clusters': [
-                    {
-                        'name': 'cluster1',
-                        'type': 'folder',
-                        'children': [...]
-                    }
-                ]
-            }
-        """
+
         if not os.path.exists(directory):
             logger.error(f"Répertoire introuvable: {directory}")
             return {}
-        
+
         project_name = os.path.basename(directory)
-        
+
         structure = {
             'name': project_name,
             'path': directory,
+            'uid': str(uuid.uuid4()),
+            'type': 'project',
             'clusters': []
         }
-        
+
         # Parcourir le niveau supérieur (clusters)
         try:
             items = sorted(os.listdir(directory))
         except PermissionError:
             logger.error(f"Accès refusé: {directory}")
             return structure
-        
+
+        # ✅ CORRECTION : Parcourir TOUS les éléments (fichiers ET dossiers)
         for item in items:
-            # Ne plus ignorer les fichiers cachés pour récupération maximale
             item_path = os.path.join(directory, item)
-            
+
             if os.path.isdir(item_path):
-                cluster = self._scan_cluster(item_path, item, max_depth)
+                # ✅ Appel récursif SANS décrementer max_depth (None reste None)
+                cluster = self._scan_cluster(item_path, item, max_depth, depth=1)
                 structure['clusters'].append(cluster)
             elif os.path.isfile(item_path):
-                # Fichier au niveau racine (rare mais possible)
+                # Fichier au niveau racine
                 file_info = self._scan_file(item_path, item)
                 structure['clusters'].append(file_info)
-        
-        logger.info(f"Scanné {len(structure['clusters'])} clusters dans {project_name}")
+
+        logger.info(f"✅ Scanné {len(structure['clusters'])} clusters dans {project_name}")
         return structure
     
-    def _scan_cluster(self, cluster_path: str, cluster_name: str, max_depth: int) -> Dict[str, Any]:
+    def _scan_cluster(self, cluster_path: str, cluster_name: str, max_depth: int, depth: int = 0) -> Dict[str, Any]:
         """
-        Scanne un cluster (dossier principal).
-        Parcours infini si max_depth est None.
-        
+        ✅ CORRIGÉ : Scanne un cluster (dossier) de manière RÉCURSIVE ILLIMITÉE par défaut.
+
         Args:
             cluster_path: Chemin du cluster
             cluster_name: Nom du cluster
-            max_depth: Profondeur restante (None pour illimité)
-        
+            max_depth: Profondeur maximale (None = illimité)
+            depth: Profondeur actuelle (pour logging)
+
         Returns:
-            Dictionnaire représentant le cluster
+            Dictionnaire représentant le cluster avec TOUS ses enfants
         """
         cluster = {
             'name': cluster_name,
             'path': cluster_path,
+            'uid': str(uuid.uuid4()),
             'type': 'folder',
-            'children': []
+            'children': [],
+            'depth': depth  # Pour debug
         }
-        
-        if max_depth is not None and max_depth <= 0:
+
+        # ✅ CORRECTION : Vérifier max_depth uniquement si défini (None = pas de limite)
+        if max_depth is not None and depth >= max_depth:
+            logger.debug(f"⚠️ Profondeur max atteinte ({max_depth}) pour {cluster_path}")
             return cluster
-        
+
         try:
             items = sorted(os.listdir(cluster_path))
         except PermissionError:
             logger.warning(f"Accès refusé au cluster: {cluster_path}")
             return cluster
-        
+
+        # ✅ CORRECTION : Parcourir TOUS les enfants récursivement
         for item in items:
             item_path = os.path.join(cluster_path, item)
-            
+
             if os.path.isdir(item_path):
-                new_depth = None if max_depth is None else max_depth - 1
-                child_folder = self._scan_cluster(item_path, item, new_depth)
+                # ✅ Appel récursif avec depth+1 (max_depth reste inchangé)
+                child_folder = self._scan_cluster(item_path, item, max_depth, depth + 1)
                 cluster['children'].append(child_folder)
+
             elif os.path.isfile(item_path):
                 file_info = self._scan_file(item_path, item)
                 cluster['children'].append(file_info)
-        
+
+        logger.debug(f"📁 Scanné {cluster_name} (profondeur {depth}): {len(cluster['children'])} enfants")
         return cluster
     
     def _scan_file(self, file_path: str, file_name: str) -> Dict[str, Any]:
@@ -1534,11 +1539,8 @@ class ProjectStructureScanner:
         label_matches = [n for n in all_nodes if normalize_node_name(n.get('label', '')) and normalize_node_name(n.get('label', '')).endswith(target_norm)]
         return label_matches[0] if label_matches else None
 
-    def _create_inverse_relations(self, all_nodes: List[Dict[str, Any]]) -> int:
-        """
-        Crée les relations inverses (incoming) depuis les outgoing existantes.
-        """
-        count = 0
+    def _create_inverse_relations(self, all_nodes):
+        inverse_count = 0
         node_by_uid = {n['uid']: n for n in all_nodes if 'uid' in n}
         
         for node in all_nodes:
@@ -1548,23 +1550,37 @@ class ProjectStructureScanner:
             
             for rel in node.get('outgoing_relations', []):
                 target_uid = rel.get('target_uid')
-                if not target_uid or target_uid not in node_by_uid:
+                
+                # Skip temporaires non résolus
+                if not target_uid or target_uid.startswith('temp_'):
                     continue
                 
-                target_node = node_by_uid[target_uid]
+                target_node = node_by_uid.get(target_uid)
+                if not target_node:
+                    continue
                 
-                # Créer l'inverse
+                # Créer relation inverse
                 inverse = {
                     'source_uid': node_uid,
                     'relation_type': rel['relation_type'],
-                    'category': rel.get('category', 'custom')
+                    'category': rel.get('category', 'parsed'),
+                    'source_name': node.get('label', node.get('name', 'Unknown'))
                 }
                 
-                if inverse not in target_node.setdefault('incoming_relations', []):
-                    target_node['incoming_relations'].append(inverse)
-                    count += 1
+                # Ajouter si pas déjà présent
+                incoming = target_node.setdefault('incoming_relations', [])
+                
+                is_duplicate = any(
+                    r['source_uid'] == node_uid and 
+                    r['relation_type'] == rel['relation_type']
+                    for r in incoming
+                )
+                
+                if not is_duplicate:
+                    incoming.append(inverse)
+                    inverse_count += 1
         
-        return count
+        return inverse_count
 
 # ============================================================================
 # FONCTIONS UTILITAIRES
@@ -1617,3 +1633,48 @@ def is_supported_file(file_path: str) -> bool:
     """
     ext = os.path.splitext(file_path)[1].lower()
     return ext in get_supported_extensions()
+
+def test_full_scan(project_path: str):
+    """
+    Teste le scan complet d'un projet.
+    
+    Args:
+        project_path: Chemin du projet à scanner
+    """
+    parser = MultiLanguageDependencyParser()
+    scanner = ProjectStructureScanner(parser)
+    
+    logger.info(f"🔍 Début du scan COMPLET de {project_path}")
+    
+    # ✅ Scan sans limite de profondeur
+    structure = scanner.scan_directory(project_path, max_depth=None)
+    
+    # Compter les éléments
+    def count_elements(node, counts=None):
+        if counts is None:
+            counts = {'folders': 0, 'files': 0, 'total': 0}
+        
+        counts['total'] += 1
+        if node.get('type') == 'folder':
+            counts['folders'] += 1
+        elif node.get('type') == 'file':
+            counts['files'] += 1
+        
+        for child in node.get('children', []):
+            count_elements(child, counts)
+        
+        return counts
+    
+    stats = {'folders': 0, 'files': 0, 'total': 0}
+    for cluster in structure.get('clusters', []):
+        count_elements(cluster, stats)
+    
+    logger.info(f"""
+    ✅ Scan terminé !
+    📊 Statistiques :
+       - Dossiers : {stats['folders']}
+       - Fichiers : {stats['files']}
+       - Total éléments : {stats['total']}
+    """)
+    
+    return structure

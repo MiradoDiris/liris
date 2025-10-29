@@ -2,12 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-Liris/ui/main_window.py - MODIFIÉ pour switch à 2 états (Dev/Data)
+Liris/ui/main_window.py - CORRIGÉ pour afficher DashboardPanel via menu IA
 """
 
 import os
 import json
-from datetime import datetime
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QFileDialog
 from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
@@ -21,21 +20,20 @@ from ui.widgets.annotation_form import AnnotationForm
 from ui.widgets.dataset_table import DatasetTable
 from ui.widgets.prompt_list import PromptList
 from ui.widgets.language_selector import LanguageSelector
-from ui.widgets.dataset_generation import DatasetGenerationWidget
 from ui.widgets.dataset_generator_widget import DatasetGeneratorWidget
 from ui.widgets.audit_panel import AuditPanel
 from ui.widgets.platform_config_widget import PlatformConfigWidget
 from ui.widgets.dataset_generator import DatasetGenerator, integrate_generation_button
+from ui.widgets.dashboard_panel import DashboardPanel
 
 from ui.widgets.dataset_strategy import DatasetStrategyWidget
+import qtawesome as qta
 
 from ui.widgets.project_config_only_widget import (
     ProjectConfigOnlyWidget,
 )
 
-from ui.widgets.tabs.project_config_widget import (
-    ProjectConfigWidget,
-)
+from ui.widgets.tabs.premium_dialog import PremiumDialog
 
 from ui.styles.theme import Theme
 from ui.localization.translator import translator, tr
@@ -45,26 +43,27 @@ from core.data.database import Database
 from core.data.exporter import DataExporter
 from core.scheduling.scheduler import AIScheduler
 from config.settings import ConfigProvider
+from ui.widgets.ide_panel import IDEPanel
 
 from utils.logger import logger
 
 
 # === Switch Glassmorphism pour deux états (Dev/Data) ===
 class GlassSwitch(QtWidgets.QWidget):
-    stateChanged = pyqtSignal(int)  # émet 0 (Dev) ou 1 (Data)
+    stateChanged = pyqtSignal(int)
     clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(200, 44)  # Largeur réduite pour 2 états
-        self._state = 0  # 0: Dev, 1: Data
+        self.setFixedSize(200, 44)
+        self._state = 0
         self._pill_x = 0.0
         self.animation = QPropertyAnimation(self, b"pill_x", self)
         self.animation.setDuration(220)
 
         self.pill_color = QColor(Theme.PRIMARY_COLOR)
         self.font = QFont("Segoe UI", 9, QFont.Bold)
-        self.section_width = 100.0  # 200/2 = 100
+        self.section_width = 100.0
 
     def getState(self):
         return self._state
@@ -99,18 +98,15 @@ class GlassSwitch(QtWidgets.QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
-        # Fond global arrondi
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(240, 240, 240))
         p.drawRoundedRect(self.rect(), 22, 22)
 
-        # Pilule sélectionnée
         pill_rect = QRectF(self._pill_x, 2.0, self.section_width - 4.0, self.height() - 4.0)
         p.setBrush(self.pill_color)
         radius = (self.height() - 4.0) / 2
         p.drawRoundedRect(pill_rect, radius, radius)
 
-        # Labels
         p.setFont(self.font)
         labels = ["Dev", "Data"]
         for i in range(2):
@@ -168,6 +164,7 @@ class MainWindow(QMainWindow):
         self.config_provider = None
 
         self.project_config_dialog_instance = None
+        self.dashboard_dialog_instance = None
 
         QTimer.singleShot(100, self._init_system)
 
@@ -188,6 +185,9 @@ class MainWindow(QMainWindow):
 
         self.dataset_generation = DatasetGeneratorWidget()
         self.dataset_strategy = DatasetStrategyWidget()
+        self.ide_panel = IDEPanel()
+        self.ide_dialog_instance = None
+        self.dashboard_panel = None
 
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setTextVisible(True)
@@ -210,44 +210,26 @@ class MainWindow(QMainWindow):
         """Configure l'interface utilisateur"""
         central_widget = QtWidgets.QWidget()
         self.setCentralWidget(central_widget)
-
+    
         main_layout = QtWidgets.QVBoxLayout(central_widget)
         main_layout.setSpacing(0)
-        main_layout.setContentsMargins(0, 15, 0, 0)  # Ajout d'espace en haut
-
-        # Zone principale avec onglets
+        main_layout.setContentsMargins(0, 0, 0, 0)
+    
         self.tab_widget = QtWidgets.QTabWidget()
         self.tab_widget.setTabsClosable(False)
-
-        # Widget personnalisé pour la barre d'onglets avec switch
-        tab_bar_container = QtWidgets.QWidget()
-        tab_bar_layout = QtWidgets.QHBoxLayout(tab_bar_container)
-        tab_bar_layout.setContentsMargins(0, 10, 30, 10)  # Marges augmentées
-        tab_bar_layout.setSpacing(0)
-
-        # Ajouter un stretch pour pousser le switch à droite
-        tab_bar_layout.addStretch()
-
-        # Switch à 2 états (à droite des onglets)
-        self.mode_switch = GlassSwitch()
-        tab_bar_layout.addWidget(self.mode_switch)
-
-        # Définir le widget de coin pour la barre d'onglets
-        self.tab_widget.setCornerWidget(tab_bar_container, Qt.TopRightCorner)
-
+    
         tab_stylesheet = f"""
             QTabWidget::pane {{
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
+                border: none;
                 background: white;
                 margin-top: 0px;
-                padding: 10px;
             }}
-
+    
             QTabBar {{
-                background: transparent;
+                background: white;
+                border: none;
             }}
-
+    
             QTabBar::tab {{
                 background: #F5F5F5;
                 color: {Theme.TEXT_COLOR};
@@ -256,43 +238,50 @@ class MainWindow(QMainWindow):
                 padding: 10px 24px;
                 margin-right: 8px;
                 margin-top: 8px;
-                margin-bottom: 8px;
+                margin-bottom: 4px;
                 font-weight: 500;
                 font-size: 13px;
                 min-width: 90px;
                 min-height: 36px;
-                max-height: 36px;
             }}
-
+    
             QTabBar::tab:selected {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                              stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
                 color: white;
                 font-weight: 600;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
             }}
-
+    
             QTabBar::tab:hover:!selected {{
                 background: #EBEBEB;
                 color: {Theme.PRIMARY_COLOR};
             }}
-
+    
             QTabBar::tab:first {{
                 margin-left: 15px;
             }}
-            """
+        """
         self.tab_widget.setStyleSheet(tab_stylesheet)
-
-        # Onglets par défaut (mode Dev)
+    
+        tab_bar_container = QtWidgets.QWidget()
+        tab_bar_layout = QtWidgets.QHBoxLayout(tab_bar_container)
+        tab_bar_layout.setContentsMargins(0, 10, 20, 0)
+        tab_bar_layout.setSpacing(0)
+    
+        tab_bar_layout.addStretch()
+        self.mode_switch = GlassSwitch()
+        tab_bar_layout.addWidget(self.mode_switch)
+    
+        self.tab_widget.setCornerWidget(tab_bar_container, Qt.TopRightCorner)
+    
         self.tab_widget.addTab(self.coding_panel, tr("coding_tab"))
         self.tab_widget.addTab(self.audit_panel, "Audit")
-
         self.tab_widget.setTabPosition(QtWidgets.QTabWidget.North)
         self.tab_widget.setDocumentMode(True)
         self.tab_widget.setMovable(False)
-
+    
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
-
+    
         main_layout.addWidget(self.tab_widget)
 
     def _update_tab_texts(self):
@@ -326,12 +315,12 @@ class MainWindow(QMainWindow):
         self.current_mode = modes.get(state, "dev")
         self.tab_widget.clear()
 
-        if state == 0:  # Dev: Coding et Audit
+        if state == 0:
             self.tab_widget.addTab(self.coding_panel, tr("coding_tab"))
             self.tab_widget.addTab(self.audit_panel, "Audit")
             self.tab_widget.setCurrentIndex(0)
 
-        elif state == 1:  # Data: Stratégie, Génération, Historique
+        elif state == 1:
             self.tab_widget.addTab(self.dataset_strategy, "📊 Stratégie")
             self.tab_widget.addTab(self.dataset_generation, "🚀 Génération")
             self.tab_widget.addTab(self.prompt_list, "📜 Historique")
@@ -389,12 +378,18 @@ class MainWindow(QMainWindow):
         refresh_action.triggered.connect(self._on_refresh)
         edit_menu.addAction(refresh_action)
 
-        # Menu IA
+        # Menu IA (avec Clé API déplacé ici)
         ai_menu = menubar.addMenu(tr("ai"))
 
         platforms_action = QtWidgets.QAction(tr("platforms"), self)
         platforms_action.triggered.connect(self._on_show_platforms)
         ai_menu.addAction(platforms_action)
+
+        # DÉPLACÉ: Gestion des clés API dans le menu IA
+        manage_api_keys_action = QtWidgets.QAction(tr("manage_api_keys"), self)
+        manage_api_keys_action.setShortcut("Ctrl+K")
+        manage_api_keys_action.triggered.connect(self._on_manage_api_keys)
+        ai_menu.addAction(manage_api_keys_action)
 
         test_action = QtWidgets.QAction(tr("test_connection"), self)
         test_action.triggered.connect(self._on_test_ai)
@@ -405,6 +400,23 @@ class MainWindow(QMainWindow):
         compare_action = QtWidgets.QAction(tr("compare_results"), self)
         compare_action.triggered.connect(self._on_compare_ai)
         ai_menu.addAction(compare_action)
+
+        # NOUVEAU: Menu IDE (remplace l'ancien menu Clé API)
+        ide_menu = menubar.addMenu("IDE")
+
+        code_editor_action = QtWidgets.QAction("Éditeur de code", self)
+        code_editor_action.triggered.connect(self._on_open_code_editor)
+        ide_menu.addAction(code_editor_action)
+
+        terminal_action = QtWidgets.QAction("Terminal", self)
+        terminal_action.triggered.connect(self._on_open_terminal)
+        ide_menu.addAction(terminal_action)
+
+        ide_menu.addSeparator()
+
+        project_explorer_action = QtWidgets.QAction("Explorateur de projet", self)
+        project_explorer_action.triggered.connect(self._on_open_project_explorer)
+        ide_menu.addAction(project_explorer_action)
 
         # Menu Brainstorming
         brainstorming_menu = menubar.addMenu("Brainstorming")
@@ -421,6 +433,16 @@ class MainWindow(QMainWindow):
         config_projects_dev_action.triggered.connect(self._on_show_project_config)
         turing_menu.addAction(config_projects_dev_action)
 
+        # Menu Update avec icône couronne
+        premium_action = QtWidgets.QAction(
+            qta.icon('fa5s.crown', color="#FBF8F8"),
+            "",
+            self
+        )
+        premium_action.setShortcut("Ctrl+U")
+        premium_action.triggered.connect(self._on_premium_update)
+        menubar.addAction(premium_action)
+
         # Menu Aide
         help_menu = menubar.addMenu(tr("help"))
 
@@ -432,6 +454,172 @@ class MainWindow(QMainWindow):
         docs_action.triggered.connect(self._on_documentation)
         help_menu.addAction(docs_action)
 
+    def _on_manage_api_keys(self):
+        """
+        Ouvre le DashboardPanel pour gérer les clés API.
+        """
+        try:
+            if not self.conductor or not self.config_provider or not self.database:
+                QMessageBox.warning(
+                    self,
+                    tr("manage_api_keys"),
+                    "Le système n'est pas encore initialisé. Veuillez patienter."
+                )
+                return
+
+            if not self.dashboard_dialog_instance:
+                self.dashboard_dialog_instance = QtWidgets.QDialog(self)
+                self.dashboard_dialog_instance.setWindowTitle("Dashboard - Gestion des Clés API")
+                self.dashboard_dialog_instance.setMinimumSize(1200, 800)
+                self.dashboard_dialog_instance.setModal(False)
+
+                dialog_layout = QtWidgets.QVBoxLayout(self.dashboard_dialog_instance)
+                dialog_layout.setContentsMargins(0, 0, 0, 0)
+
+                if not self.dashboard_panel:
+                    self.dashboard_panel = DashboardPanel(
+                        self.config_provider,
+                        self.conductor,
+                        self.database
+                    )
+
+                dialog_layout.addWidget(self.dashboard_panel)
+
+                self.dashboard_dialog_instance.finished.connect(
+                    self._on_dashboard_dialog_closed
+                )
+
+            if hasattr(self.dashboard_panel, 'refresh'):
+                self.dashboard_panel.refresh()
+
+            self.dashboard_dialog_instance.show()
+            self.dashboard_dialog_instance.raise_()
+            self.dashboard_dialog_instance.activateWindow()
+
+            logger.info("Dashboard de gestion des clés API ouvert")
+            self.update_status("Dashboard ouvert")
+
+        except Exception as e:
+            logger.error(f"Erreur lors de l'ouverture du Dashboard: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Impossible d'ouvrir le Dashboard:\n\n{str(e)}"
+            )
+            self.update_status("Erreur lors de l'ouverture du Dashboard")
+
+    def _on_dashboard_dialog_closed(self, result):
+        """Gère la fermeture de la boîte de dialogue Dashboard"""
+        self.dashboard_dialog_instance = None
+        logger.info("Fenêtre Dashboard fermée.")
+
+    # NOUVEAU: Méthodes pour le menu IDE
+    def _on_open_code_editor(self):
+        """Ouvre la fenêtre IDE pour l'intégration de code"""
+        try:
+            # Si le dialogue n'existe pas ou a été fermé, le créer
+            if not self.ide_dialog_instance:
+                self.ide_dialog_instance = QtWidgets.QDialog(self)
+                self.ide_dialog_instance.setWindowTitle("🔧 IDE - Intégration de Code")
+                self.ide_dialog_instance.setMinimumSize(1400, 900)
+                self.ide_dialog_instance.setModal(False)
+
+                # Layout du dialogue
+                dialog_layout = QtWidgets.QVBoxLayout(self.ide_dialog_instance)
+                dialog_layout.setContentsMargins(0, 0, 0, 0)
+
+                # Créer le panneau IDE s'il n'existe pas
+                if not self.ide_panel:
+                    self.ide_panel = IDEPanel()
+
+                    # Connecter les signaux
+                    self.ide_panel.integration_started.connect(self._on_ide_integration_started)
+                    self.ide_panel.integration_completed.connect(self._on_ide_integration_completed)
+
+                    # Connecter le signal de sélection de snippet depuis coding_panel
+                    if hasattr(self.coding_panel, 'snippet_selected'):
+                        self.coding_panel.snippet_selected.connect(self.ide_panel.set_snippet)
+
+                dialog_layout.addWidget(self.ide_panel)
+
+                # Gérer la fermeture
+                self.ide_dialog_instance.finished.connect(self._on_ide_dialog_closed)
+
+            # Rafraîchir le panneau
+            if hasattr(self.ide_panel, 'refresh'):
+                self.ide_panel.refresh()
+
+            # Afficher le dialogue
+            self.ide_dialog_instance.show()
+            self.ide_dialog_instance.raise_()
+            self.ide_dialog_instance.activateWindow()
+
+            logger.info("Fenêtre IDE ouverte")
+            self.update_status("Fenêtre IDE ouverte")
+
+        except Exception as e:
+            logger.error(f"Erreur lors de l'ouverture de l'IDE: {str(e)}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Impossible d'ouvrir la fenêtre IDE:\n\n{str(e)}"
+            )
+
+    def _on_open_terminal(self):
+        """Ouvre le terminal intégré"""
+        QMessageBox.information(
+            self,
+            "Terminal",
+            "Le terminal intégré sera implémenté dans une prochaine version."
+        )
+
+    def _on_open_project_explorer(self):
+        """Ouvre l'explorateur de projet"""
+        QMessageBox.information(
+            self,
+            "Explorateur de projet",
+            "L'explorateur de projet sera implémenté dans une prochaine version."
+        )
+
+    def _on_ide_integration_started(self):
+        """Gère le démarrage de l'intégration IDE"""
+        self.update_status("🚀 Intégration du code dans le projet...")
+        self.show_progress(0, 100)
+        logger.info("Intégration IDE démarrée")
+
+    def _on_ide_integration_completed(self, success, message):
+        """Gère la fin de l'intégration IDE"""
+        self.hide_progress()
+
+        if success:
+            self.update_status(f"✅ {message}")
+            logger.info(f"Intégration IDE réussie: {message}")
+        else:
+            self.update_status(f"❌ {message}")
+            logger.error(f"Intégration IDE échouée: {message}")
+
+    def _on_premium_update(self):
+        """
+        Ouvre directement le dialogue Premium Update.
+        """
+        try:
+            dialog = PremiumDialog(self)
+            result = dialog.exec_()
+            
+            if result == QtWidgets.QDialog.Accepted:
+                logger.info("Premium Update: Dialogue accepté")
+                self.update_status("Contexte mis à jour avec succès")
+            else:
+                logger.info("Premium Update: Dialogue annulé")
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de l'ouverture du dialogue Premium: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Impossible d'ouvrir le dialogue Premium:\n\n{str(e)}"
+            )
+
     def _update_menus(self):
         """Met à jour les textes des menus"""
         menubar = self.menuBar()
@@ -440,35 +628,19 @@ class MainWindow(QMainWindow):
             tr("file"): 0,
             tr("edit"): 1,
             tr("ai"): 2,
-            "Brainstorming": 3,
-            "Config": 4,
-            tr("help"): 5,
+            "IDE": 3,
+            "Brainstorming": 4,
+            "Config": 5,
+            tr("help"): 6,
         }
 
         for i, action in enumerate(menubar.actions()):
             for title_key, index in menus.items():
                 if i == index:
-                    if title_key in ["Config", "Brainstorming"]:
-                        action.setText(title_key)
-                    else:
-                        action.setText(title_key)
+                    action.setText(title_key)
                     break
 
         self._update_menu_actions()
-
-    def _on_change_language(self):
-        """Ouvre le sélecteur de langue"""
-        selector = LanguageSelector(self)
-
-        languages = translator.get_available_languages()
-        for i in range(selector.language_combo.count()):
-            if selector.language_combo.itemData(i) == translator.current_language:
-                selector.language_combo.setCurrentIndex(i)
-                break
-
-        if selector.exec_() == QtWidgets.QDialog.Accepted:
-            selected_language = selector.get_selected_language()
-            self.change_language(selected_language)
 
     def _update_menu_actions(self):
         """Met à jour les textes des actions des menus"""
@@ -490,17 +662,24 @@ class MainWindow(QMainWindow):
             ],
             2: [
                 tr("platforms"),
+                tr("manage_api_keys"),
                 tr("test_connection"),
                 None,
                 tr("compare_results"),
             ],
             3: [
-                "Ouvrir Brainstorming"
+                "Éditeur de code",
+                "Terminal",
+                None,
+                "Explorateur de projet",
             ],
             4: [
-                "Configuration projets dev"
+                "Ouvrir Brainstorming"
             ],
             5: [
+                "Configuration projets dev"
+            ],
+            6: [
                 tr("about"),
                 tr("documentation"),
             ],
@@ -522,6 +701,20 @@ class MainWindow(QMainWindow):
                         ):
                             actions[action_index].setText(text)
                         action_index += 1
+
+    def _on_change_language(self):
+        """Ouvre le sélecteur de langue"""
+        selector = LanguageSelector(self)
+
+        languages = translator.get_available_languages()
+        for i in range(selector.language_combo.count()):
+            if selector.language_combo.itemData(i) == translator.current_language:
+                selector.language_combo.setCurrentIndex(i)
+                break
+
+        if selector.exec_() == QtWidgets.QDialog.Accepted:
+            selected_language = selector.get_selected_language()
+            self.change_language(selected_language)
 
     def _init_statusbar(self):
         """Configure la barre d'état"""
@@ -558,7 +751,6 @@ class MainWindow(QMainWindow):
         self.prompt_list.prompt_selected.connect(self._on_prompt_selected)
         self.prompt_list.prompt_deleted.connect(self._on_prompt_deleted)
 
-        # Connexion du switch à 2 états
         self.mode_switch.stateChanged.connect(self._on_mode_switched)
 
         self.audit_panel.audit_started.connect(self._on_audit_started)
@@ -594,6 +786,9 @@ class MainWindow(QMainWindow):
 
         if hasattr(self.dataset_strategy, "update_language"):
             self.dataset_strategy.update_language()
+
+        if self.dashboard_panel and hasattr(self.dashboard_panel, "update_language"):
+            self.dashboard_panel.update_language()
 
         if self.project_config_dialog_instance and isinstance(
                 self.project_config_dialog_instance, QtWidgets.QDialog
@@ -717,6 +912,13 @@ class MainWindow(QMainWindow):
 
         self.prompt_list.set_database(self.database)
 
+        if not self.dashboard_panel:
+            self.dashboard_panel = DashboardPanel(
+                self.config_provider,
+                self.conductor,
+                self.database
+            )
+
         self.prompt_list.refresh_list()
         self.dataset_table.refresh_list()
 
@@ -771,6 +973,12 @@ class MainWindow(QMainWindow):
         elif current_tab == self.dataset_strategy:
             if hasattr(self.dataset_strategy, '_create_new_project'):
                 self.dataset_strategy._create_new_project()
+
+        if self.ide_panel and self.ide_dialog_instance and self.ide_dialog_instance.isVisible():
+            self.ide_panel.preview_text.clear()
+            self.ide_panel.current_snippets = []
+            self.ide_panel.integrate_btn.setEnabled(False)
+            self.update_status("Configuration IDE réinitialisée")
 
     def _on_open_file(self):
         """Gère l'ouverture d'un fichier"""
@@ -1120,6 +1328,9 @@ class MainWindow(QMainWindow):
 
         if hasattr(self.dataset_strategy, 'closeEvent'):
             self.dataset_strategy.closeEvent(None)
+        
+        if self.ide_dialog_instance:
+            self.ide_dialog_instance.close()
 
         event.accept()
 

@@ -20,8 +20,8 @@ from ui.widgets.tabs.browser_config_widget import BrowserConfigWidget
 from ui.widgets.tabs.prompt_field_widget import PromptFieldWidget
 from ui.widgets.tabs.response_area_widget import ResponseAreaWidget
 from ui.widgets.tabs.final_test_widget import FinalTestWidget
-from ui.widgets.tabs.project_config_widget import ProjectConfigWidget
 from utils.tab_refresh_helper import add_refresh_to_existing_tabs
+from ui.widgets.tabs.api_key_config_widget import ApiKeyConfigWidget
 
 
 class PlatformConfigWidget(QtWidgets.QWidget):
@@ -65,10 +65,6 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             logger.error(f"Erreur lors de l'initialisation de PlatformConfigWidget: {str(e)}")
             print(f"ERREUR CRITIQUE: {str(e)}")
             print(traceback.format_exc())
-
-    # =====================================================
-    # NOUVELLES MÉTHODES POUR SUPPORT MULTI-FENÊTRES
-    # =====================================================
 
     def _migrate_profile_browser_config(self, profile):
         """
@@ -310,10 +306,6 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             logger.error(f"Erreur sauvegarde profil interne {platform_name}: {str(e)}")
             return False
 
-    # =====================================================
-    # MÉTHODES EXISTANTES ENRICHIES (COMPATIBILITÉ GARANTIE)
-    # =====================================================
-
     # Capture explicite des événements de souris pour garantir que les clics sont traités
     def mousePressEvent(self, event):
         """Traite les événements de clic de souris"""
@@ -363,21 +355,26 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.platform_list.raise_()
 
     def _init_ui(self):
-        """Configure l'interface utilisateur"""
+        """Configure l'interface utilisateur avec style d'onglets corrigé"""
+        
         # Layout principal
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setSpacing(PlatformConfigStyle.SPACING)
-        main_layout.setContentsMargins(PlatformConfigStyle.MARGIN, PlatformConfigStyle.MARGIN,
-                                       PlatformConfigStyle.MARGIN, PlatformConfigStyle.MARGIN)
+        main_layout.setContentsMargins(
+            PlatformConfigStyle.MARGIN, 
+            PlatformConfigStyle.MARGIN,
+            PlatformConfigStyle.MARGIN, 
+            PlatformConfigStyle.MARGIN
+        )
 
         # Titre
         title_label = QtWidgets.QLabel("Configuration des Plateformes d'IA")
         title_label.setStyleSheet(PlatformConfigStyle.get_title_style())
         main_layout.addWidget(title_label)
 
-        # Créer les onglets principaux
+        # Créer les onglets principaux avec style amélioré
         self.tabs = QtWidgets.QTabWidget()
-        self.tabs.setStyleSheet(PlatformConfigStyle.get_tabs_style())
+        self.tabs.setStyleSheet(self._get_improved_tabs_style())
         main_layout.addWidget(self.tabs)
 
         # === DISPOSITION PRINCIPALE ===
@@ -486,19 +483,26 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         content_layout.addWidget(left_panel, 1)
         content_layout.addWidget(right_panel, 2)
 
-# === CRÉATION DES ONGLETS ===
+        # === CRÉATION DES ONGLETS ===
 
-        # Onglet 1: Configuration du clavier (NOUVEAU - ÉTAPE 1)
+        # Onglet 1: Configuration du clavier
         self.keyboard_widget = KeyboardConfigWidget(self.config_provider, self.conductor)
         self.keyboard_widget.keyboard_layout_changed.connect(self._on_keyboard_layout_changed)
         self.keyboard_widget.keyboard_configured.connect(self._on_keyboard_configured)
-        self.tabs.addTab(self.keyboard_widget, "Configuration clavier")
+        self.tabs.addTab(self.keyboard_widget, "Config clavier")
+
+        # Onglet 1.5: Configuration des clés API
+        self.api_key_widget = ApiKeyConfigWidget(self.config_provider, self.conductor)
+        self.api_key_widget.api_key_saved.connect(self._on_api_key_saved)
+        self.api_key_widget.api_key_deleted.connect(self._on_api_key_deleted)
+        self.api_key_widget.api_key_tested.connect(self._on_api_key_tested)
+        self.tabs.addTab(self.api_key_widget, "Clés API")
 
         # Onglet 2: Configuration générale
         general_tab = QtWidgets.QWidget()
         general_tab.setLayout(QtWidgets.QVBoxLayout())
         general_tab.layout().addWidget(content_widget)
-        self.tabs.addTab(general_tab, "Configuration Générale")
+        self.tabs.addTab(general_tab, "Config Générale")
 
         # Onglet 3: Navigateur (ENRICHI pour support multi-fenêtres)
         self.browser_widget = BrowserConfigWidget(self.config_provider, self.conductor)
@@ -508,7 +512,7 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         # NOUVEAU: Connecter les signaux pour gestion multi-fenêtres
         if hasattr(self.browser_widget, 'window_selection_changed'):
             self.browser_widget.window_selection_changed.connect(self._on_window_selection_changed)
-        self.tabs.addTab(self.browser_widget, "Gestion des navigateurs")
+        self.tabs.addTab(self.browser_widget, "Navigateurs")
 
         # Onglet 4: Champ de prompt
         self.prompt_field_widget = PromptFieldWidget(self.config_provider, self.conductor)
@@ -528,35 +532,21 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.final_test_widget.test_completed.connect(self._on_final_test_completed)
         self.tabs.addTab(self.final_test_widget, "Test final")
 
-        # Onglet 7: Configuration des projets (NOUVEAU)
-        self.project_config_widget = ProjectConfigWidget(self.config_provider, self.conductor)
-        self.project_config_widget.project_profile_saved.connect(self._on_project_profile_saved)
-        self.project_config_widget.project_profile_deleted.connect(self._on_project_profile_deleted)
-        self.tabs.addTab(self.project_config_widget, "Configuration projets dev")
-
-        # Onglet 7: Configuration des projets (NOUVEAU)
-        self.project_config_widget = ProjectConfigWidget(self.config_provider, self.conductor)
-        self.project_config_widget.project_profile_saved.connect(self._on_project_profile_saved)
-        self.project_config_widget.project_profile_deleted.connect(self._on_project_profile_deleted)
-        self.tabs.addTab(self.project_config_widget, "Configuration projets data science")
-
-        # ===== NOUVEAU: CONFIGURATION DU RAFRAÎCHISSEMENT AUTOMATIQUE =====
-        # Configurer le rafraîchissement automatique pour TOUS les onglets
+        # ===== CONFIGURATION DU RAFRAÎCHISSEMENT AUTOMATIQUE =====
         database = getattr(self.conductor, 'database', None)
         self.refresh_helper = add_refresh_to_existing_tabs(
-            self.tabs,              # Le QTabWidget avec tous les onglets
-            self.config_provider,   # Le provider de config
-            self.conductor,         # Le conducteur
-            database               # La base de données
+            self.tabs,
+            self.config_provider,
+            self.conductor,
+            database
         )
-        logger.info("Rafraîchissement automatique des onglets configuré pour tous les onglets")
-        # ===== FIN NOUVEAU =====
+        logger.info("Rafraîchissement automatique des onglets configuré")
 
         # Pour la compatibilité avec le code existant
         self.main_tabs = self.tabs
         self.interface_tabs = self.tabs
 
-        # Garantir que tous les widgets sont activés - IMPORTANT
+        # Garantir que tous les widgets sont activés
         for widget in self.findChildren(QtWidgets.QWidget):
             widget.setEnabled(True)
 
@@ -564,6 +554,199 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         self.tabs.raise_()
         self.platform_list.raise_()
         self.details_group.raise_()
+
+    def _get_improved_tabs_style(self):
+        """
+        Retourne le style amélioré des onglets
+        
+        Returns:
+            str: Feuille de style CSS pour les onglets
+        """
+        # Définir les couleurs de thème avec fallback si Theme n'a pas les attributs
+        try:
+            from ui.styles.theme import Theme
+            BORDER_COLOR = getattr(Theme, 'BORDER_COLOR', '#CCCCCC')
+            PRIMARY_COLOR = getattr(Theme, 'PRIMARY_COLOR', '#0066CC')
+            SECONDARY_COLOR = getattr(Theme, 'SECONDARY_COLOR', '#0052A3')
+            TEXT_COLOR = getattr(Theme, 'TEXT_COLOR', '#333333')
+        except (ImportError, AttributeError):
+            # Fallback colors if Theme import fails or attributes missing
+            BORDER_COLOR = '#CCCCCC'
+            PRIMARY_COLOR = '#0066CC'
+            SECONDARY_COLOR = '#0052A3'
+            TEXT_COLOR = '#333333'
+        
+        return f"""
+            /* === CONTENEUR DES ONGLETS === */
+            QTabWidget::pane {{
+                border: none;
+                background: white;
+                margin-top: 0px;
+            }}
+            
+            /* === BARRE D'ONGLETS === */
+            QTabBar {{
+                background: white;
+                border: none;
+            }}
+            
+            /* === STYLE DES ONGLETS === */
+            QTabBar::tab {{
+                background: #F5F5F5;
+                color: {TEXT_COLOR};
+                border: none;
+                border-radius: 6px;
+                padding: 10px 24px;
+                margin-right: 8px;
+                margin-top: 8px;
+                margin-bottom: 4px;
+                font-weight: 500;
+                font-size: 13px;
+                min-width: 90px;
+                min-height: 36px;
+            }}
+            
+            /* === ONGLET SÉLECTIONNÉ === */
+            QTabBar::tab:selected {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                             stop:0 {PRIMARY_COLOR}, 
+                                             stop:1 {SECONDARY_COLOR});
+                color: white;
+                font-weight: 600;
+            }}
+            
+            /* === ONGLET SURVOLÉ (NON SÉLECTIONNÉ) === */
+            QTabBar::tab:hover:!selected {{
+                background: #EBEBEB;
+                color: {PRIMARY_COLOR};
+            }}
+            
+            /* === PREMIER ONGLET === */
+            QTabBar::tab:first {{
+                margin-left: 15px;
+            }}
+            
+            /* === ONGLET DÉSACTIVÉ === */
+            QTabBar::tab:disabled {{
+                background: #F0F0F0;
+                color: #E0E0E0;
+                border: none;
+            }}
+            
+            /* === BOUTONS DE DÉFILEMENT === */
+            QTabBar::scroller {{
+                width: 35px;
+            }}
+            
+            /* === BOUTONS TOOLBUTTON (MENU ET FLÈCHES) === */
+            QTabBar QToolButton {{
+                background: #F5F5F5;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                margin: 1px;
+                width: 20px;
+                height: 20px;
+                min-width: 20px;
+                min-height: 20px;
+                max-width: 20px;
+                max-height: 20px;
+            }}
+            
+            QTabBar QToolButton:hover {{
+                background: {PRIMARY_COLOR};
+                color: white;
+                padding: 4px;
+            }}
+            
+            QTabBar QToolButton:pressed {{
+                background: {SECONDARY_COLOR};
+                padding: 4px;
+            }}
+            
+            QTabBar QToolButton:disabled {{
+                background: #F8F8F8;
+                color: #EEEEEE;
+                padding: 4px;
+            }}
+            
+            /* === BOUTON MENU DÉROULANT === */
+            QTabBar QToolButton::menu-button {{
+                background: #F5F5F5;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                width: 20px;
+                height: 20px;
+                min-width: 20px;
+                min-height: 20px;
+                max-width: 20px;
+                max-height: 20px;
+            }}
+            
+            QTabBar QToolButton::menu-button:hover {{
+                background: {PRIMARY_COLOR};
+                padding: 4px;
+            }}
+            
+            QTabBar QToolButton::menu-button:pressed {{
+                background: {SECONDARY_COLOR};
+                padding: 4px;
+            }}
+            
+            QTabBar QToolButton::menu-button:disabled {{
+                background: #F8F8F8;
+                padding: 4px;
+            }}
+            
+            /* === FLÈCHES DE NAVIGATION === */
+            QTabBar QToolButton::left-arrow {{
+                image: none;
+                border: none;
+                background: transparent;
+            }}
+            
+            QTabBar QToolButton::right-arrow {{
+                image: none;
+                border: none;
+                background: transparent;
+            }}
+            
+            /* === INDICATEURS VISUELS === */
+            QTabBar::tab[modified="true"]::after {{
+                content: " *";
+                color: #FF6B6B;
+                font-weight: bold;
+                font-size: 14px;
+            }}
+            
+            QTabBar::tab[incomplete="true"] {{
+                font-style: italic;
+            }}
+            
+            QTabBar::tab[incomplete="true"]::after {{
+                content: " ⚠";
+                color: #FFA500;
+                font-size: 12px;
+            }}
+        """
+
+    def _on_api_key_saved(self, platform_name, api_config):
+        """Gère l'événement de sauvegarde d'une clé API"""
+        print(f"DEBUG: Clé API sauvegardée pour '{platform_name}'")
+        self._update_tab_status()
+
+        # Recharger les profils pour mise à jour
+        self._load_profiles_from_files()
+
+    def _on_api_key_deleted(self, platform_name):
+        """Gère l'événement de suppression d'une clé API"""
+        print(f"DEBUG: Clé API supprimée pour '{platform_name}'")
+        self._update_tab_status()
+
+    def _on_api_key_tested(self, platform_name, success, message):
+        """Gère l'événement de test d'une clé API"""
+        print(f"DEBUG: Test clé API '{platform_name}': {success} - {message}")
 
     def _on_keyboard_layout_changed(self, layout_name):
         """Gère l'événement de changement de disposition clavier"""
@@ -641,11 +824,12 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         # Vérifier l'état de configuration de chaque onglet
         config_states = {
             0: hasattr(self, 'keyboard_widget') and self.keyboard_widget.is_configured(),  # Clavier configuré?
-            1: True,  # Config générale toujours configurée
-            2: 'browser' in profile and profile['browser'].get('url'),  # Navigateur configuré?
-            3: 'prompt_field' in interface_positions,  # Champ prompt configuré?
-            4: 'response_area' in interface_positions,  # Zone réponse configurée?
-            5: all([  # Test final disponible si tout est configuré
+            1: hasattr(self, 'api_key_widget') and self.api_key_widget.is_configured(),    # NOUVEAU: API configurée?
+            2: True,  # Config générale toujours configurée
+            3: 'browser' in profile and profile['browser'].get('url'),  # Navigateur configuré?
+            4: 'prompt_field' in interface_positions,  # Champ prompt configuré?
+            5: 'response_area' in interface_positions,  # Zone réponse configurée?
+            6: all([  # Test final disponible si tout est configuré
                 hasattr(self, 'keyboard_widget') and self.keyboard_widget.is_configured(),
                 'browser' in profile and profile['browser'].get('url'),
                 'prompt_field' in interface_positions,
@@ -670,8 +854,15 @@ class PlatformConfigWidget(QtWidgets.QWidget):
                 self.tabs.setTabText(project_tab_index, base_title_project)
 
         # Mettre à jour les titres des onglets en fonction de l'état
-        base_titles = ["Configuration clavier", "Configuration Générale", "Gestion des navigateurs",
-                       "Champ de prompt", "Zone de réponse", "Test final"]
+        base_titles = [
+            "Configuration clavier", 
+            "Clés API",  # NOUVEAU
+            "Configuration Générale", 
+            "Gestion des navigateurs",
+            "Champ de prompt", 
+            "Zone de réponse", 
+            "Test final"
+        ]
 
         for i, title in enumerate(base_titles):
             configured = config_states.get(i, False)
@@ -789,6 +980,9 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             print(f"DEBUG: {file_count} profils chargés depuis les fichiers")
             if migration_count > 0:
                 print(f"DEBUG: {migration_count} profils migrés automatiquement")
+
+            if hasattr(self, 'api_key_widget'):
+                self.api_key_widget.set_profiles(self.profiles)
 
             # Mettre à jour le widget navigateur avec les profils enrichis
             if hasattr(self, 'browser_widget'):
@@ -1133,6 +1327,9 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             if hasattr(self, 'browser_widget'):
                 self.browser_widget.set_profiles(self.profiles)
 
+            if hasattr(self, 'api_key_widget'):
+                self.api_key_widget.set_profiles(self.profiles)
+
             # Mettre à jour le widget de champ de prompt avec les profils
             if hasattr(self, 'prompt_field_widget'):
                 self.prompt_field_widget.set_profiles(self.profiles)
@@ -1233,6 +1430,9 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             # Sélectionner cette plateforme dans le widget navigateur
             if hasattr(self, 'browser_widget'):
                 self.browser_widget.select_platform(platform_name)
+
+            if hasattr(self, 'api_key_widget'):
+                self.api_key_widget.select_platform(platform_name)
 
             # Sélectionner cette plateforme dans le widget de champ de prompt
             if hasattr(self, 'prompt_field_widget'):
@@ -1838,6 +2038,9 @@ class PlatformConfigWidget(QtWidgets.QWidget):
         if hasattr(self, 'browser_widget'):
             self.browser_widget.refresh()
 
+        if hasattr(self, 'api_key_widget'):
+            self.api_key_widget.refresh()
+
         # Actualiser le widget de champ de prompt
         if hasattr(self, 'prompt_field_widget'):
             self.prompt_field_widget.refresh()
@@ -1855,10 +2058,6 @@ class PlatformConfigWidget(QtWidgets.QWidget):
 
         # Mettre à jour les indicateurs d'état
         self._update_tab_status()
-
-    # =====================================================
-    # MÉTHODES PUBLIQUES POUR ACCÈS AUX NOUVELLES FONCTIONNALITÉS
-    # =====================================================
 
     def get_platform_browser_window_info(self, platform_name):
         """

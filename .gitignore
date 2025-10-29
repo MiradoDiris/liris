@@ -5,6 +5,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
+.venv
 
 # Fichiers Python
 __pycache__/
@@ -29,7 +30,7 @@ wheels/
 *.egg
 MANIFEST
 
-# Base de données
+# Base de donnï¿½es
 *.db
 *.sqlite
 *.sqlite3
@@ -57,7 +58,7 @@ config/local_settings.py
 .env
 .env.local
 
-# Exports et données temporaires
+# Exports et donnï¿½es temporaires
 exports/
 data/temp/
 temp/

@@ -93,7 +93,14 @@
     "type": "Firefox",
     "path": "C:/Program Files/Mozilla Firefox/firefox.exe",
     "url": "https://chatgpt.com/",
-    "fullscreen": false
+    "fullscreen": false,
+    "window_selection_method": "auto",
+    "window_order": 1,
+    "window_title_pattern": "",
+    "window_position": null,
+    "window_id": null,
+    "window_size": null,
+    "remember_window": false
   },
   "interface_positions": {
     "prompt_field": {

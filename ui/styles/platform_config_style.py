@@ -41,7 +41,7 @@ class PlatformConfigStyle:
 
     # Constantes de layout
     SPACING = 10
-    MARGIN = 15
+    MARGIN = 10
 
     # Couleurs principales - MÊME COULEUR QUE THEME.PY
     PRIMARY_COLOR = "#A23B2D"  # Rouge brique (comme Theme.PRIMARY_COLOR)

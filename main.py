@@ -23,6 +23,22 @@ from ui.localization.translator import translator, tr
 from ui.widgets.language_selector import LanguageSelector
 from utils.logger import logger
 
+import sys
+import gc
+
+sys.setrecursionlimit(50000)
+gc.set_threshold(700, 10, 10)
+
+try:
+    import resource
+    resource.setrlimit(resource.RLIMIT_STACK, (2**29, -1))
+    logger.info("✅ Stack size augmenté à 512MB")
+except:
+    logger.info("⚠️ Impossible d'augmenter stack size (normal sous Windows)")
+    pass
+
+logger.info(f"✅ Configuration Python: recursion={sys.getrecursionlimit()}")
+
 
 class LinuxWindow:
     """Linux window object mimicking PyGetWindow's Window class"""

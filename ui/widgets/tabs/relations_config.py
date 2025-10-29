@@ -1,10 +1,13 @@
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtWidgets import QListWidgetItem, QHBoxLayout, QLabel, QPushButton, QInputDialog
 from PyQt5.QtCore import Qt
+from utils.dgraph_connector import LirisDgraphConnector
+from ui.styles.platform_config_style import PlatformConfigStyle
 from utils.logger import logger
 from utils.multi_language_parser import (
     normalize_node_name
 )
+from utils.dgraph_project_manager import DgraphProjectManager
 
 
 class RelationsConfig(QtWidgets.QWidget):
@@ -18,12 +21,16 @@ class RelationsConfig(QtWidgets.QWidget):
         self.level = level
         self.show_hierarchy = True
         self.show_dependencies = True
+        self.current_project_profile_data = None
         self._init_ui()
+
+        self.dgraph_connector = LirisDgraphConnector(auto_reset=False)
+        self.dgraph_manager = DgraphProjectManager(self.dgraph_connector)
 
     def _init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(8)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(10, 5, 10, 10)
 
         title = QtWidgets.QLabel(f"Relations {self.level.capitalize()}")
         title.setStyleSheet("""
@@ -42,7 +49,7 @@ class RelationsConfig(QtWidgets.QWidget):
         filter_layout.addWidget(relations_label)
 
         # Bouton Hiérarchie
-        self.hierarchy_btn = QPushButton("🔗 Hiérarchie")
+        self.hierarchy_btn = QPushButton("Hiérarchie")
         self.hierarchy_btn.setCheckable(True)
         self.hierarchy_btn.setChecked(True)
         self.hierarchy_btn.setStyleSheet(self._get_filter_button_style())
@@ -50,7 +57,7 @@ class RelationsConfig(QtWidgets.QWidget):
         filter_layout.addWidget(self.hierarchy_btn)
 
         # Bouton Dépendances
-        self.dependencies_btn = QPushButton("📊 Dépendances")
+        self.dependencies_btn = QPushButton("Dépendances")
         self.dependencies_btn.setCheckable(True)
         self.dependencies_btn.setChecked(True)
         self.dependencies_btn.setStyleSheet(self._get_filter_button_style())
@@ -108,7 +115,7 @@ class RelationsConfig(QtWidgets.QWidget):
 
         # === LISTE DES RELATIONS ===
         self.relations_list = QtWidgets.QListWidget()
-        self.relations_list.setMaximumHeight(200)
+        self.relations_list.setMaximumHeight(150)
         self.relations_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.relations_list.currentItemChanged.connect(self._on_relation_selected)
         self.relations_list.setStyleSheet("""
@@ -140,46 +147,22 @@ class RelationsConfig(QtWidgets.QWidget):
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(8)
 
-        button_style = """
-            QPushButton {
-                background-color: #e8e8e8;
-                color: black;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover:!pressed {
-                background-color: #ffffff;
-                color: black;
-                border: 1px solid #666;
-            }
-            QPushButton:pressed {
-                background-color: #d0d0d0;
-            }
-            QPushButton:disabled {
-                background-color: #d5d5d5;
-                color: #888888;
-                border: 1px solid #bbb;
-            }
-        """
-
-        self.add_button = QtWidgets.QPushButton("➕ Nouvelle relation")
-        self.add_button.setStyleSheet(button_style)
+        self.add_button = QtWidgets.QPushButton("Nouvelle relation")
+        self.add_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_button.setMaximumWidth(160)
         self.add_button.clicked.connect(self._on_add_new_relation)
         self.add_button.setEnabled(False)
         buttons_layout.addWidget(self.add_button)
 
-        self.edit_button = QtWidgets.QPushButton("✏️ Modifier")
-        self.edit_button.setStyleSheet(button_style)
+        self.edit_button = QtWidgets.QPushButton(" Modifier")
+        self.edit_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_button.setMaximumWidth(110)
         self.edit_button.clicked.connect(self._on_edit)
         self.edit_button.setEnabled(False)
         buttons_layout.addWidget(self.edit_button)
 
-        self.remove_button = QtWidgets.QPushButton("🗑️ Supprimer")
-        self.remove_button.setStyleSheet(button_style)
+        self.remove_button = QtWidgets.QPushButton("Supprimer")
+        self.remove_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_button.setMaximumWidth(110)
         self.remove_button.clicked.connect(self._on_remove)
         self.remove_button.setEnabled(False)
@@ -228,76 +211,40 @@ class RelationsConfig(QtWidgets.QWidget):
         self._refresh_relations_list()
 
     def _refresh_relations_list(self):
-        """Rafraîchit la liste avec les filtres appliqués."""
         if hasattr(self.parent_widget, 'current_selected_label_uid') and self.parent_widget.current_selected_label_uid:
+            logger.info(f"DEBUG: Refresh relations pour {self.parent_widget.current_selected_label_uid}")
             self._update_relations_list(self.parent_widget.current_selected_label_uid)
 
     def _on_relation_selected(self, current):
-        """Gère la sélection d'une relation pour afficher source/target."""
+        """Gùre la sélection d'une relation pour afficher source/target."""
         if not current:
+            self.source_label.clear()
             self.target_label.clear()
             self.edit_button.setEnabled(False)
             self.remove_button.setEnabled(False)
             return
-        
+
         rel = current.data(Qt.UserRole)
         if not rel:
             self.edit_button.setEnabled(False)
             self.remove_button.setEnabled(False)
             return
-        
+
         # Récupérer les infos source et target
         source_uid = rel.get('source')
         target_uid = rel.get('target')
-        
+
         source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
         target_info = self.parent_widget.label_uid_to_info.get(target_uid, {})
-        
-        source_name = source_info.get('name', source_info.get('label', ''))
-        target_name = target_info.get('name', target_info.get('label', ''))
-        
+
+        source_name = source_info.get('name', source_info.get('label', 'Inconnu'))
+        target_name = target_info.get('name', target_info.get('label', 'Inconnu'))
+
         # Mettre à jour l'affichage
         self.source_label.setText(source_name)
         self.target_label.setText(target_name)
 
-        # Activer les boutons de modification et suppression
-        rel_category = rel.get('category', 'custom')
-        if rel_category == 'hierarchy':
-            self.edit_button.setEnabled(False)
-            self.remove_button.setEnabled(False)
-        else:
-            self.edit_button.setEnabled(True)
-            self.remove_button.setEnabled(True)
-
-    def _on_relation_selected(self, current):
-        """Gère la sélection d'une relation pour afficher source/target."""
-        if not current:
-            self.target_label.clear()
-            self.edit_button.setEnabled(False)
-            self.remove_button.setEnabled(False)
-            return
-        
-        rel = current.data(Qt.UserRole)
-        if not rel:
-            self.edit_button.setEnabled(False)
-            self.remove_button.setEnabled(False)
-            return
-        
-        # Récupérer les infos source et target
-        source_uid = rel.get('source')
-        target_uid = rel.get('target')
-        
-        source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
-        target_info = self.parent_widget.label_uid_to_info.get(target_uid, {})
-        
-        source_name = source_info.get('name', source_info.get('label', ''))
-        target_name = target_info.get('name', target_info.get('label', ''))
-        
-        # Mettre à jour l'affichage
-        self.source_label.setText(source_name)
-        self.target_label.setText(target_name)
-
-        # Activer les boutons de modification et suppression
+        # Activer boutons selon catégorie
         rel_category = rel.get('category', 'custom')
         if rel_category == 'hierarchy':
             self.edit_button.setEnabled(False)
@@ -307,18 +254,21 @@ class RelationsConfig(QtWidgets.QWidget):
             self.remove_button.setEnabled(True)
 
     def update_current(self, source_uid):
-        """Met à jour l'affichage pour le nœud source sélectionné."""
         self.relations_list.clear()
         self.target_label.clear()
         self.edit_button.setEnabled(False)
         self.remove_button.setEnabled(False)
-        
+
         if source_uid:
             source_info = self.parent_widget.label_uid_to_info.get(source_uid, {})
             source_name = source_info.get('name', source_info.get('label', ''))
             self.source_label.setText(source_name)
+
+            # ✅ AJOUTER : Diagnostic
+            self._diagnose_relations_display(source_uid)
+
             self._update_relations_list(source_uid)
-            
+
             # Activer le bouton "Nouvelle relation" si au moins 2 nœuds existent
             if len(self.parent_widget.label_uid_to_info) > 1:
                 self.add_button.setEnabled(True)
@@ -330,20 +280,34 @@ class RelationsConfig(QtWidgets.QWidget):
         """Récupère le nom d'un nœud par son UID avec fallback robuste."""
         if not uid:
             return ""
-        
+
         # Chercher dans label_uid_to_info
         info = self.parent_widget.label_uid_to_info.get(uid)
         if info:
             name = info.get('name') or info.get('label')
-            return name if name else ""
-        
+            if name:
+                return name
+
+        # ✅ CORRECTION : Utiliser current_project_profile_data local
+        if not self.current_project_profile_data:
+            # Fallback : récupérer depuis parent_widget
+            self.current_project_profile_data = getattr(
+                self.parent_widget, 
+                'current_project_profile_data', 
+                None
+            )
+
+        if not self.current_project_profile_data:
+            return ""
+
         # Fallback: chercher directement dans les nœuds
-        all_nodes = self.parent_widget._get_all_nodes()
+        all_nodes = self.dgraph_manager._get_all_nodes(self.current_project_profile_data)
         node = next((n for n in all_nodes if n.get('uid') == uid), None)
         if node:
             name = node.get('label') or node.get('name')
-            return name if name else ""
-        
+            if name:
+                return name
+
         return ""
 
     def _on_edit(self):
@@ -452,142 +416,194 @@ class RelationsConfig(QtWidgets.QWidget):
             logger.info(f"Relation supprimée: {src_uid} → {tgt_uid}")
 
     def _update_relations_list(self, source_uid):
-        """
-        Met à jour la liste des relations avec TOUTES les sources.
-        CORRIGÉ: Les flèches pointent maintenant vers la SOURCE
-        """
+        """Affiche TOUTES les relations : hiérarchiques + parsées + custom + non résolues"""
         self.relations_list.clear()
         if not source_uid:
             return
 
-        dgraph_to_local = self.parent_widget._get_dgraph_to_local_mapping()
-        all_nodes = self.parent_widget._get_all_nodes()
-        node = next((n for n in all_nodes if n['uid'] == source_uid), None)
-        if not node:
+        # ✅ Synchroniser les données si nécessaire
+        if not self.current_project_profile_data:
+            self.current_project_profile_data = getattr(
+                self.parent_widget, 
+                'current_project_profile_data', 
+                None
+            )
+
+        if not self.current_project_profile_data:
+            logger.warning("❌ Aucune donnée de projet disponible")
             return
 
-        relations_added = {'custom': 0, 'parsed': 0, 'hierarchy': 0}
+        if not hasattr(self.parent_widget, 'dgraph_to_local'):
+            self.parent_widget.dgraph_to_local = {}
 
-        # === 1. Relations sortantes CUSTOM ===
-        # CHANGEMENT: source ← target (la flèche pointe vers source_uid)
+        dgraph_to_local = self.parent_widget._get_dgraph_to_local_mapping()
+        all_nodes = self.dgraph_manager._get_all_nodes(self.current_project_profile_data)
+        node = next((n for n in all_nodes if n['uid'] == source_uid), None)
+
+        if not node:
+            logger.warning(f"Noeud {source_uid} non trouvé")
+            return
+
+        relations_added = {'custom': 0, 'parsed': 0, 'hierarchy': 0, 'unresolved': 0}
+        seen_relations = set()
+
+        # === 1. RELATIONS SORTANTES (outgoing_relations) ===
         if self.show_dependencies:
-            for r in node.get('outgoing_relations', []):
-                target_uid = r['target_uid']
+            logger.debug(f"DEBUG: Traitement outgoing_relations pour {node.get('label')}")
+            logger.debug(f"DEBUG: Nombre d'outgoing_relations: {len(node.get('outgoing_relations', []))}")
 
-                if target_uid.startswith('temp_'):
+            for r in node.get('outgoing_relations', []):
+                target_uid = r.get('target_uid')
+
+                # ✅ CORRECTION : Ne plus ignorer tous les UIDs temporaires
+                if not target_uid:
                     continue
                 
-                if target_uid.startswith('0x') and len(target_uid) == 6:
+                # Gérer les UIDs temporaires/non résolus avec affichage spécial
+                if target_uid.startswith('temp_') or target_uid.startswith('unresolved_'):
+                    target_name = r.get('target_name', 'Inconnu')
+                    rel_type = r.get('relation_type', 'relation')
+                    line_info = f" (L{r.get('line', '?')})" if r.get('line') else ""
+
+                    source_name = self._get_node_name(source_uid)
+                    if not source_name:
+                        source_name = node.get('label', node.get('name', 'Unknown'))
+
+                    display = f"{source_name} →[{rel_type}]→ {target_name}{line_info} ⚠️ [NON RÉSOLU]"
+
+                    item = QListWidgetItem(display)
+                    item.setData(Qt.UserRole, {
+                        "category": "parsed_unresolved",
+                        "direction": "out",
+                        "source": source_uid,
+                        "target": target_uid,
+                        "target_name": target_name,
+                        "type": rel_type,
+                        "line": r.get('line', 0)
+                    })
+                    item.setForeground(QtGui.QColor("#95a5a6"))  # Gris
+                    self.relations_list.addItem(item)
+                    relations_added['unresolved'] += 1
+                    logger.debug(f"DEBUG: Relation non résolue ajoutée: {target_name}")
+                    continue
+                
+                # Mapper Dgraph UID si nécessaire
+                if target_uid.startswith('0x') and len(target_uid) <= 10:
                     target_uid = dgraph_to_local.get(target_uid, target_uid)
 
                 target_name = self._get_node_name(target_uid)
                 if not target_name:
-                    target_name = r.get('target_name', '')
-                    if not target_name:
-                        continue
+                    target_name = r.get('target_name', 'Inconnu')
+                    if not target_name or target_name == 'Inconnu':
+                        # ✅ Afficher quand même avec marqueur
+                        target_name = f"[{target_uid[:8]}...]"
 
                 rel_type = r.get('relation_type', 'relation')
                 category = r.get('category', 'custom')
 
+                # Créer clé unique
+                rel_key = f"{source_uid}->{target_uid}:{rel_type}"
+                if rel_key in seen_relations:
+                    continue
+                seen_relations.add(rel_key)
+
                 source_name = self._get_node_name(source_uid)
                 if not source_name:
-                    continue
+                    source_name = node.get('label', node.get('name', 'Unknown'))
 
-                # CHANGEMENT: Inversion de la flèche
+                # Affichage selon catégorie
+                line_info = f" (L{r.get('line', '?')})" if r.get('line') else ""
                 if category == 'parsed':
-                    display = f"{target_name} →({rel_type})→ {source_name} [CODE]"
+                    display = f"{source_name} →[{rel_type}]→ {target_name}{line_info} 📝 [CODE]"
+                    color = "#FF9800"
                 else:
-                    display = f"{target_name} →({rel_type})→ {source_name}"
+                    display = f"{source_name} →[{rel_type}]→ {target_name}"
+                    color = "#2196F3"
 
                 item = QListWidgetItem(display)
                 item.setData(Qt.UserRole, {
                     "category": category,
                     "direction": "out",
-                    "source": source_uid,  # source_uid EST la vraie source
-                    "target": r['target_uid'],  # target est d'où vient la relation
-                    "type": rel_type
+                    "source": source_uid,
+                    "target": target_uid,
+                    "type": rel_type,
+                    "line": r.get('line', 0)
                 })
-                item.setForeground(QtGui.QColor("#2196F3"))
+
+                item.setForeground(QtGui.QColor(color))
                 self.relations_list.addItem(item)
                 relations_added['custom' if category == 'custom' else 'parsed'] += 1
 
-        # === 2. Relations PARSÉES du dictionnaire 'relations' ===
+                logger.debug(f"DEBUG: Relation sortante ajoutée: {source_name} --{rel_type}--> {target_name} [{category}]")
+
+        # === 2. RELATIONS ENTRANTES (incoming_relations) ===
         if self.show_dependencies:
-            parsed_relations = node.get('relations', {})
-            if parsed_relations:
-                for rel_type, rel_list in parsed_relations.items():
-                    for rel in rel_list:
-                        target_name = rel.get('target', '')
-                        if not target_name:
-                            continue
-                        
-                        normalized = normalize_node_name(target_name)
-                        target_uid = None
+            logger.debug(f"DEBUG: Traitement incoming_relations pour {node.get('label')}")
+            logger.debug(f"DEBUG: Nombre d'incoming_relations: {len(node.get('incoming_relations', []))}")
 
-                        if normalized:
-                            target_uid = self.parent_widget._find_label_uid_by_name(normalized)
-
-                        if not target_uid or target_uid.startswith('unresolved_'):
-                            continue
-
-                        source_name = self._get_node_name(source_uid) or node.get('label', '')
-                        if not source_name:
-                            continue
-
-                        line_info = f" (L{rel.get('line', '?')})" if rel.get('line') else ""
-
-                        # CHANGEMENT: Inversion de la flèche
-                        display = f"{target_name} →({rel_type})→ {source_name}{line_info} [PARSED]"
-
-                        item = QListWidgetItem(display)
-                        item.setData(Qt.UserRole, {
-                            "category": "parsed_raw",
-                            "direction": "out",
-                            "source": source_uid,
-                            "target": target_uid,
-                            "target_name": target_name,
-                            "type": rel_type,
-                            "line": rel.get('line', 0)
-                        })
-                        item.setForeground(QtGui.QColor("#FF9800"))
-                        self.relations_list.addItem(item)
-                        relations_added['parsed'] += 1
-
-        # === 3. Relations entrantes CUSTOM ===
-        # CHANGEMENT: target ← source (la flèche pointe vers source_uid qui est la cible ici)
-        if self.show_dependencies:
             for r in node.get('incoming_relations', []):
-                source_uid_rel = r['source_uid']
+                source_uid_rel = r.get('source_uid')
 
-                if source_uid_rel.startswith('temp_'):
+                if not source_uid_rel:
                     continue
                 
-                if source_uid_rel.startswith('0x') and len(source_uid_rel) == 6:
+                # ✅ Gérer les temporaires en incoming aussi
+                if source_uid_rel.startswith('temp_') or source_uid_rel.startswith('unresolved_'):
+                    source_name = r.get('source_name', 'Inconnu')
+                    rel_type = r.get('relation_type', 'relation')
+                    target_name = self._get_node_name(source_uid)
+
+                    if not target_name:
+                        target_name = node.get('label', node.get('name', 'Unknown'))
+
+                    display = f"{source_name} →[{rel_type}]→ {target_name} ⚠️ [NON RÉSOLU IN]"
+
+                    item = QListWidgetItem(display)
+                    item.setData(Qt.UserRole, {
+                        "category": "parsed_unresolved",
+                        "direction": "in",
+                        "source": source_uid_rel,
+                        "target": source_uid,
+                        "source_name": source_name,
+                        "type": rel_type
+                    })
+                    item.setForeground(QtGui.QColor("#95a5a6"))
+                    self.relations_list.addItem(item)
+                    relations_added['unresolved'] += 1
+                    continue
+                
+                if source_uid_rel.startswith('0x') and len(source_uid_rel) <= 10:
                     source_uid_rel = dgraph_to_local.get(source_uid_rel, source_uid_rel)
 
                 source_name = self._get_node_name(source_uid_rel)
                 if not source_name:
-                    source_name = r.get('source_name', '')
-                    if not source_name:
-                        continue
+                    source_name = r.get('source_name', 'Inconnu')
+                    if not source_name or source_name == 'Inconnu':
+                        source_name = f"[{source_uid_rel[:8]}...]"
 
                 rel_type = r.get('relation_type', 'relation')
                 category = r.get('category', 'custom')
                 target_name = self._get_node_name(source_uid)
-                if not target_name:
-                    continue
 
-                # CHANGEMENT: Inversion de la flèche
+                if not target_name:
+                    target_name = node.get('label', node.get('name', 'Unknown'))
+
+                rel_key = f"{source_uid_rel}->{source_uid}:{rel_type}"
+                if rel_key in seen_relations:
+                    continue
+                seen_relations.add(rel_key)
+
+                # Affichage selon catégorie
                 if category == 'parsed':
-                    display = f"{target_name} ←({rel_type})← {source_name} [CODE IN]"
+                    display = f"{source_name} →[{rel_type}]→ {target_name} 📝 [CODE IN]"
                 else:
-                    display = f"{target_name} ←({rel_type})← {source_name}"
+                    display = f"{source_name} →[{rel_type}]→ {target_name}"
 
                 item = QListWidgetItem(display)
                 item.setData(Qt.UserRole, {
                     "category": category,
                     "direction": "in",
-                    "source": r['source_uid'],
+                    "source": source_uid_rel,
                     "target": source_uid,
                     "type": rel_type
                 })
@@ -595,93 +611,107 @@ class RelationsConfig(QtWidgets.QWidget):
                 self.relations_list.addItem(item)
                 relations_added['custom' if category == 'custom' else 'parsed'] += 1
 
-        # === 4. Hiérarchie: Enfants ===
+                logger.debug(f"DEBUG: Relation entrante ajoutée: {source_name} --{rel_type}--> {target_name} [{category}]")
+
+        # === 3. HIÉRARCHIE: Enfants ===
         if self.show_hierarchy:
+            logger.debug(f"DEBUG: Traitement children pour {node.get('label')}")
             children = node.get('children', [])
-            if children:
-                for child in children:
-                    child_uid = child.get('uid')
-                    if not child_uid:
-                        continue
+            logger.debug(f"DEBUG: Nombre d'enfants: {len(children)}")
 
-                    child_name = child.get('label') or child.get('name')
-                    if not child_name:
-                        continue
-                    
-                    source_name = self._get_node_name(source_uid)
-                    if not source_name:
-                        source_name = node.get('label', node.get('name', ''))
+            for child in children:
+                child_uid = child.get('uid')
+                if not child_uid:
+                    continue
+                
+                child_name = child.get('label') or child.get('name')
+                if not child_name:
+                    continue
+                
+                source_name = self._get_node_name(source_uid)
+                if not source_name:
+                    source_name = node.get('label', node.get('name', ''))
 
-                    if not source_name:
-                        continue
-                    
-                    # CHANGEMENT: child pointe vers parent
-                    display = f"{child_name} →(child)→ {source_name}"
+                rel_key = f"{source_uid}->child:{child_uid}"
+                if rel_key in seen_relations:
+                    continue
+                seen_relations.add(rel_key)
 
-                    item = QListWidgetItem(display)
-                    item.setData(Qt.UserRole, {
-                        "category": "hierarchy",
-                        "direction": "out",
-                        "source": source_uid,
-                        "target": child_uid,
-                        "type": "child"
-                    })
-                    item.setForeground(QtGui.QColor("#9C27B0"))
-                    self.relations_list.addItem(item)
-                    relations_added['hierarchy'] += 1
+                display = f"{source_name} →[child]→ {child_name}"
 
-        # === 5. Hiérarchie: Parents ===
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, {
+                    "category": "hierarchy",
+                    "direction": "out",
+                    "source": source_uid,
+                    "target": child_uid,
+                    "type": "child"
+                })
+                item.setForeground(QtGui.QColor("#9C27B0"))
+                self.relations_list.addItem(item)
+                relations_added['hierarchy'] += 1
+
+                logger.debug(f"DEBUG: Relation hiérarchique (child) ajoutée: {source_name} --child--> {child_name}")
+
+        # === 4. HIÉRARCHIE: Parents ===
         if self.show_hierarchy:
+            logger.debug(f"DEBUG: Traitement parents pour {node.get('label')}")
             parents = node.get('parents', [])
-            if parents:
-                for p_uid in parents:
-                    if not p_uid:
-                        continue
+            logger.debug(f"DEBUG: Nombre de parents: {len(parents)}")
 
-                    if p_uid.startswith('0x') and len(p_uid) == 6:
-                        p_uid_mapped = dgraph_to_local.get(p_uid, p_uid)
-                    else:
-                        p_uid_mapped = p_uid
+            for p_uid in parents:
+                if not p_uid:
+                    continue
+                
+                if p_uid.startswith('0x') and len(p_uid) <= 10:
+                    p_uid_mapped = dgraph_to_local.get(p_uid, p_uid)
+                else:
+                    p_uid_mapped = p_uid
 
-                    parent_name = self._get_node_name(p_uid_mapped)
-                    if not parent_name:
-                        continue
-                    
-                    source_name = self._get_node_name(source_uid)
-                    if not source_name:
-                        source_name = node.get('label', node.get('name', ''))
+                parent_name = self._get_node_name(p_uid_mapped)
+                if not parent_name:
+                    continue
+                
+                source_name = self._get_node_name(source_uid)
+                if not source_name:
+                    source_name = node.get('label', node.get('name', ''))
 
-                    if not source_name:
-                        continue
-                    
-                    # CHANGEMENT: source pointe vers parent
-                    display = f"{source_name} →(parent)→ {parent_name}"
+                rel_key = f"{source_uid}->parent:{p_uid_mapped}"
+                if rel_key in seen_relations:
+                    continue
+                seen_relations.add(rel_key)
 
-                    item = QListWidgetItem(display)
-                    item.setData(Qt.UserRole, {
-                        "category": "hierarchy",
-                        "direction": "in",
-                        "source": p_uid,
-                        "target": source_uid,
-                        "type": "parent"
-                    })
-                    item.setForeground(QtGui.QColor("#9C27B0"))
-                    self.relations_list.addItem(item)
-                    relations_added['hierarchy'] += 1
+                display = f"{source_name} →[parent]→ {parent_name}"
+
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, {
+                    "category": "hierarchy",
+                    "direction": "in",
+                    "source": p_uid,
+                    "target": source_uid,
+                    "type": "parent"
+                })
+                item.setForeground(QtGui.QColor("#9C27B0"))
+                self.relations_list.addItem(item)
+                relations_added['hierarchy'] += 1
+
+                logger.debug(f"DEBUG: Relation hiérarchique (parent) ajoutée: {source_name} --parent--> {parent_name}")
 
         # Log pour debug
         total = sum(relations_added.values())
-        logger.info(f"Relations affichées pour {node.get('label', source_uid)}: "
+        logger.info(f"✅ Relations affichées pour {node.get('label', source_uid)}: "
                     f"{relations_added['parsed']} parsées, "
                     f"{relations_added['custom']} custom, "
-                    f"{relations_added['hierarchy']} hiérarchie "
-                    f"(Total: {total})")
+                    f"{relations_added['hierarchy']} hiérarchie, "
+                    f"{relations_added['unresolved']} non résolues "
+                    f"(Total: {total}, Uniques: {len(seen_relations)})")
 
         if total == 0:
             no_rel_item = QListWidgetItem("(Aucune relation)")
             no_rel_item.setForeground(QtGui.QColor("#999"))
             self.relations_list.addItem(no_rel_item)
-
+            logger.warning(f"⚠️ Aucune relation trouvée pour {node.get('label', source_uid)}")
+    
     def _on_add_new_relation(self):
         """Ajoute une nouvelle relation custom."""
         source_uid = self.parent_widget.current_selected_label_uid
@@ -756,3 +786,73 @@ class RelationsConfig(QtWidgets.QWidget):
 
             self._update_relations_list(source_uid)
             logger.info(f"Nouvelle relation ajoutée: {source_uid} →({rel_type})→ {target_uid}")
+
+    def _diagnose_relations_display(self, node_uid):
+        """
+        Méthode de diagnostic pour vérifier l'affichage des relations.
+        Affiche des logs détaillés sur les nœuds et relations pour debug.
+        """
+        # Récupérer les données du projet via parent (ou local)
+        profile_data = self.current_project_profile_data
+        if not profile_data and self.parent_widget:
+            profile_data = getattr(self.parent_widget, 'current_project_profile_data', None)
+
+        if not profile_data:
+            logger.warning("❌ Aucune donnée de projet disponible pour le diagnostic des relations.")
+            return
+
+        logger.info(f"📦 Projet détecté pour diagnostic: {profile_data.get('name', 'Unknown')}")
+
+        # Récupérer tous les nœuds via le manager avec données passées
+        all_nodes = self.dgraph_manager._get_all_nodes(profile_data)
+        node = next((n for n in all_nodes if n['uid'] == node_uid), None)
+
+        if not node:
+            logger.error(f"❌ Nœud {node_uid} non trouvé dans {len(all_nodes)} nœuds")
+            return
+
+        node_name = node.get('label', node.get('name', 'Unknown'))
+        logger.info(f"\n{'='*60}")
+        logger.info(f"🔍 DIAGNOSTIC RELATIONS pour : {node_name} (UID: {node_uid[:8]}...)")
+        logger.info(f"{'='*60}\n")
+
+            # 1. Vérifier outgoing_relations
+        outgoing = node.get('outgoing_relations', [])
+        logger.info(f"📤 Outgoing relations: {len(outgoing)}")
+        for i, rel in enumerate(outgoing[:5], 1):
+            logger.info(f"   {i}. Type: {rel.get('relation_type')}, "
+                        f"Target: {rel.get('target_uid')[:8]}..., "
+                        f"Category: {rel.get('category', 'N/A')}")
+        if len(outgoing) > 5:
+            logger.info(f"   ... et {len(outgoing) - 5} autres")
+
+        # 2. Vérifier dict 'relations'
+        relations_dict = node.get('relations', {})
+        logger.info(f"\n📋 Dict 'relations': {len(relations_dict)} types")
+        for rel_type, rel_list in relations_dict.items():
+            logger.info(f"   - {rel_type}: {len(rel_list)} relation(s)")
+            for i, rel in enumerate(rel_list[:3], 1):
+                logger.info(f"      {i}. target: {rel.get('target', 'N/A')}, "
+                            f"line: {rel.get('line', 'N/A')}")
+            if len(rel_list) > 3:
+                logger.info(f"      ... et {len(rel_list) - 3} autres")
+
+        # 3. Vérifier incoming_relations
+        incoming = node.get('incoming_relations', [])
+        logger.info(f"\n📥 Incoming relations: {len(incoming)}")
+        for i, rel in enumerate(incoming[:5], 1):
+            logger.info(f"   {i}. Type: {rel.get('relation_type')}, "
+                        f"Source: {rel.get('source_uid')[:8]}...")
+        if len(incoming) > 5:
+            logger.info(f"   ... et {len(incoming) - 5} autres")
+
+        # 4. Vérifier les filtres actifs
+        logger.info(f"\n🔘 Filtres actifs:")
+        logger.info(f"   - Hiérarchie: {self.show_hierarchy}")
+        logger.info(f"   - Dépendances: {self.show_dependencies}")
+
+        # 5. Vérifier label_uid_to_info
+        logger.info(f"\n📚 label_uid_to_info:")
+        logger.info(f"   Total entrées: {len(self.parent_widget.label_uid_to_info)}")
+
+        logger.info(f"\n{'='*60}\n")

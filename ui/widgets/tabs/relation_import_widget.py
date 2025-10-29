@@ -134,82 +134,163 @@ class RelationImportWidget(QtWidgets.QWidget):
         return normalized
     
     def _build_clean_graph(self, relations_list: List[Dict]) -> nx.DiGraph:
-        """Construit un graphe NetworkX propre en éliminant tous les doublons."""
+        """Construit un graphe NetworkX propre avec gestion améliorée des relations."""
         G = nx.DiGraph()
-
         nodes_registry = {}
         edges_registry = {}
 
-        # Phase 1: Collecter tous les nœuds uniques
+        # ✅ VALIDATION ET NETTOYAGE DES RELATIONS
+        valid_relations = []
         for rel in relations_list:
             source = self.normalize_node_name(rel.get('source'))
             target = self.normalize_node_name(rel.get('target'))
+            relation_type = rel.get('relation_type', rel.get('relationType', 'unknown'))  # ✅ Fallback pour relationType
 
-            if not source or not target:
+            if not source or not target or source == target:
                 continue
-            
+
+            # Normaliser la relation
+            rel_normalized = {
+                'source': source,
+                'target': target,
+                'relation_type': relation_type,
+                'category': rel.get('category', 'custom'),
+                'source_uid': rel.get('source_uid'),
+                'target_uid': rel.get('target_uid'),
+                'source_type': rel.get('source_type', 'unknown'),
+                'target_type': rel.get('target_type', 'unknown')
+            }
+            valid_relations.append(rel_normalized)
+
+        logger.info(f"🔍 Relations valides après nettoyage: {len(valid_relations)}")
+
+        # Collecter nœuds uniques
+        for rel in valid_relations:
+            source = rel['source']
+            target = rel['target']
+
             if source not in nodes_registry:
-                if rel.get('is_analyzed', False):
-                    nodes_registry[source] = 'analyzed'
-                else:
-                    nodes_registry[source] = 'dependency'
-            else:
-                if rel.get('is_analyzed', False) and nodes_registry[source] != 'analyzed':
-                    nodes_registry[source] = 'analyzed'
-
+                nodes_registry[source] = {
+                    'node_type': rel.get('source_type', 'dependency'),
+                    'uid': rel.get('source_uid')
+                }
             if target not in nodes_registry:
-                nodes_registry[target] = 'dependency'
+                nodes_registry[target] = {
+                    'node_type': rel.get('target_type', 'dependency'),
+                    'uid': rel.get('target_uid')
+                }
 
-        # Phase 2: Ajouter tous les nœuds uniques au graphe
-        for node_name, node_type in nodes_registry.items():
-            G.add_node(node_name, node_type=node_type)
+        # Ajouter nœuds au graphe
+        for node_name, node_info in nodes_registry.items():
+            G.add_node(node_name, 
+                      node_type=node_info['node_type'],
+                      uid=node_info['uid'])
 
-        # Phase 3: Collecter les arêtes uniques
-        for rel in relations_list:
-            source = self.normalize_node_name(rel.get('source'))
-            target = self.normalize_node_name(rel.get('target'))
-            rel_type = rel.get('relation_type', 'unknown')
-            category = rel.get('category', 'custom')
+        # Collecter arêtes uniques avec gestion des types multiples
+        for rel in valid_relations:
+            source = rel['source']
+            target = rel['target']
+            rel_type = rel['relation_type']
+            category = rel['category']
 
-            if not source or not target:
-                continue
-            
             edge_key = (source, target)
-
             if edge_key not in edges_registry:
-                edges_registry[edge_key] = []
+                edges_registry[edge_key] = {
+                    'types': [],
+                    'categories': set(),
+                    'primary_type': rel_type,
+                    'primary_category': category
+                }
 
-            type_label = f"{rel_type} [{category}]" if category == 'parsed' else rel_type
-            if type_label not in edges_registry[edge_key]:
-                edges_registry[edge_key].append(type_label)
+            # Ajouter le type s'il n'existe pas déjà
+            type_label = f"{rel_type} [{category}]" if category != 'custom' else rel_type
+            if type_label not in edges_registry[edge_key]['types']:
+                edges_registry[edge_key]['types'].append(type_label)
+                edges_registry[edge_key]['categories'].add(category)
 
-        # Phase 4: Ajouter les arêtes au graphe
-        for (source, target), rel_types in edges_registry.items():
-            primary_type = rel_types[0]
+        # Ajouter arêtes au graphe
+        for (source, target), edge_info in edges_registry.items():
+            rel_types = edge_info['types']
+            primary_type = edge_info['primary_type']
 
-            if len(rel_types) > 1:
-                combined_label = f"{primary_type} (+{len(rel_types)-1})"
+            # Créer le label combiné
+            if len(rel_types) == 1:
+                combined_label = rel_types[0]
             else:
-                combined_label = primary_type
+                combined_label = f"{rel_types[0]} (+{len(rel_types)-1})"
 
-            G.add_edge(
-                source, 
-                target,
-                color=self._get_color_for_type(primary_type),
-                relation_type=primary_type,
-                all_types=rel_types,
-                label=combined_label
-            )
+            # Déterminer la couleur basée sur le type principal
+            edge_color = self._get_color_for_type(primary_type)
 
-        # Phase 5: Supprimer les nœuds isolés
-        isolated_nodes = list(nx.isolates(G))
-        if isolated_nodes:
-            logger.info(f"Suppression de {len(isolated_nodes)} nœud(s) isolé(s)")
-            G.remove_nodes_from(isolated_nodes)
+            G.add_edge(source, target,
+                      color=edge_color,
+                      relation_type=primary_type,
+                      all_types=rel_types,
+                      label=combined_label,
+                      categories=list(edge_info['categories']))
 
-        logger.info(f"Graphe construit: {G.number_of_nodes()} nœuds, {G.number_of_edges()} arêtes")
+        # Supprimer nœuds isolés si le graphe a plus de 10 nœuds
+        if len(G.nodes) > 10:
+            isolated_nodes = list(nx.isolates(G))
+            if isolated_nodes:
+                logger.info(f"🗑️ Suppression de {len(isolated_nodes)} nœuds isolés")
+                G.remove_nodes_from(isolated_nodes)
+
+        logger.info(f"✅ Graphe construit: {len(G.nodes)} nœuds, {len(G.edges)} arêtes")
 
         return G
+    
+    def _validate_relations_format(self, relations_list: List[Dict]) -> List[Dict]:
+        """
+        ✅ NOUVELLE MÉTHODE : Valide et normalise le format des relations
+        """
+        if not relations_list:
+            logger.warning("⚠️ Liste de relations vide")
+            return []
+    
+        validated_relations = []
+        issues_count = 0
+    
+        for i, rel in enumerate(relations_list):
+            if not isinstance(rel, dict):
+                logger.warning(f"⚠️ Relation {i} n'est pas un dictionnaire: {type(rel)}")
+                issues_count += 1
+                continue
+            
+            # Vérifier les champs obligatoires
+            source = rel.get('source')
+            target = rel.get('target')
+            
+            if not source or not target:
+                logger.warning(f"⚠️ Relation {i} manque source ou target: {rel}")
+                issues_count += 1
+                continue
+            
+            # Normaliser la relation
+            normalized_rel = {
+                'source': self.normalize_node_name(str(source)),
+                'target': self.normalize_node_name(str(target)),
+                'relation_type': rel.get('relation_type') or rel.get('relationType', 'unknown'),
+                'category': rel.get('category', 'custom'),
+                'source_uid': rel.get('source_uid'),
+                'target_uid': rel.get('target_uid'),
+                'source_type': rel.get('source_type', 'unknown'),
+                'target_type': rel.get('target_type', 'unknown')
+            }
+    
+            # Vérifier que source != target
+            if normalized_rel['source'] == normalized_rel['target']:
+                logger.debug(f"⚠️ Relation auto-référentielle ignorée: {normalized_rel['source']}")
+                continue
+            
+            validated_relations.append(normalized_rel)
+    
+        if issues_count > 0:
+            logger.warning(f"⚠️ {issues_count} relations invalides ignorées sur {len(relations_list)}")
+    
+        logger.info(f"✅ Relations validées: {len(validated_relations)}/{len(relations_list)}")
+        
+        return validated_relations
 
     def _get_dgraph_to_local_mapping(self):
         """Retourne le mapping Dgraph UID -> Local UID."""
@@ -1474,18 +1555,22 @@ class RelationImportWidget(QtWidgets.QWidget):
             return None
 
     def _detect_item_type(self, item_data, item_name, parent_item):
-        """Détecte le type d'élément."""
+        """Détecte intelligemment le type d'item - CORRIGÉ pour classes/variables."""
         if self._has_extension(item_name):
             return "file"
-        node_type = item_data.get('nodeType', '').lower()
-        if node_type in ['class', 'function', 'variable']:
-            return node_type
-        if '()' in item_name or item_name.startswith('def '):
+
+        if parent_item and isinstance(parent_item, TaxonomyItem) and parent_item.item_type == "folder":
+            return "folder"
+
+        if parent_item and isinstance(parent_item, TaxonomyItem) and parent_item.item_type == "file":
+            if item_data.get('type') == 'class' or self._is_class_name(item_name):
+                return "class"
+            if self._is_function_name(item_name) or item_data.get('type') == 'method':
+                return "method" if parent_item.item_type == "class" else "function"
+            if self._is_variable_name(item_name) or item_data.get('type') == 'variable':
+                return "variable"
             return "function"
-        if item_name.isupper():
-            return "variable"
-        if item_name[0].isupper() and parent_item.item_type == 'file':
-            return "class"
+
         return "folder"
 
     def _has_extension(self, filename):

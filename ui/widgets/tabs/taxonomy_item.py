@@ -11,47 +11,49 @@ class TaxonomyItem(QtWidgets.QTreeWidgetItem):
     """Item pour l'arbre de taxonomie avec métadonnées.
     Étendu : Niveaux utilisés pour modulation couleurs dans graphe (via level)."""
     
-    def __init__(self, parent, text, item_type="folder", data=None, level=0):
-        super().__init__(parent, [text])
+    def __init__(self, parent, name, item_type, item_data, level):
+        super().__init__(parent)
+        self.setText(0, name)
         self.item_type = item_type
-        self.item_data = data or {}
+        self.item_data = item_data
         self.level = level  # Niveau utilisé dans GraphWidget pour couleurs/labels
         
-        # Palette monochrome professionnelle (gris et rouge thème uniquement)
         primary = '#A23B2D'  # Rouge thème
         dark_gray = '#424242'
         medium_gray = '#666666'
         strong_gray = '#555555'
         
-        # Modulation couleur par niveau (pour intégration graphe)
         def modulate_color(base_color, level):
-            # Exemple : plus clair pour niveaux supérieurs (simplifié)
             if level > 1:
                 if base_color == primary:
-                    return '#D35A4A'  # Plus clair
+                    return '#D35A4A'  # Teinte plus claire
                 elif base_color == dark_gray:
-                    return medium_gray
+                    return '#5A5A5A' # Gris plus clair
+                elif base_color == medium_gray:
+                    return '#888888'
             return base_color
-        
+
+        # Configuration de l'icône (CORRECTION DES ICONES)
         modulated_primary = modulate_color(primary, level)
         modulated_dark = modulate_color(dark_gray, level)
         
-        # Icônes professionnelles avec couleurs sobres (modulées)
         if item_type == "folder":
-            self.setIcon(0, qta.icon('fa5s.folder', color=strong_gray))
+            self.setIcon(0, qta.icon('fa5s.folder', color=dark_gray))
         elif item_type == "file":
-            self.setIcon(0, qta.icon('fa5s.file-code', color=strong_gray))
+            self.setIcon(0, qta.icon('fa5s.file-code', color=medium_gray))
         elif item_type == "function":
-            self.setIcon(0, qta.icon('fa5s.cube', color=modulated_primary))
-        elif item_type == "dependency":
-            self.setIcon(0, qta.icon('fa5s.link', color=strong_gray))
+            self.setIcon(0, qta.icon('fa5s.cog', color=primary))
         elif item_type == "class":
+            self.setIcon(0, qta.icon('fa5s.cube', color=strong_gray))
+        elif item_type == "dependency":
             self.setIcon(0, qta.icon('fa5s.cubes', color=modulated_dark))
         elif item_type == "variable":
             self.setIcon(0, qta.icon('fa5s.tag', color=medium_gray))
         
         # Méthode utilitaire pour graphe (appelable depuis GraphWidget)
         self.graph_color = self._get_graph_color()
+        self.loaded = False  # Indique si le contenu détaillé a été chargé
+        self.is_expandable = False  # Indique si l'item peut avoir des enfants
     
     def _get_graph_color(self):
         """Retourne couleur pour graphe basée sur type et niveau."""
