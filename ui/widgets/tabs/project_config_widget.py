@@ -92,12 +92,14 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.label_uid_to_info = {}
         self.name_to_uid = {}
         self.current_selected_label_uid = None
+        self.child_navigation_stack = []
+
+        self.current_child_parent = None
 
         self.global_relations_config = RelationsConfig(self, "global")
         self.relations_graph = RelationsGraphWidget(self)  # Nouveau widget graphe
         self.code_dialogs = CodeDialogs(self)
 
-        # Définir une taille minimale pour le widget et maximiser
         self.setMinimumSize(1400, 900)
 
         self._init_ui()
@@ -1084,71 +1086,303 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self._update_button_states()
 
     def _on_child_label_selected(self, current):
-        """
-        Gère la sélection dans child_list.
-        Si fichier → POPUP avec éléments de code
-        Si child → met à jour les détails
-        Si élément de code → affiche détails
-        """
         if not current:
             self.current_level2_data = None
             return
 
         item_type = current.data(Qt.UserRole + 1)
+        item_uid = current.data(Qt.UserRole)
 
-        # === CAS 1 : Fichier sélectionné → POPUP ===
-        if item_type == 'level1_file':
+        # === CAS 1 : DOSSIER sélectionné ===
+        if item_type in ['folder', 'directory', 'child']:
+            folder_data = self._find_child_by_uid(self.current_level1_data, item_uid)
+
+            if folder_data:
+                # Sauvegarder l'état actuel dans la pile
+                self.child_navigation_stack.append({
+                    'parent': self.current_child_parent,
+                    'list_items': self._save_list_state(self.child_list_widget)
+                })
+
+                # Mettre à jour le parent courant
+                self.current_child_parent = folder_data
+                self.current_level2_data = folder_data
+                self.current_selected_label_uid = item_uid
+
+                # Afficher les enfants du dossier
+                self._populate_child_list_for_folder(folder_data)
+
+                # Mettre à jour les détails
+                self._update_selected_details("Dossier", folder_data)
+
+                # Mettre à jour relations
+                self.global_relations_config.update_current(item_uid)
+                self.relations_graph.update_graph(item_uid)
+
+        # === CAS 2 : FICHIER sélectionné ===
+        elif item_type == 'level1_file':
             file_path = current.data(Qt.UserRole + 2)
             content = self.current_project_profile_data.get('file_contents', {}).get(file_path, '')
 
-            # Pré-extraire les éléments pour passer à la popup (optionnel ; la popup peut extraire elle-même)
-            classes = self.dependency_parser.extract_classes(content, file_path)
-            functions = self.dependency_parser.extract_functions(content, file_path)
-            variables = self.dependency_parser.extract_variables(content, file_path)
+            if content:
+                # Extraire les éléments de code
+                classes = self.dependency_parser.extract_classes(content, file_path)
+                functions = self.dependency_parser.extract_functions(content, file_path)
+                variables = self.dependency_parser.extract_variables(content, file_path)
 
-            # Créer parent_data avec les éléments extraits
-            parent_data = {
-                'classes': classes,
-                'functions': functions,
-                'variables': variables,
-                'children': self.current_level1_data.get('children', []) if self.current_level1_data else []
-            }
+                # Sauvegarder l'état actuel
+                self.child_navigation_stack.append({
+                    'parent': self.current_child_parent,
+                    'list_items': self._save_list_state(self.child_list_widget)
+                })
 
-            # Instancier la popup (remplace l'appel à _show_code_elements_popup)
-            popup = CodeElementsPopup(
-                os.path.basename(file_path),
-                file_path,
-                content,  # file_content
-                parent_data,
-                self  # parent widget pour accès aux méthodes comme _show_code_snippet_dialog
-            )
-            popup.exec_()  # Ouvre la popup modale
+                # Créer un pseudo-parent pour le fichier
+                file_parent = {
+                    'label': os.path.basename(file_path),
+                    'uid': f"file_{file_path}",
+                    'type': 'file',
+                    'path': file_path,
+                    'classes': classes,
+                    'functions': functions,
+                    'variables': variables
+                }
 
-        # === CAS 2 : Child sélectionné ===
-        elif item_type in ['folder', 'file', 'child']:
-            item_uid = current.data(Qt.UserRole)
-            self.current_selected_label_uid = item_uid
+                self.current_child_parent = file_parent
 
-            child_data = self._find_child_by_uid(self.current_level1_data, item_uid)
+                # Afficher les éléments de code du fichier
+                self._populate_child_list_for_file(file_path, classes, functions, variables)
 
-            if child_data:
-                self.current_level2_data = child_data
-                self._update_selected_details("Niveau 2", child_data)
+                # Afficher détails
+                details = f"📄 Fichier: {os.path.basename(file_path)}\n\n"
+                details += f"Classes: {len(classes)}\n"
+                details += f"Fonctions: {len(functions)}\n"
+                details += f"Variables: {len(variables)}\n"
+                self.details_text.setPlainText(details)
 
-                self.global_relations_config.update_current(self.current_selected_label_uid)
-                self.relations_graph.update_graph(self.current_selected_label_uid)
-
-        # === CAS 3 : Élément de code sélectionné ===
-        elif item_type in ['class', 'function', 'variable']:
+        # === CAS 3 : ÉLÉMENT DE CODE sélectionné ===
+        elif item_type in ['class', 'function', 'variable', 'method']:
             file_path = current.data(Qt.UserRole + 2)
             line = current.data(Qt.UserRole + 3)
 
             details = f"Type: {item_type.upper()}\n"
-            details += f"Fichier: {os.path.basename(file_path)}\n"
+            details += f"Nom: {current.text().split('[')[1].split(']')[1].strip().split('(')[0].strip()}\n"
+            details += f"Fichier: {os.path.basename(file_path) if file_path else 'N/A'}\n"
             details += f"Ligne: {line}\n"
             self.details_text.setPlainText(details)
 
+            self.current_selected_label_uid = item_uid
+            self.global_relations_config.update_current(item_uid)
+            self.relations_graph.update_graph(item_uid)
+
         self._update_button_states()
+        self._update_navigation_buttons()
+
+    def _populate_child_list_for_file(self, file_path: str, classes: List, functions: List, variables: List):
+        self.child_list_widget.clear()
+
+        # Bouton retour
+        back_item = QListWidgetItem("⬅️ Retour")
+        back_item.setData(Qt.UserRole, 'back_navigation')
+        back_item.setData(Qt.UserRole + 1, 'navigation')
+        back_item.setForeground(QtGui.QColor("#3498db"))
+        back_item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+        self.child_list_widget.addItem(back_item)
+
+        # Séparateur
+        separator = QListWidgetItem("─" * 50)
+        separator.setFlags(separator.flags() & ~Qt.ItemIsSelectable)
+        separator.setForeground(QtGui.QColor("#95a5a6"))
+        self.child_list_widget.addItem(separator)
+
+        if not classes and not functions and not variables:
+            empty_item = QListWidgetItem("(Aucun élément de code trouvé)")
+            empty_item.setForeground(QtGui.QColor("#95a5a6"))
+            self.child_list_widget.addItem(empty_item)
+            return
+
+        # Afficher les CLASSES
+        for cls in classes:
+            cls_uid = cls.get('uid', str(uuid.uuid4()))
+            if 'uid' not in cls:
+                cls['uid'] = cls_uid
+
+            item = QListWidgetItem(f"[CLASS] {cls['name']} (ligne {cls.get('line', '?')})")
+            item.setData(Qt.UserRole, cls_uid)
+            item.setData(Qt.UserRole + 1, 'class')
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setData(Qt.UserRole + 3, cls.get('line', 0))
+            item.setForeground(QtGui.QColor("#e74c3c"))
+            item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+            self.child_list_widget.addItem(item)
+
+            # Méthodes indentées
+            for method in cls.get('methods', []):
+                method_item = QListWidgetItem(f"  ↳ {method.get('name', 'method')} (ligne {method.get('line', '?')})")
+                method_item.setData(Qt.UserRole, method.get('uid', str(uuid.uuid4())))
+                method_item.setData(Qt.UserRole + 1, 'method')
+                method_item.setData(Qt.UserRole + 2, file_path)
+                method_item.setData(Qt.UserRole + 3, method.get('line', 0))
+                method_item.setForeground(QtGui.QColor("#c0392b"))
+                self.child_list_widget.addItem(method_item)
+
+        # Afficher les FONCTIONS
+        for func in functions:
+            func_uid = func.get('uid', str(uuid.uuid4()))
+            if 'uid' not in func:
+                func['uid'] = func_uid
+
+            func_type = func.get('type', 'function')
+            prefix = "[METH]" if func_type == 'method' else "[FUNC]"
+
+            item = QListWidgetItem(f"{prefix} {func['name']} (ligne {func.get('line', '?')})")
+            item.setData(Qt.UserRole, func_uid)
+            item.setData(Qt.UserRole + 1, func_type)
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setData(Qt.UserRole + 3, func.get('line', 0))
+            item.setForeground(QtGui.QColor("#3498db"))
+            item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+            self.child_list_widget.addItem(item)
+
+        # Afficher les VARIABLES
+        for var in variables:
+            var_uid = var.get('uid', str(uuid.uuid4()))
+            if 'uid' not in var:
+                var['uid'] = var_uid
+
+            var_type = var.get('type', 'local')
+
+            item = QListWidgetItem(f"[VAR] {var['name']} ({var_type}, ligne {var.get('line', '?')})")
+            item.setData(Qt.UserRole, var_uid)
+            item.setData(Qt.UserRole + 1, 'variable')
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setData(Qt.UserRole + 3, var.get('line', 0))
+            item.setForeground(QtGui.QColor("#2ecc71"))
+            item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+            self.child_list_widget.addItem(item)
+
+    def _on_child_navigation_back(self):
+        if not self.child_navigation_stack:
+            if self.current_level1_data:
+                self._populate_child_list_with_parent_files()
+            self.current_child_parent = None
+            self._update_navigation_buttons()
+            return
+
+        previous_state = self.child_navigation_stack.pop()
+        self.current_child_parent = previous_state['parent']
+
+        self._restore_list_state(self.child_list_widget, previous_state['list_items'])
+
+        self._update_navigation_buttons()
+
+    def _update_navigation_buttons(self):
+        is_navigating = bool(self.child_navigation_stack)
+
+        self.add_child_button.setEnabled(not is_navigating and bool(self.current_level1_data))
+        self.edit_child_button.setEnabled(not is_navigating and self.child_list_widget.currentRow() != -1)
+        self.remove_child_button.setEnabled(not is_navigating and self.child_list_widget.currentRow() != -1)
+
+    def _restore_list_state(self, list_widget, items):
+        list_widget.clear()
+        for item_data in items:
+            item = QListWidgetItem(item_data['text'])
+            item.setData(Qt.UserRole, item_data['uid'])
+            item.setData(Qt.UserRole + 1, item_data['type'])
+            item.setData(Qt.UserRole + 2, item_data['data2'])
+            item.setData(Qt.UserRole + 3, item_data['data3'])
+            item.setForeground(QtGui.QColor(item_data['color']))
+            list_widget.addItem(item)
+
+    def _setup_child_list_connections(self):
+        self.child_list_widget.itemClicked.connect(self._on_child_item_clicked)
+        self.child_list_widget.itemDoubleClicked.connect(self._on_double_click_item)
+
+    def _on_child_item_clicked(self, item):
+        if not item:
+            return
+
+        item_type = item.data(Qt.UserRole + 1)
+
+        if item_type == 'navigation':
+            uid = item.data(Qt.UserRole)
+            if uid == 'back_navigation':
+                self._on_child_navigation_back()
+                return
+
+        self._on_child_label_selected(item)
+
+    def _populate_child_list_for_folder(self, folder_data: Dict):
+        self.child_list_widget.clear()
+
+        if not folder_data:
+            return
+
+        # Bouton retour
+        back_item = QListWidgetItem("⬅️ Retour")
+        back_item.setData(Qt.UserRole, 'back_navigation')
+        back_item.setData(Qt.UserRole + 1, 'navigation')
+        back_item.setForeground(QtGui.QColor("#3498db"))
+        back_item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+        self.child_list_widget.addItem(back_item)
+
+        # Séparateur
+        separator = QListWidgetItem("─" * 50)
+        separator.setFlags(separator.flags() & ~Qt.ItemIsSelectable)
+        separator.setForeground(QtGui.QColor("#95a5a6"))
+        self.child_list_widget.addItem(separator)
+
+        # Afficher les enfants
+        for child in folder_data.get('children', []):
+            child_type = child.get('type', 'folder')
+            child_label = child.get('label', child.get('name', 'Sans nom'))
+            child_uid = child.get('uid', str(uuid.uuid4()))
+            child['uid'] = child_uid
+
+            # Icône selon le type
+            if child_type == 'file' or child_label.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net')):
+                icon = "📄"
+                display_type = 'level1_file'
+                color = QtGui.QColor("#7f8c8d")
+            elif child_type in ['folder', 'directory']:
+                icon = "📁"
+                display_type = 'folder'
+                color = QtGui.QColor("#f39c12")
+            else:
+                icon = self._get_node_icon(child_type)
+                display_type = child_type
+                color = QtGui.QColor("#27ae60")
+
+            display = f"{icon} {child_label}"
+            item = QListWidgetItem(display)
+            item.setData(Qt.UserRole, child_uid)
+            item.setData(Qt.UserRole + 1, display_type)
+
+            # Pour les fichiers, stocker le chemin
+            if display_type == 'level1_file':
+                file_path = child.get('files', [None])[0] if child.get('files') else None
+                item.setData(Qt.UserRole + 2, file_path)
+
+            item.setForeground(color)
+            self.child_list_widget.addItem(item)
+
+        if not folder_data.get('children'):
+            empty_item = QListWidgetItem("(Dossier vide)")
+            empty_item.setForeground(QtGui.QColor("#95a5a6"))
+            self.child_list_widget.addItem(empty_item)
+
+    def _save_list_state(self, list_widget):
+        items = []
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            items.append({
+                'text': item.text(),
+                'uid': item.data(Qt.UserRole),
+                'type': item.data(Qt.UserRole + 1),
+                'data2': item.data(Qt.UserRole + 2),
+                'data3': item.data(Qt.UserRole + 3),
+                'color': item.foreground().color().name()
+            })
+        return items
 
     def _display_code_elements_in_list(self, list_widget, classes, functions, variables, file_path):
         """
