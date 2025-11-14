@@ -274,19 +274,19 @@ class DgraphProjectManager:
 
     def _transform_profile_to_dgraph_mutations(self, profile_data):
         """
-        ✅ CORRIGÉ : Génère mutations avec relations enrichies
+        ✅ Version améliorée avec support des champs d'appels résolus
         """
         if not profile_data:
             logger.error("❌ profile_data est None")
             return []
 
         mutations = []
-        label_uids = {}  # Mapping local_uid -> dgraph_uid
+        label_uids = {}
         seen_uids = set()
         seen_relations = set()
+        mutations_by_uid = {}
 
         def add_mutation(mutation):
-            """Ajoute une mutation si son UID n'existe pas déjà"""
             mutation_uid = mutation.get("uid")
 
             if not self._validate_uid_format(mutation_uid):
@@ -296,6 +296,7 @@ class DgraphProjectManager:
             if mutation_uid and mutation_uid not in seen_uids:
                 mutations.append(mutation)
                 seen_uids.add(mutation_uid)
+                mutations_by_uid[mutation_uid] = mutation
                 return True
             return False
 
@@ -314,7 +315,6 @@ class DgraphProjectManager:
             "fileContents": json.dumps(profile_data.get("file_contents", {})),
         }
 
-        # ClusterManagement
         cm_uid = self._sanitize_uid("", "cm")
         workspace["clusterManagement"] = {"uid": cm_uid}
 
@@ -368,11 +368,12 @@ class DgraphProjectManager:
         if clusters_refs:
             cluster_management["clusters"] = clusters_refs
 
-        # 4️⃣ ✅ RELATIONS ENRICHIES avec toutes les métadonnées
-        logger.info(f"\n🔗 Création des mutations Relation enrichies...")
+        # 4️⃣ ✅ RELATIONS ENRICHIES avec métadonnées complètes
+        logger.info(f"\n🔗 Création des relations enrichies...")
 
         all_nodes = self._get_all_nodes(profile_data)
         relations_created = 0
+        direct_predicates_added = 0
         skipped_invalid_uids = 0
 
         for node in all_nodes:
@@ -406,9 +407,6 @@ class DgraphProjectManager:
                 # ✅ RÉCUPÉRER LES MÉTADONNÉES TARGET
                 target_info = self.label_uid_to_info.get(target_local_uid, {})
 
-                # Priorité 1 : métadonnées dans `rel` (si déjà remplies)
-                # Priorité 2 : métadonnées dans `label_uid_to_info`
-                # Priorité 3 : fallback sur valeurs par défaut
                 target_name = (
                     rel.get('target_name') or 
                     target_info.get('name') or 
@@ -436,28 +434,45 @@ class DgraphProjectManager:
                 relation_key = f"{source_uid}:{rel_type}:{target_uid}"
 
                 if relation_key not in seen_relations:
-                    # ✅ RELATION ENRICHIE COMPLÈTE
+                    # ✅ AJOUTER PRÉDICAT DIRECT AU NŒUD SOURCE
+                    if rel_type in ['inherits', 'extends', 'implements', 'calls', 'uses', 'imports']:
+                        source_mutation = mutations_by_uid.get(source_uid)
+
+                        if source_mutation:
+                            if rel_type not in source_mutation:
+                                source_mutation[rel_type] = []
+
+                            target_ref = {"uid": target_uid}
+                            if target_ref not in source_mutation[rel_type]:
+                                source_mutation[rel_type].append(target_ref)
+                                direct_predicates_added += 1
+
+                                logger.debug(
+                                    f"  ✅ Prédicat direct: {source_name}.{rel_type} → {target_name}"
+                                )
+
+                    # ✅ CRÉER OBJET RELATION (pour métadonnées complètes)
                     relation = {
                         "uid": self._sanitize_uid("", "rel"),
                         "dgraph.type": "Relation",
                         "name": f"{rel_type}_relation",
                         "relationType": rel_type,
 
-                        # ✅ Source (référence UID + métadonnées)
+                        # ✅ Source
                         "source": {"uid": source_uid},
                         "sourceName": source_name,
                         "sourceDescription": source_description,
                         "sourcePath": source_path,
                         "sourceType": source_type,
 
-                        # ✅ Target (référence UID + métadonnées)
+                        # ✅ Target
                         "target": {"uid": target_uid},
                         "targetName": target_name,
                         "targetDescription": target_description,
                         "targetPath": target_path,
                         "targetType": target_type,
 
-                        # Metadata relation
+                        # ✅ Metadata relation (NOUVEAUX CHAMPS)
                         "category": rel.get('category', 'custom'),
                         "line": rel.get('line', 0),
                         "intraFile": rel.get('intra_file', False),
@@ -469,66 +484,11 @@ class DgraphProjectManager:
                     seen_relations.add(relation_key)
                     relations_created += 1
 
-                    # Log détaillé pour debug
-                    if relations_created % 100 == 0:  # Log tous les 100
-                        logger.debug(
-                            f"  ✅ [{relations_created}] {source_name} "
-                            f"--{rel_type}--> "
-                            f"{target_name}"
-                        )
-
-        # 5️⃣ Pending relations (backup) - aussi enrichies
-        pending_rels_created = 0
-
-        for source_local_uid, relations in profile_data.get("pending_relations", {}).items():
-            source_uid = label_uids.get(source_local_uid)
-
-            if not source_uid or not self._validate_uid_format(source_uid):
-                logger.warning(f"⚠️ Pending relation source invalide: {source_local_uid}")
-                continue
-
-            for rel in relations:
-                target_local_uid = rel["target_uid"]
-                target_uid = label_uids.get(target_local_uid)
-
-                if not target_uid or not self._validate_uid_format(target_uid):
-                    logger.debug(f"⚠️ Pending relation target non résolu: {target_local_uid}")
-                    continue
-
-                relation_key = f"{source_uid}:{rel['relation_type']}:{target_uid}"
-
-                if relation_key not in seen_relations:
-                    relation = {
-                        "uid": self._sanitize_uid("", "rel"),
-                        "dgraph.type": "Relation",
-                        "name": f"{rel['relation_type']}_relation",
-                        "relationType": rel["relation_type"],
-
-                        # Source
-                        "source": {"uid": source_uid},
-                        "sourceName": rel.get('source_name', ''),
-                        "sourceDescription": rel.get('source_description', ''),
-                        "sourcePath": rel.get('source_path', ''),
-
-                        # Target
-                        "target": {"uid": target_uid},
-                        "targetName": rel.get("target_name", ""),
-                        "targetDescription": rel.get("target_description", ""),
-                        "targetPath": rel.get("target_path", ""),
-
-                        "createdAt": datetime.now().isoformat() + "Z",
-                    }
-
-                    add_mutation(relation)
-                    seen_relations.add(relation_key)
-                    pending_rels_created += 1
-
         # ✅ LOGS AMÉLIORÉS
         logger.info(f"✅ {len(mutations)} mutations générées")
         logger.info(f"📊 {len(label_uids)} labels mappés")
-        logger.info(f"🔗 {relations_created} relations enrichies depuis outgoing_relations")
-        logger.info(f"🔗 {pending_rels_created} relations enrichies depuis pending_relations")
-        logger.info(f"🔗 {len(seen_relations)} relations uniques totales")
+        logger.info(f"🔗 {relations_created} objets Relation créés")
+        logger.info(f"⚡ {direct_predicates_added} prédicats directs ajoutés")
 
         if skipped_invalid_uids > 0:
             logger.warning(f"⚠️ {skipped_invalid_uids} UIDs invalides ignorés")
@@ -780,21 +740,19 @@ class DgraphProjectManager:
 
     def _process_code_elements(self, node_data, parent_uid, mutations, label_uids, seen_uids):
         """
-        ✅ CORRECTION COMPLÈTE : Crée les mutations AVEC TOUTES LES DONNÉES
+        ✅ CORRIGÉ : Transfùre TOUTES les données INCLUANT codeContent
         """
 
         def get_valid_uid(raw_uid, prefix):
-            """Retourne un UID valide : conserve 0x..., sinon génère un blank node."""
             if raw_uid and isinstance(raw_uid, str) and raw_uid.startswith("0x"):
                 return raw_uid
             return self._sanitize_uid(raw_uid or "", prefix)
 
-        # ✅ CLASSES AVEC DONNÉES COMPLÈTES
+        # ✅ CLASSES AVEC codeContent
         for cls in node_data.get('classes', []):
             cls_uid = get_valid_uid(cls.get('uid', ''), 'class')
 
             if cls_uid not in seen_uids:
-                # ✅ CRÉER LA MUTATION COMPLÈTE
                 cls_mutation = {
                     "uid": cls_uid,
                     "dgraph.type": "Class",
@@ -802,16 +760,16 @@ class DgraphProjectManager:
                     "description": cls.get("description", ""),
                     "line": cls.get("line", 0),
                     "bases": cls.get("bases", []),
-                    "uses_vars": cls.get("uses_vars", [])
+                    "uses_vars": cls.get("uses_vars", []),
+                    "codeContent": cls.get("codeContent", "")  # ✅ AJOUTÉ
                 }
 
-                # ✅ AJOUTER LES MÉTHODES COMME RÉFÉRENCES COMPLÈTES
+                # ✅ MÉTHODES avec codeContent
                 methods_refs = []
                 for method in cls.get('methods', []):
                     method_uid = get_valid_uid(method.get('uid', ''), 'method')
 
                     if method_uid not in seen_uids:
-                        # Créer mutation de la méthode
                         method_mutation = {
                             "uid": method_uid,
                             "dgraph.type": "Function",
@@ -819,7 +777,8 @@ class DgraphProjectManager:
                             "description": method.get("description", ""),
                             "line": method.get("line", 0),
                             "params": json.dumps(method.get("params", [])),
-                            "returns": json.dumps(method.get("returns", {}))
+                            "returns": json.dumps(method.get("returns", {})),
+                            "codeContent": method.get("codeContent", "")  # ✅ AJOUTÉ
                         }
                         mutations.append(method_mutation)
                         seen_uids.add(method_uid)
@@ -832,40 +791,13 @@ class DgraphProjectManager:
                 if methods_refs:
                     cls_mutation["methods"] = methods_refs
 
-                # ✅ AJOUTER LES VARIABLES DE LA CLASSE
-                vars_refs = []
-                for var in cls.get('variables', []):
-                    var_uid = get_valid_uid(var.get('uid', ''), 'var')
-
-                    if var_uid not in seen_uids:
-                        var_mutation = {
-                            "uid": var_uid,
-                            "dgraph.type": "Variable",
-                            "name": var.get("name", "UnnamedVar"),
-                            "description": var.get("description", ""),
-                            "line": var.get("line", 0),
-                            "var_type": var.get("type", "unknown"),
-                            "scope": var.get("scope", "local")
-                        }
-                        mutations.append(var_mutation)
-                        seen_uids.add(var_uid)
-
-                        if var.get('uid'):
-                            label_uids[var['uid']] = var_uid
-
-                    vars_refs.append({"uid": var_uid})
-
-                if vars_refs:
-                    cls_mutation["variables"] = vars_refs
-
-                # ✅ AJOUTER LA MUTATION DE LA CLASSE
                 mutations.append(cls_mutation)
                 seen_uids.add(cls_uid)
 
                 if cls.get('uid'):
                     label_uids[cls['uid']] = cls_uid
 
-        # ✅ FONCTIONS GLOBALES AVEC DONNÉES COMPLÈTES
+        # ✅ FONCTIONS avec codeContent
         for func in node_data.get('functions', []):
             func_uid = get_valid_uid(func.get('uid', ''), 'func')
 
@@ -877,17 +809,16 @@ class DgraphProjectManager:
                     "description": func.get("description", ""),
                     "line": func.get("line", 0),
                     "params": json.dumps(func.get("params", [])),
-                    "returns": json.dumps(func.get("returns", {}))
+                    "returns": json.dumps(func.get("returns", {})),
+                    "codeContent": func.get("codeContent", "")  # ✅ AJOUTÉ
                 }
 
-                # ✅ AJOUTER LES APPELS (CALLS)
+                # Calls
                 calls_refs = []
                 for call in func.get('calls', []):
-                    # Si call est un dict avec uid
                     if isinstance(call, dict):
                         call_uid = call.get('uid')
                     else:
-                        # Si call est juste un nom, essayer de résoudre
                         call_uid = self.name_to_uid.get(str(call))
 
                     if call_uid:
@@ -896,39 +827,13 @@ class DgraphProjectManager:
                 if calls_refs:
                     func_mutation["calls"] = calls_refs
 
-                # ✅ VARIABLES DE LA FONCTION
-                vars_refs = []
-                for var in func.get('variables', []):
-                    var_uid = get_valid_uid(var.get('uid', ''), 'var')
-
-                    if var_uid not in seen_uids:
-                        var_mutation = {
-                            "uid": var_uid,
-                            "dgraph.type": "Variable",
-                            "name": var.get("name", "UnnamedVar"),
-                            "description": var.get("description", ""),
-                            "line": var.get("line", 0),
-                            "var_type": var.get("type", "unknown"),
-                            "scope": "local"
-                        }
-                        mutations.append(var_mutation)
-                        seen_uids.add(var_uid)
-
-                        if var.get('uid'):
-                            label_uids[var['uid']] = var_uid
-
-                    vars_refs.append({"uid": var_uid})
-
-                if vars_refs:
-                    func_mutation["variables"] = vars_refs
-
                 mutations.append(func_mutation)
                 seen_uids.add(func_uid)
 
                 if func.get('uid'):
                     label_uids[func['uid']] = func_uid
 
-        # ✅ VARIABLES GLOBALES
+            # ✅ VARIABLES GLOBALES
         for var in node_data.get('variables', []):
             var_uid = get_valid_uid(var.get('uid', ''), 'var')
 
@@ -1296,7 +1201,7 @@ class DgraphProjectManager:
     
         return mutation
 
-    def _batch_save_to_dgraph(self, profile_data, initial_batch_size=50, max_retries=5):
+    def _batch_save_to_dgraph(self, profile_data, initial_batch_size=500, max_retries=5):
         """
         ✅ CORRIGÉ : Avec nettoyage des doublons AVANT insertion
         """
@@ -1719,6 +1624,99 @@ class DgraphProjectManager:
         except Exception as e:
             logger.error(f"❌ Erreur : {e}")
             return False
+        
+    def _create_schema_compliant_relations(self, node, label_uids, mutations, seen_relations):
+        node_uid = node.get('uid')
+        if not node_uid:
+            return
+        
+        for rel in node.get('outgoing_relations', []):
+            target_uid = rel.get('target_uid')
+            rel_type = rel.get('relation_type', 'relation')
+            
+            if not target_uid or target_uid.startswith('temp_'):
+                continue
+            
+            # Mapper les UIDs
+            source_dgraph_uid = label_uids.get(node_uid, node_uid)
+            target_dgraph_uid = label_uids.get(target_uid, target_uid)
+            
+            if not self._validate_uid_format(source_dgraph_uid):
+                continue
+            if not self._validate_uid_format(target_dgraph_uid):
+                continue
+            
+            relation_key = f"{source_dgraph_uid}:{rel_type}:{target_dgraph_uid}"
+            if relation_key in seen_relations:
+                continue
+            
+            # ✅ MÉTHODE 1 : Utiliser les prédicats directs du schéma
+            # Pour les relations courantes (inherits, calls, extends, implements)
+            if rel_type in ['inherits', 'extends']:
+                # Ajouter directement au nœud source
+                node_mutation = next((m for m in mutations if m.get('uid') == source_dgraph_uid), None)
+                if node_mutation:
+                    if 'inherits' not in node_mutation:
+                        node_mutation['inherits'] = []
+                    node_mutation['inherits'].append({'uid': target_dgraph_uid})
+                    logger.debug(f"  ✅ Relation directe: {rel_type} ajoutée au nœud")
+            
+            elif rel_type == 'calls':
+                node_mutation = next((m for m in mutations if m.get('uid') == source_dgraph_uid), None)
+                if node_mutation:
+                    if 'calls' not in node_mutation:
+                        node_mutation['calls'] = []
+                    node_mutation['calls'].append({'uid': target_dgraph_uid})
+                    logger.debug(f"  ✅ Relation directe: calls ajoutée au nœud")
+            
+            elif rel_type == 'implements':
+                node_mutation = next((m for m in mutations if m.get('uid') == source_dgraph_uid), None)
+                if node_mutation:
+                    if 'implements' not in node_mutation:
+                        node_mutation['implements'] = []
+                    node_mutation['implements'].append({'uid': target_dgraph_uid})
+                    logger.debug(f"  ✅ Relation directe: implements ajoutée au nœud")
+            
+            # ✅ MÉTHODE 2 : Créer un objet Relation avec toutes les métadonnées
+            # (pour traçabilité complète et requêtes riches)
+            source_info = self.label_uid_to_info.get(node_uid, {})
+            target_info = self.label_uid_to_info.get(target_uid, {})
+            
+            relation_obj = {
+                "uid": self._sanitize_uid("", "rel"),
+                "dgraph.type": "Relation",
+                "name": f"{rel_type}_relation",
+                "relationType": rel_type,
+                
+                # Source
+                "source": {"uid": source_dgraph_uid},
+                "sourceName": source_info.get('name', node.get('label', node.get('name', ''))),
+                "sourceDescription": source_info.get('description', ''),
+                "sourcePath": source_info.get('file', rel.get('source_path', '')),
+                "sourceType": source_info.get('type', node.get('type', 'unknown')),
+                
+                # Target
+                "target": {"uid": target_dgraph_uid},
+                "targetName": target_info.get('name', rel.get('target_name', '')),
+                "targetDescription": target_info.get('description', ''),
+                "targetPath": target_info.get('file', rel.get('target_path', '')),
+                "targetType": target_info.get('type', rel.get('target_type', 'unknown')),
+                
+                # Metadata
+                "category": rel.get('category', 'parsed'),
+                "line": rel.get('line', 0),
+                "intraFile": rel.get('intra_file', True),
+                
+                "createdAt": datetime.now().isoformat() + "Z",
+            }
+            
+            mutations.append(relation_obj)
+            seen_relations.add(relation_key)
+            
+            logger.debug(
+                f"  ✅ Relation objet créée: {source_info.get('name', '?')} "
+                f"--{rel_type}--> {target_info.get('name', '?')}"
+            )
 
     def _test_relations_loading(self, profile_data=None):
         """

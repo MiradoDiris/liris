@@ -13,6 +13,7 @@ from PyQt5.Qsci import (
 )
 
 import qtawesome as qta
+import requests
 
 from utils.logger import logger
 from ui.localization.translator import tr
@@ -24,6 +25,7 @@ from utils.ai_platform_manager import AIPlatformManager
 from utils.conversation_history import ConversationHistory
 from ui.widgets.tabs.code_popup_dialog import CodePopupDialog
 from ui.widgets.tabs.snippet_card import SnippetCard
+from utils.vscode_integration import VSCodeIntegration
 
 class CodingPanel(QtWidgets.QWidget):   
     """Widget pour les sessions du coding multi-IA avec panneau de snippets rétractable"""
@@ -56,8 +58,16 @@ class CodingPanel(QtWidgets.QWidget):
         self.current_snippets = []
 
         self.is_browser_mode = False
-        # État du panneau de snippets
         self.snippets_panel_visible = False
+
+        self.vscode_url = "http://127.0.0.1:9000"
+
+        self.vscode_integration = VSCodeIntegration()
+        self.vscode_integration.code_sent.connect(self._on_vscode_response)
+        self.vscode_integration.connection_changed.connect(self._on_vscode_connection_changed)
+        logger.info("✅ Signaux VS Code connectés")
+
+        QtCore.QTimer.singleShot(1000, self._check_vscode_startup)
 
         # Couleurs du thème
         self.primary_color = "#A23B2D"
@@ -565,23 +575,150 @@ class CodingPanel(QtWidgets.QWidget):
             self.browser_mode_button.setStyleSheet(inactive_style)
 
     def _on_start_session(self):
-        """Lance une session de coding avec affichage de snippets"""
-        
-        # Vérifier le mode sélectionné
-        if self.is_browser_mode:
-            # Mode Navigation Automatique
-            QtWidgets.QMessageBox.information(
-                self,
-                "Mode Navigation Automatique",
-                "⚠️ Mode Navigation Automatique sélectionné.\n\n"
-                "Cette fonctionnalité est en cours d'implémentation.\n"
-                "Le système prendra le contrôle de votre navigateur."
-            )
-            # TODO: Implémenter la logique de navigation automatique
-            return
-        
-        # Mode API (code existant)
+        """
+        Lance une session de coding avec support Navigation Automatique amélioré
+        VERSION AVEC EXTRACTION RÉELLE DE SNIPPETS
+        """
         selected_platform_name = self.platforms_combo.currentData()
+
+        if not selected_platform_name:
+            self.update_status("Erreur: Sélectionnez une plateforme IA", 0)
+            QtWidgets.QMessageBox.warning(
+                self, "Plateforme non sélectionnée",
+                "Veuillez sélectionner une plateforme IA."
+            )
+            return
+
+        test_message = self.context_edit.toPlainText().strip()
+        if not test_message:
+            self.update_status("Erreur: Décrivez le contexte", 0)
+            QtWidgets.QMessageBox.warning(
+                self, "Contexte vide",
+                "Veuillez décrire la fonctionnalité à implémenter."
+            )
+            return
+
+        perimeter_data = self._build_perimeter_data()
+        self._clear_snippets()
+
+        if self.is_browser_mode:
+            logger.info(f"🌐 Mode Navigation Automatique activé pour {selected_platform_name}")
+
+            self.update_status(f"🌐 Initialisation de la navigation vers {selected_platform_name}...", 0)
+            self.start_button.setEnabled(False)
+            self.export_button.setEnabled(False)
+            self.progress_bar.setMaximum(100)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+
+            # Utiliser le nouveau worker amélioré
+            try:
+                from core.orchestration.browser_navigation_worker import BrowserNavigationWorker
+
+                self.current_worker = BrowserNavigationWorker(
+                    platform_name=selected_platform_name,
+                    context=test_message,
+                    perimeter_data=perimeter_data,
+                    parent=self
+                )
+
+            except ImportError as e:
+                logger.error(f"❌ Worker amélioré introuvable: {e}")
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Module manquant",
+                    "Le module 'improved_browser_navigation_worker.py' est introuvable.\n\n"
+                    "Fichiers requis:\n"
+                    "• universal_browser_handler.py\n"
+                    "• improved_browser_navigation_worker.py\n"
+                    "• browser_helpers.py\n"
+                    "• browserOs_conductor.py"
+                )
+                self.start_button.setEnabled(True)
+                self.update_status("❌ Modules de navigation manquants", 0)
+                return
+
+            # Connecter les signaux
+            self.current_worker.test_completed.connect(self._on_worker_completed)
+            self.current_worker.step_update.connect(self._on_step_update_enhanced)
+            self.current_worker.debug_info.connect(self._on_debug_info)
+
+            if hasattr(self.current_worker, 'snippet_generated'):
+                self.current_worker.snippet_generated.connect(self._add_snippet)
+                logger.info("✅ Signal snippet_generated connecté")
+
+            self.current_worker.finished.connect(self._on_worker_finished_generic)
+
+            logger.info(f"🚀 Démarrage navigation vers {selected_platform_name}")
+            self.current_worker.start()
+            self.session_started.emit(1)
+
+        else:
+            # Mode API (code existant inchangé)
+            logger.info(f"🔑 Mode API activé pour {selected_platform_name}")
+
+            platform = self.platform_manager.get_platform(selected_platform_name)
+            if not platform:
+                self.update_status(f"Erreur: Plateforme {selected_platform_name} introuvable", 0)
+                return
+
+            is_valid, message = self.platform_manager.validate_api_key(selected_platform_name)
+            if not is_valid:
+                self.update_status(f"Erreur: {message}", 0)
+                QtWidgets.QMessageBox.critical(
+                    self, "Erreur Configuration",
+                    f"{message}\nVeuillez configurer votre clé API."
+                )
+                return
+
+            self.update_status(f"Initialisation de {platform.name}...", 0)
+            self.start_button.setEnabled(False)
+            self.export_button.setEnabled(False)
+            self.progress_bar.setMaximum(100)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+
+            self.current_worker = self._create_worker_for_platform(
+                platform, test_message, perimeter_data
+            )
+
+            if not self.current_worker:
+                self.update_status(f"Erreur: Worker non disponible pour {platform.name}", 0)
+                self.start_button.setEnabled(True)
+                return
+
+            self.current_worker.test_completed.connect(self._on_worker_completed)
+            self.current_worker.step_update.connect(self._on_step_update)
+            self.current_worker.debug_info.connect(self._on_debug_info)
+
+            if hasattr(self.current_worker, 'snippet_generated'):
+                self.current_worker.snippet_generated.connect(self._add_snippet)
+                logger.info("✅ Signal snippet_generated connecté")
+
+            self.current_worker.finished.connect(self._on_worker_finished_generic)
+
+            logger.info(f"🚀 Démarrage de {platform.name} avec {len(perimeter_data)} éléments")
+            self.current_worker.start()
+            self.session_started.emit(1)
+
+    def _on_step_update_enhanced(self, step_name, message):
+        """
+        Version améliorée du callback de progression
+        Extrait le pourcentage depuis le message
+        """
+        sender_worker = self.sender()
+        platform_name = getattr(sender_worker, "platform_name", "Unknown")
+
+        # Extraire le pourcentage si présent
+        import re
+        match = re.search(r'\((\d+)%\)', message)
+        if match:
+            progress = int(match.group(1))
+            self.progress_bar.setValue(progress)
+            clean_message = message.replace(f'({progress}%)', '').strip()
+            self.update_status(f"[{platform_name}] {clean_message}", progress)
+        else:
+            self.update_status(f"[{platform_name}] {message}")
 
     def _toggle_snippets_panel(self):
             """Affiche/Cache le panneau de snippets avec animation (40% de l'écran)"""
@@ -735,24 +872,24 @@ class CodingPanel(QtWidgets.QWidget):
                 self.no_snippets_label.setVisible(False)
             except RuntimeError:
                 logger.warning("no_snippets_label was already deleted")
-
+    
         snippet_card = SnippetCard(snippet_data, self)
         snippet_card.copy_requested.connect(self._copy_to_clipboard)
         snippet_card.expand_requested.connect(self._expand_snippet)
-        snippet_card.ide_requested.connect(self._on_ide_integration_requested)
-
+        snippet_card.vscode_requested.connect(self._on_vscode_merge)
+    
         insert_position = self.snippets_layout.count() - 1
         if insert_position < 0:
             insert_position = 0
-
+    
         self.snippets_layout.insertWidget(insert_position, snippet_card)
         self.current_snippets.append(snippet_data)
         self._update_snippets_count()
-
+    
         # Ouvrir automatiquement le panneau si c'est le premier snippet
         if len(self.current_snippets) == 1 and not self.snippets_panel_visible:
             self._toggle_snippets_panel()
-
+    
         logger.info(f"Snippet ajouté: {snippet_data.get('action')} - {snippet_data.get('title')}")
     
     def _on_ide_integration_requested(self, snippet_data):
@@ -787,75 +924,6 @@ class CodingPanel(QtWidgets.QWidget):
         """Ouvre le snippet dans une popup plein écran"""
         dialog = CodePopupDialog(snippet_data, self)
         dialog.exec_()
-
-    def _on_start_session(self):
-        """Lance une session de coding avec affichage de snippets"""
-        selected_platform_name = self.platforms_combo.currentData()
-
-        if not selected_platform_name:
-            self.update_status("Erreur: Sélectionnez une plateforme IA", 0)
-            QtWidgets.QMessageBox.warning(
-                self, "Plateforme non sélectionnée",
-                "Veuillez sélectionner une plateforme IA."
-            )
-            return
-
-        platform = self.platform_manager.get_platform(selected_platform_name)
-        if not platform:
-            self.update_status(f"Erreur: Plateforme {selected_platform_name} introuvable", 0)
-            return
-
-        is_valid, message = self.platform_manager.validate_api_key(selected_platform_name)
-        if not is_valid:
-            self.update_status(f"Erreur: {message}", 0)
-            QtWidgets.QMessageBox.critical(
-                self, "Erreur Configuration",
-                f"{message}\nVeuillez configurer votre clé API."
-            )
-            return
-
-        test_message = self.context_edit.toPlainText().strip()
-        if not test_message:
-            self.update_status("Erreur: Décrivez le contexte", 0)
-            QtWidgets.QMessageBox.warning(
-                self, "Contexte vide",
-                "Veuillez décrire la fonctionnalité à implémenter."
-            )
-            return
-
-        perimeter_data = self._build_perimeter_data()
-
-        self._clear_snippets()
-        
-        self.update_status(f"Initialisation de {platform.name}...", 0)
-        self.start_button.setEnabled(False)
-        self.export_button.setEnabled(False)
-        self.progress_bar.setMaximum(100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(True)
-
-        self.current_worker = self._create_worker_for_platform(
-            platform, test_message, perimeter_data
-        )
-
-        if not self.current_worker:
-            self.update_status(f"Erreur: Worker non disponible pour {platform.name}", 0)
-            self.start_button.setEnabled(True)
-            return
-
-        self.current_worker.test_completed.connect(self._on_worker_completed)
-        self.current_worker.step_update.connect(self._on_step_update)
-        self.current_worker.debug_info.connect(self._on_debug_info)
-        
-        if hasattr(self.current_worker, 'snippet_generated'):
-            self.current_worker.snippet_generated.connect(self._add_snippet)
-            logger.info("Signal snippet_generated connecté")
-        
-        self.current_worker.finished.connect(self._on_worker_finished_generic)
-
-        logger.info(f"Démarrage de {platform.name} avec {len(perimeter_data)} éléments")
-        self.current_worker.start()
-        self.session_started.emit(1)
 
     def _on_worker_completed(self, success, message, duration, response):
         """Gère la complétion du worker avec support snippets"""
@@ -1604,77 +1672,624 @@ class CodingPanel(QtWidgets.QWidget):
         return icon_map.get(node_type, '•')
 
     def _build_perimeter_data(self) -> list:
-        """Construit les données du périmètre"""
+        """
+        ✅ VERSION FINALE : Récupération CODE + PATH avec stratégies de fallback multiples
+        """
         perimeter_list = []
 
         if not self.selected_taxonomy:
+            logger.warning("⚠️ Aucune taxonomie sélectionnée")
             return perimeter_list
 
-        for tax_item in self.selected_taxonomy:
+        logger.info(f"\n{'='*80}")
+        logger.info(f"📋 CONSTRUCTION DU PÉRIMÈTRE")
+        logger.info(f"{'='*80}")
+        logger.info(f"Éléments sélectionnés : {len(self.selected_taxonomy)}")
+
+        for idx, tax_item in enumerate(self.selected_taxonomy, 1):
+            name = tax_item.get('name', 'N/A')
+            item_type = tax_item.get('type', 'unknown')
+            uid = tax_item.get('data', {}).get('uid', '')
+
+            logger.info(f"\n🔹 Élément {idx} : {name}")
+            logger.info(f"   Type : {item_type}")
+            logger.info(f"   UID : {uid}")
+
+            # 🔧 INITIALISATION DES DONNÉES
+            code_content = ""
+            file_contents = ""
+            description = ""
+            path = ""
+            classes_data = []
+            functions_data = []
+            variables_data = []
+
+            # ✅ STRATÉGIE 1 : Récupérer path depuis taxonomy_data directement
+            path = (tax_item.get('path') or 
+                   tax_item.get('sourcePath') or 
+                   tax_item.get('full_path') or 
+                   tax_item.get('data', {}).get('path') or
+                   tax_item.get('data', {}).get('sourcePath') or
+                   tax_item.get('data', {}).get('full_path', ''))
+
+            if path:
+                logger.info(f"   ✅ Path trouvé dans taxonomy_data: {path}")
+            else:
+                logger.warning(f"   ⚠️ Path absent de taxonomy_data")
+
+            # ✅ STRATÉGIE 2 : Recharger depuis Dgraph
+            if uid and self.dgraph_connector and self.dgraph_connector.client:
+                try:
+                    # 🆕 REQUÊTE UNIVERSELLE avec relations directes ET inverses + path complet
+                    query = f'''
+                    {{
+                      node(func: uid({uid})) {{
+                        uid
+                        name
+                        nodeType
+                        # ✅ TOUS LES CHAMPS PATH POSSIBLES
+                        path
+                        sourcePath
+                        full_path
+                        targetPath
+                        description
+                        fileContents
+                        codeContent
+                        docstring
+                        line
+                        params
+                        returns
+                        var_type
+                        scope
+                        bases
+                        uses_vars
+
+                        # ✅ CLASSES - directes ET inverses
+                        classes {{
+                          uid
+                          name
+                          description
+                          line
+                          codeContent
+                          bases
+                          uses_vars
+                          path
+                          sourcePath
+
+                          methods {{
+                            uid
+                            name
+                            description
+                            line
+                            codeContent
+                            params
+                            returns
+                            docstring
+                            path
+                            sourcePath
+                          }}
+
+                          variables {{
+                            uid
+                            name
+                            description
+                            line
+                            var_type
+                            scope
+                          }}
+                        }}
+
+                        ~classes {{
+                          uid
+                          name
+                          description
+                          line
+                          codeContent
+                          bases
+                          uses_vars
+                          path
+                          sourcePath
+
+                          methods {{
+                            uid
+                            name
+                            description
+                            line
+                            codeContent
+                            params
+                            returns
+                            docstring
+                            path
+                            sourcePath
+                          }}
+
+                          variables {{
+                            uid
+                            name
+                            description
+                            line
+                            var_type
+                            scope
+                          }}
+                        }}
+
+                        # ✅ FUNCTIONS - directes ET inverses
+                        functions {{
+                          uid
+                          name
+                          description
+                          line
+                          codeContent
+                          params
+                          returns
+                          docstring
+                          path
+                          sourcePath
+
+                          variables {{
+                            uid
+                            name
+                            description
+                            line
+                            var_type
+                            scope
+                          }}
+                        }}
+
+                        ~functions {{
+                          uid
+                          name
+                          description
+                          line
+                          codeContent
+                          params
+                          returns
+                          docstring
+                          path
+                          sourcePath
+
+                          variables {{
+                            uid
+                            name
+                            description
+                            line
+                            var_type
+                            scope
+                          }}
+                        }}
+
+                        # ✅ VARIABLES - directes ET inverses
+                        variables {{
+                          uid
+                          name
+                          description
+                          line
+                          var_type
+                          scope
+                        }}
+
+                        ~variables {{
+                          uid
+                          name
+                          description
+                          line
+                          var_type
+                          scope
+                        }}
+
+                        # ✅ RÉCUPÉRER LE FICHIER PARENT (pour fonctions/méthodes)
+                        ~functions {{
+                          uid
+                          name
+                          path
+                          sourcePath
+                          full_path
+                          fileContents
+                          codeContent
+                        }}
+
+                        ~methods {{
+                          uid
+                          name
+                          path
+                          sourcePath
+
+                          # Remonter au fichier via la classe
+                          ~classes {{
+                            uid
+                            name
+                            path
+                            sourcePath
+                            full_path
+                            fileContents
+                            codeContent
+                          }}
+                        }}
+
+                        # ✅ Si c'est un nœud parent (Label/File)
+                        ~label @filter(type(Function) OR type(Class) OR type(Variable)) {{
+                          uid
+                          name
+                          nodeType
+                          codeContent
+                          description
+                          line
+                          path
+                          sourcePath
+                        }}
+                      }}
+                    }}
+                    '''
+
+                    txn = self.dgraph_connector.client.txn(read_only=True)
+                    resp = txn.query(query)
+                    txn.discard()
+
+                    data = self.dgraph_connector._parse_response(resp)
+                    nodes = data.get('node', [])
+
+                    if nodes and len(nodes) > 0:
+                        node = nodes[0]
+
+                        # ✅ RÉCUPÉRATION UNIVERSELLE DU CODE
+                        code_content = node.get('codeContent', '')
+                        description = node.get('description', '')
+
+                        # ✅ RÉCUPÉRATION PATH avec toutes les variantes
+                        if not path:  # Si pas encore trouvé dans taxonomy_data
+                            path = (node.get('path') or 
+                                   node.get('sourcePath') or 
+                                   node.get('full_path') or 
+                                   node.get('targetPath', ''))
+
+                            if path:
+                                logger.info(f"   ✅ Path trouvé via Dgraph (nœud direct): {path}")
+
+                        # ✅ FALLBACK 1 : Chercher dans le fichier parent (pour fonctions)
+                        if not path:
+                            parent_files = node.get('~functions', [])
+                            if parent_files:
+                                parent_path = (parent_files[0].get('path') or 
+                                              parent_files[0].get('sourcePath') or 
+                                              parent_files[0].get('full_path', ''))
+                                if parent_path:
+                                    path = parent_path
+                                    logger.info(f"   ✅ Path trouvé via fichier parent (fonction): {path}")
+
+                        # ✅ FALLBACK 2 : Chercher via classe parent (pour méthodes)
+                        if not path:
+                            parent_methods = node.get('~methods', [])
+                            if parent_methods:
+                                parent_class = parent_methods[0]
+                                parent_files = parent_class.get('~classes', [])
+                                if parent_files:
+                                    parent_path = (parent_files[0].get('path') or 
+                                                  parent_files[0].get('sourcePath') or 
+                                                  parent_files[0].get('full_path', ''))
+                                    if parent_path:
+                                        path = parent_path
+                                        logger.info(f"   ✅ Path trouvé via classe parent (méthode): {path}")
+
+                        # 📊 DIAGNOSTIC
+                        logger.info(f"   📊 Données Dgraph récupérées:")
+                        logger.info(f"      - codeContent: {len(code_content)} chars")
+                        logger.info(f"      - path: {path if path else 'MANQUANT'}")
+                        logger.info(f"      - nodeType: {node.get('nodeType', 'N/A')}")
+
+                        # 🔧 FUSION des classes directes + inverses
+                        direct_classes = node.get('classes', [])
+                        inverse_classes = node.get('~classes', [])
+                        all_classes = direct_classes + inverse_classes
+
+                        # Dédoublonner par UID
+                        seen_uids = set()
+                        unique_classes = []
+                        for cls in all_classes:
+                            cls_uid = cls.get('uid')
+                            if cls_uid and cls_uid not in seen_uids:
+                                seen_uids.add(cls_uid)
+                                unique_classes.append(cls)
+
+                        classes_data = unique_classes
+
+                        # 🔧 FUSION des fonctions directes + inverses
+                        direct_functions = node.get('functions', [])
+                        inverse_functions = node.get('~functions', [])
+                        all_functions = direct_functions + inverse_functions
+
+                        seen_uids = set()
+                        unique_functions = []
+                        for func in all_functions:
+                            func_uid = func.get('uid')
+                            if func_uid and func_uid not in seen_uids:
+                                seen_uids.add(func_uid)
+                                unique_functions.append(func)
+
+                        functions_data = unique_functions
+
+                        # 🔧 FUSION des variables
+                        direct_variables = node.get('variables', [])
+                        inverse_variables = node.get('~variables', [])
+                        all_variables = direct_variables + inverse_variables
+
+                        seen_uids = set()
+                        unique_variables = []
+                        for var in all_variables:
+                            var_uid = var.get('uid')
+                            if var_uid and var_uid not in seen_uids:
+                                seen_uids.add(var_uid)
+                                unique_variables.append(var)
+
+                        variables_data = unique_variables
+
+                        # 📊 STATISTIQUES
+                        logger.info(f"      - Classes: {len(classes_data)}")
+                        logger.info(f"      - Functions: {len(functions_data)}")
+                        logger.info(f"      - Variables: {len(variables_data)}")
+
+                        # 🔧 POUR FONCTIONS/CLASSES : le code est dans le nœud lui-même
+                        if item_type in ['function', 'class', 'method']:
+                            if code_content:
+                                file_contents = code_content
+                                logger.info(f"   ✅ Code fonction/classe: {len(code_content)} chars")
+                            else:
+                                logger.error(f"   ❌ AUCUN codeContent pour {item_type} '{name}'")
+
+                        # 🔧 POUR FICHIERS/LABELS : récupérer fileContents
+                        if item_type not in ['function', 'class', 'variable', 'method']:
+                            file_contents = node.get('fileContents', '')
+                            logger.info(f"   📦 Fichier/Label: {len(file_contents)} chars")
+
+                        # 🚨 VÉRIFICATION CRITIQUE PATH
+                        if not path:
+                            logger.error(f"   ❌ AUCUN PATH trouvé pour {item_type} '{name}' (UID: {uid})")
+                            logger.error(f"      Clés disponibles : {list(node.keys())}")
+
+                            # 🆕 FALLBACK ULTIME : Utiliser _get_function_path
+                            logger.info(f"   🔄 Tentative _get_function_path() en dernier recours...")
+                            from ui.widgets.tabs.taxonomy_dialog import TaxonomyDialog
+                            # Créer une instance temporaire si nécessaire
+                            if hasattr(self, 'taxonomy_dialog_instance'):
+                                path = self.taxonomy_dialog_instance._get_function_path(uid, name)
+                            else:
+                                # Appeler directement la méthode si disponible
+                                path = self._get_function_path_fallback(uid, name)
+
+                            if path:
+                                logger.info(f"   ✅ Path trouvé via fallback ultime: {path}")
+                            else:
+                                logger.error(f"   ❌ PATH DÉFINITIVEMENT INTROUVABLE")
+
+                    else:
+                        logger.warning(f"   ⚠️ Aucun nœud trouvé pour UID {uid}")
+
+                except Exception as e:
+                    logger.error(f"   ❌ Erreur récupération Dgraph : {e}")
+                    import traceback
+                    traceback.print_exc()
+
+                    # Fallback sur données locales
+                    code_content = tax_item.get('data', {}).get('codeContent', '')
+                    file_contents = tax_item.get('data', {}).get('fileContents', '')
+                    description = tax_item.get('data', {}).get('description', '')
+
+                    if code_content or file_contents:
+                        logger.info(f"   🔄 Fallback sur données locales réussi")
+
+            else:
+                logger.warning(f"   ⚠️ Pas d'UID ou Dgraph non connecté")
+                # Utiliser les données locales
+                code_content = tax_item.get('data', {}).get('codeContent', '')
+                file_contents = tax_item.get('data', {}).get('fileContents', '')
+                description = tax_item.get('data', {}).get('description', '')
+
+            # 🗃️ CONSTRUIRE L'OBJET PERIMETER
             item_data = {
-                'name': tax_item.get('name', 'N/A'),
-                'type': tax_item.get('type', 'unknown'),
+                'name': name,
+                'type': item_type,
                 'level': tax_item.get('level', 0),
                 'search_depth': tax_item.get('search_depth', 1),
                 'data': {
-                    'description': '',
-                    'path': '',
-                    'uid': '',
-                    'fileContents': '',
-                    'codeContent': ''
+                    'uid': uid,
+                    'path': path,  # ✅ PATH GARANTI
+                    'sourcePath': path,  # ✅ Duplication pour compatibilité
+                    'full_path': path,  # ✅ Duplication pour compatibilité
+                    'description': description or tax_item.get('data', {}).get('description', ''),
+                    'fileContents': file_contents,
+                    'codeContent': code_content,
+                    'classes': classes_data,
+                    'functions': functions_data,
+                    'variables': variables_data
                 },
                 'relations': [],
                 'related': []
             }
 
-            file_data = tax_item.get('data', {})
-            if file_data:
-                item_data['data']['description'] = file_data.get('description', '')
-                item_data['data']['path'] = file_data.get('path', '')
-                item_data['data']['uid'] = file_data.get('uid', '')
-                item_data['data']['fileContents'] = file_data.get('fileContents', '')
-                item_data['data']['codeContent'] = file_data.get('codeContent', '')
+            # 🔍 VÉRIFICATION FINALE
+            final_code = item_data['data']['codeContent'] or item_data['data']['fileContents']
+            final_path = item_data['data']['path']
 
-            if not item_data['data']['uid']:
-                uid = self._get_uid_by_name(item_data['name'])
-                if uid:
-                    item_data['data']['uid'] = uid
+            if final_code:
+                logger.info(f"   ✅ Code final disponible : {len(final_code)} chars")
+            else:
+                logger.error(f"   ❌ AUCUN CODE RÉCUPÉRÉ pour {name}")
 
+            if final_path:
+                logger.info(f"   ✅ Path final : {final_path}")
+            else:
+                logger.error(f"   ❌ AUCUN PATH RÉCUPÉRÉ pour {name}")
+
+            # 📊 TRAITER LES RELATIONS
             relations = tax_item.get('relations', [])
             for rel in relations:
                 relation_obj = {
                     'source': rel.get('source', ''),
                     'target': rel.get('target', ''),
-                    'relation_type': rel.get('relation_type', 'unknown')
+                    'relation_type': rel.get('relation_type', 'unknown'),
+                    'source_uid': rel.get('source_uid', ''),
+                    'target_uid': rel.get('target_uid', '')
                 }
                 item_data['relations'].append(relation_obj)
 
-            related = tax_item.get('related', [])
-            for rel_item in related:
-                related_data = rel_item.get('data', {})
-                related_obj = {
-                    'name': rel_item.get('name', ''),
-                    'type': rel_item.get('type', 'unknown'),
-                    'data': {
-                        'description': related_data.get('description', ''),
-                        'path': related_data.get('path', ''),
-                        'uid': related_data.get('uid', ''),
-                        'fileContents': related_data.get('fileContents', ''),
-                        'codeContent': related_data.get('codeContent', '')
-                    }
-                }
-
-                if not related_obj['data']['uid']:
-                    uid = self._get_uid_by_name(related_obj['name'])
-                    if uid:
-                        related_obj['data']['uid'] = uid
-
-                item_data['related'].append(related_obj)
-
             perimeter_list.append(item_data)
+            logger.info(f"   ✅ Élément ajouté au périmètre")
+
+        # 📊 STATISTIQUES FINALES
+        logger.info(f"\n{'='*80}")
+        logger.info(f"✅ PÉRIMÈTRE CONSTRUIT : {len(perimeter_list)} élément(s)")
+
+        total_code_size = 0
+        items_with_code = 0
+        items_without_code = []
+        items_with_path = 0
+        items_without_path = []
+
+        for item in perimeter_list:
+            # Vérifier code
+            code = item['data'].get('codeContent', '') or item['data'].get('fileContents', '')
+            if code:
+                total_code_size += len(code)
+                items_with_code += 1
+            else:
+                items_without_code.append(f"{item['name']} ({item['type']})")
+
+            # Vérifier path
+            path = item['data'].get('path', '')
+            if path:
+                items_with_path += 1
+            else:
+                items_without_path.append(f"{item['name']} ({item['type']})")
+
+        logger.info(f"   📊 Éléments avec code : {items_with_code}/{len(perimeter_list)}")
+        logger.info(f"   📦 Taille totale du code : {total_code_size:,} caractères")
+        logger.info(f"   📂 Éléments avec path : {items_with_path}/{len(perimeter_list)}")
+
+        if items_without_code:
+            logger.warning(f"   ⚠️ Éléments SANS code :")
+            for item_name in items_without_code:
+                logger.warning(f"      - {item_name}")
+
+        if items_without_path:
+            logger.error(f"   ❌ Éléments SANS path :")
+            for item_name in items_without_path:
+                logger.error(f"      - {item_name}")
+
+        logger.info(f"{'='*80}\n")
 
         return perimeter_list
     
+    def _get_function_path_fallback(self, uid: str, name: str) -> str:
+        """
+        ✅ FALLBACK ULTIME : Chercher le path via relations Dgraph
+        """
+        if not uid or not self.dgraph_connector:
+            return ""
+        
+        logger.info(f"🔍 Fallback ultime pour path de '{name}'...")
+        
+        normalized_name = name.replace('F: ', '').replace('M: ', '').replace('C: ', '').strip()
+        escaped = normalized_name.replace('"', '\\"')
+        
+        query = f"""
+        {{
+          by_source(func: type(Relation)) @filter(regexp(sourceName, /{escaped}/i)) {{
+            sourceName
+            sourcePath
+          }}
+          
+          by_target(func: type(Relation)) @filter(regexp(targetName, /{escaped}/i)) {{
+            targetName
+            targetPath
+          }}
+        }}
+        """
+        
+        try:
+            txn = self.dgraph_connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+            
+            data = self.dgraph_connector._parse_response(resp)
+            
+            # Vérifier sourcePath
+            for rel in data.get('by_source', []):
+                source_name = rel.get('sourceName', '')
+                source_path = rel.get('sourcePath', '')
+                
+                if source_name and source_path:
+                    clean_source = source_name.replace('Function: ', '').replace('Method: ', '').strip()
+                    if clean_source == normalized_name or normalized_name in clean_source:
+                        # Nettoyer le path
+                        clean_path = source_path
+                        for marker in ['/Function:', '/Method:', '/Class:']:
+                            if marker in clean_path:
+                                clean_path = clean_path.split(marker)[0]
+                                break
+                            
+                        if clean_path:
+                            logger.info(f"   ✅ Path trouvé via relations (source): {clean_path}")
+                            return clean_path
+            
+            # Vérifier targetPath
+            for rel in data.get('by_target', []):
+                target_name = rel.get('targetName', '')
+                target_path = rel.get('targetPath', '')
+                
+                if target_name and target_path:
+                    clean_target = target_name.replace('Function: ', '').replace('Method: ', '').strip()
+                    if clean_target == normalized_name or normalized_name in clean_target:
+                        # Nettoyer le path
+                        clean_path = target_path
+                        for marker in ['/Function:', '/Method:', '/Class:']:
+                            if marker in clean_path:
+                                clean_path = clean_path.split(marker)[0]
+                                break
+                            
+                        if clean_path:
+                            logger.info(f"   ✅ Path trouvé via relations (target): {clean_path}")
+                            return clean_path
+            
+            logger.warning(f"   ⚠️ Aucun path trouvé via relations pour '{name}'")
+            return ""
+        
+        except Exception as e:
+            logger.error(f"   ❌ Erreur fallback path: {e}")
+            return ""
+
+    def diagnose_perimeter_data(self):
+        if not self.selected_taxonomy:
+            print("⚠️ Aucune taxonomie sélectionnée")
+            return
+
+        print("\n" + "="*80)
+        print("🔍 DIAGNOSTIC DU PÉRIMÈTRE")
+        print("="*80)
+
+        perimeter = self._build_perimeter_data()
+
+        print(f"\n📊 Résumé :")
+        print(f"   • Éléments sélectionnés : {len(self.selected_taxonomy)}")
+        print(f"   • Éléments dans perimeter_data : {len(perimeter)}")
+
+        for idx, item in enumerate(perimeter, 1):
+            name = item.get('name', 'N/A')
+            code = item['data'].get('codeContent', '') or item['data'].get('fileContents', '')
+            path = item['data'].get('path', 'N/A')
+
+            print(f"\n   🔹 Élément {idx} : {name}")
+            print(f"      Path : {path}")
+            print(f"      Code : {'✅ ' + str(len(code)) + ' chars' if code else '❌ Vide'}")
+
+            if code:
+                lines = code.split('\n')[:10]
+                print(f"      Aperçu :")
+                for line in lines:
+                    print(f"         {line[:70]}")
+                if len(code.split('\n')) > 10:
+                    print(f"         ... ({len(code.split('\n'))} lignes au total)")
+
+        print("\n" + "="*80 + "\n")
+
     def _get_uid_by_name(self, node_name: str) -> str:
         """Récupère l'UID d'un nœud par son nom"""
         if not self.dgraph_connector or not node_name:
@@ -1807,6 +2422,507 @@ class CodingPanel(QtWidgets.QWidget):
             self.graph_widget.refresh()
         logger.info("Coding panel refreshed")
 
+    def _check_vscode_startup(self):
+        """Vérifie la connexion VS Code au démarrage"""
+        if self.vscode_integration.check_connection():
+            logger.info("✅ VS Code connecté au démarrage")
+            self._update_vscode_status_indicator(True)
+        else:
+            logger.info("ℹ️ VS Code non disponible")
+            self._update_vscode_status_indicator(False)
+
+    def _update_vscode_status_indicator(self, connected):
+        """Met à jour l'indicateur visuel de connexion VS Code"""
+        # Optionnel: Ajouter un petit indicateur dans la barre de statut
+        if hasattr(self, 'status_label'):
+            if connected:
+                # Ne pas surcharger le status_label principal
+                pass
+            else:
+                pass
+
+    def _on_vscode_response(self, success, message):
+        """Callback pour les réponses VS Code"""
+        if success:
+            logger.info(f"✅ VS Code: {message}")
+            QtWidgets.QMessageBox.information(
+                self,
+                "VS Code - Succès",
+                f"✅ {message}"
+            )
+        else:
+            logger.error(f"❌ VS Code: {message}")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "VS Code - Erreur",
+                f"❌ {message}\n\nVérifiez que l'extension Liris est installée et démarrée dans VS Code."
+            )
+
+    def _on_vscode_connection_changed(self, connected):
+        """Callback pour les changements de connexion VS Code"""
+        if connected:
+            logger.info("✅ VS Code connecté")
+            self._update_vscode_status_indicator(True)
+        else:
+            logger.warning("⚠️ VS Code déconnecté")
+            self._update_vscode_status_indicator(False)
+
+    def _on_vscode_merge(self, snippet_data):
+        """Gère le merge dans VS Code - SANS DIALOGUES"""
+        logger.info(f"🔀 Demande de merge VS Code: {snippet_data.get('title', 'N/A')}")
+        
+        # ✅ VALIDATION STRICTE : Vérifier que toutes les infos nécessaires sont présentes
+        action = snippet_data.get('action', '').upper()
+        file_path = snippet_data.get('file', '').strip()
+        code = snippet_data.get('code', '').strip()
+        
+        if not file_path:
+            logger.error("❌ Aucun chemin de fichier dans snippet_data")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Données manquantes",
+                "Le chemin du fichier n'est pas fourni par l'IA.\n\n"
+                "Assurez-vous que l'IA inclut le champ 'file' dans sa réponse."
+            )
+            return
+        
+        if not code:
+            logger.error("❌ Aucun code dans snippet_data")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Données manquantes",
+                "Le code n'est pas fourni par l'IA.\n\n"
+                "Assurez-vous que l'IA inclut le champ 'code' dans sa réponse."
+            )
+            return
+        
+        logger.info(f"📋 Action: {action}")
+        logger.info(f"📁 File: {file_path}")
+        logger.info(f"💻 Code length: {len(code)} chars")
+        
+        # Router vers la bonne méthode selon l'action
+        if action == 'AJOUTER':
+            logger.info("➡️ Appel _vscode_insert()")
+            self._vscode_insert(snippet_data)
+        elif action in ['MODIFIER', 'REMPLACER']:
+            logger.info("➡️ Appel _vscode_replace()")
+            
+            # ✅ VALIDATION : Vérifier que le target existe pour REPLACE
+            target = snippet_data.get('target', '').strip()
+            if not target:
+                logger.error("❌ Action REPLACE sans target")
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Données manquantes",
+                    f"L'action '{action}' nécessite un champ 'target' (nom de fonction/classe à remplacer).\n\n"
+                    "Assurez-vous que l'IA inclut ce champ dans sa réponse."
+                )
+                return
+            
+            self._vscode_replace(snippet_data)
+        else:
+            logger.warning(f"⚠️ Action inconnue: {action}, utilisation de INSERT par défaut")
+            self._vscode_insert(snippet_data)
+        
+        logger.info("✅ _on_vscode_merge terminé")
+
+    def _prompt_file_path(self, snippet_data):
+        """Demande le chemin du fichier à l'utilisateur"""
+        # Suggérer un nom basé sur le contexte
+        suggested_name = "code.py"
+
+        # Essayer d'extraire depuis la description
+        description = snippet_data.get('description', '')
+        title = snippet_data.get('title', '')
+
+        if description:
+            # Chercher des patterns comme "dans fichier.py" ou "file: fichier.py"
+            import re
+            match = re.search(r'(?:dans|file:|fichier:)\s+([a-zA-Z0-9_/\\.]+\.py)', description)
+            if match:
+                suggested_name = match.group(1)
+
+        # Utiliser le projet actuel si disponible
+        if self.current_project_data:
+            project_name = self.current_project_data.get('name', '')
+            if project_name and '/' not in suggested_name:
+                suggested_name = f"src/{suggested_name}"
+
+        dialog = QtWidgets.QInputDialog(self)
+        dialog.setWindowTitle("Chemin du fichier")
+        dialog.setLabelText("Entrez le chemin du fichier (relatif au workspace VS Code):")
+        dialog.setTextValue(suggested_name)
+        dialog.resize(500, 150)
+
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            file_path = dialog.textValue().strip()
+            return file_path if file_path else None
+
+        return None
+
+    def _vscode_insert(self, snippet):
+        """Insère du code via VS Code - SANS DIALOGUES"""
+        logger.info(f"📝 _vscode_insert démarré pour: {snippet.get('file', 'N/A')}")
+        
+        file_path = snippet.get('file', '').strip()
+        code = snippet.get('code', '').strip()
+        line_number = snippet.get('lineNumber', 0)
+        
+        # ✅ VALIDATION : Pas de dialogue, juste vérification
+        if not file_path:
+            logger.error("❌ file_path manquant dans snippet")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Erreur",
+                "Le chemin du fichier est manquant.\n"
+                "L'IA doit fournir le champ 'file' dans sa réponse."
+            )
+            return
+        
+        if not code:
+            logger.error("❌ code manquant dans snippet")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Erreur",
+                "Le code est manquant.\n"
+                "L'IA doit fournir le champ 'code' dans sa réponse."
+            )
+            return
+        
+        payload = {
+            "action": "insert",
+            "filePath": file_path,
+            "code": code,
+            "lineNumber": line_number
+        }
+        
+        logger.info(f"📤 Payload VS Code:")
+        logger.info(f"   - Action: {payload['action']}")
+        logger.info(f"   - File: {payload['filePath']}")
+        logger.info(f"   - Line: {payload['lineNumber']}")
+        
+        try:
+            response = requests.post(
+                f"{self.vscode_url}/update",
+                json=payload,
+                timeout=10
+            )
+            
+            logger.info(f"📥 Réponse VS Code: {response.status_code}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    logger.info("✅ Code inséré avec succès dans VS Code")
+                    QtWidgets.QMessageBox.information(
+                        self,
+                        "Succès",
+                        f"✅ Code inséré avec succès dans:\n{file_path}"
+                    )
+                else:
+                    error_msg = result.get('error', 'Unknown error')
+                    logger.error(f"❌ Échec VS Code: {error_msg}")
+                    
+                    if result.get('userCancelled'):
+                        QtWidgets.QMessageBox.information(
+                            self,
+                            "Annulé",
+                            "Opération annulée par l'utilisateur dans VS Code."
+                        )
+                    else:
+                        QtWidgets.QMessageBox.warning(
+                            self,
+                            "Erreur VS Code",
+                            f"Impossible d'insérer le code:\n{error_msg}"
+                        )
+            else:
+                result = response.json() if response.content else {}
+                error_msg = result.get('error', f'HTTP {response.status_code}')
+                logger.error(f"❌ Erreur HTTP: {error_msg}")
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Erreur serveur",
+                    f"Le serveur VS Code a retourné une erreur:\n{error_msg}"
+                )
+        
+        except requests.exceptions.Timeout:
+            logger.error("⏱️ Timeout connexion VS Code")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Timeout",
+                "Le serveur VS Code ne répond pas (timeout)."
+            )
+        except requests.exceptions.ConnectionError:
+            logger.error("🔌 Impossible de se connecter à VS Code")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Connexion impossible",
+                f"Impossible de se connecter au serveur VS Code sur {self.vscode_url}.\n"
+                "Vérifiez que l'extension Liris est active dans VS Code."
+            )
+        except Exception as e:
+            logger.error(f"❌ Erreur inattendue: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Erreur inattendue:\n{str(e)}"
+            )
+
+    def _vscode_replace(self, snippet):
+        """Remplace du code via VS Code - SANS DIALOGUES"""
+        logger.info(f"📝 _vscode_replace démarré pour: {snippet.get('file', 'N/A')}")
+        
+        file_path = snippet.get('file', '').strip()
+        code = snippet.get('code', '').strip()
+        target = snippet.get('target', '').strip()
+        
+        # ✅ VALIDATION STRICTE : Tous les champs requis doivent être présents
+        if not file_path:
+            logger.error("❌ file_path manquant")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Données manquantes",
+                "Le chemin du fichier est manquant.\n"
+                "L'IA doit fournir le champ 'file' dans sa réponse."
+            )
+            return
+        
+        if not code:
+            logger.error("❌ code manquant")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Données manquantes",
+                "Le code de remplacement est manquant.\n"
+                "L'IA doit fournir le champ 'code' dans sa réponse."
+            )
+            return
+        
+        if not target:
+            logger.error("❌ target manquant pour action REPLACE")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Données manquantes",
+                "Le nom de la fonction/classe à remplacer est manquant.\n\n"
+                "L'IA doit fournir le champ 'target' dans sa réponse.\n"
+                "Exemple: 'target': 'def old_function():'"
+            )
+            return
+        
+        payload = {
+            "action": "replace",
+            "filePath": file_path,
+            "code": code,
+            "target": target
+        }
+        
+        logger.info(f"📤 Payload VS Code:")
+        logger.info(f"   - Action: {payload['action']}")
+        logger.info(f"   - File: {payload['filePath']}")
+        logger.info(f"   - Target: {payload['target'][:50]}...")
+        
+        try:
+            response = requests.post(
+                f"{self.vscode_url}/update",
+                json=payload,
+                timeout=10
+            )
+            
+            logger.info(f"📥 Réponse VS Code: {response.status_code}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    logger.info("✅ Code remplacé avec succès dans VS Code")
+                    
+                    # Message différent si le fichier a été créé
+                    if result.get('created'):
+                        QtWidgets.QMessageBox.information(
+                            self,
+                            "Fichier créé",
+                            f"✅ Le fichier {file_path} a été créé avec le nouveau contenu."
+                        )
+                    else:
+                        QtWidgets.QMessageBox.information(
+                            self,
+                            "Succès",
+                            f"✅ Code remplacé avec succès dans:\n{file_path}"
+                        )
+                else:
+                    error_msg = result.get('error', 'Unknown error')
+                    logger.error(f"❌ Échec VS Code: {error_msg}")
+                    
+                    # Gérer l'erreur de fichier inexistant
+                    if 'non-existent file' in error_msg.lower():
+                        self._handle_missing_file(snippet, payload)
+                    elif result.get('userCancelled'):
+                        QtWidgets.QMessageBox.information(
+                            self,
+                            "Annulé",
+                            "Opération annulée par l'utilisateur dans VS Code."
+                        )
+                    else:
+                        QtWidgets.QMessageBox.warning(
+                            self,
+                            "Erreur VS Code",
+                            f"Impossible de remplacer le code:\n{error_msg}"
+                        )
+            else:
+                result = response.json() if response.content else {}
+                error_msg = result.get('error', f'HTTP {response.status_code}')
+                logger.error(f"❌ Erreur HTTP: {error_msg}")
+                
+                # Gérer l'erreur de fichier inexistant
+                if 'non-existent file' in error_msg.lower():
+                    self._handle_missing_file(snippet, payload)
+                else:
+                    QtWidgets.QMessageBox.critical(
+                        self,
+                        "Erreur serveur",
+                        f"Le serveur VS Code a retourné une erreur:\n{error_msg}"
+                    )
+        
+        except requests.exceptions.Timeout:
+            logger.error("⏱️ Timeout connexion VS Code")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Timeout",
+                "Le serveur VS Code ne répond pas (timeout)."
+            )
+        except requests.exceptions.ConnectionError:
+            logger.error("🔌 Impossible de se connecter à VS Code")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Connexion impossible",
+                f"Impossible de se connecter au serveur VS Code sur {self.vscode_url}.\n"
+                "Vérifiez que l'extension Liris est active dans VS Code."
+            )
+        except Exception as e:
+            logger.error(f"❌ Erreur inattendue: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Erreur inattendue:\n{str(e)}"
+            )
+
+    def _handle_missing_file(self, snippet, original_payload):
+        """Gère le cas où le fichier n'existe pas - SANS DIALOGUE"""
+        file_path = snippet.get('file', '')
+        
+        logger.info(f"📄 Fichier {file_path} introuvable")
+        
+        # ✅ Proposition automatique de création (avec confirmation simple)
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Fichier introuvable",
+            f"Le fichier '{file_path}' n'existe pas.\n\n"
+            f"Voulez-vous créer le fichier avec ce contenu ?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.Yes
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            logger.info(f"📄 Conversion REPLACE → INSERT pour créer {file_path}")
+            
+            insert_payload = {
+                "action": "insert",
+                "filePath": file_path,
+                "code": snippet.get('code', ''),
+                "lineNumber": 0
+            }
+            
+            try:
+                response = requests.post(
+                    f"{self.vscode_url}/update",
+                    json=insert_payload,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        logger.info(f"✅ Fichier {file_path} créé avec succès")
+                        QtWidgets.QMessageBox.information(
+                            self,
+                            "Fichier créé",
+                            f"✅ Le fichier {file_path} a été créé avec succès."
+                        )
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        logger.error(f"❌ Échec création: {error_msg}")
+                        QtWidgets.QMessageBox.warning(
+                            self,
+                            "Erreur",
+                            f"Impossible de créer le fichier:\n{error_msg}"
+                        )
+                else:
+                    logger.error(f"❌ Erreur HTTP {response.status_code}")
+                    QtWidgets.QMessageBox.critical(
+                        self,
+                        "Erreur",
+                        f"Erreur lors de la création du fichier (HTTP {response.status_code})"
+                    )
+            
+            except Exception as e:
+                logger.error(f"❌ Erreur lors de la création: {e}")
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Erreur",
+                    f"Erreur lors de la création du fichier:\n{str(e)}"
+                )
+        else:
+            logger.info("❌ Utilisateur a annulé la création du fichier")
+
+    def _prompt_target_code(self):
+        """Demande le code à remplacer à l'utilisateur"""
+        dialog = QtWidgets.QInputDialog(self)
+        dialog.setWindowTitle("Code à remplacer")
+        dialog.setLabelText(
+            "Entrez le code à remplacer (doit être unique dans le fichier):\n\n"
+            "Exemple: def old_function():"
+        )
+        dialog.setInputMode(QtWidgets.QInputDialog.InputMode.TextInput)
+        dialog.resize(600, 200)
+
+        # Créer un QTextEdit pour multiligne
+        text_edit = QtWidgets.QTextEdit()
+        text_edit.setPlaceholderText("Code à rechercher et remplacer...")
+        text_edit.setMinimumHeight(100)
+
+        # Remplacer le widget par défaut
+        layout = dialog.layout()
+        if layout:
+            old_input = dialog.findChild(QtWidgets.QLineEdit)
+            if old_input:
+                old_input.setParent(None)
+                layout.addWidget(text_edit)
+
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            target = text_edit.toPlainText().strip()
+            return target if target else None
+
+        return None
+
+    def check_vscode_connection(self):
+        """Vérifie manuellement la connexion VS Code"""
+        if self.vscode_integration.check_connection():
+            QtWidgets.QMessageBox.information(
+                self,
+                "VS Code",
+                "✅ VS Code est connecté et prêt à recevoir du code."
+            )
+            return True
+        else:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "VS Code",
+                "❌ VS Code n'est pas accessible.\n\n"
+                "Vérifiez que:\n"
+                "• VS Code est ouvert\n"
+                "• L'extension Liris est installée et activée\n"
+                "• Le serveur est démarré (port 9000)"
+            )
+            return False
+
     def _update_ui_texts(self):
         """Met à jour les textes de l'interface"""
         pass
@@ -1816,6 +2932,9 @@ class CodingPanel(QtWidgets.QWidget):
         if hasattr(self, 'current_worker') and self.current_worker:
             self.current_worker.quit()
             self.current_worker.wait()
+
+        if hasattr(self, 'vscode_integration'):
+            pass
 
         if self.dgraph_connector:
             self.dgraph_connector.close()

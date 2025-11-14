@@ -126,7 +126,6 @@ class GlassSwitch(QtWidgets.QWidget):
         self._pill_x = float(x)
         self.update()
 
-
 class MainWindow(QMainWindow):
     """
     Fenêtre principale de l'application d'IA collaborative

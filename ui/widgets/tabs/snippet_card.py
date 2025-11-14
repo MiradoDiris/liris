@@ -1,51 +1,33 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.Qsci import (
-    QsciScintilla,
-    QsciLexerPython,
-    QsciLexerCPP,
-    QsciLexerJavaScript,
-    QsciLexerHTML,
-)
-
 import qtawesome as qta
-
-from utils.logger import logger
-from ui.localization.translator import tr
+import os
+from pathlib import Path
 
 
 class SnippetCard(QtWidgets.QWidget):
-    """Widget pour afficher un snippet de code avec métadonnées - style monochrome gris"""
+    """Widget compact sans scroll horizontal - Adaptatif selon la largeur disponible"""
     
     copy_requested = pyqtSignal(str)
     expand_requested = pyqtSignal(dict)
-    ide_requested = pyqtSignal(dict)
+    vscode_requested = pyqtSignal(dict)
     
     def __init__(self, snippet_data, parent=None):
         super().__init__(parent)
         self.snippet_data = snippet_data
         self._init_ui()
     
-    def _get_action_icon_and_color(self, action):
-        """Retourne l'icône selon l'action, couleur grise uniforme"""
-        action_map = {
-            'AJOUTER': ('fa5s.plus-circle', '#666666'),
-            'MODIFIER': ('fa5s.edit', '#666666'),
-            'REMPLACER': ('fa5s.sync-alt', '#666666'),
-        }
-        return action_map.get(action.upper(), ('fa5s.code', '#666666'))
-    
     def _init_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # Fond et bordures - design épuré
+        # Fond et bordures
         self.setStyleSheet("""
             SnippetCard {
                 background-color: #ffffff;
                 border: none;
-                border-bottom: 1px solid #e0e0e0;
+                border-bottom: 1px solid #e8e8e8;
             }
         """)
         
@@ -56,263 +38,252 @@ class SnippetCard(QtWidgets.QWidget):
                 background-color: white;
                 border: none;
             }
-            QWidget:hover {
-                background-color: #fafafa;
-            }
         """)
+        
+        # Layout vertical pour empiler les éléments si nécessaire
         content_layout = QtWidgets.QVBoxLayout(content_widget)
         content_layout.setContentsMargins(12, 12, 12, 12)
-        content_layout.setSpacing(10)
+        content_layout.setSpacing(8)
         
-        # ===== EN-TÊTE SIMPLIFIÉ =====
-        header_layout = QtWidgets.QHBoxLayout()
-        header_layout.setSpacing(10)
+        # ===== LIGNE 1 : TITRE + ACTION + BOUTONS =====
+        first_row = QtWidgets.QHBoxLayout()
+        first_row.setSpacing(12)
         
-        # Badge numéro (gardé)
-        order_label = QtWidgets.QLabel(f"#{self.snippet_data.get('order', 0)}")
-        order_label.setStyleSheet("""
-            font-size: 11px;
-            color: #666;
-            padding: 3px 9px;
-            background-color: #f0f0f0;
-            border-radius: 10px;
-            font-weight: 700;
-        """)
-        header_layout.addWidget(order_label)
+        # Container titre + action
+        title_container = QtWidgets.QWidget()
+        title_layout = QtWidgets.QVBoxLayout(title_container)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(2)
         
-        action = self.snippet_data.get('action', 'MODIFIER')
-        icon_name, color = self._get_action_icon_and_color(action)
-        
-        action_icon = QtWidgets.QLabel()
-        action_icon.setPixmap(qta.icon(icon_name, color=color).pixmap(18, 18))
-        header_layout.addWidget(action_icon)
-        
-        action_label = QtWidgets.QLabel(action.capitalize())
-        action_label.setStyleSheet(f"""
-            font-weight: 700;
-            font-size: 13px;
-            color: {color};
-        """)
-        header_layout.addWidget(action_label)
-        
-        # Titre (sans "Snippet 1", "Snippet 2" - juste le vrai titre)
+        # Extraire le titre
         title = self.snippet_data.get('title', 'Sans titre')
-        # Enlever le préfixe "Snippet N: " s'il existe
+        action = self.snippet_data.get('action', 'MODIFIER').upper()
+        
+        # Extraire le numéro si présent
+        snippet_number = ""
         if title.lower().startswith('snippet') and ':' in title:
-            title = title.split(':', 1)[1].strip()
+            parts = title.split(':', 1)
+            snippet_number = parts[0].strip()
+            title = parts[1].strip()
         
-        if title and title != 'Sans titre':
-            separator = QtWidgets.QLabel("•")
-            separator.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px;")
-            header_layout.addWidget(separator)
-            
-            title_label = QtWidgets.QLabel(title)
-            title_label.setWordWrap(True)
-            title_label.setStyleSheet("""
-                font-weight: 600;
-                font-size: 13px;
-                color: #333;
-            """)
-            header_layout.addWidget(title_label, 1)
+        # Formater l'action
+        action_text = "[A remplacer]" if action in ["MODIFIER", "REPLACE", "REMPLACER"] else "[A ajouter]"
         
-        header_layout.addStretch()
-        content_layout.addLayout(header_layout)
-        
-        # ===== MÉTADONNÉES MINIMALISTES =====
-        meta_layout = QtWidgets.QVBoxLayout()
-        meta_layout.setSpacing(4)
-        
-        file_layout = QtWidgets.QHBoxLayout()
-        file_icon = QtWidgets.QLabel()
-        file_icon.setPixmap(qta.icon('fa5s.file-code', color='#888').pixmap(12, 12))
-        file_layout.addWidget(file_icon)
-        
-        file_path = self.snippet_data.get('file', 'Non spécifié')
-        file_label = QtWidgets.QLabel(f"<span style='color: #666;'>Fichier:</span> <b>{file_path}</b>")
-        file_label.setTextFormat(Qt.RichText)
-        file_label.setStyleSheet("font-size: 11px; color: #333;")
-        file_layout.addWidget(file_label, 1)
-        file_layout.addStretch()
-        meta_layout.addLayout(file_layout)
-        
-        target = self.snippet_data.get('target')
-        if target:
-            target_layout = QtWidgets.QHBoxLayout()
-            target_icon = QtWidgets.QLabel()
-            target_icon.setPixmap(qta.icon('fa5s.bullseye', color='#888').pixmap(12, 12))
-            target_layout.addWidget(target_icon)
-            
-            target_label = QtWidgets.QLabel(f"<span style='color: #666;'>Cible:</span> <b>{target}</b>")
-            target_label.setTextFormat(Qt.RichText)
-            target_label.setStyleSheet("font-size: 11px; color: #333;")
-            target_layout.addWidget(target_label, 1)
-            target_layout.addStretch()
-            meta_layout.addLayout(target_layout)
-        
-        content_layout.addLayout(meta_layout)
-        
-        # ===== DESCRIPTION =====
-        description = self.snippet_data.get('description', '').strip()
-        if description:
-            desc_label = QtWidgets.QLabel(description)
-            desc_label.setWordWrap(True)
-            desc_label.setStyleSheet("""
-                font-size: 12px;
-                color: #666;
-                padding: 8px 0;
-                line-height: 1.4;
-            """)
-            content_layout.addWidget(desc_label)
-        
-        # ===== BARRE D'ACTIONS =====
-        actions_bar = QtWidgets.QWidget()
-        actions_bar.setStyleSheet("""
-            background-color: transparent;
-            border: none;
+        # Label titre (avec ellipsis si trop long)
+        snippet_title = f"{snippet_number}: {title}" if snippet_number else title
+        title_label = QtWidgets.QLabel(snippet_title)
+        title_label.setStyleSheet("""
+            font-weight: 600;
+            font-size: 12px;
+            color: #1a1a1a;
         """)
-        actions_layout = QtWidgets.QHBoxLayout(actions_bar)
-        actions_layout.setContentsMargins(0, 8, 0, 0)
+        title_label.setWordWrap(False)
+        title_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # ✅ IMPORTANT : Activer l'ellipsis pour éviter le débordement
+        title_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        title_label.setMaximumWidth(600)  # Largeur max raisonnable
+        
+        # Créer une version avec elide si trop long
+        font_metrics = title_label.fontMetrics()
+        elided_text = font_metrics.elidedText(snippet_title, Qt.ElideRight, 600)
+        title_label.setText(elided_text)
+        title_label.setToolTip(snippet_title)  # Tooltip pour voir le texte complet
+        
+        title_layout.addWidget(title_label)
+        
+        # Label action
+        action_label = QtWidgets.QLabel(action_text)
+        action_label.setStyleSheet("""
+            font-size: 10px;
+            color: #888;
+            font-weight: 500;
+        """)
+        title_layout.addWidget(action_label)
+        
+        first_row.addWidget(title_container, 1)  # Stretch = 1
+        first_row.addStretch()  # Push buttons à droite
+        
+        # ===== BOUTONS D'ACTION (toujours visibles) =====
+        actions_container = QtWidgets.QWidget()
+        actions_container.setStyleSheet("background: transparent; border: none;")
+        actions_layout = QtWidgets.QHBoxLayout(actions_container)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(6)
         
-        # Bouton toggle
-        self.toggle_button = QtWidgets.QPushButton()
-        self.toggle_button.setIcon(qta.icon('fa5s.code', color='#666'))
-        self.toggle_button.setText(" Code")
-        self.toggle_button.setStyleSheet("""
-            QPushButton {
-                background: #f5f5f5;
-                border: 1px solid #e0e0e0;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 11px;
-                font-weight: 600;
-                color: #555;
-            }
-            QPushButton:hover {
-                background: #eeeeee;
-                border-color: #ccc;
-                color: #333;
-            }
-        """)
-        self.toggle_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.toggle_button.clicked.connect(self._toggle_code)
-        actions_layout.addWidget(self.toggle_button)
-        
-        actions_layout.addStretch()
-        
         code_text = self.snippet_data.get('code', '')
-        
-        # Boutons d'action groupés
-        button_style = """
-            QPushButton {
-                background: transparent;
-                border: 1px solid #e0e0e0;
-                border-radius: 4px;
-                padding: 6px;
-                min-width: 30px;
-                max-width: 30px;
-            }
-            QPushButton:hover {
-                background: #f5f5f5;
-                border-color: #ccc;
-            }
-        """
         
         # Bouton Copier
         copy_button = QtWidgets.QPushButton()
         copy_button.setIcon(qta.icon('fa5s.copy', color='#666'))
         copy_button.setToolTip("Copier le code")
         copy_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        copy_button.setStyleSheet(button_style)
-        copy_button.setIconSize(QtCore.QSize(14, 14))
-        copy_button.clicked.connect(lambda: self.copy_requested.emit(code_text))
-        actions_layout.addWidget(copy_button)
-    
-        # Bouton Étendre
-        expand_button = QtWidgets.QPushButton()
-        expand_button.setIcon(qta.icon('fa5s.expand', color='#666'))
-        expand_button.setToolTip("Ouvrir en plein écran")
-        expand_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        expand_button.setStyleSheet(button_style)
-        expand_button.setIconSize(QtCore.QSize(14, 14))
-        expand_button.clicked.connect(lambda: self.expand_requested.emit(self.snippet_data))
-        actions_layout.addWidget(expand_button)
-    
-        # Bouton IDE
-        ide_button = QtWidgets.QPushButton()
-        ide_button.setIcon(qta.icon('fa5s.code-branch', color='#4CAF50'))
-        ide_button.setToolTip("Intégrer dans l'IDE")
-        ide_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        ide_button.setStyleSheet("""
+        copy_button.setStyleSheet("""
             QPushButton {
-                background: transparent;
+                background: white;
                 border: 1px solid #e0e0e0;
                 border-radius: 4px;
                 padding: 6px;
                 min-width: 30px;
                 max-width: 30px;
+                min-height: 30px;
+                max-height: 30px;
             }
             QPushButton:hover {
-                background: #e8f5e9;
-                border-color: #4CAF50;
+                background: #f5f5f5;
+                border-color: #ccc;
             }
         """)
-        ide_button.setIconSize(QtCore.QSize(14, 14))
-        ide_button.clicked.connect(lambda: self.ide_requested.emit(self.snippet_data))
-        actions_layout.addWidget(ide_button)
+        copy_button.setIconSize(QtCore.QSize(14, 14))
+        copy_button.clicked.connect(lambda: self.copy_requested.emit(code_text))
+        actions_layout.addWidget(copy_button)
         
-        content_layout.addWidget(actions_bar)
-        
-        # ===== ZONE DE CODE =====
-        self.code_viewer = QsciScintilla()
-        self.code_viewer.setUtf8(True)
-        self.code_viewer.setReadOnly(True)
-        self.code_viewer.setVisible(False)
-        self.code_viewer.setText(code_text)
-        
-        language = self.snippet_data.get('language', 'python')
-        lexer = self._get_lexer(language)
-        code_font = QtGui.QFont("Consolas", 10)
-        if lexer:
-            lexer.setDefaultFont(code_font)
-            self.code_viewer.setLexer(lexer)
-        
-        self.code_viewer.setMarginsBackgroundColor(QtGui.QColor("#fafafa"))
-        self.code_viewer.setMarginsForegroundColor(QtGui.QColor("#999"))
-        self.code_viewer.setMarginLineNumbers(0, True)
-        self.code_viewer.setMarginWidth(0, QtGui.QFontMetrics(code_font).width("000") + 8)
-        
-        # Style épuré pour l'éditeur
-        self.code_viewer.setStyleSheet("""
-            QsciScintilla {
+        # Bouton Étendre
+        expand_button = QtWidgets.QPushButton()
+        expand_button.setIcon(qta.icon('fa5s.expand-alt', color='#666'))
+        expand_button.setToolTip("Voir le code complet")
+        expand_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        expand_button.setStyleSheet("""
+            QPushButton {
+                background: white;
                 border: 1px solid #e0e0e0;
                 border-radius: 4px;
-                background-color: #fafafa;
+                padding: 6px;
+                min-width: 30px;
+                max-width: 30px;
+                min-height: 30px;
+                max-height: 30px;
+            }
+            QPushButton:hover {
+                background: #f5f5f5;
+                border-color: #ccc;
+            }
+        """)
+        expand_button.setIconSize(QtCore.QSize(14, 14))
+        expand_button.clicked.connect(lambda: self.expand_requested.emit(self.snippet_data))
+        actions_layout.addWidget(expand_button)
+        
+        # Bouton VS Code
+        vscode_button = QtWidgets.QPushButton()
+        vscode_button.setToolTip("Merger dans VS Code")
+        vscode_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        vscode_button.setStyleSheet("""
+            QPushButton {
+                background: white;
+                border: 1px solid #0078d4;
+                border-radius: 4px;
+                padding: 6px;
+                min-width: 30px;
+                max-width: 30px;
+                min-height: 30px;
+                max-height: 30px;
+            }
+            QPushButton:hover {
+                background: #e3f2fd;
+                border-color: #0078d4;
             }
         """)
         
-        line_count = code_text.count('\n') + 1
-        self.code_viewer.setMinimumHeight(min(line_count * 18 + 40, 250))
-        self.code_viewer.setMaximumHeight(400)
+        # Charger l'icône SVG
+        try:
+            current_file = Path(__file__).resolve()
+            project_root = current_file.parent.parent
+            svg_path = project_root / "ui" / "resources" / "icons" / "vscode.svg"
+            
+            if svg_path.exists():
+                icon = QtGui.QIcon(str(svg_path))
+                vscode_button.setIcon(icon)
+                vscode_button.setIconSize(QtCore.QSize(16, 16))
+            else:
+                vscode_button.setIcon(qta.icon('fa5b.microsoft', color='#0078d4'))
+                vscode_button.setIconSize(QtCore.QSize(14, 14))
+        except:
+            vscode_button.setIcon(qta.icon('fa5b.microsoft', color='#0078d4'))
+            vscode_button.setIconSize(QtCore.QSize(14, 14))
         
-        content_layout.addWidget(self.code_viewer)
+        vscode_button.clicked.connect(lambda: self.vscode_requested.emit(self.snippet_data))
+        actions_layout.addWidget(vscode_button)
+        
+        first_row.addWidget(actions_container)
+        content_layout.addLayout(first_row)
+        
+        # ===== LIGNE 2 : FICHIER + CLASSE/FONCTION (compacts avec ellipsis) =====
+        second_row = QtWidgets.QHBoxLayout()
+        second_row.setSpacing(12)
+        
+        # Fichier
+        file_name = self.snippet_data.get('file', '')
+        if file_name:
+            file_container = QtWidgets.QHBoxLayout()
+            file_container.setSpacing(4)
+            
+            file_icon = QtWidgets.QLabel("📄")
+            file_icon.setStyleSheet("font-size: 10px;")
+            file_container.addWidget(file_icon)
+            
+            file_label = QtWidgets.QLabel(file_name)
+            file_label.setStyleSheet("""
+                font-size: 10px;
+                color: #666;
+            """)
+            file_label.setWordWrap(False)
+            file_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+            
+            # Ellipsis si trop long
+            font_metrics = file_label.fontMetrics()
+            elided_file = font_metrics.elidedText(file_name, Qt.ElideMiddle, 250)
+            file_label.setText(elided_file)
+            file_label.setToolTip(file_name)
+            
+            file_container.addWidget(file_label, 1)
+            second_row.addLayout(file_container, 1)
+        
+        # Classe/Fonction
+        class_func = self.snippet_data.get('class_function', '')
+        if class_func:
+            class_container = QtWidgets.QHBoxLayout()
+            class_container.setSpacing(4)
+            
+            class_icon = QtWidgets.QLabel("⚙️")
+            class_icon.setStyleSheet("font-size: 10px;")
+            class_container.addWidget(class_icon)
+            
+            class_label = QtWidgets.QLabel(class_func)
+            class_label.setStyleSheet("""
+                font-size: 10px;
+                color: #666;
+            """)
+            class_label.setWordWrap(False)
+            class_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+            
+            # Ellipsis si trop long
+            font_metrics = class_label.fontMetrics()
+            elided_class = font_metrics.elidedText(class_func, Qt.ElideRight, 250)
+            class_label.setText(elided_class)
+            class_label.setToolTip(class_func)
+            
+            class_container.addWidget(class_label, 1)
+            second_row.addLayout(class_container, 1)
+        
+        if file_name or class_func:
+            content_layout.addLayout(second_row)
         
         main_layout.addWidget(content_widget)
     
-    def _toggle_code(self):
-        is_visible = self.code_viewer.isVisible()
-        self.code_viewer.setVisible(not is_visible)
-        icon = 'fa5s.chevron-up' if not is_visible else 'fa5s.chevron-down'
-        self.toggle_button.setIcon(qta.icon(icon, color='#666'))
-        self.toggle_button.setText("  Masquer le code" if not is_visible else "  Afficher le code")
+    def resizeEvent(self, event):
+        """Ajuste le contenu lors du redimensionnement"""
+        super().resizeEvent(event)
+        # Recalculer les ellipsis si nécessaire
+        self._update_ellipsis()
     
-    def _get_lexer(self, language):
-        lexers = {
-            'python': QsciLexerPython,
-            'cpp': QsciLexerCPP,
-            'c++': QsciLexerCPP,
-            'javascript': QsciLexerJavaScript,
-            'js': QsciLexerJavaScript,
-            'html': QsciLexerHTML
-        }
-        return lexers.get(language.lower(), QsciLexerPython)()  
+    def _update_ellipsis(self):
+        """Met à jour les ellipsis en fonction de la largeur disponible"""
+        width = self.width()
+        
+        # Trouver les labels à ajuster
+        title_label = self.findChild(QtWidgets.QLabel, "title_label")
+        if title_label:
+            available_width = max(200, width - 200)  # Garder de l'espace pour les boutons
+            font_metrics = title_label.fontMetrics()
+            original_text = self.snippet_data.get('title', '')
+            elided = font_metrics.elidedText(original_text, Qt.ElideRight, available_width)
+            title_label.setText(elided)

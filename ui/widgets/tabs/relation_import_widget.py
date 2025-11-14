@@ -389,84 +389,121 @@ class RelationImportWidget(QtWidgets.QWidget):
     
     def _compute_grouped_layout(self, G: nx.DiGraph, center_node: str = None, existing_orbits=None):
         """
-        ✅ Version améliorée : conserve les orbites précédentes et place les nouveaux nœuds à l'extérieur
+        ✅ VERSION AMÉLIORÉE : Rayons adaptatifs selon la densité
         """
         import numpy as np
-
+    
         if len(G.nodes()) == 0:
             return {}, {}
-
+    
         # Reprendre les orbites existantes si elles existent
         node_orbits = existing_orbits.copy() if existing_orbits else {}
-
+    
         # Grouper par type
         HIERARCHICAL_TYPES = {'parent', 'child', 'contains', 'belongs_to', 'hierarchy', 'has'}
         CODE_TYPES = {'call', 'calls', 'method_call', 'function_call', 'uses', 'used_by',
                       'implements', 'extends', 'inherits', 'override', 'invoke'}
         EXTERNAL_TYPES = {'import', 'from_import', 'require', 'include', 'dependency', 'external'}
-
+    
         # Identifier les nouveaux nœuds
         hierarchical_nodes, code_nodes, external_nodes = [], [], []
         for node in G.nodes():
             if node == center_node:
                 continue
             if node in node_orbits:
-                continue  # déjà positionné, on garde sa position
-
+                continue  # déjà positionné
+            
             primary_types = {data.get('relation_type', '').lower()
                              for _, _, data in G.edges(data=True)
                              if _ == node or data.get('target') == node}
             categories = {data.get('category', '').lower()
                           for _, _, data in G.edges(data=True)
                           if _ == node or data.get('target') == node}
-
+    
             if any(t in HIERARCHICAL_TYPES for t in primary_types) or 'hierarchy' in categories:
                 hierarchical_nodes.append(node)
             elif any(t in CODE_TYPES for t in primary_types) or 'code' in categories:
                 code_nodes.append(node)
             else:
                 external_nodes.append(node)
-
-        # Rayon de base et orbite max existante
-        base_gap = 6.0
+    
+        # ✅ CALCUL ADAPTATIF DES RAYONS selon nombre de nœuds
+        num_nodes = len(G.nodes())
         max_existing_orbit = max(node_orbits.values()) if node_orbits else 0
-
-        radius_inner = base_gap * (1 + max_existing_orbit)
-        radius_middle = base_gap * (2 + max_existing_orbit)
-        radius_outer = base_gap * (3 + max_existing_orbit)
-
+        
+        # ✅ NOUVEAU : Calculer la circonférence nécessaire pour chaque orbite
+        # Dimension fixe d'un nœud : ~4.0 de largeur
+        node_width = 4.0
+        min_spacing = 1.5  # Espace minimal entre nœuds
+        
+        def calculate_optimal_radius(num_nodes_on_orbit, base_radius):
+            """Calcule le rayon optimal pour éviter les superpositions"""
+            if num_nodes_on_orbit == 0:
+                return base_radius
+            
+            # Circonférence requise = (largeur nœud + espacement) * nombre de nœuds
+            required_circumference = (node_width + min_spacing) * num_nodes_on_orbit
+            
+            # Rayon minimal requis = circonférence / (2π)
+            min_required_radius = required_circumference / (2 * math.pi)
+            
+            # Retourner le maximum entre rayon de base et rayon requis
+            return max(base_radius, min_required_radius)
+    
+        # ✅ Rayons de base (augmentés progressivement)
+        base_gap = 8.0  # Augmenté de 6.0 à 8.0
+        
+        # Calculer rayons optimaux pour chaque orbite
+        radius_inner = calculate_optimal_radius(
+            len(hierarchical_nodes),
+            base_gap * (1 + max_existing_orbit)
+        )
+        
+        radius_middle = calculate_optimal_radius(
+            len(code_nodes),
+            base_gap * (2 + max_existing_orbit)
+        )
+        
+        radius_outer = calculate_optimal_radius(
+            len(external_nodes),
+            base_gap * (3 + max_existing_orbit)
+        )
+        
+        logger.info(f"📏 Rayons calculés : inner={radius_inner:.1f}, middle={radius_middle:.1f}, outer={radius_outer:.1f}")
+    
         pos = {}
-
+    
         # Garder les anciennes positions
         if hasattr(self, 'graph_data') and 'pos' in self.graph_data:
             for n, coords in self.graph_data['pos'].items():
                 pos[n] = np.array(coords)
-
+    
         def distribute(nodes, radius, orbit_id, angular_offset=0.0):
             n = len(nodes)
             if n == 0:
                 return
             for i, node in enumerate(nodes):
                 angle = 2 * math.pi * i / n + angular_offset
-                angle += (math.pi / 180) * np.random.uniform(-6, 6)
+                # Petite variation aléatoire réduite
+                angle += (math.pi / 180) * np.random.uniform(-3, 3)
                 x = radius * math.cos(angle)
                 y = radius * math.sin(angle)
                 pos[node] = np.array([x, y])
                 node_orbits[node] = orbit_id
-
-        # Placer les nouveaux nœuds sur les orbites extérieures
+    
+        # Placer les nouveaux nœuds
         distribute(hierarchical_nodes, radius_inner, max_existing_orbit + 1)
         distribute(code_nodes, radius_middle, max_existing_orbit + 2)
         distribute(external_nodes, radius_outer, max_existing_orbit + 3)
-
+    
         if center_node and center_node in G.nodes():
             pos[center_node] = np.array([0.0, 0.0])
             node_orbits[center_node] = 0
-
+    
         # Sauvegarder orbites
         if hasattr(self, 'graph_data'):
             self.graph_data['node_orbits'] = node_orbits
-
+    
         return pos, node_orbits
 
 
@@ -4164,43 +4201,52 @@ class RelationImportWidget(QtWidgets.QWidget):
         else:
             self._remove_node_origins_display()
 
-        self.canvas.draw_idle()
+        # ✅ CORRECTION : Forcer le redraw complet
+        self.canvas.draw()  # Changé de draw_idle() à draw()
 
         self._update_status(
             f"Origines nœuds: {'Affichées' if is_checked else 'Masquées'}"
         )
 
     def _add_node_origins_display(self):
-        """✅ COMPLET : Affiche les origines des nœuds avec recherche exhaustive."""
+        """✅ CORRIGÉ : Affiche l'origine en bas à droite de CHAQUE nœud individuellement."""
         if not hasattr(self, 'graph_data') or 'ax' not in self.graph_data:
             logger.warning("⚠️ graph_data ou ax non disponible")
             return
 
         ax = self.graph_data['ax']
         G = self.graph_data.get('G')
+        pos = self.graph_data.get('pos')
 
-        if not G:
-            logger.warning("⚠️ Graphe non disponible")
+        if not G or not pos:
+            logger.warning("⚠️ Graphe ou positions non disponibles")
             return
 
         logger.info(f"\n{'='*70}")
-        logger.info(f"🔍 RECHERCHE ORIGINES DES NŒUDS")
+        logger.info(f"📍 AFFICHAGE ORIGINES SUR CHAQUE NŒUD")
         logger.info(f"{'='*70}")
 
-        # ✅ COLLECTER LES NOMS DE TOUS LES NŒUDS DU GRAPHE
+        # Supprimer les anciens textes d'origine s'ils existent
+        if hasattr(self, 'origin_text_objects') and self.origin_text_objects:
+            for text_obj in self.origin_text_objects:
+                try:
+                    text_obj.remove()
+                except:
+                    pass
+                
+        self.origin_text_objects = []
+
+        # Collecter les noms de tous les nœuds du graphe
         graph_nodes = set(G.nodes())
         logger.info(f"📊 {len(graph_nodes)} nœuds dans le graphe")
 
-        # ✅ MAPPING : nom_nœud -> set de paths d'origine
+        # Mapping : nom_nœud -> path d'origine
         node_origins = {}
 
-        # ===== STRATÉGIE 0 : Métadonnées du graphe =====
-        logger.info(f"\n🔍 Stratégie 0 : Métadonnées du graphe...")
-
+        # ===== STRATÉGIE 1 : Métadonnées du graphe =====
         for node_name in graph_nodes:
             node_data = G.nodes[node_name]
 
-            # Essayer de récupérer le path depuis les attributs du nœud
             path = (node_data.get('path') or 
                    node_data.get('sourcePath') or 
                    node_data.get('full_path', ''))
@@ -4208,18 +4254,12 @@ class RelationImportWidget(QtWidgets.QWidget):
             if path:
                 filename = os.path.basename(path)
                 if filename and filename.strip():
-                    if node_name not in node_origins:
-                        node_origins[node_name] = set()
-                    node_origins[node_name].add(filename)
+                    node_origins[node_name] = filename
                     logger.debug(f"   ✅ Métadonnées graphe: {node_name} -> {filename}")
 
-        logger.info(f"   ✅ {len(node_origins)} nœuds trouvés depuis métadonnées graphe")
-
-        # ===== STRATÉGIE 1 : Cache _node_cache =====
-        logger.info(f"\n🔍 Stratégie 1 : Cache _node_cache...")
-
+        # ===== STRATÉGIE 2 : Cache _node_cache =====
         for node_name in graph_nodes:
-            if node_name in node_origins and node_origins[node_name]:
+            if node_name in node_origins:
                 continue  # Déjà trouvé
             
             # Chercher dans le cache par nom
@@ -4235,7 +4275,6 @@ class RelationImportWidget(QtWidgets.QWidget):
                 clean_item = item_name.replace('F: ', '').replace('M: ', '').replace('C: ', '').replace('V: ', '').strip()
 
                 if clean_node == clean_item or clean_node in clean_item or clean_item in clean_node:
-                    # Récupérer le path
                     path = (cached_item.item_data.get('path') or 
                            cached_item.item_data.get('sourcePath') or 
                            cached_item.item_data.get('full_path', ''))
@@ -4243,47 +4282,17 @@ class RelationImportWidget(QtWidgets.QWidget):
                     if path:
                         filename = os.path.basename(path)
                         if filename and filename.strip():
-                            if node_name not in node_origins:
-                                node_origins[node_name] = set()
-                            node_origins[node_name].add(filename)
+                            node_origins[node_name] = filename
                             logger.debug(f"   ✅ Cache: {node_name} -> {filename}")
                             break
-                        
-        logger.info(f"   ✅ {len([n for n in graph_nodes if n in node_origins and node_origins[n]])} nœuds avec origines après cache")
 
-        # ===== STRATÉGIE 2 : Relations courantes (current_relations) =====
-        logger.info(f"\n🔍 Stratégie 2 : Relations courantes...")
-
-        if self.current_relations:
-            for rel in self.current_relations:
-                source = rel.get('source')
-                target = rel.get('target')
-                source_path = rel.get('source_path', '')
-                target_path = rel.get('target_path', '')
-
-                # Traiter source
-                if source and source in graph_nodes and source_path:
-                    filename = os.path.basename(source_path)
-                    if filename and filename.strip():
-                        if source not in node_origins:
-                            node_origins[source] = set()
-                        node_origins[source].add(filename)
-
-                # Traiter target
-                if target and target in graph_nodes and target_path:
-                    filename = os.path.basename(target_path)
-                    if filename and filename.strip():
-                        if target not in node_origins:
-                            node_origins[target] = set()
-                        node_origins[target].add(filename)
-
-        # ===== STRATÉGIE 3 : Relations Dgraph (sourcePath/targetPath) =====
-        missing_nodes = [n for n in graph_nodes if n not in node_origins or not node_origins[n]]
+        # ===== STRATÉGIE 3 : Relations Dgraph =====
+        missing_nodes = [n for n in graph_nodes if n not in node_origins]
 
         if missing_nodes and self.dgraph_connector:
             logger.info(f"\n🔍 Stratégie 3 : Relations Dgraph ({len(missing_nodes)} nœuds sans path)...")
 
-            for node_name in missing_nodes[:20]:  # Limiter à 20 pour performance
+            for node_name in missing_nodes[:20]:  # Limiter pour performance
                 clean_name = node_name.replace('F: ', '').replace('M: ', '').replace('C: ', '').replace('V: ', '').strip()
                 escaped = clean_name.replace('"', '\\"')
 
@@ -4306,221 +4315,101 @@ class RelationImportWidget(QtWidgets.QWidget):
                     continue
                 
                 # Traiter sourcePath
-                found = False
                 for rel in result.get('by_source', []):
                     source_name = rel.get('sourceName', '')
                     source_path = rel.get('sourcePath', '')
 
-                    # Vérifier correspondance du nom
                     if source_name and source_path:
-                        # Nettoyer le nom de la relation
                         clean_source = source_name.replace('Function: ', '').replace('Method: ', '').replace('Class: ', '').strip()
 
                         if clean_source == clean_name or clean_name in clean_source or clean_source in clean_name:
                             filename = self._extract_filename_from_relation_path(source_path)
                             if filename:
-                                if node_name not in node_origins:
-                                    node_origins[node_name] = set()
-                                node_origins[node_name].add(filename)
+                                node_origins[node_name] = filename
                                 logger.debug(f"   ✅ Relations (source): {node_name} -> {filename}")
-                                found = True
                                 break
-                            
-                # Traiter targetPath si pas encore trouvé
-                if not found:
-                    for rel in result.get('by_target', []):
-                        target_name = rel.get('targetName', '')
-                        target_path = rel.get('targetPath', '')
 
-                        if target_name and target_path:
-                            clean_target = target_name.replace('Function: ', '').replace('Method: ', '').replace('Class: ', '').strip()
+        logger.info(f"\n📊 RÉSUMÉ :")
+        logger.info(f"   ✅ {len(node_origins)} nœuds avec origines")
+        logger.info(f"   ❌ {len(graph_nodes) - len(node_origins)} nœuds sans origines")
 
-                            if clean_target == clean_name or clean_name in clean_target or clean_target in clean_name:
-                                filename = self._extract_filename_from_relation_path(target_path)
-                                if filename:
-                                    if node_name not in node_origins:
-                                        node_origins[node_name] = set()
-                                    node_origins[node_name].add(filename)
-                                    logger.debug(f"   ✅ Relations (target): {node_name} -> {filename}")
-                                    break
-                                
-            logger.info(f"   ✅ Trouvé via Relations : {len([n for n in missing_nodes if n in node_origins])} nœuds")
-
-        # ===== STRATÉGIE 4 : Requête Dgraph par nom (fallback) =====
-        missing_nodes = [n for n in graph_nodes if n not in node_origins or not node_origins[n]]
-
-        if missing_nodes and self.dgraph_connector:
-            logger.info(f"\n🔍 Stratégie 4 : Requête Dgraph par nom ({len(missing_nodes)} restants)...")
-
-            for node_name in missing_nodes[:10]:  # Limiter à 10
-                clean_name = node_name.replace('F: ', '').replace('M: ', '').replace('C: ', '').replace('V: ', '').strip()
-                escaped = clean_name.replace('"', '\\"')
-
-                query = f"""
-                {{
-                  by_name(func: has(name)) @filter(eq(name, "{escaped}")) {{
-                    uid
-                    name
-                    path
-                    sourcePath
-                    full_path
-
-                    ~functions {{
-                      uid
-                      name
-                      path
-                      sourcePath
-                      full_path
-                    }}
-
-                    ~methods {{
-                      uid
-                      name
-
-                      ~classes {{
-                        uid
-                        name
-                        path
-                        sourcePath
-                        full_path
-                      }}
-                    }}
-                  }}
-                }}
-                """
-
-                result = self._execute_dgraph_query(query)
-                if not result or 'by_name' not in result:
-                    continue
-                
-                for node_data in result['by_name']:
-                    # Essayer path direct
-                    path = (node_data.get('path') or 
-                           node_data.get('sourcePath') or 
-                           node_data.get('full_path', ''))
-
-                    if path:
-                        filename = os.path.basename(path)
-                        if filename and filename.strip():
-                            if node_name not in node_origins:
-                                node_origins[node_name] = set()
-                            node_origins[node_name].add(filename)
-                            logger.debug(f"   ✅ Dgraph direct: {node_name} -> {filename}")
+        text_height = self.graph_data.get('text_height', 1.3)
+    
+        for node_name, origin_file in node_origins.items():
+            if node_name not in pos:
+                continue
+            
+            x, y = pos[node_name]
+            
+            # ✅ NOUVEAU : Récupérer le PATH COMPLET depuis les métadonnées
+            full_path = None
+            
+            # 1. Essayer depuis les métadonnées du graphe
+            if node_name in G.nodes():
+                node_data = G.nodes[node_name]
+                full_path = (node_data.get('path') or 
+                            node_data.get('sourcePath') or 
+                            node_data.get('full_path', ''))
+            
+            # 2. Si pas trouvé, essayer depuis le cache
+            if not full_path:
+                for uid, cached_item in self._node_cache.items():
+                    item_name = self.normalize_node_name(
+                        cached_item.item_data.get('name') or 
+                        cached_item.item_data.get('label') or 
+                        cached_item.text(0)
+                    )
+                    
+                    clean_node = node_name.replace('F: ', '').replace('M: ', '').replace('C: ', '').replace('V: ', '').strip()
+                    clean_item = item_name.replace('F: ', '').replace('M: ', '').replace('C: ', '').replace('V: ', '').strip()
+                    
+                    if clean_node == clean_item or clean_node in clean_item or clean_item in clean_node:
+                        full_path = (cached_item.item_data.get('path') or 
+                                   cached_item.item_data.get('sourcePath') or 
+                                   cached_item.item_data.get('full_path', ''))
+                        if full_path:
                             break
                         
-                    # Essayer parent fichier
-                    parents = node_data.get('~functions', []) or node_data.get('~methods', [])
-                    for parent in parents:
-                        path = (parent.get('path') or 
-                               parent.get('sourcePath') or 
-                               parent.get('full_path', ''))
-
-                        if path:
-                            filename = os.path.basename(path)
-                            if filename and filename.strip():
-                                if node_name not in node_origins:
-                                    node_origins[node_name] = set()
-                                node_origins[node_name].add(filename)
-                                logger.debug(f"   ✅ Dgraph parent: {node_name} -> {filename}")
-                                break
-                            
-                        # Si méthode, chercher dans classe parent
-                        class_parents = parent.get('~classes', [])
-                        for class_parent in class_parents:
-                            path = (class_parent.get('path') or 
-                                   class_parent.get('sourcePath') or 
-                                   class_parent.get('full_path', ''))
-
-                            if path:
-                                filename = os.path.basename(path)
-                                if filename and filename.strip():
-                                    if node_name not in node_origins:
-                                        node_origins[node_name] = set()
-                                    node_origins[node_name].add(filename)
-                                    logger.debug(f"   ✅ Dgraph classe: {node_name} -> {filename}")
-                                    break
-                                
-        # ===== CONSTRUIRE LE TEXTE D'AFFICHAGE =====
-        logger.info(f"\n📊 RÉSUMÉ :")
-        nodes_with_origins = {node: origins for node, origins in node_origins.items() if origins}
-        logger.info(f"   ✅ {len(nodes_with_origins)} nœuds avec origines")
-        logger.info(f"   ❌ {len(graph_nodes) - len(nodes_with_origins)} nœuds sans origines")
-
-        if not nodes_with_origins:
-            logger.warning("⚠️ Aucune origine trouvée")
-            self.origins_text_obj = ax.text(
-                0.98, 0.02,
-                "📂 Origines des nœuds:\n" + "─" * 30 + "\n(Aucune origine disponible)\n\nℹ️ Activez la recherche Relations",
-                transform=ax.transAxes,
-                ha='right', va='bottom',
-                color='#1A1A1A',
-                fontsize=7,
-                family='monospace',
-                style='italic',
-                bbox=dict(
-                    boxstyle='round,pad=0.6',
-                    facecolor='#FFFFFF',
-                    edgecolor='#999999',
-                    alpha=0.95,
-                    linewidth=1.5
-                ),
-                zorder=1000
+            # 3. Fallback : utiliser origin_file si pas de path complet
+            if not full_path:
+                full_path = origin_file
+            
+            # Nettoyer le path (enlever les suffixes de type comme /Function:xxx)
+            if full_path:
+                # Séparer si format "path/Function:name"
+                if '/Function:' in full_path or '/Method:' in full_path or '/Class:' in full_path:
+                    full_path = full_path.split('/Function:')[0].split('/Method:')[0].split('/Class:')[0]
+                
+                # Normaliser les séparateurs
+                full_path = full_path.replace('\\', '/')
+            
+            # Afficher le path complet (pas de troncature)
+            display_origin = full_path if full_path else origin_file
+            
+            # Position : juste en dessous du rectangle du nœud
+            text_x = x + 0.7
+            text_y = y - (text_height / 2) - 0.35  # Un peu plus d'espace pour paths longs
+            
+            # Créer le texte d'origine avec le PATH COMPLET
+            origin_text = ax.text(
+                text_x, text_y,
+                display_origin,
+                ha='center',      # Centré horizontalement avec le nœud
+                va='top',         # Aligné en haut (donc en dessous du rectangle)
+                color='#1A1A1A',  # Noir pour meilleure visibilité
+                fontsize=6.5,     # ✅ Réduit légèrement car paths plus longs
+                style='italic',   # En italique
+                family='monospace',  # ✅ Monospace pour paths
+                fontweight='500', # Légèrement gras pour visibilité
+                alpha=0.95,       # Presque totalement opaque
+                zorder=4,         # Au-dessus des arêtes mais sous les nœuds
+                wrap=True         # ✅ Permettre le retour à la ligne si nécessaire
             )
-            return
-
-        # Grouper par fichier d'origine
-        origins_by_file = {}
-        for node_name, origins in nodes_with_origins.items():
-            for origin in origins:
-                if origin not in origins_by_file:
-                    origins_by_file[origin] = []
-                origins_by_file[origin].append(node_name)
-
-        # Construire le texte
-        origins_text = "📂 Origines des nœuds:\n" + "─" * 30 + "\n"
-
-        max_display = 5
-        count = 0
-
-        for origin, nodes in sorted(origins_by_file.items())[:max_display]:
-            origin_short = origin[:30] + '..' if len(origin) > 30 else origin
-            origins_text += f"\n📄 {origin_short}\n"
-
-            # Afficher max 3 nœuds par fichier
-            for node_name in nodes[:3]:
-                node_short = node_name[:25] + '..' if len(node_name) > 25 else node_name
-                origins_text += f"  • {node_short}\n"
-
-            if len(nodes) > 3:
-                origins_text += f"  ... +{len(nodes) - 3} autres\n"
-
-            count += len(nodes)
-
-        if len(origins_by_file) > max_display:
-            remaining_files = len(origins_by_file) - max_display
-            remaining_nodes = sum(len(nodes) for i, nodes in enumerate(origins_by_file.values()) if i >= max_display)
-            origins_text += f"\n... +{remaining_files} fichiers ({remaining_nodes} nœuds)"
-
-        # Afficher en bas à droite
-        self.origins_text_obj = ax.text(
-            0.98, 0.02,
-            origins_text,
-            transform=ax.transAxes,
-            ha='right', va='bottom',
-            color='#222222',
-            fontsize=7,
-            family='monospace',
-            bbox=dict(
-                boxstyle='round,pad=0.6',
-                facecolor='#FFFEF0',
-                edgecolor='#999999',
-                alpha=0.95,
-                linewidth=1.5
-            ),
-            zorder=1000
-        )
-
-        logger.info(f"✅ {len(nodes_with_origins)} origines affichées depuis {len(origins_by_file)} fichiers")
+            
+            self.origin_text_objects.append(origin_text)
+            logger.debug(f"   📍 Origine affichée pour {node_name}: {display_origin}")
+    
+        logger.info(f"✅ {len(self.origin_text_objects)} origines affichées sur les nœuds")
         logger.info(f"{'='*70}\n")
 
     def _extract_filename_from_relation_path(self, path: str) -> str:
@@ -4902,15 +4791,16 @@ class RelationImportWidget(QtWidgets.QWidget):
         logger.info(f"🗑️ {removed_count} relations intra-fichier supprimées")
 
     def _remove_node_origins_display(self):
-        """❌ Supprime l'affichage des origines."""
-        if hasattr(self, 'origins_text_obj') and self.origins_text_obj:
-            try:
-                self.origins_text_obj.remove()
-            except:
-                pass
-            self.origins_text_obj = None
+        """❌ Supprime l'affichage des origines sous chaque nœud."""
+        if hasattr(self, 'origin_text_objects') and self.origin_text_objects:
+            for text_obj in self.origin_text_objects:
+                try:
+                    text_obj.remove()
+                except:
+                    pass
+            self.origin_text_objects = []
 
-        logger.info("🗑️ Origines masquées")
+    logger.info("🗑️ Origines masquées")
 
     def _get_node_path_from_relations(self, node_name: str) -> Optional[str]:
         """
@@ -5140,30 +5030,36 @@ class RelationImportWidget(QtWidgets.QWidget):
         if not hasattr(self, 'graph_data') or not self.graph_data:
             logger.warning("⚠️ Impossible de déplacer la vue : graph_data non disponible")
             return
-
+    
         if 'ax' not in self.graph_data:
             logger.error("❌ Clé 'ax' manquante dans graph_data")
             return
-
+    
         ax = self.graph_data['ax']
-
+    
         # Récupérer les limites actuelles
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
-
-        # Calculer le facteur de déplacement basé sur le zoom
-        pan_factor = 1.0 / self.current_zoom
-
-        # Déplacer
-        new_xlim = (xlim[0] + dx * pan_factor, xlim[1] + dx * pan_factor)
-        new_ylim = (ylim[0] + dy * pan_factor, ylim[1] + dy * pan_factor)
-
+    
+        # ✅ CORRECTION : Facteur de déplacement adaptatif selon zoom
+        # Plus on est zoomé, moins on se déplace (pour contrôle précis)
+        pan_factor = 0.1 / self.current_zoom
+    
+        # ✅ Calculer le déplacement réel
+        x_shift = dx * pan_factor * (xlim[1] - xlim[0])
+        y_shift = dy * pan_factor * (ylim[1] - ylim[0])
+    
+        # ✅ Appliquer le déplacement
+        new_xlim = (xlim[0] + x_shift, xlim[1] + x_shift)
+        new_ylim = (ylim[0] + y_shift, ylim[1] + y_shift)
+    
         ax.set_xlim(new_xlim)
         ax.set_ylim(new_ylim)
-
+    
+        # ✅ NE PAS redessiner les nœuds
         self.canvas.draw_idle()
-
-        logger.info(f"➡️ Vue déplacée: dx={dx}, dy={dy}")
+    
+        logger.info(f"➡️ Vue déplacée: dx={dx}, dy={dy}, zoom={self.current_zoom:.1f}x")
 
     def _add_minimap(self):
         """Ajoute une mini-carte pour la navigation dans les grands graphes."""
@@ -5215,8 +5111,25 @@ class RelationImportWidget(QtWidgets.QWidget):
         if not hasattr(self, 'graph_data') or not self.graph_data:
             return
 
-        self._reset_view_to_overview()
-        logger.info("🔍 Zoom réinitialisé")
+        ax = self.graph_data['ax']
+        x_min = self.graph_data['x_min']
+        x_max = self.graph_data['x_max']
+        y_min = self.graph_data['y_min']
+        y_max = self.graph_data['y_max']
+
+        margin = 5.0
+
+        # ✅ Remettre les limites originales
+        ax.set_xlim(x_min - margin, x_max + margin)
+        ax.set_ylim(y_min - margin, y_max + margin)
+
+        # ✅ Réinitialiser le facteur de zoom
+        self.current_zoom = 1.0
+
+        # ✅ NE PAS redessiner les nœuds
+        self.canvas.draw_idle()
+
+        logger.info("🔄 Zoom réinitialisé : vue d'ensemble")
 
     def _apply_zoom(self):
         """Applique le zoom en gardant le centre de la vue actuelle."""
@@ -5233,27 +5146,39 @@ class RelationImportWidget(QtWidgets.QWidget):
 
         ax = self.graph_data['ax']
 
-        # Récupérer les limites actuelles
+        # Récupérer les limites actuelles pour trouver le centre
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
 
-        # Calculer le centre
         x_center = (xlim[0] + xlim[1]) / 2
         y_center = (ylim[0] + ylim[1]) / 2
 
-        # Calculer la plage d'origine
-        x_range_original = self.graph_data['x_max'] - self.graph_data['x_min'] + 10
-        y_range_original = self.graph_data['y_max'] - self.graph_data['y_min'] + 10
+        # ✅ CORRECTION : Calculer la plage ORIGINALE (référence fixe)
+        x_range_original = self.graph_data['x_max'] - self.graph_data['x_min']
+        y_range_original = self.graph_data['y_max'] - self.graph_data['y_min']
 
-        # Nouvelles limites basées sur le zoom
-        x_range = x_range_original / self.current_zoom
-        y_range = y_range_original / self.current_zoom
+        # ✅ Ajouter marges aux plages originales
+        margin = 5.0
+        x_range_original += 2 * margin
+        y_range_original += 2 * margin
 
-        # Appliquer
-        ax.set_xlim(x_center - x_range/2, x_center + x_range/2)
-        ax.set_ylim(y_center - y_range/2, y_center + y_range/2)
+        # ✅ CORRECTION : Calculer les nouvelles plages BASÉES sur le zoom
+        # Plus le zoom est grand, plus la plage est petite (effet loupe)
+        x_range_zoomed = x_range_original / self.current_zoom
+        y_range_zoomed = y_range_original / self.current_zoom
 
+        # ✅ Appliquer les nouvelles limites centrées sur le point focal
+        new_xlim = (x_center - x_range_zoomed/2, x_center + x_range_zoomed/2)
+        new_ylim = (y_center - y_range_zoomed/2, y_center + y_range_zoomed/2)
+
+        ax.set_xlim(new_xlim)
+        ax.set_ylim(new_ylim)
+
+        # ✅ NE PAS redessiner les nœuds (ils gardent leur taille)
+        # Juste rafraîchir l'affichage
         self.canvas.draw_idle()
+
+        logger.info(f"🔍 Zoom appliqué: {self.current_zoom:.1f}x (xlim={new_xlim}, ylim={new_ylim})")
 
     def _clear_cache(self):
         """Vide le cache et met à jour l'interface."""
@@ -5280,7 +5205,6 @@ class RelationImportWidget(QtWidgets.QWidget):
 
         num_nodes = len(G.nodes())
 
-        # ✅ CAS LIMITES
         if num_nodes == 0:
             ax.text(0.5, 0.5, "Aucune relation à afficher", ha='center', va='center', 
                    color='#999999', fontsize=11, style='italic')
@@ -5295,7 +5219,6 @@ class RelationImportWidget(QtWidgets.QWidget):
             self.canvas.draw()
             return
 
-        # ✅ DÉTECTION MODE
         is_global_mode = self.level_combo.currentIndex() == 0
 
         node_orbits = {}
@@ -5307,10 +5230,8 @@ class RelationImportWidget(QtWidgets.QWidget):
                 node_degrees = dict(G.degree())
                 if node_degrees:
                     central_node = max(node_degrees, key=node_degrees.get)
-                    logger.info(f"🎯 Mode global : nœud central automatique = {central_node}")
                     pos, node_orbits = self._compute_grouped_layout(G, central_node)
                 else:
-                    logger.warning("⚠️ Aucune connexion détectée, fallback spring layout")
                     if num_nodes <= 15:
                         scale = 80.0
                         k = 4.0
@@ -5319,23 +5240,44 @@ class RelationImportWidget(QtWidgets.QWidget):
                         scale = 120.0
                         k = 5.5
                         iterations = 350
-                    elif num_nodes <= 50:
+                    else:
                         scale = 180.0
                         k = 7.0
                         iterations = 300
-                    else:
-                        scale = 300.0
-                        k = 10.0
-                        iterations = 200
 
                     pos = nx.spring_layout(G, k=k, iterations=iterations, seed=42, scale=scale)
             else:
                 pos = {}
 
-        # ✅ COLLISION AVOIDANCE RENFORCÉE
-        pos = self._apply_universal_collision_avoidance(G, pos, num_nodes)
+        # ✅ NOUVEAU : ÉCHELLE GLOBALE si graphe très dense
+        if num_nodes > 50:
+            # Calculer l'échelle nécessaire selon densité
+            scale_factor = 1.0 + (num_nodes - 50) * 0.01  # +1% par nœud au-delà de 50
+            scale_factor = min(scale_factor, 3.0)  # Maximum 3x
 
-        logger.info(f"🎨 Layout calculé pour {num_nodes} nœuds (mode={'Global' if is_global_mode else 'Groupé'})")
+            logger.info(f"🔍 Application échelle globale : {scale_factor:.2f}x pour {num_nodes} nœuds")
+
+            # Appliquer l'échelle à toutes les positions
+            for node in pos:
+                pos[node] *= scale_factor
+
+        # ✅ DIMENSIONS DES NŒUDS : FIXES (pas de modification)
+        if num_nodes <= 15:
+            text_width = 6.0
+            text_height = 1.5
+            font_size = 10
+            max_chars = 30
+        elif num_nodes <= 30:
+            text_width = 5.5
+            text_height = 1.4
+            font_size = 9
+            max_chars = 28
+        else:
+            text_width = 5.0
+            text_height = 1.3
+            font_size = 8
+            max_chars = 25
+            logger.info(f"🎨 Layout calculé pour {num_nodes} nœuds (mode={'Global' if is_global_mode else 'Groupé'})")
 
         # ✅ DIMENSIONS AUGMENTÉES
         if num_nodes <= 15:
@@ -5478,7 +5420,6 @@ class RelationImportWidget(QtWidgets.QWidget):
         else:
             self.current_zoom = 1.0
 
-        # ✅ SAUVEGARDE DONNÉES
         self.graph_data = {
             'pos': {node: list(coord) for node, coord in pos.items()},
             'G': G,
@@ -5497,7 +5438,8 @@ class RelationImportWidget(QtWidgets.QWidget):
             'x_max': x_max,
             'y_min': y_min,
             'y_max': y_max,
-            'node_orbits': node_orbits
+            'node_orbits': node_orbits,
+            'scale_factor': scale_factor if num_nodes > 50 else 1.0  # ✅ Sauvegarder l'échelle
         }
 
         self.canvas.draw()
@@ -5507,9 +5449,9 @@ class RelationImportWidget(QtWidgets.QWidget):
         ✅ NOUVEAU : Légende simplifiée sans orbites (seulement types de relations)
         """
         from matplotlib.lines import Line2D
-        
+
         legend_elements = []
-        
+
         # ===== TYPES DE RELATIONS (ARÊTES) - Afficher max 8 =====
         edge_types_seen = {}
         for _, _, d in edges:
@@ -5517,23 +5459,23 @@ class RelationImportWidget(QtWidgets.QWidget):
             color = d.get('color', '#CCCCCC')
             if rel_type not in edge_types_seen:
                 edge_types_seen[rel_type] = color
-        
+
         sorted_types = sorted(edge_types_seen.items())[:8]
-        
+
         for rel_type, color in sorted_types:
             legend_elements.append(
                 Line2D([0], [0], color=color, linewidth=2.5, 
                       label=rel_type[:18] + '..' if len(rel_type) > 18 else rel_type,
                       marker='>', markersize=8)
             )
-        
+
         if len(edge_types_seen) > 8:
             legend_elements.append(
                 Line2D([0], [0], color='#999999', linewidth=2, 
                       label=f'... +{len(edge_types_seen)-8} types',
                       linestyle='--')
             )
-        
+
         # ===== AFFICHER LA LÉGENDE =====
         if legend_elements:
             legend = ax.legend(
@@ -5553,65 +5495,116 @@ class RelationImportWidget(QtWidgets.QWidget):
                 borderpad=0.4,
                 labelspacing=0.3
             )
-            
+
             legend.set_bbox_to_anchor((0.98, 0.98))
 
+        if hasattr(self, 'show_node_origins_cb') and self.show_node_origins_cb.isChecked():
+            # Réafficher les origines sous chaque nœud
+            self._add_node_origins_display()
+
+    def _on_mouse_scroll(self, event):
+        """✅ Gère le zoom à la molette de la souris."""
+        if not hasattr(self, 'graph_data') or 'ax' not in self.graph_data:
+            return
+
+        if event.inaxes != self.graph_data['ax']:
+            return
+
+        # Direction du scroll (up = zoom in, down = zoom out)
+        if event.button == 'up':
+            # Zoom avant
+            if self.current_zoom < 5.0:  # Limite max
+                self.current_zoom += self.zoom_step
+        elif event.button == 'down':
+            # Zoom arrière
+            if self.current_zoom > 0.3:  # Limite min
+                self.current_zoom -= self.zoom_step
+        else:
+            return
+
+        # Appliquer le zoom centré sur la position de la souris
+        self._apply_zoom_at_point(event.xdata, event.ydata)
+
+        logger.info(f"🔍 Zoom molette: {self.current_zoom:.1f}x")
+
+    def _apply_zoom_at_point(self, x_focus, y_focus):
+        """Applique le zoom en gardant le point focal fixe."""
+        if not hasattr(self, 'graph_data') or not self.graph_data:
+            return
+
+        required_keys = ['ax', 'x_min', 'x_max', 'y_min', 'y_max']
+        for key in required_keys:
+            if key not in self.graph_data:
+                return
+
+        ax = self.graph_data['ax']
+
+        # Si pas de point focal (zoom depuis boutons), utiliser le centre
+        if x_focus is None or y_focus is None:
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            x_focus = (xlim[0] + xlim[1]) / 2
+            y_focus = (ylim[0] + ylim[1]) / 2
+
+        # ✅ CORRECTION : Calculer la plage ORIGINALE (référence fixe)
+        x_range_original = self.graph_data['x_max'] - self.graph_data['x_min']
+        y_range_original = self.graph_data['y_max'] - self.graph_data['y_min']
+
+        # ✅ Ajouter marges
+        margin = 5.0
+        x_range_original += 2 * margin
+        y_range_original += 2 * margin
+
+        # ✅ Nouvelles plages basées sur le zoom
+        x_range = x_range_original / self.current_zoom
+        y_range = y_range_original / self.current_zoom
+
+        # ✅ Centrer sur le point focal
+        new_xlim = (x_focus - x_range/2, x_focus + x_range/2)
+        new_ylim = (y_focus - y_range/2, y_focus + y_range/2)
+
+        ax.set_xlim(new_xlim)
+        ax.set_ylim(new_ylim)
+
+        # ✅ NE PAS redessiner les nœuds
+        self.canvas.draw_idle()
+
     def _apply_universal_collision_avoidance(self, G, pos, num_nodes):
-        """
-        ✅ COLLISION AVOIDANCE ULTRA-EFFICACE avec RESPECT STRICT DES ORBITES
-        Empêche les collisions SANS déplacer les nœuds entre les orbites
-        Utilise des mouvements TANGENTIELS (rotation) pour nœuds de même orbite
-        """
-
-        def get_node_dimensions(node_name):
-            """Calcule largeur réelle basée sur longueur du texte"""
-            if num_nodes <= 15:
-                max_chars = 30
-                base_width = 6.0
-            elif num_nodes <= 30:
-                max_chars = 28
-                base_width = 5.5
-            else:
-                max_chars = 25
-                base_width = 5.0
-
-            display_name = node_name[:max_chars] + '..' if len(node_name) > max_chars else node_name
-            char_width = base_width / max_chars
-            width = len(display_name) * char_width + 0.5
-            height = 1.5 if num_nodes <= 15 else 1.4 if num_nodes <= 30 else 1.3
-
-            return width, height
+        import numpy as np
 
         def get_node_distance_from_center(node):
             """Calcule la distance d'un nœud par rapport au centre"""
             x, y = pos[node]
             return (x**2 + y**2) ** 0.5
 
-        # ✅ PARAMÈTRES ADAPTATIFS
+        # ✅ PARAMÈTRES ADAPTATIFS (distances minimales RÉDUITES car on a des rayons plus grands)
         if num_nodes <= 10:
-            base_min_distance = 2.5
-            iterations = 150
-            orbit_tolerance = 2.0  # Tolérance pour déterminer si 2 nœuds sont sur même orbite
+            base_min_distance = 1.8  # Réduit de 2.5
+            iterations = 100
+            orbit_tolerance = 2.0
         elif num_nodes <= 20:
-            base_min_distance = 2.0
-            iterations = 120
+            base_min_distance = 1.5  # Réduit de 2.0
+            iterations = 80
             orbit_tolerance = 2.5
         elif num_nodes <= 40:
-            base_min_distance = 1.8
-            iterations = 100
+            base_min_distance = 1.2  # Réduit de 1.8
+            iterations = 60
             orbit_tolerance = 3.0
         else:
-            base_min_distance = 1.5
-            iterations = 80
+            base_min_distance = 1.0  # Réduit de 1.5
+            iterations = 50
             orbit_tolerance = 3.5
 
-        # ✅ CALCULER LES DISTANCES INITIALES
+        # ✅ Dimensions FIXES des nœuds (récupérées depuis graph_data)
+        text_width = self.graph_data.get('text_width', 5.0)
+        text_height = self.graph_data.get('text_height', 1.3)
+
+        # Calculer les distances initiales
         node_distances = {}
         for node in G.nodes():
             node_distances[node] = get_node_distance_from_center(node)
 
-        logger.info(f"🔄 Collision avoidance : {iterations} itérations max, "
-                    f"distance min={base_min_distance:.1f}, tolérance orbite={orbit_tolerance:.1f}")
+        node_orbits = self.graph_data.get('node_orbits', {})
 
         for iteration in range(iterations):
             nodes = list(G.nodes())
@@ -5619,62 +5612,46 @@ class RelationImportWidget(QtWidgets.QWidget):
 
             for i, node1 in enumerate(nodes):
                 x1, y1 = pos[node1]
-                w1, h1 = get_node_dimensions(node1)
                 dist1 = node_distances[node1]
 
                 for node2 in nodes[i+1:]:
                     x2, y2 = pos[node2]
-                    w2, h2 = get_node_dimensions(node2)
                     dist2 = node_distances[node2]
 
                     dx = x2 - x1
                     dy = y2 - y1
                     distance = (dx**2 + dy**2) ** 0.5
 
-                    # Distance requise = somme des demi-largeurs + marge
-                    required_distance = (w1 + w2) / 2 + base_min_distance
+                    # ✅ Distance requise basée sur dimensions FIXES + marge
+                    required_distance = (text_width + text_height) / 2 + base_min_distance
 
                     if distance < required_distance and distance > 0.01:
-                        # Force qui diminue avec les itérations
+                        # Force diminuant avec les itérations
                         force_factor = 1.0 - (iteration / iterations) * 0.5
 
-                        # ✅ VÉRIFIER SI MÊME ORBITE (avec tolérance)
-                        same_orbit = abs(dist1 - dist2) < orbit_tolerance
+                        # Vérifier même orbite
+                        orbit1 = node_orbits.get(node1, 3)
+                        orbit2 = node_orbits.get(node2, 3)
+                        same_orbit = (orbit1 == orbit2) or (abs(dist1 - dist2) < orbit_tolerance)
 
                         if same_orbit:
-                            # ===== MÊME ORBITE : MOUVEMENT TANGENTIEL (ROTATION) =====
-
-                            # Calculer les angles
+                            # ✅ MOUVEMENT TANGENTIEL (rotation)
                             angle1 = math.atan2(y1, x1)
                             angle2 = math.atan2(y2, x2)
 
-                            # Différence angulaire
-                            angle_diff = angle2 - angle1
-
-                            # Normaliser entre -π et π
-                            while angle_diff > math.pi:
-                                angle_diff -= 2 * math.pi
-                            while angle_diff < -math.pi:
-                                angle_diff += 2 * math.pi
-
-                            # Force angulaire proportionnelle à l'écart requis
-                            force = (required_distance - distance) * 0.03 * force_factor  # Augmenté de 0.02 à 0.03
-
-                            # Calculer le rayon moyen pour le mouvement
+                            force = (required_distance - distance) * 0.015 * force_factor  # Force réduite
                             avg_radius = (dist1 + dist2) / 2
 
-                            # Convertir la force linéaire en angle
                             if avg_radius > 0.01:
                                 angle_force = force / avg_radius
                             else:
                                 angle_force = force * 0.1
 
-                            # Appliquer rotation inverse pour chaque nœud
-                            # Nœud 1 recule, nœud 2 avance
+                            # Rotation inverse
                             new_angle1 = angle1 - angle_force
                             new_angle2 = angle2 + angle_force
 
-                            # Recalculer positions EN GARDANT LE MÊME RAYON
+                            # ✅ GARDER LE MÊME RAYON
                             pos[node1][0] = dist1 * math.cos(new_angle1)
                             pos[node1][1] = dist1 * math.sin(new_angle1)
                             pos[node2][0] = dist2 * math.cos(new_angle2)
@@ -5683,9 +5660,7 @@ class RelationImportWidget(QtWidgets.QWidget):
                             max_displacement = max(max_displacement, angle_force * avg_radius)
 
                         else:
-                            # ===== ORBITES DIFFÉRENTES : MOUVEMENT RADIAL =====
-
-                            # Directions radiales pour chaque nœud
+                            # ✅ MOUVEMENT RADIAL
                             if dist1 > 0.01:
                                 radial_dir1_x = x1 / dist1
                                 radial_dir1_y = y1 / dist1
@@ -5700,40 +5675,28 @@ class RelationImportWidget(QtWidgets.QWidget):
                                 radial_dir2_x = 1.0
                                 radial_dir2_y = 0.0
 
-                            # Force radiale
-                            radial_force = (required_distance - distance) * 0.3 * force_factor
+                            radial_force = (required_distance - distance) * 0.2 * force_factor  # Force réduite
 
-                            # Déplacer radialement selon la position relative
                             if dist1 < dist2:
-                                # node1 plus proche : recule vers le centre
                                 pos[node1][0] -= radial_force * radial_dir1_x
                                 pos[node1][1] -= radial_force * radial_dir1_y
-                                # node2 plus loin : s'éloigne du centre
                                 pos[node2][0] += radial_force * radial_dir2_x
                                 pos[node2][1] += radial_force * radial_dir2_y
                             else:
-                                # node2 plus proche : recule vers le centre
                                 pos[node2][0] -= radial_force * radial_dir2_x
                                 pos[node2][1] -= radial_force * radial_dir2_y
-                                # node1 plus loin : s'éloigne du centre
                                 pos[node1][0] += radial_force * radial_dir1_x
                                 pos[node1][1] += radial_force * radial_dir1_y
 
                             max_displacement = max(max_displacement, radial_force)
 
-                # ✅ METTRE À JOUR LA DISTANCE APRÈS DÉPLACEMENT
-                node_distances[node1] = get_node_distance_from_center(node1)
+                    # Mettre à jour distance
+                    node_distances[node1] = get_node_distance_from_center(node1)
 
-            # ✅ CONVERGENCE
+            # Convergence
             if max_displacement < 0.01:
-                logger.info(f"✅ Convergence atteinte à l'itération {iteration}")
+                logger.info(f"✅ Convergence à l'itération {iteration}")
                 break
-
-            # ✅ RÉDUCTION PROGRESSIVE DE LA DISTANCE MINIMALE
-            if iteration % 30 == 0 and iteration > 0:
-                base_min_distance *= 0.95
-
-        logger.info(f"✅ Collision avoidance terminée après {min(iteration+1, iterations)} itérations")
 
         return pos
 
@@ -5758,13 +5721,16 @@ class RelationImportWidget(QtWidgets.QWidget):
 
         margin = 5.0
 
+        # ✅ Remettre les limites originales
         ax.set_xlim(x_min - margin, x_max + margin)
         ax.set_ylim(y_min - margin, y_max + margin)
 
+        # ✅ Réinitialiser le zoom
         self.current_zoom = 1.0
+
+        # ✅ NE PAS redessiner les nœuds
         self.canvas.draw_idle()
 
-        logger.info("🔄 Vue réinitialisée : vue d'ensemble")
         logger.info("🔄 Vue réinitialisée : vue d'ensemble")
 
     def _apply_rectangle_collision_avoidance_global(self, G, pos, num_nodes):
@@ -6958,6 +6924,7 @@ class RelationImportWidget(QtWidgets.QWidget):
         self.canvas.mpl_connect('button_press_event', self._on_graph_press)
         self.canvas.mpl_connect('button_release_event', self._on_graph_release)
         self.canvas.mpl_connect('motion_notify_event', self._on_graph_motion)
+        self.canvas.mpl_connect('scroll_event', self._on_mouse_scroll)
     
     def _on_graph_press(self, event):
         """Gère le clic de la souris : double-clic = explorer OU afficher code selon le type."""
@@ -8452,6 +8419,12 @@ class RelationImportWidget(QtWidgets.QWidget):
         if self.graph_data.get('selected_node'):
             self._show_node_details_in_graph(self.graph_data['selected_node'], G)
 
+        # ✅ NOUVEAU : Réafficher les origines si checkbox activée
+        if hasattr(self, 'show_node_origins_cb') and self.show_node_origins_cb.isChecked():
+            self._add_node_origins_display()
+
+        ax.axis('off')
+
         ax.axis('off')
 
         # ✅ Recalculer limites avec marges adaptées
@@ -8482,6 +8455,10 @@ class RelationImportWidget(QtWidgets.QWidget):
         # Mettre à jour minimap si existe
         if hasattr(self, 'minimap_ax') and self.minimap_ax:
             self._update_minimap()
+        if hasattr(self, 'show_node_origins_cb') and self.show_node_origins_cb.isChecked():
+            self._add_node_origins_display()
+
+        ax.axis('off')
 
     def _apply_fixed_dimension_collision_avoidance(self, G, pos, num_nodes):
         """

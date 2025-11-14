@@ -1,4 +1,5 @@
 # graph_widget.py - Version complète intégrant le design et principes de relation_import_widget.py
+import math
 import os
 import json
 from typing import List, Dict, Optional
@@ -13,25 +14,29 @@ from PyQt5.QtGui import QCursor
 import networkx as nx
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from matplotlib.patches import Circle
+from matplotlib.patches import Circle, FancyBboxPatch
 
 from utils.logger import logger
 from utils.dgraph_connector import LirisDgraphConnector
 
 class QueryCache:
-    """Système de cache pour les requêtes Dgraph avec expiration."""
+    """✅ Cache optimisé avec statistiques"""
     
-    def __init__(self, ttl_seconds=300):
+    def __init__(self, ttl_seconds=600):  # 10 minutes
         self.cache = {}
         self.ttl = timedelta(seconds=ttl_seconds)
+        self.hits = 0
+        self.misses = 0
     
     def get(self, key: str) -> Optional[Dict]:
         if key in self.cache:
             data, timestamp = self.cache[key]
             if datetime.now() - timestamp < self.ttl:
+                self.hits += 1
                 return data
             else:
                 del self.cache[key]
+        self.misses += 1
         return None
     
     def set(self, key: str, value: Dict):
@@ -39,9 +44,13 @@ class QueryCache:
     
     def clear(self):
         self.cache.clear()
+        self.hits = 0
+        self.misses = 0
     
     def get_stats(self) -> str:
-        return f"Cache: {len(self.cache)} entrées"
+        total = self.hits + self.misses
+        hit_rate = (self.hits / total * 100) if total > 0 else 0
+        return f"Cache: {len(self.cache)} entrées, {hit_rate:.1f}% hits"
 
 
 class GraphWidget(QtWidgets.QWidget):
@@ -95,7 +104,7 @@ class GraphWidget(QtWidgets.QWidget):
         self._load_uid_mappings()
     
     def normalize_node_name(self, name: str) -> str:
-        """✅ CORRIGÉ : Garde l'extension pour les fichiers"""
+        """✅ VERSION CORRIGÉE : Garde l'extension pour les fichiers"""
         if not name or not isinstance(name, str):
             return f"unnamed_{id(name)}"
 
@@ -103,14 +112,25 @@ class GraphWidget(QtWidgets.QWidget):
         if not name or name.lower() == 'n/a':
             return f"unnamed_{id(name)}"
 
-        # ✅ NOUVEAU : Garder le basename complet (avec extension)
+        # Garder seulement le basename (sans chemin)
         base = os.path.basename(name)
 
-        # Si c'est un fichier (a une extension), garder tel quel
-        if '.' in base and len(base.split('.')[-1]) <= 5:
-            return base
+        # ✅ CORRECTION : Garder l'extension pour TOUS les fichiers
+        # Liste des extensions de code reconnues
+        code_extensions = {
+            '.py', '.js', '.ts', '.tsx', '.jsx', '.java', '.cpp', '.c', '.h',
+            '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala',
+            '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg',
+            '.html', '.css', '.scss', '.sass', '.md', '.txt'
+        }
 
-        # Sinon, supprimer l'extension
+        # Si le fichier a une extension reconnue, le garder tel quel
+        if '.' in base:
+            ext = '.' + base.split('.')[-1].lower()
+            if ext in code_extensions:
+                return base  # ✅ Garde "user.py" au lieu de "user"
+
+        # Pour les noms sans extension (classes, fonctions), supprimer si présent
         name_without_ext = os.path.splitext(base)[0]
         normalized = name_without_ext.strip()
 
@@ -119,11 +139,70 @@ class GraphWidget(QtWidgets.QWidget):
 
         return normalized
     
+    def _format_node_display_name(self, node_name: str, node_type: str = None) -> str:
+        if not node_name:
+            return "Unknown"
+
+        # Garder seulement le basename (sans chemin)
+        display_name = os.path.basename(node_name)
+
+        # ✅ MAPPING COMPLET : Préfixes longs → courts (multilingue)
+        prefix_mapping = {
+            # Functions
+            'function:': 'F:', 'fonction:': 'F:', 'func:': 'F:',
+            'Function:': 'F:', 'Fonction:': 'F:', 'Func:': 'F:',
+            'method:': 'M:', 'methode:': 'M:', 'méthode:': 'M:',
+            'Method:': 'M:', 'Methode:': 'M:', 'Méthode:': 'M:',
+            'class:': 'C:', 'classe:': 'C:',
+            'Class:': 'C:', 'Classe:': 'C:',
+            'variable:': 'V:', 'var:': 'V:',
+            'Variable:': 'V:', 'Var:': 'V:',
+            'file:': '', 'fichier:': '',
+            'module:': 'Mod:', 'package:': 'Pkg:',
+        }
+
+        # ✅ 1. DÉTECTER ET REMPLACER les préfixes dans le nom lui-même
+        display_lower = display_name.lower()
+        for long_prefix, short_prefix in prefix_mapping.items():
+            if display_lower.startswith(long_prefix):
+                # Extraire le nom sans le préfixe long
+                actual_name = display_name[len(long_prefix):].strip()
+                # Si c'est un fichier (préfixe vide), retourner tel quel
+                if not short_prefix:
+                    return actual_name
+                # Sinon ajouter le préfixe court
+                return f"{short_prefix} {actual_name}"
+
+        # ✅ 2. Si pas de préfixe détecté dans le nom, utiliser node_type
+        type_prefixes = {
+            'function': 'F:',
+            'method': 'M:',
+            'class': 'C:',
+            'variable': 'V:',
+            'module': 'Mod:',
+            'package': 'Pkg:',
+        }
+
+        # Pour les fichiers, garder l'extension
+        if node_type == 'file' or '.' in display_name:
+            return display_name
+
+        # Pour les autres, supprimer l'extension si présente
+        name_without_ext = os.path.splitext(display_name)[0]
+        final_name = name_without_ext if name_without_ext else display_name
+
+        # ✅ Ajouter le préfixe court si type reconnu
+        if node_type and node_type.lower() in type_prefixes:
+            prefix = type_prefixes[node_type.lower()]
+            return f"{prefix} {final_name}"
+
+        return final_name
+    
     def _get_dgraph_to_local_mapping(self):
         """Retourne le mapping Dgraph UID -> Local UID."""
-        if not self.dgraph_to_local:
+        if not hasattr(self, 'dgraph_to_local') or not self.dgraph_to_local:
             self._load_uid_mappings()
-        return self.dgraph_to_local
+        return getattr(self, 'dgraph_to_local', {})
     
     def _get_node_uid_by_name(self, node_name: str) -> str:
         if not node_name:
@@ -250,9 +329,7 @@ class GraphWidget(QtWidgets.QWidget):
             self.current_graph.nodes[node]['level'] = 0
 
         self._draw_graph()
-        self._update_legend()
         self._update_info_label()
-
 
     def _detect_hierarchical_context(self, selected_uid: str, selected_name: str) -> Dict:
         """
@@ -650,8 +727,8 @@ class GraphWidget(QtWidgets.QWidget):
         return 2
 
     def update_graph(self, central_node: str, central_uid: str, related_items: List[Dict], 
-        project_data: Dict, append_mode: bool = False):
-
+                project_data: Dict, append_mode: bool = False):
+    
         logger.info(f"\n{'='*70}")
         logger.info(f"🕸️ UPDATE_GRAPH (Mode: {'Ajout' if append_mode else 'Remplacement'})")
         logger.info(f"{'='*70}")
@@ -659,62 +736,20 @@ class GraphWidget(QtWidgets.QWidget):
         logger.info(f"  UID: {central_uid}")
         logger.info(f"  Related items: {len(related_items)}")
 
-        # ✅ DÉTECTION SÉLECTION MULTIPLE
-        if len(related_items) > 1 and all(item.get('uid') for item in related_items):
-            logger.info("🎯 Mode sélection multiple détecté")
-            return self.update_graph_with_persistent_selections(
-                related_items, project_data, append_mode
-            )
-
-        # ✅ DÉTECTION STRUCTURE INTERNE
-        if (len(related_items) == 1 and 
-            related_items[0].get('mode') == 'internal_structure'):
-            logger.info("📂 Mode structure interne détecté")
-            return self.update_graph_with_internal_structure(
-                central_node, central_uid, 
-                related_items[0].get('data', {}), 
-                project_data
-            )
-
-        # ✅ NOUVEAU : DÉTECTION CONTEXTE HIÉRARCHIQUE
-        if central_uid and central_node:
-            hierarchical_context = self._detect_hierarchical_context(central_uid, central_node)
-
-            if hierarchical_context['has_hierarchy']:
-                logger.info(f"🌳 Contexte hiérarchique détecté - Mode: {hierarchical_context['display_mode']}")
-
-                if hierarchical_context['display_mode'] == 'hierarchy':
-                    return self.update_graph_with_hierarchical_relations(
-                        central_node, central_uid, hierarchical_context, project_data, append_mode
-                    )
-                elif hierarchical_context['display_mode'] == 'internal_structure':
-                    return self.update_graph_with_internal_structure(
-                        central_node, central_uid, 
-                        {'classes': [elem for elem in hierarchical_context['code_elements'] if elem['type'] == 'class'],
-                         'functions': [elem for elem in hierarchical_context['code_elements'] if elem['type'] == 'function'],
-                         'variables': [elem for elem in hierarchical_context['code_elements'] if elem['type'] == 'variable']}, 
-                        project_data
-                    )
-
-        # ✅ MODE STANDARD (code existant inchangé)
+        # ✅ VALIDATION DE BASE
         if not central_node or not central_uid:
             if not append_mode:
                 self._clear_graph()
+            logger.warning("⚠️ Nœud central manquant")
             return
 
+        # ✅ Sauvegarder contexte
         self.current_project_data = project_data
         self.central_node = central_node
         self.current_central_uid = central_uid
+        self.current_central_name = central_node
 
-        # ✅ GESTION APPEND_MODE
-        if append_mode and hasattr(self, 'current_relations'):
-            logger.info("🔄 Mode ajout - fusion avec relations existantes")
-            existing_relations = self.current_relations.copy()
-        else:
-            existing_relations = []
-            self.related_items = related_items
-
-        # Détecter le niveau
+        # ✅ Détection niveau
         level = 1
         for item in related_items:
             if item.get('search_depth'):
@@ -723,102 +758,62 @@ class GraphWidget(QtWidgets.QWidget):
             
         logger.info(f"  Niveau détecté: {level}")
 
-        # ✅ RÉCUPÉRER NOUVELLES RELATIONS
+        # ✅ RÉCUPÉRATION RELATIONS (TOUJOURS)
+        logger.info(f"📡 Récupération relations niveau {level}...")
         new_relations = self._get_complete_relations(central_uid, level)
-        logger.info(f"📊 {len(new_relations)} nouvelles relations")
 
-        # ✅ DIAGNOSTIC DES RELATIONS AVANT FUSION
-        if new_relations:
-            diagnostic = self._diagnose_hierarchy_relations(new_relations)
-            if diagnostic['issues']:
-                logger.warning("⚠️ Problèmes détectés dans les relations")
+        if not new_relations:
+            logger.warning("⚠️ Aucune relation récupérée")
+            if not append_mode:
+                self._clear_graph()
+            return
 
-        # ✅ FUSION avec relations existantes
-        if append_mode and existing_relations:
-            all_relations = existing_relations + new_relations
+        logger.info(f"📊 {len(new_relations)} relations récupérées")
 
-            # Dédoublonner
-            unique_relations = []
-            seen_keys = set()
-
-            for rel in all_relations:
-                key = (
-                    rel.get('source_uid', ''),
-                    rel.get('target_uid', ''),
-                    rel.get('relation_type', '')
-                )
-
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    unique_relations.append(rel)
-
-            validated_relations = self._validate_relations_format(unique_relations)
-            logger.info(f"🔗 {len(validated_relations)} relations après fusion")
-        else:
-            validated_relations = self._validate_relations_format(new_relations)
+        # ✅ VALIDATION FORMAT
+        validated_relations = self._validate_relations_format(new_relations)
 
         if not validated_relations:
-            logger.warning("⚠️ Aucune relation valide trouvée")
+            logger.error("❌ Aucune relation valide après validation")
             if not append_mode:
                 self._clear_graph()
             return
 
-        # ✅ DIAGNOSTIC FINAL DES RELATIONS VALIDÉES
-        final_diagnostic = self._diagnose_hierarchy_relations(validated_relations)
-        if final_diagnostic['valid_relations'] == 0:
-            logger.error("❌ CRITIQUE: Aucune relation valide après validation")
-            if not append_mode:
-                self._clear_graph()
-            return
-
-        # ✅ CONSTRUIRE LE GRAPHE
+        # ✅ CONSTRUCTION GRAPHE (TOUJOURS)
+        logger.info(f"🔨 Construction du graphe...")
         self.current_relations = validated_relations
-        self.current_graph = self._build_clean_graph(validated_relations)
 
-        # Vérification post-construction
-        if not self.current_graph or len(self.current_graph.edges()) == 0:
-            logger.error("❌ CRITIQUE: Graphe sans arêtes après construction")
-            logger.info("🔍 Lancement diagnostic approfondi...")
+        G = self._build_clean_graph(validated_relations)
 
-            # Diagnostic approfondi
-            for i, rel in enumerate(validated_relations[:5]):
-                logger.info(f"  Relation {i}: {rel.get('source')} -> {rel.get('target')} [{rel.get('relation_type')}]")
+        if not G or len(G.nodes()) == 0:
+            logger.error("❌ Graphe vide après construction")
+            if not append_mode:
+                self._clear_graph()
+            return
 
-        # ✅ ENRICHIR LES MÉTADONNÉES
-        for node in self.current_graph.nodes:
-            node_uid = self.current_graph.nodes[node].get('uid')
+        # ✅ ENRICHISSEMENT MÉTADONNÉES
+        for node in G.nodes():
+            node_uid = G.nodes[node].get('uid')
 
             if node_uid:
                 node_details = self._get_node_details(node_uid)
-                self.current_graph.nodes[node]['level'] = node_details.get('level', 0)
-                if not self.current_graph.nodes[node].get('node_type'):
-                    self.current_graph.nodes[node]['node_type'] = node_details.get('nodeType', 'unknown')
+                G.nodes[node]['level'] = node_details.get('level', 0)
+                if not G.nodes[node].get('node_type'):
+                    G.nodes[node]['node_type'] = node_details.get('nodeType', 'unknown')
             else:
-                self.current_graph.nodes[node]['level'] = 0
-                if not self.current_graph.nodes[node].get('node_type'):
-                    self.current_graph.nodes[node]['node_type'] = 'unknown'
+                G.nodes[node]['level'] = 0
+                if not G.nodes[node].get('node_type'):
+                    G.nodes[node]['node_type'] = 'unknown'
 
-            # ✅ HIÉRARCHIE : Marquer le niveau hiérarchique
-            if node == central_node:
-                self.current_graph.nodes[node]['hierarchy_level'] = 0  # Nœud central
-            else:
-                # Calculer niveau hiérarchique basé sur les relations
-                self.current_graph.nodes[node]['hierarchy_level'] = self._calculate_hierarchy_level(
-                    node, central_node, validated_relations
-                )
-
-        all_uids = [central_uid]
-        for item in related_items:
-            if item.get('uid'):
-                all_uids.append(item['uid'])
-
-        self._preload_uid_cache(all_uids)
-
+        # ✅ AFFICHAGE
+        self.current_graph = G  # CRITIQUE : Sauvegarder avant dessin
         self._draw_graph()
-        self._update_legend()
 
-        logger.info(f"✅ Graphe généré avec {len(self.current_graph.nodes)} nœuds, {len(self.current_graph.edges)} arêtes")
+        logger.info(f"✅ Graphe généré avec {len(G.nodes())} nœuds, {len(G.edges())} arêtes")
         logger.info(f"{'='*70}\n")
+        if not self.current_graph or len(self.current_graph.nodes()) == 0:
+            logger.error("❌ ÉCHEC update_graph - Lancement diagnostic...")
+        self._diagnose_graph_display_issue()
 
     def update_graph_with_hierarchical_relations(self, central_node: str, central_uid: str, 
                                            hierarchical_context: Dict, project_data: Dict, 
@@ -970,13 +965,21 @@ class GraphWidget(QtWidgets.QWidget):
             node_data['level'] = 0  # Pour compatibilité
 
         self._draw_graph()
-        self._update_legend()
         self._update_info_label()
 
         logger.info(f"✅ Graphe hiérarchique généré avec {len(self.current_graph.nodes)} nœuds, {len(self.current_graph.edges)} arêtes")
 
+    def _get_orbit_color(self, orbit_num: int) -> tuple:
+        """✅ NOUVEAU : Retourne les couleurs pour chaque orbite"""
+        orbit_colors = {
+            1: ('#2196F3', '#1565C0'),  # Bleu pour hiérarchique
+            2: ('#00ACC1', '#00838F'),  # Cyan pour code interne
+            3: ('#FF8C00', '#E65100')   # Orange pour externe
+        }
+        return orbit_colors.get(orbit_num, ('#999999', '#666666'))
+
     def _validate_relations_format(self, relations_list: List[Dict]) -> List[Dict]:
-        """✅ VERSION CORRIGÉE : Validation sans perte de données"""
+        """✅ CORRECTION : Validation sans perte de relations externes"""
         validated_relations = []
 
         for rel in relations_list:
@@ -987,55 +990,92 @@ class GraphWidget(QtWidgets.QWidget):
             source = rel.get('source', '').strip()
             target = rel.get('target', '').strip()
 
-            # ✅ Validation minimale
-            if not source or not target or source == target:
+            # ✅ Validation minimale (permettre même source=target pour import self)
+            if not source or not target:
                 continue
 
-            # ✅ Normalisation unifiée relation_type
-            relation_type = rel.get('relation_type') or rel.get('relationType', 'unknown')
+            # ✅ CORRECTION : Ne rejeter que les vrais doublons (même nom ET pas import)
+            rel_type = rel.get('relation_type') or rel.get('relationType', 'unknown')
+            if source == target:
+                # Accepter auto-imports/références pour tous les systèmes
+                if rel_type.lower() not in ['import', 'self_import', 'self_reference', 'from_import', 'require', 'include']:
+                    continue
 
             # ✅ Construire relation normalisée
             normalized_rel = {
                 'source': source,
                 'source_uid': rel.get('source_uid', ''),
-                'source_type': rel.get('source_type', 'unknown'),
+                'source_type': rel.get('source_type', 'file'),  # ✅ Défaut: file
                 'target': target,
                 'target_uid': rel.get('target_uid', ''),
-                'target_type': rel.get('target_type', 'unknown'),
-                'relation_type': relation_type,
-                'category': rel.get('category', 'external')
+                'target_type': rel.get('target_type', 'file'),  # ✅ Défaut: file
+                'relation_type': rel_type,
+                'category': rel.get('category', 'external'),  # ✅ Défaut: external
+                'line': rel.get('line'),
+                'intraFile': rel.get('intraFile', False)
             }
 
             validated_relations.append(normalized_rel)
 
         logger.info(f"✅ {len(validated_relations)} relations validées sur {len(relations_list)}")
+
+        # ✅ DIAGNOSTIC : Compter par type
+        type_counts = {}
+        for rel in validated_relations:
+            rel_type = rel['relation_type']
+            type_counts[rel_type] = type_counts.get(rel_type, 0) + 1
+
+        logger.info(f"📊 Types de relations validées:")
+        for rel_type, count in sorted(type_counts.items(), key=lambda x: -x[1])[:10]:
+            logger.info(f"   • {rel_type}: {count}")
+
         return validated_relations
 
     def _build_clean_graph(self, relations_list: List[Dict]) -> nx.DiGraph:
-        """✅ CORRIGÉ : Construction sans normalisation excessive"""
+        """✅ CORRECTION FINALE : Support complet des relations externes"""
         G = nx.DiGraph()
         nodes_registry = {}
         edges_registry = {}
 
         logger.info(f"🔨 Construction graphe avec {len(relations_list)} relations")
 
-        # ÉTAPE 1: Collecter tous les nœuds SANS normalisation
+        # ✅ ÉTAPE 1: Collecter TOUS les nœuds (sans filtrage excessif)
         for rel in relations_list:
             source = rel.get('source', '').strip()
             target = rel.get('target', '').strip()
 
-            if not source or not target or source == target:
+            # ✅ CORRECTION : Accepter toutes relations valides (même import, call, use)
+            if not source or not target:
                 continue
             
-            # ✅ PAS de normalisation ici
+            # ✅ Permettre auto-références pour certains types (import self)
+            rel_type = rel.get('relation_type', 'unknown').lower()
+            if source == target and rel_type not in ['import', 'self_reference']:
+                continue
+            
+            def safe_basename(path):
+                """Garde le basename AVEC extension"""
+                if not path:
+                    return ''
+                # Si c'est un chemin, garder seulement le nom de fichier complet
+                if '/' in path or '\\' in path:
+                    return os.path.basename(path)
+                return path
+        
+            source = safe_basename(source)
+            target = safe_basename(target)
+
+            # ✅ Ajouter source avec type par défaut 'file'
             if source not in nodes_registry:
                 nodes_registry[source] = {
-                    'node_type': rel.get('source_type', 'unknown'),
+                    'node_type': rel.get('source_type', 'file'),  # ✅ Défaut: file
                     'uid': rel.get('source_uid', '')
                 }
+
+            # ✅ Ajouter target avec type par défaut 'file'
             if target not in nodes_registry:
                 nodes_registry[target] = {
-                    'node_type': rel.get('target_type', 'unknown'),
+                    'node_type': rel.get('target_type', 'file'),  # ✅ Défaut: file
                     'uid': rel.get('target_uid', '')
                 }
 
@@ -1049,29 +1089,32 @@ class GraphWidget(QtWidgets.QWidget):
                 uid=metadata['uid']
             )
 
-        # ÉTAPE 3: Collecter et valider toutes les arêtes
+        # ✅ ÉTAPE 3: Collecter les arêtes (SANS FILTRAGE)
         valid_edges_count = 0
         for rel in relations_list:
             source = rel.get('source', '').strip()
             target = rel.get('target', '').strip()
             rel_type = rel.get('relation_type', 'unknown')
-            category = rel.get('category', 'custom')
+            category = rel.get('category', 'external')  # ✅ Défaut: external
 
-            # Validation stricte des arêtes
-            if not source or not target or source == target:
+            if not source or not target:
                 continue
 
-            # Vérifier que les nœuds existent dans le graphe
+            # ✅ Normalisation
+            source = os.path.basename(source) if '/' in source or '\\' in source else source
+            target = os.path.basename(target) if '/' in target or '\\' in target else target
+
+            # ✅ Vérification existence (devrait toujours passer maintenant)
             if source not in G.nodes or target not in G.nodes:
-                logger.warning(f"⚠️ Nœuds manquants pour relation: {source} -> {target}")
+                logger.error(f"❌ CRITIQUE: Nœuds manquants: {source} -> {target}")
                 continue
             
             edge_key = (source, target)
             if edge_key not in edges_registry:
                 edges_registry[edge_key] = []
 
-            # Créer le label de l'arête
-            type_label = f"{rel_type} [{category}]" if category != 'custom' else rel_type
+            # ✅ Label clair avec catégorie
+            type_label = f"{rel_type} [{category}]"
             if type_label not in edges_registry[edge_key]:
                 edges_registry[edge_key].append(type_label)
                 valid_edges_count += 1
@@ -1081,39 +1124,31 @@ class GraphWidget(QtWidgets.QWidget):
         # ÉTAPE 4: Ajouter toutes les arêtes au graphe
         edges_added = 0
         for (source, target), rel_types in edges_registry.items():
-            # S'assurer que les nœuds existent toujours
-            if source in G.nodes and target in G.nodes:
-                primary_type = rel_types[0]
-                combined_label = f"{primary_type} (+{len(rel_types)-1})" if len(rel_types) > 1 else primary_type
+            primary_type = rel_types[0]
+            combined_label = f"{primary_type} (+{len(rel_types)-1})" if len(rel_types) > 1 else primary_type
 
-                G.add_edge(
-                    source, target,
-                    color=self._get_color_for_type(primary_type),
-                    relation_type=primary_type,
-                    all_types=rel_types,
-                    label=combined_label
-                )
-                edges_added += 1
+            G.add_edge(
+                source, target,
+                color=self._get_color_for_type(primary_type.split('[')[0].strip()),
+                relation_type=primary_type.split('[')[0].strip(),
+                all_types=rel_types,
+                label=combined_label,
+                category=rel_types[0].split('[')[1].strip(']') if '[' in rel_types[0] else 'external'
+            )
+            edges_added += 1
 
         logger.info(f"✅ Arêtes ajoutées au graphe: {edges_added}")
 
         # ÉTAPE 5: Diagnostic final
         final_nodes = len(G.nodes())
         final_edges = len(G.edges())
-        isolated_nodes = list(nx.isolates(G))
 
         logger.info(f"📈 Graphe final: {final_nodes} nœuds, {final_edges} arêtes")
 
+        # ✅ NE PAS supprimer les nœuds isolés (peuvent être pertinents)
+        isolated_nodes = list(nx.isolates(G))
         if isolated_nodes:
-            logger.warning(f"⚠️ Nœuds isolés détectés: {len(isolated_nodes)}")
-            for node in isolated_nodes[:5]:
-                logger.warning(f"  • {node}")
-
-        # Ne supprimer les nœuds isolés que si on a des arêtes
-        if final_edges > 0 and isolated_nodes:
-            logger.info("🧹 Suppression des nœuds isolés")
-            G.remove_nodes_from(isolated_nodes)
-            logger.info(f"✅ Graphe nettoyé: {len(G.nodes())} nœuds, {len(G.edges())} arêtes")
+            logger.info(f"ℹ️  {len(isolated_nodes)} nœuds isolés (conservés)")
 
         return G
     
@@ -1244,45 +1279,99 @@ class GraphWidget(QtWidgets.QWidget):
         logger.info(f"{'='*50}\n")
         return diagnostic
 
+    # ✅ VERSION CORRIGÉE de _get_color_for_type() - Ligne ~1230-1320
+
     def _get_color_for_type(self, rel_type: str) -> str:
-        """✅ MODIFIÉ : Ajouter couleurs pour relations Dgraph type Relation"""
+        """✅ MODIFIÉ : Palette de couleurs avec diagnostic"""
         if isinstance(rel_type, str):
             rel_lower = rel_type.lower()
         else:
             rel_lower = str(rel_type).lower()
-    
-        color_map = {
-            # Relations type Relation (NOUVELLES)
-            'import': '#CC5500',        # Orange foncé
-            'call': '#2AA198',          # Turquoise foncé
-            'use': '#3B7A57',           # Vert menthe sombre
-            'inherit': '#C23B22',       # Rouge brique / saumon foncé
-            'extends': '#6A5ACD',       # Violet foncé
-            'implements': '#2E8B57',    # Vert forêt
-            
-            # Relations hiérarchiques
-            'parent': '#1565C0',        # Bleu profond
-            'child': '#1B5E20',         # Vert foncé
-            'contains_class': '#6A1B9A',# Violet sombre
-            'contains_function': '#E65100', # Orange brûlé
-            'contains_variable': '#9E9D24', # Vert olive
-            
-            # Relations de code existantes
-            'from_import': '#B35900',   # Orange terre
-            'require': '#B35900',       # Même teinte pour cohérence
-            'function_call': '#005A9C', # Bleu foncé
-            'relation': '#4B0082',      # Indigo profond
-            'uses': '#CC7722',          # Orange ambré
-            
-            # Relations internes
-            'has_method': '#283593',    # Bleu nuit
-            'has_variable': '#2E7D32',  # Vert forêt foncé
+
+        # ===== RELATIONS INTRA-FICHIER (Violets) =====
+        call_colors = {
+            'call': '#9C27B0',
+            'calls': '#AB47BC',
+            'method_call': '#BA68C8',
+            'function_call': '#CE93D8',
+            'called_by': '#E1BEE7',
         }
-        for key, color in color_map.items():
+
+        # ===== ORBITE 1 : RELATIONS HIÉRARCHIQUES (Bleus) =====
+        hierarchical_colors = {
+            'parent': '#2196F3',
+            'child': '#4CAF50',
+            'contains': '#1976D2',
+            'belongs_to': '#64B5F6',
+            'hierarchy': '#42A5F5',
+        }
+
+        # ===== ORBITE 2 : RELATIONS DE CODE (Verts/Cyans) =====
+        code_colors = {
+            'function_call': '#00ACC1',
+            'method_call': '#00BCD4',
+            'call': '#26C6DA',
+            'called_by': '#4DD0E1',
+            'uses': '#66BB6A',
+            'used_by': '#81C784',
+            'implements': '#43A047',
+            'extends': '#00A65A',
+            'heritage': '#388E3C',
+            'inherit': '#4CAF50',
+        }
+
+        # ===== ORBITE 3 : RELATIONS EXTERNES (Oranges/Rouges) =====
+        external_colors = {
+            'import': '#FF8C00',
+            'from_import': '#FFA726',
+            'require': '#FFB74D',
+            'include': '#FF9800',
+            'dependency': '#F57C00',
+        }
+
+        # ===== RELATIONS SPÉCIALES (Violets/Roses) =====
+        special_colors = {
+            'relation': '#8A2BE2',
+            'relation_inverse': '#9370DB',
+            'custom': '#BA68C8',
+        }
+
+        # ===== RECHERCHE DANS LES DICTIONNAIRES =====
+        # ✅ CORRECTION ICI - Remplacer intra_file_colors par call_colors
+        for key, color in call_colors.items():
             if key in rel_lower:
                 return color
-        
-        return '#999999'  # Défaut gris
+
+        for key, color in hierarchical_colors.items():
+            if key in rel_lower:
+                return color
+
+        for key, color in code_colors.items():
+            if key in rel_lower:
+                return color
+
+        for key, color in external_colors.items():
+            if key in rel_lower:
+                return color
+
+        for key, color in special_colors.items():
+            if key in rel_lower:
+                return color
+
+        # ===== COULEUR PAR DÉFAUT + DIAGNOSTIC =====
+        logger.debug(f"⚠️ Type de relation non reconnu: '{rel_type}' → couleur par défaut (gris)")
+        return '#999999'
+
+    def _get_node_color_from_relations(self, G, node, center_node):
+        # Récupérer l'orbite du nœud
+        node_orbits = {}
+        if hasattr(self, 'graph_data') and self.graph_data is not None:
+            node_orbits = self.graph_data.get('node_orbits', {})
+
+        orbit = node_orbits.get(node, 3)  # Par défaut orbite 3
+
+        # Retourner la couleur selon l'orbite
+        return self._get_orbit_color(orbit)
 
     def _get_color_for_node(self, node_type: str, level: int) -> str:
         """Retourne couleur nœud basée sur type et niveau."""
@@ -1300,62 +1389,16 @@ class GraphWidget(QtWidgets.QWidget):
     def _init_ui(self):
         """Initialise l'UI du widget graphe."""
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # ✅ NOUVEAU : Barre d'outils en haut
-        toolbar_layout = QtWidgets.QHBoxLayout()
-        toolbar_layout.setSpacing(8)
-        toolbar_layout.setContentsMargins(5, 5, 5, 5)
-
-        # Bouton vider le graphe
-        self.clear_button = QtWidgets.QPushButton("🧹 Vider le graphe")
-        self.clear_button.setStyleSheet("""
-            QPushButton {
-                background-color: #E0E0E0;
-                color: #333333;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #D0D0D0;
-            }
-            QPushButton:pressed {
-                background-color: #C0C0C0;
-            }
-        """)
-        self.clear_button.clicked.connect(self.clear_graph_action)
-        self.clear_button.setMaximumWidth(150)
-        toolbar_layout.addWidget(self.clear_button)
-
-        # Label info (optionnel)
-        self.info_label = QtWidgets.QLabel("Aucun graphe")
-        self.info_label.setStyleSheet("color: #666; font-size: 10px; font-style: italic;")
-        toolbar_layout.addWidget(self.info_label)
-
-        toolbar_layout.addStretch()
-
-        # Statistiques (optionnel)
-        self.stats_label = QtWidgets.QLabel("")
-        self.stats_label.setStyleSheet("color: #666; font-size: 10px;")
-        toolbar_layout.addWidget(self.stats_label)
-
-        layout.addLayout(toolbar_layout)
-
-        # Canvas graphe (existant)
+        # Canvas graphe uniquement (sans barre d'outils)
         self.figure = Figure(facecolor='white', figsize=(8, 6))
         self.canvas = FigureCanvas(self.figure)
         self.canvas.mpl_connect('button_press_event', self._on_graph_click)
         self.canvas.mpl_connect('motion_notify_event', self._on_graph_motion)
         self.canvas.mpl_connect('button_release_event', self._on_graph_release)
         layout.addWidget(self.canvas)
-
-        # Légende dynamique (existant)
-        legend_widget = QtWidgets.QWidget()
-        self.legend_layout = QtWidgets.QHBoxLayout(legend_widget)
-        self.legend_layout.setSpacing(2)
-        layout.addWidget(legend_widget)
 
     def _update_info_label(self):
         """✅ NOUVEAU : Met à jour le label d'information"""
@@ -1381,164 +1424,322 @@ class GraphWidget(QtWidgets.QWidget):
         self.stats_label.setText(f"📊 {num_nodes} nœuds, {num_edges} relations")
 
     def _get_complete_relations(self, uid: str, level: int = 1, use_cache: bool = True) -> List[Dict]:
-        """
-        ✅ CORRIGÉ : Cache optionnel
-        """
-        logger.info(f"\n{'='*70}")
-        logger.info(f"🔍 RÉCUPÉRATION RELATIONS COMPLÈTES")
-        logger.info(f"  UID: {uid}")
-        logger.info(f"  Niveau: {level}")
-        logger.info(f"  Cache: {use_cache}")
-        logger.info(f"{'='*70}")
-
-        # ✅ Vérifier cache UNIQUEMENT si demandé
         if use_cache:
             cache_key = f"complete_relations_{uid}_{level}"
             cached_data = self.query_cache.get(cache_key)
             if cached_data:
-                logger.info(f"📦 Relations récupérées depuis cache: {len(cached_data)}")
+                logger.info(f"📦 Relations depuis cache: {len(cached_data)}")
                 return cached_data
 
-        all_relations = []
-        processed_uids = set()
+            all_relations = []
+            processed_uids = set()
 
-        # ÉTAPE 1 : Relations du nœud central
-        central_relations = self._get_node_all_relations(uid)
-        all_relations.extend(central_relations)
-        processed_uids.add(uid)
+            # ✅ ÉTAPE 1 : Relations du nœud central
+            central_relations = self._get_node_all_relations(uid)
+            all_relations.extend(central_relations)
+            processed_uids.add(uid)
 
-        logger.info(f"✅ Nœud central : {len(central_relations)} relations")
+            # ✅ ÉTAPE 2 : Si niveau 2, explorer les nœuds connectés
+            if level == 2:
+                connected_uids = set()
 
-        # ÉTAPE 2 : Si niveau 2, récupérer relations des nœuds connectés
-        if level == 2:
-            connected_uids = set()
+                for rel in central_relations:
+                    source_uid = rel.get('source_uid')
+                    target_uid = rel.get('target_uid')
 
-            for rel in central_relations:
-                source_uid = rel.get('source_uid')
-                target_uid = rel.get('target_uid')
+                    if source_uid and source_uid != uid and source_uid not in processed_uids:
+                        connected_uids.add(source_uid)
 
-                if source_uid and source_uid != uid:
-                    connected_uids.add(source_uid)
-                if target_uid and target_uid != uid:
-                    connected_uids.add(target_uid)
+                    if target_uid and target_uid != uid and target_uid not in processed_uids:
+                        connected_uids.add(target_uid)
 
-            logger.info(f"🔗 {len(connected_uids)} nœuds connectés à explorer")
+                logger.info(f"\n📊 ÉTAPE 2: {len(connected_uids)} nœuds connectés à explorer")
 
-            for connected_uid in connected_uids:
-                if connected_uid in processed_uids:
-                    continue
-                
-                connected_relations = self._get_node_all_relations(connected_uid)
-                all_relations.extend(connected_relations)
-                processed_uids.add(connected_uid)
+                # ✅ CORRECTION : Ajouter cette boucle qui manquait
+                if connected_uids:
+                    self._get_nodes_details_batch(list(connected_uids))
 
-        # ÉTAPE 3 : Dédoublonner
-        unique_relations = []
-        seen_keys = set()
+                for idx, connected_uid in enumerate(connected_uids, 1):
+                    if connected_uid not in processed_uids:
+                        logger.debug(f"  [{idx}/{len(connected_uids)}] UID: {connected_uid}")
 
-        for rel in all_relations:
-            if 'relation_type' not in rel and 'relationType' in rel:
-                rel['relation_type'] = rel['relationType']
-            elif 'relation_type' not in rel:
-                rel['relation_type'] = 'unknown'
+                        # ✅ LIGNE CRITIQUE QUI MANQUAIT
+                        connected_relations = self._get_node_all_relations(connected_uid)
+                        all_relations.extend(connected_relations)
+                        processed_uids.add(connected_uid)
 
-            key = (
-                rel.get('source_uid', ''),
-                rel.get('target_uid', ''),
-                rel.get('relation_type', '')
-            )
+            # ✅ ÉTAPE 3 : Déduplication
+            unique_relations = []
+            seen_keys = set()
 
-            if key not in seen_keys and key[0] and key[1]:
-                seen_keys.add(key)
-                unique_relations.append(rel)
+            for rel in all_relations:
+                if 'relation_type' not in rel and 'relationType' in rel:
+                    rel['relation_type'] = rel['relationType']
 
-        # ✅ Mettre en cache UNIQUEMENT si demandé
-        if use_cache:
-            cache_key = f"complete_relations_{uid}_{level}"
-            self.query_cache.set(cache_key, unique_relations)
+                key = (
+                    rel.get('source_uid', ''),
+                    rel.get('target_uid', ''),
+                    rel.get('relation_type', '')
+                )
 
-        logger.info(f"\n📊 STATISTIQUES FINALES :")
-        logger.info(f"  Total relations : {len(unique_relations)}")
-        logger.info(f"  Nœuds traités : {len(processed_uids)}")
+                if key not in seen_keys and key[0] and key[1]:
+                    seen_keys.add(key)
+                    unique_relations.append(rel)
+
+            # ✅ ÉTAPE 4 : Mise en cache
+            if use_cache:
+                cache_key = f"complete_relations_{uid}_{level}"
+                self.query_cache.set(cache_key, unique_relations)
 
         return unique_relations
     
     def _get_node_all_relations(self, uid: str) -> List[Dict]:
-        """
-        ✅ VERSION CORRIGÉE : Utilise la méthode unifiée pour type Relation
-        """
         if not uid or not self.dgraph_connector:
             logger.warning("⚠️ Pas d'UID ou pas de connecteur Dgraph")
             return []
-
-        logger.info(f"\n{'='*70}")
-        logger.info(f"🔍 RÉCUPÉRATION RELATIONS COMPLÈTES")
-        logger.info(f"  UID: {uid}")
-        logger.info(f"{'='*70}")
-
+    
         all_relations = []
-
-        # 1️⃣ Relations hiérarchiques et de code (requête simplifiée)
-        query = f"""
+    
+        # ✅ ÉTAPE 1: Vérifier le type de nœud AVANT la requête principale
+        type_query = f"""
         {{
-          node(func: uid({uid})) {{
+          check(func: uid({uid})) {{
             uid
             name
-            label
-            path
             nodeType
-
-            # Relations hiérarchiques
-            parents {{ uid name label nodeType }}
-            children: ~parents {{ uid name label nodeType }}
-            classes {{ uid name label nodeType }}
-            functions {{ uid name label nodeType }}
-            variables {{ uid name label nodeType }}
-            methods {{ uid name label nodeType }}
-
-            # Relations de code direct
-            imports {{ uid name label nodeType }}
-            ~imports {{ uid name label nodeType }}
-            calls {{ uid name label nodeType }}
-            ~calls {{ uid name label nodeType }}
-            uses {{ uid name label nodeType }}
-            ~uses {{ uid name label nodeType }}
-            extends {{ uid name label nodeType }}
-            ~extends {{ uid name label nodeType }}
-            implements {{ uid name label nodeType }}
-            ~implements {{ uid name label nodeType }}
+            dgraph.type
           }}
         }}
         """
-
+    
+        type_result = self._execute_dgraph_query(type_query)
+    
+        if not type_result or 'check' not in type_result or not type_result['check']:
+            logger.warning(f"⚠️ Nœud {uid} introuvable")
+            return []
+    
+        node_info = type_result['check'][0]
+        node_type = node_info.get('nodeType', '')
+        dgraph_types = node_info.get('dgraph.type', [])
+    
+        is_function = (
+            node_type in ['function', 'method'] or
+            'Function' in dgraph_types or
+            'Method' in dgraph_types
+        )
+    
+        logger.info(f"🔍 Type détecté: {node_type} (is_function={is_function})")
+    
+        # ✅ REQUÊTE ADAPTÉE selon le type
+        if is_function:
+            # 🎯 REQUÊTE SPÉCIALE POUR FONCTIONS/MÉTHODES
+            query = f"""
+            {{
+              node(func: uid({uid})) {{
+                uid
+                name
+                label
+                path
+                nodeType
+    
+                # ✅ PARENT FICHIER (si fonction globale)
+                ~functions {{
+                  uid
+                  name
+                  label
+                  nodeType
+                  path
+                }}
+    
+                # ✅ PARENT CLASSE (si méthode)
+                ~methods {{
+                  uid
+                  name
+                  label
+                  nodeType
+                  description
+    
+                  # ✅ FICHIER DE LA CLASSE
+                  ~classes {{
+                    uid
+                    name
+                    label
+                    nodeType
+                    path
+                  }}
+                }}
+    
+                # Relations de code direct
+                imports {{ uid name label nodeType }}
+                ~imports {{ uid name label nodeType }}
+                calls {{ uid name label nodeType }}
+                ~calls {{ uid name label nodeType }}
+                uses {{ uid name label nodeType }}
+                ~uses {{ uid name label nodeType }}
+              }}
+            }}
+            """
+        else:
+            # 📄 REQUÊTE STANDARD POUR FICHIERS/CLASSES
+            query = f"""
+            {{
+              node(func: uid({uid})) {{
+                uid
+                name
+                label
+                path
+                nodeType
+    
+                # Relations hiérarchiques
+                parents {{ uid name label nodeType }}
+                children: ~parents {{ uid name label nodeType }}
+                classes {{ uid name label nodeType }}
+                functions {{ uid name label nodeType }}
+                variables {{ uid name label nodeType }}
+                methods {{ uid name label nodeType }}
+    
+                # Relations de code direct
+                imports {{ uid name label nodeType }}
+                ~imports {{ uid name label nodeType }}
+                calls {{ uid name label nodeType }}
+                ~calls {{ uid name label nodeType }}
+                uses {{ uid name label nodeType }}
+                ~uses {{ uid name label nodeType }}
+                extends {{ uid name label nodeType }}
+                ~extends {{ uid name label nodeType }}
+                implements {{ uid name label nodeType }}
+                ~implements {{ uid name label nodeType }}
+              }}
+            }}
+            """
+    
         result = self._execute_dgraph_query(query)
-
+    
         if not result or 'node' not in result or not result['node']:
             logger.warning(f"⚠️ Nœud {uid} introuvable")
+            return []
+    
+        node = result['node'][0]
+        central_uid = node.get('uid')
+        central_name = self.normalize_node_name(
+            node.get('name') or 
+            node.get('label') or 
+            node.get('path') or 
+            f"Node_{uid[-8:]}"
+        )
+        central_type = node.get('nodeType', 'unknown')
+    
+        # ✅ TRAITEMENT SPÉCIAL POUR FONCTIONS
+        if is_function:
+            # 1️⃣ PARENT FICHIER (si fonction globale)
+            parent_files = node.get('~functions', [])
+    
+            for parent_file in parent_files:
+                parent_uid = parent_file.get('uid')
+                if not parent_uid:
+                    continue
+                
+                parent_name = self.normalize_node_name(
+                    parent_file.get('name') or 
+                    parent_file.get('label') or 
+                    f"File_{parent_uid[-8:]}"
+                )
+                parent_type = parent_file.get('nodeType', 'file')
+    
+                if not parent_name or parent_name == central_name:
+                    continue
+                
+                all_relations.append({
+                    'source': parent_name,
+                    'source_uid': parent_uid,
+                    'source_type': parent_type,
+                    'target': central_name,
+                    'target_uid': central_uid,
+                    'target_type': central_type,
+                    'relation_type': 'contains_function',
+                    'category': 'hierarchy'
+                })
+    
+                logger.info(f"   📄 Parent fichier: {parent_name}")
+    
+            # 2️⃣ PARENT CLASSE (si méthode)
+            parent_classes = node.get('~methods', [])
+    
+            for parent_class in parent_classes:
+                class_uid = parent_class.get('uid')
+                if not class_uid:
+                    continue
+                
+                class_name = self.normalize_node_name(
+                    parent_class.get('name') or 
+                    parent_class.get('label') or 
+                    f"Class_{class_uid[-8:]}"
+                )
+                class_type = parent_class.get('nodeType', 'class')
+    
+                if not class_name or class_name == central_name:
+                    continue
+                
+                # Relation: Classe → Méthode
+                all_relations.append({
+                    'source': class_name,
+                    'source_uid': class_uid,
+                    'source_type': class_type,
+                    'target': central_name,
+                    'target_uid': central_uid,
+                    'target_type': central_type,
+                    'relation_type': 'has_method',
+                    'category': 'hierarchy'
+                })
+    
+                logger.info(f"   🗂️ Parent classe: {class_name}")
+    
+                # 3️⃣ FICHIER DE LA CLASSE
+                class_files = parent_class.get('~classes', [])
+    
+                for class_file in class_files:
+                    file_uid = class_file.get('uid')
+                    if not file_uid:
+                        continue
+                    
+                    file_name = self.normalize_node_name(
+                        class_file.get('name') or 
+                        class_file.get('label') or 
+                        f"File_{file_uid[-8:]}"
+                    )
+                    file_type = class_file.get('nodeType', 'file')
+    
+                    if not file_name:
+                        continue
+                    
+                    # Relation: Fichier → Classe
+                    all_relations.append({
+                        'source': file_name,
+                        'source_uid': file_uid,
+                        'source_type': file_type,
+                        'target': class_name,
+                        'target_uid': class_uid,
+                        'target_type': class_type,
+                        'relation_type': 'contains_class',
+                        'category': 'hierarchy'
+                    })
+    
+                    logger.info(f"   📄 Fichier de la classe: {file_name}")
+    
         else:
-            node = result['node'][0]
-            central_uid = node.get('uid')
-            central_name = self.normalize_node_name(
-                node.get('name') or 
-                node.get('label') or 
-                node.get('path') or 
-                f"Node_{uid[-8:]}"
-            )
-            central_type = node.get('nodeType', 'unknown')
-
-            # Traiter relations hiérarchiques
+            # 📦 TRAITEMENT STANDARD pour fichiers/classes
             hierarchical_predicates = {
-                'parents': ('parent', True),      
+                'parents': ('parent', True),
                 'children': ('child', False),
                 'classes': ('contains_class', False),
                 'functions': ('contains_function', False),
                 'variables': ('contains_variable', False),
                 'methods': ('has_method', False)
             }
-
+    
             for predicate, (rel_type, is_incoming) in hierarchical_predicates.items():
                 related_nodes = node.get(predicate, [])
-
+    
                 for related_node in related_nodes:
                     if not isinstance(related_node, dict):
                         continue
@@ -1553,7 +1754,7 @@ class GraphWidget(QtWidgets.QWidget):
                         f"Node_{related_uid[-8:]}"
                     )
                     related_type = related_node.get('nodeType', 'unknown')
-
+    
                     if not central_name or not related_name or central_name == related_name:
                         continue
                     
@@ -1579,78 +1780,77 @@ class GraphWidget(QtWidgets.QWidget):
                             'relation_type': rel_type,
                             'category': 'hierarchy'
                         }
-
+    
                     if (relation['source'] and relation['target'] and 
                         relation['source'] != relation['target']):
                         all_relations.append(relation)
-
-            # Traiter relations de code
-            code_predicates = {
-                'imports': ('import', False),
-                '~imports': ('imported_by', True),
-                'calls': ('call', False),
-                '~calls': ('called_by', True),
-                'uses': ('use', False),
-                '~uses': ('used_by', True),
-                'extends': ('extends', False),
-                '~extends': ('extended_by', True),
-                'implements': ('implements', False),
-                '~implements': ('implemented_by', True)
-            }
-
-            for predicate, (rel_type, is_incoming) in code_predicates.items():
-                related_nodes = node.get(predicate, [])
-
-                for related_node in related_nodes:
-                    if not isinstance(related_node, dict):
-                        continue
-                    
-                    related_uid = related_node.get('uid')
-                    if not related_uid:
-                        continue
-                    
-                    related_name = self.normalize_node_name(
-                        related_node.get('name') or 
-                        related_node.get('label') or 
-                        f"Node_{related_uid[-8:]}"
-                    )
-                    related_type = related_node.get('nodeType', 'unknown')
-
-                    if not central_name or not related_name or central_name == related_name:
-                        continue
-                    
-                    if is_incoming:
-                        relation = {
-                            'source': related_name,
-                            'source_uid': related_uid,
-                            'source_type': related_type,
-                            'target': central_name,
-                            'target_uid': central_uid,
-                            'target_type': central_type,
-                            'relation_type': rel_type,
-                            'category': 'code'
-                        }
-                    else:
-                        relation = {
-                            'source': central_name,
-                            'source_uid': central_uid,
-                            'source_type': central_type,
-                            'target': related_name,
-                            'target_uid': related_uid,
-                            'target_type': related_type,
-                            'relation_type': rel_type,
-                            'category': 'code'
-                        }
-
-                    if (relation['source'] and relation['target'] and 
-                        relation['source'] != relation['target']):
-                        all_relations.append(relation)
-
-        # 2️⃣ ✅ Relations via type Relation (MÉTHODE UNIFIÉE CORRIGÉE)
+    
+        # ✅ TRAITER RELATIONS DE CODE (commun pour tous les types)
+        code_predicates = {
+            'imports': ('import', False),
+            '~imports': ('imported_by', True),
+            'calls': ('call', False),
+            '~calls': ('called_by', True),
+            'uses': ('use', False),
+            '~uses': ('used_by', True),
+            'extends': ('extends', False),
+            '~extends': ('extended_by', True),
+            'implements': ('implements', False),
+            '~implements': ('implemented_by', True)
+        }
+    
+        for predicate, (rel_type, is_incoming) in code_predicates.items():
+            related_nodes = node.get(predicate, [])
+    
+            for related_node in related_nodes:
+                if not isinstance(related_node, dict):
+                    continue
+                
+                related_uid = related_node.get('uid')
+                if not related_uid:
+                    continue
+                
+                related_name = self.normalize_node_name(
+                    related_node.get('name') or 
+                    related_node.get('label') or 
+                    f"Node_{related_uid[-8:]}"
+                )
+                related_type = related_node.get('nodeType', 'unknown')
+    
+                if not central_name or not related_name or central_name == related_name:
+                    continue
+                
+                if is_incoming:
+                    relation = {
+                        'source': related_name,
+                        'source_uid': related_uid,
+                        'source_type': related_type,
+                        'target': central_name,
+                        'target_uid': central_uid,
+                        'target_type': central_type,
+                        'relation_type': rel_type,
+                        'category': 'code'
+                    }
+                else:
+                    relation = {
+                        'source': central_name,
+                        'source_uid': central_uid,
+                        'source_type': central_type,
+                        'target': related_name,
+                        'target_uid': related_uid,
+                        'target_type': related_type,
+                        'relation_type': rel_type,
+                        'category': 'code'
+                    }
+    
+                if (relation['source'] and relation['target'] and 
+                    relation['source'] != relation['target']):
+                    all_relations.append(relation)
+    
+        # ✅ ÉTAPE 2: Relations via type Relation (commun pour tous)
         try:
-            relation_type_relations = self._get_relation_type_relations(uid)
-
-            # Fusionner en évitant les doublons
+            relation_type_relations = self._get_relation_type_relations_cached(uid)
+    
             existing_keys = set()
             for rel in all_relations:
                 key = (
@@ -1659,8 +1859,7 @@ class GraphWidget(QtWidgets.QWidget):
                     rel.get('relation_type')
                 )
                 existing_keys.add(key)
-
-            # Ajouter uniquement les nouvelles
+    
             added_count = 0
             for rel in relation_type_relations:
                 key = (
@@ -1668,35 +1867,30 @@ class GraphWidget(QtWidgets.QWidget):
                     rel.get('target_uid') or rel.get('target'),
                     rel.get('relation_type')
                 )
-
+    
                 if key not in existing_keys:
                     all_relations.append(rel)
                     existing_keys.add(key)
                     added_count += 1
-
+    
             logger.info(f"  🔗 Relations type Relation: {len(relation_type_relations)} récupérées, {added_count} ajoutées")
-
+    
         except Exception as e:
             logger.error(f"❌ Erreur récupération relations type Relation: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # 3️⃣ Statistiques finales
-        self._log_relation_stats(all_relations)
-
-        logger.info(f"\n✅ Total final: {len(all_relations)} relations pour {uid}")
-
-        return all_relations
     
+        # ✅ ÉTAPE 3: Statistiques
+        self._log_relation_stats(all_relations)
+    
+        logger.info(f"✅ Total: {len(all_relations)} relations pour {uid}")
+        return all_relations
+        
     def _get_nodes_details_batch(self, uids: List[str]) -> Dict[str, Dict]:
-        """
-        ✅ NOUVELLE MÉTHODE : Récupère les détails de plusieurs nœuds en une seule requête
-        avec système de cache pour optimiser les performances
-        """
+        """✅ Récupère plusieurs nœuds en UNE SEULE requête"""
+
         if not uids:
             return {}
 
-        # Vérifier le cache d'abord
+        # Vérifier cache d'abord
         cached_details = {}
         missing_uids = []
 
@@ -1708,44 +1902,46 @@ class GraphWidget(QtWidgets.QWidget):
             else:
                 missing_uids.append(uid)
 
-        logger.info(f"📦 Cache: {len(cached_details)} trouvés, {len(missing_uids)} à récupérer")
+        if not missing_uids:
+            logger.info(f"✅ Tous les nœuds en cache ({len(uids)})")
+            return cached_details
 
-        # Récupérer les nœuds manquants
-        if missing_uids:
-            uid_list = ", ".join(missing_uids)
-            query = f"""
-            {{
-              nodes(func: uid({uid_list})) {{
-                uid
-                name
-                path
-                label
-                nodeType
-                level
-                description
+        logger.info(f"📡 Batch: {len(missing_uids)} nœuds à récupérer")
 
-                # Relations de base pour contexte
-                parents {{ uid name }}
-                children: ~parents {{ uid name }}
-              }}
-            }}
-            """
+        # Requête batch
+        uid_list = ", ".join(missing_uids)
+        query = f"""
+        {{
+          nodes(func: uid({uid_list})) {{
+            uid
+            name
+            path
+            label
+            nodeType
+            level
+            parents {{ uid name }}
+            children: ~parents {{ uid name }}
+          }}
+        }}
+        """
 
-            result = self._execute_dgraph_query(query)
+        result = self._execute_dgraph_query(query)
 
-            if result and 'nodes' in result:
-                for node in result['nodes']:
-                    node_uid = node.get('uid')
-                    if node_uid:
-                        # Mettre en cache
-                        cache_key = f"node_details_{node_uid}"
-                        self.query_cache.set(cache_key, node)
-                        cached_details[node_uid] = node
+        if result and 'nodes' in result:
+            for node in result['nodes']:
+                node_uid = node.get('uid')
+                if node_uid:
+                    cache_key = f"node_details_{node_uid}"
+                    self.query_cache.set(cache_key, node)
+                    cached_details[node_uid] = node
 
-        logger.info(f"✅ Détails récupérés pour {len(cached_details)} nœuds")
+        logger.info(f"✅ Batch récupéré: {len(cached_details)} nœuds")
         return cached_details
     
     def _diagnose_relation_issues(self, uid: str) -> Dict:
+        """
+        ✅ DIAGNOSTIC PUBLIC : Peut être appelé par taxonomy_dialog
+        """
         if not uid or not self.dgraph_connector:
             return {'error': 'UID ou connecteur manquant'}
 
@@ -1788,13 +1984,11 @@ class GraphWidget(QtWidgets.QWidget):
           node(func: uid({uid})) {{
             uid
             name
-
             parents {{ uid }}
             children: ~parents {{ uid }}
             classes {{ uid }}
             functions {{ uid }}
             variables {{ uid }}
-
             imports {{ uid }}
             ~imports {{ uid }}
             calls {{ uid }}
@@ -1803,7 +1997,6 @@ class GraphWidget(QtWidgets.QWidget):
             ~uses {{ uid }}
           }}
 
-          # Compter relations de type Relation
           outgoing_relations(func: type(Relation)) @filter(uid_in(source, {uid})) {{
             uid
             relationType
@@ -1822,15 +2015,13 @@ class GraphWidget(QtWidgets.QWidget):
             node_data = result.get('node', [{}])[0]
 
             # Compter relations hiérarchiques
-            hierarchical_predicates = ['parents', 'children', 'classes', 'functions', 'variables']
-            for predicate in hierarchical_predicates:
+            for predicate in ['parents', 'children', 'classes', 'functions', 'variables']:
                 count = len(node_data.get(predicate, []))
                 if count > 0:
                     diagnostic['relation_counts'][predicate] = count
 
             # Compter relations de code
-            code_predicates = ['imports', '~imports', 'calls', '~calls', 'uses', '~uses']
-            for predicate in code_predicates:
+            for predicate in ['imports', '~imports', 'calls', '~calls', 'uses', '~uses']:
                 count = len(node_data.get(predicate, []))
                 if count > 0:
                     diagnostic['relation_counts'][predicate] = count
@@ -1841,19 +2032,17 @@ class GraphWidget(QtWidgets.QWidget):
 
             if outgoing_rels:
                 diagnostic['relation_counts']['outgoing_relation_type'] = len(outgoing_rels)
-                # Compter par type
                 for rel in outgoing_rels:
                     rel_type = rel.get('relationType', 'unknown')
                     diagnostic['relation_type_counts'][rel_type] = diagnostic['relation_type_counts'].get(rel_type, 0) + 1
 
             if incoming_rels:
                 diagnostic['relation_counts']['incoming_relation_type'] = len(incoming_rels)
-                # Compter par type
                 for rel in incoming_rels:
                     rel_type = rel.get('relationType', 'unknown')
                     diagnostic['relation_type_counts'][f"~{rel_type}"] = diagnostic['relation_type_counts'].get(f"~{rel_type}", 0) + 1
 
-        # Analyser les problèmes potentiels
+        # Analyser les problèmes
         total_relations = sum(diagnostic['relation_counts'].values())
 
         if total_relations == 0:
@@ -1866,26 +2055,20 @@ class GraphWidget(QtWidgets.QWidget):
 
         logger.info(f"🔬 Diagnostic terminé: {len(diagnostic['issues'])} problème(s) identifié(s)")
         return diagnostic
-    
+
     def _get_relation_type_relations(self, uid: str) -> List[Dict]:
-        """
-        ✅ VERSION ULTRA-ROBUSTE : Recherche multi-critères
-        - Par UID (source/target)
-        - Par nom exact (avec/sans extension)
-        - Par sourceName/targetName
-        - Par sourcePath/targetPath
-        - Par expressions régulières
-        """
+        """✅ VERSION CORRIGÉE : Récupère TOUTES les relations de type Relation"""
+
         if not uid or not self.dgraph_connector:
             logger.error("❌ Pas d'UID ou pas de connecteur")
             return []
 
         logger.info(f"\n{'='*70}")
-        logger.info(f"🔗 RÉCUPÉRATION RELATIONS TYPE RELATION (ROBUSTE)")
+        logger.info(f"🔗 RÉCUPÉRATION RELATIONS TYPE RELATION (AMÉLIORÉE)")
         logger.info(f"  UID central: {uid}")
         logger.info(f"{'='*70}")
 
-        # ✅ ÉTAPE 1 : Récupérer TOUS les identifiants possibles du nœud
+        # ✅ ÉTAPE 1 : Récupérer les informations du nœud
         node_query = f"""
         {{
           node(func: uid({uid})) {{
@@ -1905,143 +2088,180 @@ class GraphWidget(QtWidgets.QWidget):
             return []
 
         node_data = node_result['node'][0]
-        node_name = node_data.get('name', '')
-        node_path = node_data.get('path', '')
-        node_label = node_data.get('label', '')
-        node_id = node_data.get('id', '')
 
-        # ✅ Créer TOUTES les variantes possibles
+        # ✅ CORRECTION : Essayer TOUS les champs possibles + FALLBACK
+        node_name = (
+            node_data.get('name') or 
+            node_data.get('label') or 
+            node_data.get('id') or 
+            ''
+        )
+        node_path = node_data.get('path', '')
+
+        # ✅ FALLBACK CRITIQUE : Si toujours vide, utiliser UID uniquement
+        if not node_name and not node_path:
+            logger.warning(f"⚠️ Nœud {uid} sans nom/path, recherche par UID uniquement")
+            # Appeler une méthode de fallback qui cherche UNIQUEMENT par UID
+            return self._get_relations_by_uid_only(uid)
+
+        # 2. Construire variantes de recherche
         search_variants = set()
 
-        # Variantes du nom
         if node_name:
-            search_variants.add(node_name)  # Ex: "main_window.py"
-            search_variants.add(os.path.basename(node_name))  # Ex: "main_window.py"
-            name_no_ext = os.path.splitext(node_name)[0]  # Ex: "main_window"
+            search_variants.add(node_name)
+            search_variants.add(os.path.basename(node_name))
+            name_no_ext = os.path.splitext(node_name)[0]
             search_variants.add(name_no_ext)
             search_variants.add(os.path.basename(name_no_ext))
 
-        # Variantes du path
         if node_path:
             search_variants.add(node_path)
             search_variants.add(os.path.basename(node_path))
-            path_no_ext = os.path.splitext(node_path)[0]
-            search_variants.add(path_no_ext)
 
-        # Autres identifiants
-        if node_label:
-            search_variants.add(node_label)
-        if node_id:
-            search_variants.add(node_id)
-
-        # Filtrer les valeurs vides
         search_variants = {v for v in search_variants if v and v.strip()}
 
-        logger.info(f"📋 Identifiants du nœud à rechercher:")
+        logger.info(f"🔍 Identifiants à rechercher:")
         for variant in sorted(search_variants):
             logger.info(f"   • {variant}")
 
         if not search_variants:
-            logger.error("❌ Aucun identifiant valide pour ce nœud")
+            # ✅ CORRECTION : Ne devrait jamais arriver grâce au fallback ci-dessus
+            logger.error("❌ Aucun identifiant valide (cas impossible après fallback)")
             return []
 
-        # ✅ ÉTAPE 2 : Construction de la requête Dgraph MULTI-CRITÈRES
+        # ✅ ÉTAPE 3 : Requête TRIPLE MODE
+        # Mode 1 : Par UID direct
+        # Mode 2 : Par sourceName/targetName exact
+        # Mode 3 : Par sourcePath/targetPath exact
 
-        # Filtres par UID
-        uid_filters = f"uid_in(source, {uid}) OR uid_in(target, {uid})"
+        relations_by_uid = []
+        relations_by_name = []
 
-        # Filtres par nom/path (exact match)
-        exact_filters = []
-        for variant in search_variants:
-            escaped = variant.replace('"', '\\"')
-            exact_filters.extend([
-                f'eq(sourceName, "{escaped}")',
-                f'eq(targetName, "{escaped}")',
-                f'eq(sourcePath, "{escaped}")',
-                f'eq(targetPath, "{escaped}")'
-            ])
-
-        # Filtres par regex (pour les variantes partielles)
-        regex_filters = []
-        for variant in search_variants:
-            # Échapper les caractères spéciaux regex
-            escaped_regex = variant.replace('.', r'\.').replace('_', r'\_')
-            regex_filters.extend([
-                f'regexp(sourceName, /{escaped_regex}/)',
-                f'regexp(targetName, /{escaped_regex}/)',
-                f'regexp(sourcePath, /{escaped_regex}/)',
-                f'regexp(targetPath, /{escaped_regex}/)'
-            ])
-
-        # Combiner tous les filtres
-        exact_filter_str = " OR ".join(exact_filters)
-        regex_filter_str = " OR ".join(regex_filters)
-
-        combined_filter = f"""
-        {uid_filters} OR 
-        ({exact_filter_str}) OR 
-        ({regex_filter_str})
-        """
-
-        # ✅ ÉTAPE 3 : Requête unifiée
-        unified_query = f"""
+        # 🔍 MODE 1 : Recherche par UID
+        query_by_uid = f"""
         {{
-          all_relations(func: type(Relation)) @filter(
-            {combined_filter}
-          ) {{
+          relations_out(func: type(Relation)) @filter(uid_in(source, {uid})) {{
             uid
             relationType
             category
             line
             intraFile
-
-            # Métadonnées complètes
             sourceName
             sourceDescription
             sourcePath
             sourceType
-
             targetName
             targetDescription
             targetPath
             targetType
+            source {{ uid name path label nodeType }}
+            target {{ uid name path label nodeType }}
+          }}
 
-            # Références UIDs (peuvent être null)
-            source {{
-              uid
-              name
-              path
-              label
-              nodeType
-            }}
-
-            target {{
-              uid
-              name
-              path
-              label
-              nodeType
-            }}
+          relations_in(func: type(Relation)) @filter(uid_in(target, {uid})) {{
+            uid
+            relationType
+            category
+            line
+            intraFile
+            sourceName
+            sourceDescription
+            sourcePath
+            sourceType
+            targetName
+            targetDescription
+            targetPath
+            targetType
+            source {{ uid name path label nodeType }}
+            target {{ uid name path label nodeType }}
           }}
         }}
         """
 
-        logger.info(f"🔍 Exécution requête unifiée...")
+        result_uid = self._execute_dgraph_query(query_by_uid)
 
-        result = self._execute_dgraph_query(unified_query)
+        if result_uid:
+            relations_by_uid = (result_uid.get('relations_out', []) + 
+                               result_uid.get('relations_in', []))
 
-        if not result or 'all_relations' not in result:
-            logger.warning("⚠️ Aucune relation trouvée")
-            return []
+        logger.info(f"🎯 Mode UID: {len(relations_by_uid)} relations trouvées")
 
-        raw_relations = result['all_relations']
-        logger.info(f"📦 {len(raw_relations)} relations brutes récupérées")
+        # 🔍 MODE 2 : Recherche par nom/path
+        for variant in search_variants:
+            escaped = variant.replace('"', '\\"')
 
-        # ✅ ÉTAPE 4 : Traitement et validation
+            query_by_name = f"""
+            {{
+              by_source_name(func: type(Relation)) @filter(
+                eq(sourceName, "{escaped}") OR eq(sourcePath, "{escaped}")
+              ) {{
+                uid
+                relationType
+                category
+                line
+                intraFile
+                sourceName
+                sourceDescription
+                sourcePath
+                sourceType
+                targetName
+                targetDescription
+                targetPath
+                targetType
+                source {{ uid name path label nodeType }}
+                target {{ uid name path label nodeType }}
+              }}
+
+              by_target_name(func: type(Relation)) @filter(
+                eq(targetName, "{escaped}") OR eq(targetPath, "{escaped}")
+              ) {{
+                uid
+                relationType
+                category
+                line
+                intraFile
+                sourceName
+                sourceDescription
+                sourcePath
+                sourceType
+                targetName
+                targetDescription
+                targetPath
+                targetType
+                source {{ uid name path label nodeType }}
+                target {{ uid name path label nodeType }}
+              }}
+            }}
+            """
+
+            result_name = self._execute_dgraph_query(query_by_name)
+
+            if result_name:
+                found = (result_name.get('by_source_name', []) + 
+                        result_name.get('by_target_name', []))
+                relations_by_name.extend(found)
+
+        logger.info(f"🎯 Mode Nom/Path: {len(relations_by_name)} relations trouvées")
+
+        # ✅ ÉTAPE 4 : Fusionner et dédupliquer
+        all_raw_relations = relations_by_uid + relations_by_name
+
+        seen_uids = set()
+        unique_raw_relations = []
+
+        for rel in all_raw_relations:
+            rel_uid = rel.get('uid')
+            if rel_uid and rel_uid not in seen_uids:
+                seen_uids.add(rel_uid)
+                unique_raw_relations.append(rel)
+
+        logger.info(f"📦 {len(unique_raw_relations)} relations uniques après déduplication")
+
+        # ✅ ÉTAPE 5 : Validation et normalisation
         relations_list = []
         seen_keys = set()
 
-        for rel in raw_relations:
+        for rel in unique_raw_relations:
             # Extraction source
             source_node = rel.get('source', {})
             source_uid_rel = source_node.get('uid') if source_node else None
@@ -2056,11 +2276,10 @@ class GraphWidget(QtWidgets.QWidget):
                 target_node.get('name') if target_node else None
             ) or rel.get('targetName') or rel.get('targetPath', '')
 
-            # ✅ VALIDATION CRITIQUE : Vérifier pertinence
+            # Validation pertinence
             is_source_match = False
             is_target_match = False
 
-            # Vérifier si source correspond à notre nœud
             if source_uid_rel == uid:
                 is_source_match = True
             else:
@@ -2069,7 +2288,6 @@ class GraphWidget(QtWidgets.QWidget):
                 if source_basename in search_variants or source_no_ext in search_variants:
                     is_source_match = True
 
-            # Vérifier si target correspond à notre nœud
             if target_uid_rel == uid:
                 is_target_match = True
             else:
@@ -2078,25 +2296,21 @@ class GraphWidget(QtWidgets.QWidget):
                 if target_basename in search_variants or target_no_ext in search_variants:
                     is_target_match = True
 
-            # ✅ La relation doit concerner notre nœud (source OU target)
             if not (is_source_match or is_target_match):
                 continue
             
-            # Normalisation DOUCE des noms (garde l'extension)
+            # Normalisation noms
             source_name_norm = os.path.basename(source_name).strip() if source_name else ''
             target_name_norm = os.path.basename(target_name).strip() if target_name else ''
 
-            # ✅ Si un des deux noms manque, utiliser l'identifiant du nœud central
-            if not source_name_norm:
-                source_name_norm = node_name or f"Node_{uid[-8:]}"
-            if not target_name_norm:
-                target_name_norm = node_name or f"Node_{uid[-8:]}"
+            if not source_name_norm or not target_name_norm:
+                continue
 
             # Ignorer auto-références
             if source_name_norm == target_name_norm:
                 continue
             
-            # ✅ Déduplication
+            # Déduplication
             relation_type = rel.get('relationType', 'relation')
             unique_key = (
                 source_uid_rel or source_name_norm,
@@ -2109,7 +2323,7 @@ class GraphWidget(QtWidgets.QWidget):
             
             seen_keys.add(unique_key)
 
-            # ✅ Créer la relation
+            # Créer la relation
             relations_list.append({
                 'source': source_name_norm,
                 'source_uid': source_uid_rel or uid,
@@ -2123,239 +2337,402 @@ class GraphWidget(QtWidgets.QWidget):
                 'intraFile': rel.get('intraFile', False)
             })
 
-        # ✅ ÉTAPE 5 : Diagnostic final
-        logger.info(f"\n{'='*70}")
-        logger.info(f"📊 RÉSULTAT FINAL : {len(relations_list)} relations uniques")
-        logger.info(f"{'='*70}")
-
-        if not relations_list:
-            logger.warning("⚠️ AUCUNE RELATION VALIDE après filtrage")
-            logger.warning(f"   Relations brutes : {len(raw_relations)}")
-            logger.warning(f"   Possible cause : Les noms dans Dgraph ne correspondent pas")
-
-            # Afficher échantillon des relations brutes
-            logger.warning(f"\n🔬 Échantillon des relations brutes:")
-            for idx, rel in enumerate(raw_relations[:3]):
-                logger.warning(f"\n  Relation {idx + 1}:")
-                logger.warning(f"    UID: {rel.get('uid')}")
-                logger.warning(f"    Type: {rel.get('relationType')}")
-                logger.warning(f"    sourceName: {rel.get('sourceName', 'N/A')}")
-                logger.warning(f"    targetName: {rel.get('targetName', 'N/A')}")
-                logger.warning(f"    source.uid: {rel.get('source', {}).get('uid', 'N/A')}")
-                logger.warning(f"    target.uid: {rel.get('target', {}).get('uid', 'N/A')}")
-        else:
-            # Log échantillon des relations valides
-            for idx, rel in enumerate(relations_list[:5]):
-                logger.info(f"  {idx+1}. {rel['source']} --[{rel['relation_type']}]--> {rel['target']}")
-                logger.info(f"      source_uid: {rel['source_uid']}")
-                logger.info(f"      target_uid: {rel['target_uid']}")
-
-            if len(relations_list) > 5:
-                logger.info(f"  ... et {len(relations_list) - 5} autres")
+        logger.info(f"✅ {len(relations_list)} relations finales validées")
+        logger.info(f"{'='*70}\n")
 
         return relations_list
     
+    def _get_relations_by_uid_only(self, uid: str) -> List[Dict]:
+        """
+        ✅ FALLBACK CRITIQUE : Récupère relations UNIQUEMENT par UID
+        Utilisé quand name/path sont vides
+        """
+        if not uid or not self.dgraph_connector:
+            return []
+        
+        logger.info(f"🔍 FALLBACK : Recherche par UID uniquement pour {uid}")
+        
+        # Requête UNIQUEMENT par UID dans les relations
+        query = f"""
+        {{
+          relations_out(func: type(Relation)) @filter(uid_in(source, {uid})) {{
+            uid
+            relationType
+            category
+            line
+            sourceName
+            sourceType
+            targetName
+            targetType
+            target {{ uid name path label }}
+          }}
+    
+          relations_in(func: type(Relation)) @filter(uid_in(target, {uid})) {{
+            uid
+            relationType
+            category
+            line
+            sourceName
+            sourceType
+            targetName
+            targetType
+            source {{ uid name path label }}
+          }}
+        }}
+        """
+        
+        result = self._execute_dgraph_query(query)
+        
+        if not result:
+            logger.warning(f"⚠️ Aucune relation trouvée pour UID {uid}")
+            return []
+        
+        all_relations = result.get('relations_out', []) + result.get('relations_in', [])
+        
+        logger.info(f"📦 {len(all_relations)} relations trouvées via UID")
+        
+        relations_list = []
+        seen_keys = set()
+        
+        for rel in all_relations:
+            # Extraire les noms depuis les relations elles-mêmes
+            source_name = rel.get('sourceName', '')
+            target_name = rel.get('targetName', '')
+            
+            # ✅ CORRECTION : Fallback sur les nœuds liés
+            if not source_name and 'source' in rel:
+                source_node = rel['source']
+                source_name = (
+                    source_node.get('name') or 
+                    source_node.get('label') or 
+                    source_node.get('path') or 
+                    f"Node_{source_node.get('uid', 'unknown')[-8:]}"
+                )
+            
+            if not target_name and 'target' in rel:
+                target_node = rel['target']
+                target_name = (
+                    target_node.get('name') or 
+                    target_node.get('label') or 
+                    target_node.get('path') or 
+                    f"Node_{target_node.get('uid', 'unknown')[-8:]}"
+                )
+            
+            if not source_name or not target_name:
+                continue
+            
+            # Normaliser
+            source_name_norm = os.path.basename(source_name).strip()
+            target_name_norm = os.path.basename(target_name).strip()
+            
+            if not source_name_norm or not target_name_norm:
+                continue
+            
+            # Ignorer auto-références
+            if source_name_norm == target_name_norm:
+                continue
+            
+            relation_type = rel.get('relationType', 'relation')
+            unique_key = (source_name_norm, target_name_norm, relation_type)
+            
+            if unique_key in seen_keys:
+                continue
+            
+            seen_keys.add(unique_key)
+            
+            relations_list.append({
+                'source': source_name_norm,
+                'source_uid': uid if rel in result.get('relations_out', []) else rel.get('source', {}).get('uid'),
+                'source_type': rel.get('sourceType', 'file'),
+                'target': target_name_norm,
+                'target_uid': rel.get('target', {}).get('uid') if rel in result.get('relations_out', []) else uid,
+                'target_type': rel.get('targetType', 'file'),
+                'relation_type': relation_type,
+                'category': rel.get('category', 'external'),
+                'line': rel.get('line')
+            })
+        
+        logger.info(f"✅ FALLBACK : {len(relations_list)} relations validées")
+        return relations_list
+
     def _get_relation_type_relations_cached(self, uid: str) -> List[Dict]:
-        """
-        ✅ VERSION AVEC CACHE : Évite de refaire la même requête
-        """
-        # Vérifier cache
         cache_key = f"relations_unified_{uid}"
         cached_data = self.query_cache.get(cache_key)
 
         if cached_data:
-            logger.info(f"✅ Relations récupérées depuis cache: {len(cached_data)} relations")
+            logger.debug(f"✅ Relations type Relation depuis cache: {len(cached_data)}")
             return cached_data
 
-        # Sinon, exécuter la requête
         relations = self._get_relation_type_relations(uid)
 
-        # Mettre en cache
         if relations:
             self.query_cache.set(cache_key, relations)
 
         return relations
 
     def _draw_graph(self):
-        """✅ VERSION AMÉLIORÉE : Dessine avec support sélections multiples"""
+        """Dessine le graphe avec le style unifié (utilise self.current_graph)"""
+
+        # ✅ CORRECTION : Supprimer la vérification de G avant sa définition
         if not self.current_graph:
+            logger.warning("⚠️ Aucun graphe à dessiner")
+            self.figure.clear()
+            ax = self.figure.add_subplot(111)
+            ax.set_facecolor('white')
+            ax.text(0.5, 0.5, "Aucune relation à afficher", ha='center', va='center', 
+                   color='#999999', fontsize=11, style='italic')
+            ax.axis('off')
+            self.canvas.draw()
             return
 
+        # ✅ Maintenant on peut définir G
         G = self.current_graph
-        num_nodes = len(G.nodes())
+        self._diagnose_graph_metadata(G)
 
-        # ✅ DÉTECTER LE MODE SÉLECTION MULTIPLE
-        selected_nodes = [node for node in G.nodes() if G.nodes[node].get('selected', False)]
-        is_multi_selection = len(selected_nodes) > 1
-
-        logger.info(f"🎨 Rendu graphique : {num_nodes} nœuds, multi-sélection={is_multi_selection}")
-
-        # Préparer figure
         self.figure.clear()
         ax = self.figure.add_subplot(111)
         ax.set_facecolor('white')
 
-        self.graph_data = {
-            'G': G, 'ax': ax, 'pos': {}, 'edges': [], 'edge_colors': [],
-            'node_colors': [], 'node_sizes': [], 'labels': {}, 'edge_labels': {},
-            'num_nodes': num_nodes,
-            'min_distance': 0.3 if num_nodes <= 20 else 0.2 if num_nodes <= 50 else 0.15,
-            'is_multi_selection': is_multi_selection,
-            'selected_nodes': selected_nodes
-        }
-        data = self.graph_data
+        num_nodes = len(G.nodes())
 
-        # ✅ LAYOUT ADAPTÉ POUR SÉLECTIONS MULTIPLES
-        if is_multi_selection:
-            if num_nodes <= 10:
-                # Disposition circulaire pour petit graphe multi-sélection
-                pos = nx.circular_layout(G, scale=2.5)
-            elif num_nodes <= 20:
-                # Disposition spring avec nœuds sélectionnés au centre
-                pos = nx.spring_layout(G, k=2.0, iterations=500, seed=42, scale=3.0)
-                # Ajuster positions des nœuds sélectionnés
-                self._adjust_selected_nodes_positions(pos, selected_nodes)
-            else:
-                pos = nx.kamada_kawai_layout(G, scale=3.5)
+        # ✅ CAS LIMITES
+        if num_nodes == 0:
+            ax.text(0.5, 0.5, "Aucune relation à afficher", ha='center', va='center', 
+                   color='#999999', fontsize=11, style='italic')
+            ax.axis('off')
+            self.canvas.draw()
+            return
+
+        # ✅ LAYOUT AVEC ORBITES
+        node_orbits = {}
+        if self.current_central_name:
+            pos, node_orbits = self._compute_grouped_layout(G, self.current_central_name)
         else:
-            # Layout standard pour sélection simple
-            if num_nodes > 100:
-                pos = nx.kamada_kawai_layout(G, scale=3.0)
-            elif num_nodes > 50:
-                pos = nx.spring_layout(G, k=2.0, iterations=300, seed=42, scale=3.0)
-            else:
-                k_value = 3.0 / (num_nodes ** 0.4) if num_nodes > 0 else 1.0
-                pos = nx.spring_layout(G, k=k_value, iterations=300, seed=42, scale=3.0)
-
-        pos = self._apply_collision_avoidance(G, pos, num_nodes)
-        data['pos'] = {node: list(coord) for node, coord in pos.items()}
-
-        # ✅ PRÉPARER ARÊTES avec couleurs spéciales pour multi-sélection
-        for u, v, edge_data in G.edges(data=True):
-            data['edges'].append((u, v))
-            edge_color = edge_data.get('color', '#CCCCCC')
-            relation_type = edge_data.get('relation_type', '')
-
-            if is_multi_selection:
-                # Couleurs spéciales pour relations entre sélectionnés
-                if u in selected_nodes and v in selected_nodes:
-                    edge_color = '#4CAF50'  # Vert pour relations directes entre sélectionnés
-                elif u in selected_nodes or v in selected_nodes:
-                    edge_color = '#FF9800'  # Orange pour relations vers/depuis sélectionnés
+            if num_nodes > 0:
+                node_degrees = dict(G.degree())
+                if node_degrees:
+                    central_node = max(node_degrees, key=node_degrees.get)
+                    pos, node_orbits = self._compute_grouped_layout(G, central_node)
                 else:
-                    edge_color = '#E0E0E0'  # Gris clair pour autres relations
+                    # Fallback
+                    pos = nx.spring_layout(G, k=2.0, iterations=300, seed=42, scale=3.0)
+            else:
+                pos = {}
 
-            data['edge_colors'].append(edge_color)
+        # ✅ COLLISION AVOIDANCE
+        pos = self._apply_universal_collision_avoidance(G, pos, num_nodes)
 
-        # ✅ PRÉPARER NŒUDS avec styles distincts
+        logger.info(f"🎨 Layout calculé pour {num_nodes} nœuds avec orbites")
+
+        if num_nodes <= 15:
+            text_width = 10.0  # ✅ AUGMENTÉ de 8.0 à 10.0
+            text_height = 2.5  # ✅ AUGMENTÉ de 2.0 à 2.5
+            font_size = 11
+            max_chars = 35
+        elif num_nodes <= 30:
+            text_width = 9.0  # ✅ AUGMENTÉ
+            text_height = 2.3  # ✅ AUGMENTÉ
+            font_size = 10
+            max_chars = 32
+        else:
+            text_width = 8.0  # ✅ AUGMENTÉ
+            text_height = 2.0  # ✅ AUGMENTÉ
+            font_size = 9
+            max_chars = 28 
+
+        # ✅ DESSINER LES ARÊTES
+        curvature = 0.12 if num_nodes <= 20 else 0.08
+        edge_width = 2.0 if num_nodes <= 20 else 1.5
+        edge_alpha = 0.7
+        arrow_size = 14 if num_nodes <= 20 else 10
+
+        edges = list(G.edges(data=True))
+        edge_colors = [d.get('color', '#CCCCCC') for _, _, d in edges]
+
+        if num_nodes > 30:
+            nx.draw_networkx_edges(
+                G, pos, ax=ax, 
+                edge_color=edge_colors, 
+                width=edge_width,
+                alpha=edge_alpha, 
+                arrows=True, 
+                arrowsize=arrow_size,
+                arrowstyle='->'
+            )
+        else:
+            nx.draw_networkx_edges(
+                G, pos, ax=ax, 
+                edge_color=edge_colors, 
+                width=edge_width,
+                alpha=edge_alpha, 
+                arrows=True, 
+                arrowsize=arrow_size,
+                connectionstyle=f'arc3,rad={curvature}'
+            )
+
         for node in G.nodes():
-            node_type = G.nodes[node].get('node_type', 'unknown')
-            level = G.nodes[node].get('level', 0)
-            is_selected = G.nodes[node].get('selected', False)
+            x, y = pos[node]
 
-            # Couleurs et tailles selon le statut
-            if is_multi_selection and is_selected:
-                # Nœuds sélectionnés en mode multi : rouge/rose vif
-                data['node_colors'].append('#E91E63')
-                data['node_sizes'].append(int((500 if num_nodes <= 20 else 400) * 1.3))
-            elif node == self.central_node:
-                # Nœud central (mode simple)
-                data['node_colors'].append('#8B2E1F')
-                data['node_sizes'].append(int((400 if num_nodes <= 20 else 300) * 1.4))
+            node_data = G.nodes[node]
+            node_type = node_data.get('node_type', None)
+
+            # Formater le nom
+            formatted_name = self._format_node_display_name(node, node_type)
+            display_name = formatted_name[:max_chars] + '..' if len(formatted_name) > max_chars else formatted_name
+
+            if node == self.current_central_name:
+                color = '#8B2E1F'  # Rouge central
+                edge_color = '#666666'
+                linewidth = 3.0
             else:
-                # Nœuds normaux
-                base_color = self._get_color_for_node(node_type, level)
-                # Atténuer si pas connecté aux sélectionnés
-                if is_multi_selection and not self._is_connected_to_selected(G, node, selected_nodes):
-                    data['node_colors'].append('#BDBDBD')  # Gris pour nœuds non connectés
+                # 🎯 ÉTAPE 1 : Récupérer l'orbite du nœud
+                node_orbit = node_orbits.get(node, 3)  # Par défaut orbite 3
+
+                # 🎯 ÉTAPE 2 : Couleur de base selon l'orbite
+                if node_orbit == 1:
+                    # Orbite 1 : Hiérarchie (Bleu)
+                    color = '#2196F3'
+                    edge_color = '#1565C0'
+                    color_reason = "orbite 1 (hiérarchie)"
+                elif node_orbit == 2:
+                    # Orbite 2 : Code interne (Cyan)
+                    color = '#00ACC1'
+                    edge_color = '#00838F'
+                    color_reason = "orbite 2 (code interne)"
                 else:
-                    data['node_colors'].append(base_color)
+                    # Orbite 3 : Externe (Orange)
+                    color = '#FF8C00'
+                    edge_color = '#E65100'
+                    color_reason = "orbite 3 (externe)"
 
-                data['node_sizes'].append(350 if num_nodes <= 20 else 250 if num_nodes <= 50 else 150)
+                # 🎯 ÉTAPE 3 : OVERRIDE pour les CALLS si c'est vraiment dominant
+                # Collecter les types de relations
+                node_relation_types = {}
+                for u, v, data in G.edges(data=True):
+                    if u == node or v == node:
+                        rel_type = data.get('relation_type', '').lower()
+                        if rel_type:
+                            node_relation_types[rel_type] = node_relation_types.get(rel_type, 0) + 1
 
-            data['labels'][node] = node
+                # Si le nœud a BEAUCOUP de calls (>80% des relations), le marquer en violet
+                if node_relation_types:
+                    total_relations = sum(node_relation_types.values())
+                    call_count = sum(count for rel, count in node_relation_types.items() 
+                                    if rel in ['call', 'calls', 'method_call', 'function_call'])
 
-        # Labels arêtes
-        data['edge_labels'] = {(u, v): d.get('label', '') for u, v, d in G.edges(data=True)}
+                    call_percentage = (call_count / total_relations * 100) if total_relations > 0 else 0
 
-        # ✅ DESSINER ARÊTES avec épaisseurs variables
-        curvature = 0.1 if num_nodes <= 15 else 0.05
+                    # 🟣 OVERRIDE : Si >80% de calls, marquer en violet
+                    if call_percentage > 80 and call_count >= 2:
+                        color = '#9C27B0'  # Violet
+                        edge_color = '#7B1FA2'
+                        color_reason = f"calls dominant ({call_percentage:.0f}%)"
 
-        if data['edges']:
-            # Calculer épaisseurs selon importance
-            edge_widths = []
-            for i, (u, v) in enumerate(data['edges']):
-                if is_multi_selection and u in selected_nodes and v in selected_nodes:
-                    edge_widths.append(3.0)  # Plus épais pour relations entre sélectionnés
-                elif is_multi_selection and (u in selected_nodes or v in selected_nodes):
-                    edge_widths.append(2.0)  # Moyen pour relations avec sélectionnés
-                else:
-                    edge_widths.append(1.0)  # Normal pour autres
+                    logger.debug(f"🎨 {node}: {color_reason}")
+                    if call_percentage > 50:
+                        logger.debug(f"   Calls: {call_count}/{total_relations} ({call_percentage:.0f}%)")
 
-            nx.draw_networkx_edges(G, pos, edgelist=data['edges'], ax=ax, 
-                                   edge_color=data['edge_colors'],
-                                   width=edge_widths,
-                                   alpha=0.8, arrows=True,
-                                   arrowsize=15 if num_nodes <= 50 else 12,
-                                   connectionstyle=f'arc3,rad={curvature}')
+                linewidth = 2.5
 
-        # Dessiner nœuds avec bordures distinctives
-        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=data['node_colors'],
-                               node_size=data['node_sizes'], alpha=0.9,
-                               edgecolors='#2C2C2C',
-                               linewidths=4.0 if is_multi_selection else 2.5)
+            # Dessiner le rectangle du nœud
+            rect = FancyBboxPatch(
+                (x - text_width/2, y - text_height/2),
+                text_width, text_height,
+                boxstyle="round,pad=0.15",
+                edgecolor=edge_color,
+                facecolor=color,
+                alpha=0.95,
+                linewidth=linewidth,
+                zorder=2
+            )
+            ax.add_patch(rect)
 
-        # ✅ CERCLES DISTINCTIFS pour sélections multiples
-        if is_multi_selection:
-            for node in selected_nodes:
-                if node in pos:
-                    from matplotlib.patches import Circle
-                    circle = Circle(pos[node], 0.20, color='#E91E63', fill=False,
-                                    linewidth=3, alpha=0.9, linestyle='--')
-                    ax.add_patch(circle)
+            # Texte
+            ax.text(
+                x, y, display_name,
+                ha='center', va='center',
+                fontsize=font_size,
+                fontweight='bold',
+                color='white',
+                zorder=3
+            )
 
-        # Labels nœuds avec couleurs adaptées
-        if data['labels']:
-            font_size = 9 if num_nodes <= 15 else 7 if num_nodes <= 30 else 6
-            font_colors = []
-
-            for node in data['labels'].keys():
-                if is_multi_selection and G.nodes[node].get('selected', False):
-                    font_colors.append('#FFFFFF')  # Blanc pour nœuds sélectionnés
-                else:
-                    font_colors.append('#000000')  # Noir standard
-
-            # Note: networkx ne supporte pas font_color par nœud, on utilise une couleur globale
-            nx.draw_networkx_labels(G, pos, data['labels'], ax=ax,
-                                    font_size=font_size,
-                                    font_weight='bold', font_color='#000000',
-                                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
-                                              edgecolor='none', alpha=0.85))
-
-        # Labels arêtes si petit graphe
-        if data['edge_labels'] and num_nodes <= 25:
-            nx.draw_networkx_edge_labels(G, pos, data['edge_labels'], ax=ax,
-                                        font_size=6 if num_nodes > 15 else 7,
-                                        font_color='#444444',
-                                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
-                                                  edgecolor='none', alpha=0.7))
-
-        # ✅ TITRE adapté au mode
-        if is_multi_selection:
-            if len(data['edges']) > 0:
-                ax.set_title(f"Relations entre {len(selected_nodes)} éléments sélectionnés",
-                             fontsize=12, fontweight='bold', color='#E91E63', pad=20)
-            else:
-                ax.set_title(f"{len(selected_nodes)} éléments sélectionnés (aucune relation directe)",
-                             fontsize=12, fontweight='bold', color='#FF9800', pad=20)
-
-        # Détails nœud sélectionné
-        if self.selected_node:
-            self._show_node_details_in_graph(self.selected_node, G)
+        # ✅ DESSINER LA LÉGENDE AVEC STATISTIQUES
+        self._draw_orbit_legend(ax, edges, node_orbits)
 
         ax.axis('off')
-        ax.margins(0.12 if num_nodes <= 50 else 0.08)
-        self.canvas.draw_idle()
+
+        # ✅ LIMITES
+        x_coords = [pos[node][0] for node in G.nodes()]
+        y_coords = [pos[node][1] for node in G.nodes()]
+
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
+
+        margin = 5.0 if num_nodes <= 15 else 4.0 if num_nodes <= 30 else 3.0
+
+        ax.set_xlim(x_min - margin, x_max + margin)
+        ax.set_ylim(y_min - margin, y_max + margin)
+
+        # ✅ SAUVEGARDE DONNÉES
+        self.graph_data = {
+            'pos': {node: list(coord) for node, coord in pos.items()},
+            'G': G,
+            'ax': ax,
+            'edges': edges,
+            'edge_colors': edge_colors,
+            'num_nodes': num_nodes,
+            'node_orbits': node_orbits,
+            'text_width': text_width,
+            'text_height': text_height,
+            'font_size': font_size,
+            'max_chars': max_chars,
+            'x_min': x_min,
+            'x_max': x_max,
+            'y_min': y_min,
+            'y_max': y_max
+        }
+
+        self.canvas.draw()
+
+    def _diagnose_graph_metadata(self, G):
+        """🔍 DIAGNOSTIC : Affiche les métadonnées des arêtes"""
+        logger.info(f"\n{'='*70}")
+        logger.info(f"🔍 DIAGNOSTIC MÉTADONNÉES DU GRAPHE")
+        logger.info(f"{'='*70}")
+        logger.info(f"Nœuds : {len(G.nodes())}")
+        logger.info(f"Arêtes : {len(G.edges())}")
+
+        # Échantillon d'arêtes
+        sample_size = min(10, len(G.edges()))
+        logger.info(f"\n📊 Échantillon de {sample_size} arêtes :")
+
+        for i, (u, v, data) in enumerate(list(G.edges(data=True))[:sample_size]):
+            rel_type = data.get('relation_type', 'MANQUANT')
+            category = data.get('category', 'MANQUANT')
+            color = data.get('color', 'MANQUANT')
+            logger.info(f"  {i+1}. {u} → {v}")
+            logger.info(f"     type: {rel_type}, catégorie: {category}, couleur: {color}")
+
+        # Statistiques par type
+        type_counts = {}
+        category_counts = {}
+
+        for u, v, data in G.edges(data=True):
+            rel_type = data.get('relation_type', 'unknown')
+            category = data.get('category', 'unknown')
+            type_counts[rel_type] = type_counts.get(rel_type, 0) + 1
+            category_counts[category] = category_counts.get(category, 0) + 1
+
+        logger.info(f"\n📈 Types de relations :")
+        for rel_type, count in sorted(type_counts.items(), key=lambda x: -x[1]):
+            logger.info(f"  • {rel_type}: {count}")
+
+        logger.info(f"\n📂 Catégories :")
+        for category, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+            logger.info(f"  • {category}: {count}")
+
+        logger.info(f"{'='*70}\n")
 
     def _adjust_selected_nodes_positions(self, pos: Dict, selected_nodes: List[str]):
         if not selected_nodes:
@@ -2384,65 +2761,7 @@ class GraphWidget(QtWidgets.QWidget):
                 return True
 
         return False
-
-
-    def _update_legend(self):
-    # Nettoyer la légende actuelle
-        while self.legend_layout.count() > 0:
-            child = self.legend_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-    
-        if not self.current_graph:
-            return
-    
-        # Statistiques globales
-        total_nodes = len(self.current_graph.nodes())
-        total_edges = len(self.current_graph.edges())
-    
-        stats_label = QtWidgets.QLabel(f"📊 {total_nodes} nœuds, {total_edges} relations")
-        stats_label.setStyleSheet("color: #000; font-size: 12px; font-weight: bold; padding: 4px 8px;")
-        self.legend_layout.addWidget(stats_label)
-    
-        # Espacement
-        sep = QtWidgets.QLabel(" | ")
-        sep.setStyleSheet("color: #999; font-size: 12px; padding: 0 4px;")
-        self.legend_layout.addWidget(sep)
-    
-        # Récupérer tous les types de relations utilisés dans le graphe
-        relation_types = defaultdict(int)
-        for _, _, d in self.current_graph.edges(data=True):
-            rel_type = d.get('relation_type', 'unknown')
-            relation_types[rel_type] += 1
-    
-        # Trier par fréquence
-        sorted_relations = sorted(relation_types.items(), key=lambda x: -x[1])
-    
-        # Afficher chaque type de relation avec un petit tiret coloré
-        for rel_type, count in sorted_relations:
-            color = self._get_color_for_type(rel_type)
-    
-            # Conteneur horizontal
-            item_widget = QtWidgets.QWidget()
-            layout = QtWidgets.QHBoxLayout(item_widget)
-            layout.setContentsMargins(5, 0, 5, 0)
-            layout.setSpacing(6)
-    
-            # Tiret coloré (ligne horizontale)
-            color_bar = QtWidgets.QFrame()
-            color_bar.setFixedSize(25, 4)
-            color_bar.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
-            layout.addWidget(color_bar)
-    
-            # Nom du type de relation
-            label = QtWidgets.QLabel(f"{rel_type} ({count})")
-            label.setStyleSheet("color: #000; font-size: 12px;")
-            layout.addWidget(label)
-    
-            self.legend_layout.addWidget(item_widget)
-    
-        self.legend_layout.addStretch()
-
+   
 
     def _get_relation_category(self, rel_type: str) -> str:
         """✅ CORRIGÉ : Catégories sans 'selection'"""
@@ -2528,49 +2847,181 @@ class GraphWidget(QtWidgets.QWidget):
             self._clear_graph()
 
     def _apply_collision_avoidance(self, G, pos, num_nodes):
-        """Applique collision avoidance."""
-        min_distance = 0.3 if num_nodes <= 20 else 0.2 if num_nodes <= 50 else 0.15
-        iterations = 50 if num_nodes <= 30 else 30
+        """✅ AMÉLIORÉ : Collision avoidance robuste avec distance minimum garantie."""
+        import numpy as np
 
+        # 🎯 Distance minimum adaptative selon la taille du graphe
+        if num_nodes <= 10:
+            min_distance = 0.5
+            iterations = 100
+        elif num_nodes <= 20:
+            min_distance = 0.4
+            iterations = 80
+        elif num_nodes <= 50:
+            min_distance = 0.3
+            iterations = 60
+        else:
+            min_distance = 0.25
+            iterations = 40
+
+        nodes = list(G.nodes())
+
+        # 🔄 Algorithme de répulsion par force
         for iteration in range(iterations):
-            nodes = list(G.nodes())
+            moved = False
+
             for i, node1 in enumerate(nodes):
                 x1, y1 = pos[node1]
+                force_x, force_y = 0.0, 0.0
+
                 for node2 in nodes[i+1:]:
                     x2, y2 = pos[node2]
-                    dx, dy = x2 - x1, y2 - y1
-                    distance = (dx**2 + dy**2) ** 0.5
-                    if distance < min_distance and distance > 0:
-                        angle = dy / distance if distance > 0 else 0
-                        angle_cos = dx / distance if distance > 0 else 1
-                        force = (min_distance - distance) / 10
-                        pos[node1][0] -= force * angle_cos
-                        pos[node1][1] -= force * angle
-                        pos[node2][0] += force * angle_cos
-                        pos[node2][1] += force * angle
-            if iteration % 10 == 0:
+
+                    # Calculer distance et direction
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    distance = np.sqrt(dx**2 + dy**2)
+
+                    # ✅ Si collision détectée
+                    if distance < min_distance and distance > 0.001:
+                        moved = True
+
+                        # Force de répulsion inversement proportionnelle à la distance
+                        overlap = min_distance - distance
+                        repulsion_strength = overlap / min_distance
+
+                        # Normaliser la direction
+                        dx_norm = dx / distance
+                        dy_norm = dy / distance
+
+                        # Appliquer force de répulsion
+                        force_magnitude = repulsion_strength * 0.1
+
+                        force_x -= force_magnitude * dx_norm
+                        force_y -= force_magnitude * dy_norm
+
+                # Appliquer les forces cumulées
+                if abs(force_x) > 0.001 or abs(force_y) > 0.001:
+                    pos[node1][0] += force_x
+                    pos[node1][1] += force_y
+
+            # 🛑 Arrêt anticipé si plus de mouvement
+            if not moved and iteration > 20:
+                logger.debug(f"✅ Collision avoidance converged at iteration {iteration}")
+                break
+            
+            # 📉 Réduction progressive de la distance minimum
+            if iteration % 15 == 0 and iteration > 0:
                 min_distance *= 0.98
+
+        # 🔍 Vérification finale et correction des collisions restantes
+        collision_count = 0
+        for i, node1 in enumerate(nodes):
+            x1, y1 = pos[node1]
+            for node2 in nodes[i+1:]:
+                x2, y2 = pos[node2]
+                dx = x2 - x1
+                dy = y2 - y1
+                distance = np.sqrt(dx**2 + dy**2)
+
+                if distance < min_distance * 0.9:
+                    collision_count += 1
+                    # Correction d'urgence : déplacer radialement
+                    angle = np.arctan2(dy, dx)
+                    correction = (min_distance - distance) / 2
+
+                    pos[node1][0] -= correction * np.cos(angle)
+                    pos[node1][1] -= correction * np.sin(angle)
+                    pos[node2][0] += correction * np.cos(angle)
+                    pos[node2][1] += correction * np.sin(angle)
+
+        if collision_count > 0:
+            logger.warning(f"⚠️ {collision_count} collisions résiduelles corrigées")
+        else:
+            logger.debug(f"✅ Aucune collision détectée (distance min: {min_distance:.3f})")
+
         return pos
 
     def _apply_local_collision_avoidance(self, dragging_node):
-        """Collision avoidance locale."""
+        """✅ VERSION CORRIGÉE : Respecte les orbites pendant le drag"""
         pos = self.graph_data['pos']
         G = self.graph_data['G']
-        min_distance = self.graph_data['min_distance']
+        num_nodes = self.graph_data['num_nodes']
+        node_orbits = self.graph_data.get('node_orbits', {})
+
+        # Distance minimale adaptée
+        if num_nodes <= 10:
+            base_min_distance = 2.5
+            orbit_tolerance = 2.0
+        elif num_nodes <= 20:
+            base_min_distance = 2.0
+            orbit_tolerance = 2.5
+        else:
+            base_min_distance = 1.5
+            orbit_tolerance = 3.0
+
         x1, y1 = pos[dragging_node]
-        
+        dist_dragged = (x1**2 + y1**2) ** 0.5
+        dragged_orbit = node_orbits.get(dragging_node, 3)
+
         for node in G.nodes():
-            if node == dragging_node:
+            if node == dragging_node or node == self.current_central_name:
                 continue
+            
             x2, y2 = pos[node]
-            dx, dy = x2 - x1, y2 - y1
+            dist_node = (x2**2 + y2**2) ** 0.5
+            node_orbit = node_orbits.get(node, 3)
+
+            dx = x2 - x1
+            dy = y2 - y1
             distance = (dx**2 + dy**2) ** 0.5
-            if distance < min_distance and distance > 0.01:
-                angle_cos = dx / distance
-                angle_sin = dy / distance
-                force = (min_distance - distance) / 20
-                pos[node][0] += force * angle_cos
-                pos[node][1] += force * angle_sin
+
+            # Dimensions
+            text_width = self.graph_data.get('text_width', 5.0)
+            text_height = self.graph_data.get('text_height', 1.3)
+            required_distance = (text_width + text_height) / 2 + base_min_distance
+
+            if distance < required_distance and distance > 0.01:
+                # Vérifier même orbite
+                same_orbit_distance = abs(dist_dragged - dist_node) < orbit_tolerance
+                same_orbit_number = (dragged_orbit == node_orbit)
+                same_orbit = same_orbit_distance and same_orbit_number
+
+                if same_orbit:
+                    # Mouvement tangentiel
+                    angle_dragged = math.atan2(y1, x1)
+                    angle_node = math.atan2(y2, x2)
+
+                    force = (required_distance - distance) * 0.02
+                    avg_radius = (dist_dragged + dist_node) / 2
+
+                    if avg_radius > 0.01:
+                        angle_force = force / avg_radius
+                    else:
+                        angle_force = force * 0.1
+
+                    new_angle = angle_node + angle_force
+
+                    pos[node][0] = dist_node * math.cos(new_angle)
+                    pos[node][1] = dist_node * math.sin(new_angle)
+
+                else:
+                    # Mouvement radial
+                    if dist_node > 0.01:
+                        radial_dir_x = x2 / dist_node
+                        radial_dir_y = y2 / dist_node
+                    else:
+                        radial_dir_x = 1.0
+                        radial_dir_y = 0.0
+
+                    radial_force = (required_distance - distance) * 0.25
+
+                    if dragged_orbit < node_orbit:
+                        pos[node][0] += radial_force * radial_dir_x
+                        pos[node][1] += radial_force * radial_dir_y
+                    elif dragged_orbit > node_orbit:
+                        pos[node][0] -= radial_force * radial_dir_x
+                        pos[node][1] -= radial_force * radial_dir_y
 
     def _show_node_details_in_graph(self, node_name, G):
         """Affiche détails nœud dans graphe - STYLE RELATION_IMPORT_WIDGET."""
@@ -2809,12 +3260,19 @@ class GraphWidget(QtWidgets.QWidget):
                    color='#999999', fontsize=12, style='italic')
             ax.axis('off')
             self.canvas.draw()
-        
-        # Clear dynamic legend items
-        while self.legend_layout.count() > 0:
-            child = self.legend_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+
+        # Vider la légende du périmètre
+        if hasattr(self, 'legend_layout'):
+            while self.legend_layout.count() > 0:
+                child = self.legend_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+
+            # Ajouter le label par défaut
+            default_label = QtWidgets.QLabel("Aucun élément sélectionné")
+            default_label.setStyleSheet("color: #999; font-size: 10px; font-style: italic;")
+            self.legend_layout.addWidget(default_label)
+            self.legend_layout.addStretch()
 
     def _extract_node_relations(self, node_data: Dict, node_name: str, node_uid: str, 
                           node_type: str, relations_list: List[Dict]):
@@ -2877,7 +3335,6 @@ class GraphWidget(QtWidgets.QWidget):
         self.central_node = None
 
         self._draw_graph()
-        self._update_legend()
         self._update_info_label()
 
         logger.info(f"✅ Graphe isolé créé avec {len(self.current_graph.nodes)} nœuds")
@@ -2944,6 +3401,325 @@ class GraphWidget(QtWidgets.QWidget):
         self.uid_to_name_cache[uid] = fallback_name
         logger.warning(f"  ⚠️ UID {uid} introuvable, fallback: {fallback_name}")
         return fallback_name
+        
+    def _compute_grouped_layout(self, G: nx.DiGraph, center_node: str = None):
+        """✅ VERSION CORRIGÉE : Classification correcte des orbites avec rayons adaptatifs."""
+        if len(G.nodes()) == 0:
+            return {}, {}
+
+        import numpy as np
+
+        num_nodes = len(G.nodes())
+
+        # ✅ DÉFINITION DES TYPES PAR ORBITE (identique à relation_import_widget)
+        HIERARCHICAL_TYPES = {
+            'parent', 'child', 'contains', 'belongs_to', 'hierarchy', 
+            'has', 'contains_class', 'contains_function', 'contains_variable',
+            'has_method', 'has_variable'
+        }
+
+        INTERNAL_CODE_TYPES = {
+            'import', 'from_import', 'call', 'calls', 'method_call', 
+            'function_call', 'use', 'uses', 'used_by', 'implements', 'extends', 
+            'inherits', 'override', 'invoke', 'intra_file'
+        }
+
+        EXTERNAL_TYPES = {
+            'require', 'include', 'dependency', 'external', 'inter_file'
+        }
+
+        # 🎯 CLASSIFICATION DES NŒUDS PAR ORBITE
+        hierarchical_nodes = []
+        internal_code_nodes = []
+        external_nodes = []
+
+        for node in G.nodes():
+            if node == center_node:
+                continue
+            
+            relation_types = set()
+            categories = set()
+            has_intra_file = False
+
+            # Collecter tous les types de relations du nœud
+            for u, v, data in G.edges(data=True):
+                if u == node or v == node:
+                    rel_type = data.get('relation_type', '').lower()
+                    category = data.get('category', '').lower()
+                    intra = data.get('intraFile', False)
+
+                    if rel_type:
+                        relation_types.add(rel_type)
+                    if category:
+                        categories.add(category)
+                    if intra:
+                        has_intra_file = True
+
+            # ✅ CLASSIFICATION AVEC PRIORITÉ : hiérarchique > code interne > externe
+            is_hierarchical = any(t in HIERARCHICAL_TYPES for t in relation_types) or 'hierarchy' in categories
+            is_internal_code = any(t in INTERNAL_CODE_TYPES for t in relation_types) or 'code' in categories or has_intra_file
+            is_external = any(t in EXTERNAL_TYPES for t in relation_types) or 'external' in categories
+
+            if is_hierarchical:
+                hierarchical_nodes.append(node)
+                logger.debug(f"  🔵 {node} -> Orbite 1 (hiérarchie)")
+            elif is_internal_code:
+                internal_code_nodes.append(node)
+                logger.debug(f"  🟢 {node} -> Orbite 2 (code interne)")
+            else:
+                external_nodes.append(node)
+                logger.debug(f"  🟠 {node} -> Orbite 3 (externe)")
+
+        logger.info(f"📊 Classification orbites:")
+        logger.info(f"   🔵 Orbite 1 (hiérarchie): {len(hierarchical_nodes)}")
+        logger.info(f"   🟢 Orbite 2 (code interne): {len(internal_code_nodes)}")
+        logger.info(f"   🟠 Orbite 3 (externe): {len(external_nodes)}")
+
+        # 🎨 CALCUL DES RAYONS ADAPTATIFS
+        pos = {}
+        if center_node and center_node in G.nodes():
+            pos[center_node] = np.array([0.0, 0.0])
+
+        def compute_radius(base, count):
+            """Rayon adaptatif selon densité"""
+            if count == 0:
+                return base
+            # Calculer la circonférence nécessaire
+            node_width = 5.0  # ✅ AUGMENTÉ de 4.0 à 5.0
+            min_spacing = 2.5  # ✅ AUGMENTÉ de 1.5 à 2.5
+            required_circumference = (node_width + min_spacing) * count
+            min_required_radius = required_circumference / (2 * math.pi)
+            return max(base, min_required_radius)
+        
+        base_gap = 10.0  # ✅ AUGMENTÉ de 8.0 à 10.0
+        radius_inner = compute_radius(base_gap * 1.5, len(hierarchical_nodes))  # ✅ 1.2 → 1.5
+        radius_middle = compute_radius(base_gap * 2.5, len(internal_code_nodes))  # ✅ 2.0 → 2.5
+        radius_outer = compute_radius(base_gap * 3.5, len(external_nodes))
+
+        logger.info(f"🔍 Rayons calculés : inner={radius_inner:.1f}, middle={radius_middle:.1f}, outer={radius_outer:.1f}")
+
+        # 🔄 DISTRIBUTION CIRCULAIRE avec décalages angulaires
+        def distribute(nodes, radius, angular_offset=0.0):
+            n = len(nodes)
+            if n == 0:
+                return
+            for i, node in enumerate(nodes):
+                angle = 2 * math.pi * i / n + angular_offset
+                # Décalage aléatoire léger pour briser symétries
+                angle += (math.pi / 180) * np.random.uniform(-6, 6)
+                x = radius * math.cos(angle)
+                y = radius * math.sin(angle)
+                pos[node] = np.array([x, y])
+
+        distribute(hierarchical_nodes, radius_inner)
+        distribute(internal_code_nodes, radius_middle, angular_offset=math.pi / 8)
+        distribute(external_nodes, radius_outer, angular_offset=math.pi / 5)
+
+        # 🔄 Recentrage global
+        if len(pos) > 1:
+            coords = np.array(list(pos.values()))
+            mean_x, mean_y = coords.mean(axis=0)
+            for node in pos:
+                pos[node] -= np.array([mean_x, mean_y])
+
+        # 🔍 Enregistrer les orbites
+        node_orbits = {}
+        if center_node and center_node in G.nodes():
+            node_orbits[center_node] = 0  # Centre
+
+        for node in hierarchical_nodes:
+            node_orbits[node] = 1
+        for node in internal_code_nodes:
+            node_orbits[node] = 2
+        for node in external_nodes:
+            node_orbits[node] = 3
+
+        logger.info(f"✅ Orbites assignées: {len(node_orbits)} nœuds")
+
+        return pos, node_orbits
+    
+    def _apply_universal_collision_avoidance(self, G, pos, num_nodes):
+        """
+        ✅ COLLISION AVOIDANCE avec RESPECT STRICT DES ORBITES
+        """
+        def get_node_dimensions(node_name):
+            """Calcule largeur réelle basée sur longueur du texte"""
+            if num_nodes <= 15:
+                max_chars = 30
+                base_width = 8.0  # ✅ AUGMENTÉ de 6.0 à 8.0
+            elif num_nodes <= 30:
+                max_chars = 28
+                base_width = 7.5  # ✅ AUGMENTÉ de 5.5 à 7.5
+            else:
+                max_chars = 25
+                base_width = 7.0  # ✅ AUGMENTÉ de 5.0 à 7.0
+
+            display_name = node_name[:max_chars] + '..' if len(node_name) > max_chars else node_name
+            char_width = base_width / max_chars
+            width = len(display_name) * char_width + 1.0  # ✅ AUGMENTÉ padding de 0.5 à 1.0
+            height = 2.5 if num_nodes <= 15 else 2.2 if num_nodes <= 30 else 2.0  # ✅ AUGMENTÉ
+
+            return width, height
+
+        def get_node_distance_from_center(node):
+            """Calcule la distance d'un nœud par rapport au centre"""
+            x, y = pos[node]
+            return (x**2 + y**2) ** 0.5
+
+        # ✅ PARAMÈTRES ADAPTATIFS
+        if num_nodes <= 10:
+            base_min_distance = 3.0  # ✅ AUGMENTÉ de 2.5 à 3.0
+            iterations = 150
+            orbit_tolerance = 2.5  # ✅ AUGMENTÉ de 2.0 à 2.5
+        elif num_nodes <= 20:
+            base_min_distance = 2.5  # ✅ AUGMENTÉ de 2.0 à 2.5
+            iterations = 120
+            orbit_tolerance = 3.0  # ✅ AUGMENTÉ de 2.5 à 3.0
+        elif num_nodes <= 40:
+            base_min_distance = 2.2  # ✅ AUGMENTÉ de 1.8 à 2.2
+            iterations = 100
+            orbit_tolerance = 3.5  # ✅ AUGMENTÉ de 3.0 à 3.5
+        else:
+            base_min_distance = 2.0  # ✅ AUGMENTÉ de 1.5 à 2.0
+            iterations = 80
+            orbit_tolerance = 4.0  # ✅ AUGMENTÉ de 3.5 à 4.0
+
+        # ✅ CALCULER LES DISTANCES INITIALES (ORBITES DE RÉFÉRENCE)
+        node_distances = {}
+        initial_distances = {}  # ✅ NOUVEAU : Sauvegarder les distances initiales
+        for node in G.nodes():
+            dist = get_node_distance_from_center(node)
+            node_distances[node] = dist
+            initial_distances[node] = dist  # ✅ Référence à ne pas dépasser
+
+        # ✅ RÉCUPÉRER LES ORBITES
+        node_orbits = {}
+        if hasattr(self, 'graph_data') and self.graph_data is not None:
+            node_orbits = self.graph_data.get('node_orbits', {})
+
+        if not node_orbits:
+            node_orbits = {node: 3 for node in G.nodes()}
+
+        logger.info(f"🔄 Collision avoidance : {iterations} itérations max, tolérance orbite={orbit_tolerance}")
+
+        for iteration in range(iterations):
+            nodes = list(G.nodes())
+            max_displacement = 0
+
+            for i, node1 in enumerate(nodes):
+                x1, y1 = pos[node1]
+                w1, h1 = get_node_dimensions(node1)
+                dist1 = node_distances[node1]
+                orbit1 = node_orbits.get(node1, 3)
+                initial_dist1 = initial_distances[node1]
+
+                for node2 in nodes[i+1:]:
+                    x2, y2 = pos[node2]
+                    w2, h2 = get_node_dimensions(node2)
+                    dist2 = node_distances[node2]
+                    orbit2 = node_orbits.get(node2, 3)
+                    initial_dist2 = initial_distances[node2]
+
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    distance = (dx**2 + dy**2) ** 0.5
+
+                    required_distance = (w1 + w2) / 2 + base_min_distance
+
+                    if distance < required_distance and distance > 0.01:
+                        force_factor = 1.0 - (iteration / iterations) * 0.5
+
+                        # ✅ VÉRIFIER SI MÊME ORBITE
+                        same_orbit_distance = abs(dist1 - dist2) < orbit_tolerance
+                        same_orbit_number = (orbit1 == orbit2)
+                        same_orbit = same_orbit_distance and same_orbit_number
+
+                        if same_orbit:
+                            # ===== MÊME ORBITE : MOUVEMENT TANGENTIEL =====
+                            angle1 = math.atan2(y1, x1)
+                            angle2 = math.atan2(y2, x2)
+
+                            force = (required_distance - distance) * 0.03 * force_factor
+                            avg_radius = (dist1 + dist2) / 2
+
+                            if avg_radius > 0.01:
+                                angle_force = force / avg_radius
+                            else:
+                                angle_force = force * 0.1
+
+                            new_angle1 = angle1 - angle_force
+                            new_angle2 = angle2 + angle_force
+
+                            # ✅ CONTRAINTE : Garder la distance orbitale
+                            pos[node1][0] = initial_dist1 * math.cos(new_angle1)
+                            pos[node1][1] = initial_dist1 * math.sin(new_angle1)
+                            pos[node2][0] = initial_dist2 * math.cos(new_angle2)
+                            pos[node2][1] = initial_dist2 * math.sin(new_angle2)
+
+                            max_displacement = max(max_displacement, angle_force * avg_radius)
+
+                        else:
+                            # ===== ORBITES DIFFÉRENTES : MOUVEMENT RADIAL LIMITÉ =====
+                            if dist1 > 0.01:
+                                radial_dir1_x = x1 / dist1
+                                radial_dir1_y = y1 / dist1
+                            else:
+                                radial_dir1_x = 1.0
+                                radial_dir1_y = 0.0
+
+                            if dist2 > 0.01:
+                                radial_dir2_x = x2 / dist2
+                                radial_dir2_y = y2 / dist2
+                            else:
+                                radial_dir2_x = 1.0
+                                radial_dir2_y = 0.0
+
+                            # ✅ Force radiale RÉDUITE pour éviter de changer d'orbite
+                            radial_force = (required_distance - distance) * 0.15 * force_factor  # Réduit de 0.3 à 0.15
+
+                            if dist1 < dist2:
+                                # node1 plus proche du centre
+                                pos[node1][0] -= radial_force * radial_dir1_x
+                                pos[node1][1] -= radial_force * radial_dir1_y
+                                pos[node2][0] += radial_force * radial_dir2_x
+                                pos[node2][1] += radial_force * radial_dir2_y
+                            else:
+                                pos[node2][0] -= radial_force * radial_dir2_x
+                                pos[node2][1] -= radial_force * radial_dir2_y
+                                pos[node1][0] += radial_force * radial_dir1_x
+                                pos[node1][1] += radial_force * radial_dir1_y
+
+                            max_displacement = max(max_displacement, radial_force)
+
+                            # ✅ CONTRAINTE : Ramener vers l'orbite initiale si trop éloigné
+                            current_dist1 = get_node_distance_from_center(node1)
+                            if abs(current_dist1 - initial_dist1) > orbit_tolerance:
+                                # Ramener progressivement
+                                correction_factor = 0.1
+                                target_x1 = x1 * (initial_dist1 / current_dist1)
+                                target_y1 = y1 * (initial_dist1 / current_dist1)
+                                pos[node1][0] += (target_x1 - x1) * correction_factor
+                                pos[node1][1] += (target_y1 - y1) * correction_factor
+
+                            current_dist2 = get_node_distance_from_center(node2)
+                            if abs(current_dist2 - initial_dist2) > orbit_tolerance:
+                                correction_factor = 0.1
+                                target_x2 = x2 * (initial_dist2 / current_dist2)
+                                target_y2 = y2 * (initial_dist2 / current_dist2)
+                                pos[node2][0] += (target_x2 - x2) * correction_factor
+                                pos[node2][1] += (target_y2 - y2) * correction_factor
+
+                    # ✅ Mettre à jour les distances
+                    node_distances[node1] = get_node_distance_from_center(node1)
+                    node_distances[node2] = get_node_distance_from_center(node2)
+
+                # ✅ CONVERGENCE
+                if max_displacement < 0.01:
+                    logger.info(f"✅ Convergence atteinte à l'itération {iteration}")
+                    break
+
+        logger.info(f"✅ Collision avoidance terminée")
+        return pos
     
     def _log_relation_stats(self, relations_list: List[Dict]):
         """
@@ -2980,7 +3756,146 @@ class GraphWidget(QtWidgets.QWidget):
         logger.info(f"\n📂 PAR CATÉGORIE :")
         for category, count in sorted(by_category.items(), key=lambda x: -x[1]):
             logger.info(f"   • {category} : {count}")
-    
+
+    def _draw_orbit_legend(self, ax, edges, node_orbits):
+        """
+        ✅ LÉGENDE COMPACTE en haut à droite avec types de relations et statistiques
+        """
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import Patch
+
+        legend_elements = []
+
+        # ===== COULEURS PAR TYPE DE NŒUD (au lieu d'orbites) =====
+        type_colors = {
+            'hierarchy': ('#2196F3', '🔵 Hiérarchie'),
+            'code': ('#00ACC1', '🟢 Code interne'),
+            'call': ('#9C27B0', '🟣 Appels/Calls'),
+            'external': ('#FF8C00', '🟠 Externe'),
+            'unknown': ('#999999', '⚪ Autre')
+        }
+
+        # ✅ Compter les nœuds par type dominant (au lieu de par orbite)
+        if hasattr(self, 'current_graph') and self.current_graph:
+            G = self.current_graph
+            node_type_counts = {}
+
+            for node in G.nodes():
+                # Récupérer le type dominant du nœud
+                node_relation_types = {}
+
+                for u, v, data in G.edges(data=True):
+                    if u == node or v == node:
+                        rel_type = data.get('relation_type', '').lower()
+                        if rel_type:
+                            node_relation_types[rel_type] = node_relation_types.get(rel_type, 0) + 1
+
+                # Classifier le nœud
+                node_category = 'unknown'
+
+                if node_relation_types:
+                    dominant_type = max(node_relation_types, key=node_relation_types.get)
+
+                    # Hiérarchique
+                    if dominant_type in ['parent', 'child', 'contains', 'hierarchy',
+                                        'contains_class', 'contains_function', 'contains_variable',
+                                        'has_method', 'has_variable', 'belongs_to']:
+                        node_category = 'hierarchy'
+
+                    # Code interne
+                    elif dominant_type in ['import', 'from_import', 'use', 'uses', 'used_by',
+                                          'implements', 'extends', 'inherits', 'intra_file']:
+                        node_category = 'code'
+
+                    # Appels
+                    elif dominant_type in ['call', 'calls', 'method_call', 'function_call', 'called_by']:
+                        node_category = 'call'
+
+                    # Externe
+                    elif dominant_type in ['require', 'dependency', 'external', 'inter_file', 'include']:
+                        node_category = 'external'
+
+                node_type_counts[node_category] = node_type_counts.get(node_category, 0) + 1
+
+            # Afficher les catégories avec des nœuds
+            for category in ['hierarchy', 'code', 'call', 'external', 'unknown']:
+                count = node_type_counts.get(category, 0)
+                if count > 0:
+                    color, label_text = type_colors[category]
+                    legend_elements.append(
+                        Patch(facecolor=color, edgecolor='#666666', linewidth=1.5,
+                              label=f"{label_text} ({count})")
+                    )
+
+        # ===== SÉPARATEUR =====
+        if legend_elements:
+            legend_elements.append(Line2D([0], [0], color='none', label=''))
+
+        # ===== TOP 5 TYPES DE RELATIONS (arêtes) =====
+        edge_types_count = {}
+        for _, _, d in edges:
+            rel_type = d.get('relation_type', 'unknown')
+            color = d.get('color', '#CCCCCC')
+            if rel_type not in edge_types_count:
+                edge_types_count[rel_type] = {'count': 0, 'color': color}
+            edge_types_count[rel_type]['count'] += 1
+
+        # Trier par fréquence
+        sorted_types = sorted(edge_types_count.items(), key=lambda x: -x[1]['count'])[:5]
+
+        for rel_type, data in sorted_types:
+            count = data['count']
+            color = data['color']
+            short_name = rel_type[:15] + '..' if len(rel_type) > 15 else rel_type
+            legend_elements.append(
+                Line2D([0], [0], color=color, linewidth=2.5, 
+                      label=f"{short_name} ({count})",
+                      marker='>', markersize=6)
+            )
+
+        if len(edge_types_count) > 5:
+            remaining = len(edge_types_count) - 5
+            legend_elements.append(
+                Line2D([0], [0], color='#999999', linewidth=1.5, 
+                      label=f'... +{remaining} types',
+                      linestyle='--')
+            )
+
+        # ===== STATISTIQUES GLOBALES =====
+        total_nodes = len(self.current_graph.nodes()) if hasattr(self, 'current_graph') and self.current_graph else 0
+        total_edges = len(edges)
+
+        legend_elements.append(Line2D([0], [0], color='none', label=''))
+        legend_elements.append(
+            Line2D([0], [0], color='none', 
+                  label=f"📊 {total_nodes} nœuds • {total_edges} relations")
+        )
+
+        # ===== AFFICHER LA LÉGENDE =====
+        if legend_elements:
+            legend = ax.legend(
+                handles=legend_elements, 
+                loc='upper right',  # ✅ Position de base
+                fontsize=7,
+                title="Graphe de Relations",
+                title_fontsize=9,
+                framealpha=0.95,
+                edgecolor='#CCCCCC',
+                fancybox=True,
+                shadow=True,
+                ncol=1,
+                columnspacing=0.5,
+                handlelength=1.8,
+                handletextpad=0.6,
+                borderpad=0.6,
+                labelspacing=0.4
+            )
+
+            legend.set_bbox_to_anchor((1.0, 1.0), transform=ax.transAxes)
+
+            legend.get_frame().set_facecolor('#FFFFFF')
+            legend.get_frame().set_linewidth(1.5)
+
     def _resolve_uids_batch(self, uids: List[str]) -> Dict[str, str]:
         """✅ VERSION SÉCURISÉE : Vérifie les caches avant utilisation"""
         if not uids:
@@ -3194,7 +4109,6 @@ class GraphWidget(QtWidgets.QWidget):
             self.central_node = None
 
             self._draw_graph()
-            self._update_legend()
 
             logger.info(f"✅ {len(self.current_graph.nodes)} nœuds affichés SANS connexion")
             logger.info(f"{'='*70}\n")
@@ -3219,7 +4133,6 @@ class GraphWidget(QtWidgets.QWidget):
         self.central_node = None
 
         self._draw_graph()
-        self._update_legend()
 
         logger.info(f"✅ Graphe multi-sélection généré avec {len(self.current_graph.nodes)} nœuds")
         logger.info(f"✅ {len(filtered_relations)} relations RÉELLES affichées")

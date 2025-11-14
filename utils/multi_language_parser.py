@@ -152,33 +152,81 @@ class MultiLanguageDependencyParser:
             return []
     
     def _extract_python_classes(self, content: str) -> List[Dict[str, Any]]:
-        """Extrait les classes Python avec AST."""
+        """✅ CORRIGÉ : Extrait classes AVEC code source"""
         classes = []
+
         try:
             tree = ast.parse(content)
+            lines = content.split('\n')
+
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
+                    # ✅ EXTRACTION DU CODE SOURCE
+                    start_line = node.lineno - 1
+
+                    # Trouver la fin de la classe
+                    end_line = start_line + 1
+                    base_indent = len(lines[start_line]) - len(lines[start_line].lstrip())
+
+                    while end_line < len(lines):
+                        line = lines[end_line]
+
+                        # Ligne vide ou commentaire : continuer
+                        if not line.strip() or line.strip().startswith('#'):
+                            end_line += 1
+                            continue
+                        
+                        # Si indentation <= base, c'est la fin
+                        current_indent = len(line) - len(line.lstrip())
+                        if current_indent <= base_indent:
+                            break
+                        
+                        end_line += 1
+
+                    # ✅ EXTRAIRE LE CODE
+                    code_content = '\n'.join(lines[start_line:end_line])
+
                     class_info = {
                         'name': node.name,
                         'line': node.lineno,
                         'methods': [],
                         'bases': [base.id if isinstance(base, ast.Name) else str(base) for base in node.bases],
-                        'uid': f"class_{node.name}_{node.lineno}",  # UID unique
-                        'uses_vars': []  # Pour liens vers variables
+                        'uid': f"class_{node.name}_{node.lineno}",
+                        'uses_vars': [],
+                        'codeContent': code_content  # ✅ AJOUTÉ
                     }
-                    # Extraire méthodes
+
+                    # Extraire méthodes AVEC code
                     for body_node in node.body:
                         if isinstance(body_node, ast.FunctionDef):
-                            method = {'name': body_node.name, 'line': body_node.lineno}
+                            method_start = body_node.lineno - 1
+                            method_end = method_start + 1
+
+                            # Trouver fin méthode
+                            method_indent = len(lines[method_start]) - len(lines[method_start].lstrip())
+                            while method_end < len(lines):
+                                line = lines[method_end]
+                                if not line.strip() or line.strip().startswith('#'):
+                                    method_end += 1
+                                    continue
+                                current_indent = len(line) - len(line.lstrip())
+                                if current_indent <= method_indent:
+                                    break
+                                method_end += 1
+
+                            method_code = '\n'.join(lines[method_start:method_end])
+
+                            method = {
+                                'name': body_node.name, 
+                                'line': body_node.lineno,
+                                'codeContent': method_code  # ✅ AJOUTÉ
+                            }
                             class_info['methods'].append(method)
-                            # Détecter usages de vars dans méthodes (simplifié)
-                            for assign in ast.walk(body_node):
-                                if isinstance(assign, ast.Assign) and isinstance(assign.targets[0], ast.Name):
-                                    if assign.targets[0].id not in class_info['uses_vars']:
-                                        class_info['uses_vars'].append(assign.targets[0].id)
+
                     classes.append(class_info)
+
         except SyntaxError:
-            # Fallback regex amélioré pour classes avec décorateurs, imbriquées, etc.
+            # Fallback regex (sans codeContent pour simplicitĂ©)
             class_pattern = r'(?:@[\w\s]+\n)*\s*class\s+(\w+)(?:\s*\([^)]*\))?'
             for match in re.finditer(class_pattern, content, re.MULTILINE | re.DOTALL):
                 classes.append({
@@ -186,34 +234,353 @@ class MultiLanguageDependencyParser:
                     'line': content[:match.start()].count('\n') + 1,
                     'methods': [],
                     'uid': f"class_{match.group(1)}_approx",
-                    'uses_vars': []
+                    'uses_vars': [],
+                    'codeContent': ""  # Vide pour fallback
                 })
-        return classes
 
-    def _extract_python_functions(self, content: str) -> List[Dict[str, Any]]:
-        """Extrait les fonctions Python avec AST."""
-        functions = []
+        return classes
+    
+    def extract_detailed_relations(self, content: str, file_path: str, 
+                                   classes: List[Dict], functions: List[Dict]) -> Dict[str, List[Dict]]:
+
+        relations = {
+            'class_to_class': [],
+            'class_to_function': [],
+            'function_to_function': [],
+            'function_to_class': []
+        }
+
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext == '.py':
+            return self._extract_python_detailed_relations(content, classes, functions)
+        elif ext == '.java':
+            return self._extract_java_detailed_relations(content, classes, functions)
+        elif ext in ['.js', '.jsx', '.ts', '.tsx']:
+            return self._extract_js_detailed_relations(content, classes, functions)
+
+        return relations
+    
+    def _extract_python_detailed_relations(self, content: str, 
+                                          classes: List[Dict], 
+                                          functions: List[Dict]) -> Dict[str, List[Dict]]:
+        """
+        ✅ Extrait relations détaillées pour Python avec AST
+        ADAPTÉ AU SCHÉMA: utilise 'inherits' au lieu de 'extends' pour Python
+        """
+        relations = {
+            'class_to_class': [],
+            'class_to_function': [],
+            'function_to_function': [],
+            'function_to_class': []
+        }
+
         try:
             tree = ast.parse(content)
+
+            # Créer des mappings pour recherche rapide
+            class_map = {cls['name']: cls for cls in classes}
+            func_map = {func['name']: func for func in functions}
+
+            # === RELATIONS CLASSE-CLASSE (Héritage) ===
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    source_class = class_map.get(node.name)
+                    if not source_class:
+                        continue
+                    
+                    # ✅ Utiliser 'inherits' (conforme au schéma)
+                    for base in node.bases:
+                        if isinstance(base, ast.Name):
+                            base_name = base.id
+                            if base_name in class_map:
+                                relations['class_to_class'].append({
+                                    'source_uid': source_class['uid'],
+                                    'source_name': node.name,
+                                    'target_uid': class_map[base_name]['uid'],
+                                    'target_name': base_name,
+                                    'relation_type': 'inherits',  # ✅ Conforme schéma
+                                    'line': node.lineno,
+                                    'category': 'parsed',
+                                    'intra_file': True
+                                })
+
+            # === RELATIONS CLASSE-FONCTION (Méthode → Fonction externe) ===
+            for cls_data in classes:
+                for method in cls_data.get('methods', []):
+                    method_name = method.get('name')
+
+                    # Trouver le nœud AST de la méthode
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.FunctionDef) and node.name == method_name:
+                            # Chercher appels de fonctions externes
+                            for child in ast.walk(node):
+                                if isinstance(child, ast.Call):
+                                    called_name = None
+
+                                    if isinstance(child.func, ast.Name):
+                                        called_name = child.func.id
+
+                                    # Si c'est une fonction externe (pas une méthode)
+                                    if called_name and called_name in func_map:
+                                        relations['class_to_function'].append({
+                                            'source_uid': method.get('uid'),
+                                            'source_name': f"{cls_data['name']}.{method_name}",
+                                            'target_uid': func_map[called_name]['uid'],
+                                            'target_name': called_name,
+                                            'relation_type': 'calls',  # ✅ Conforme schéma
+                                            'line': child.lineno,
+                                            'category': 'parsed',
+                                            'intra_file': True
+                                        })
+
+            # === RELATIONS FONCTION-FONCTION ===
+            for func_data in functions:
+                func_name = func_data['name']
+
+                # Trouver le nœud AST
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                        # Chercher tous les appels
+                        for child in ast.walk(node):
+                            if isinstance(child, ast.Call):
+                                called_name = None
+
+                                if isinstance(child.func, ast.Name):
+                                    called_name = child.func.id
+                                elif isinstance(child.func, ast.Attribute):
+                                    called_name = child.func.attr
+
+                                # Si c'est une autre fonction
+                                if called_name and called_name in func_map:
+                                    relations['function_to_function'].append({
+                                        'source_uid': func_data['uid'],
+                                        'source_name': func_name,
+                                        'target_uid': func_map[called_name]['uid'],
+                                        'target_name': called_name,
+                                        'relation_type': 'calls',  # ✅ Conforme schéma
+                                        'line': child.lineno,
+                                        'category': 'parsed',
+                                        'intra_file': True
+                                    })
+
+            # === RELATIONS FONCTION-CLASSE (Instanciation) ===
+            for func_data in functions:
+                func_name = func_data['name']
+
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                        # Chercher instanciations de classes
+                        for child in ast.walk(node):
+                            if isinstance(child, ast.Call):
+                                if isinstance(child.func, ast.Name):
+                                    class_name = child.func.id
+
+                                    if class_name in class_map:
+                                        relations['function_to_class'].append({
+                                            'source_uid': func_data['uid'],
+                                            'source_name': func_name,
+                                            'target_uid': class_map[class_name]['uid'],
+                                            'target_name': class_name,
+                                            'relation_type': 'uses',  # ✅ Conforme schéma (uses pour instanciation)
+                                            'line': child.lineno,
+                                            'category': 'parsed',
+                                            'intra_file': True
+                                        })
+
+        except Exception as e:
+            logger.error(f"Erreur extraction relations détaillées Python: {e}")
+
+        return relations
+
+    def _extract_java_detailed_relations(self, content: str, 
+                                         classes: List[Dict], 
+                                         functions: List[Dict]) -> Dict[str, List[Dict]]:
+        """
+        ✅ Extrait relations détaillées pour Java avec regex
+        ADAPTÉ AU SCHÉMA: utilise 'extends' et 'implements'
+        """
+        relations = {
+            'class_to_class': [],
+            'class_to_function': [],
+            'function_to_function': [],
+            'function_to_class': []
+        }
+
+        class_map = {cls['name']: cls for cls in classes}
+        func_map = {func['name']: func for func in functions}
+
+        # ✅ Héritage Java (extends)
+        extends_pattern = r'class\s+(\w+)\s+extends\s+(\w+)'
+        for match in re.finditer(extends_pattern, content):
+            child_class = match.group(1)
+            parent_class = match.group(2)
+
+            if child_class in class_map and parent_class in class_map:
+                relations['class_to_class'].append({
+                    'source_uid': class_map[child_class]['uid'],
+                    'source_name': child_class,
+                    'target_uid': class_map[parent_class]['uid'],
+                    'target_name': parent_class,
+                    'relation_type': 'extends',  # ✅ Conforme schéma Java
+                    'line': content[:match.start()].count('\n') + 1,
+                    'category': 'parsed',
+                    'intra_file': True
+                })
+
+        # ✅ Implémentation d'interfaces (implements)
+        implements_pattern = r'class\s+(\w+)\s+implements\s+(\w+(?:\s*,\s*\w+)*)'
+        for match in re.finditer(implements_pattern, content):
+            class_name = match.group(1)
+            interfaces = [i.strip() for i in match.group(2).split(',')]
+
+            if class_name in class_map:
+                for interface in interfaces:
+                    if interface in class_map:
+                        relations['class_to_class'].append({
+                            'source_uid': class_map[class_name]['uid'],
+                            'source_name': class_name,
+                            'target_uid': class_map[interface]['uid'],
+                            'target_name': interface,
+                            'relation_type': 'implements',  # ✅ Conforme schéma
+                            'line': content[:match.start()].count('\n') + 1,
+                            'category': 'parsed',
+                            'intra_file': True
+                        })
+
+        # Appels de méthodes (simplifié)
+        call_pattern = r'(\w+)\s*\.\s*(\w+)\s*\('
+        for match in re.finditer(call_pattern, content):
+            method_name = match.group(2)
+
+            if method_name in func_map:
+                relations['function_to_function'].append({
+                    'source_uid': '',  # Sera résolu plus tard
+                    'source_name': '',
+                    'target_uid': func_map[method_name]['uid'],
+                    'target_name': method_name,
+                    'relation_type': 'calls',  # ✅ Conforme schéma
+                    'line': content[:match.start()].count('\n') + 1,
+                    'category': 'parsed',
+                    'intra_file': True
+                })
+
+        return relations
+    
+    def _extract_js_detailed_relations(self, content: str, 
+                                       classes: List[Dict], 
+                                       functions: List[Dict]) -> Dict[str, List[Dict]]:
+        """
+        ✅ Extrait relations détaillées pour JS/TS avec regex
+        """
+        relations = {
+            'class_to_class': [],
+            'class_to_function': [],
+            'function_to_function': [],
+            'function_to_class': []
+        }
+        
+        class_map = {cls['name']: cls for cls in classes}
+        func_map = {func['name']: func for func in functions}
+        
+        # Héritage ES6
+        extends_pattern = r'class\s+(\w+)\s+extends\s+(\w+)'
+        for match in re.finditer(extends_pattern, content):
+            child_class = match.group(1)
+            parent_class = match.group(2)
+            
+            if child_class in class_map and parent_class in class_map:
+                relations['class_to_class'].append({
+                    'source_uid': class_map[child_class]['uid'],
+                    'source_name': child_class,
+                    'target_uid': class_map[parent_class]['uid'],
+                    'target_name': parent_class,
+                    'relation_type': 'extends',
+                    'line': content[:match.start()].count('\n') + 1
+                })
+        
+        # Instanciation avec new
+        new_pattern = r'new\s+(\w+)\s*\('
+        for match in re.finditer(new_pattern, content):
+            class_name = match.group(1)
+            
+            if class_name in class_map:
+                # Note: Difficile de déterminer la fonction source en regex
+                # Cette relation sera enrichie lors du scan complet
+                pass
+            
+        return relations
+
+
+    def _extract_python_functions(self, content: str) -> List[Dict[str, Any]]:
+        """✅ CORRIGÉ : Extrait fonctions AVEC code source ET appels détaillés"""
+        functions = []
+        
+        try:
+            tree = ast.parse(content)
+            lines = content.split('\n')
+            
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
+                    # ✅ EXTRACTION DU CODE
+                    start_line = node.lineno - 1
+                    end_line = start_line + 1
+                    
+                    base_indent = len(lines[start_line]) - len(lines[start_line].lstrip())
+                    
+                    while end_line < len(lines):
+                        line = lines[end_line]
+                        
+                        if not line.strip() or line.strip().startswith('#'):
+                            end_line += 1
+                            continue
+                        
+                        current_indent = len(line) - len(line.lstrip())
+                        if current_indent <= base_indent:
+                            break
+                        
+                        end_line += 1
+                    
+                    code_content = '\n'.join(lines[start_line:end_line])
+                    
                     func_type = 'method' if any(arg.arg == 'self' for arg in node.args.args) else 'function'
+                    
                     func_info = {
                         'name': node.name,
                         'line': node.lineno,
                         'type': func_type,
-                        'uid': f"func_{node.name}_{node.lineno}",  # UID unique
-                        'calls': []  # Pour intra-relations
+                        'uid': f"func_{node.name}_{node.lineno}",
+                        'calls': [],  # Liste simple de noms
+                        'calls_detailed': [],  # ✅ NOUVEAU : Liste détaillée avec ligne
+                        'codeContent': code_content
                     }
-                    # Détecter calls internes (simplifié)
+                    
+                    # ✅ AMÉLIORATION : Détecter calls avec numéro de ligne
                     for body_node in ast.walk(node):
-                        if isinstance(body_node, ast.Call) and isinstance(body_node.func, ast.Name):
-                            called = body_node.func.id
-                            if called not in func_info['calls']:
-                                func_info['calls'].append(called)
+                        if isinstance(body_node, ast.Call):
+                            called_name = None
+                            call_line = body_node.lineno
+                            
+                            # Appel simple : function()
+                            if isinstance(body_node.func, ast.Name):
+                                called_name = body_node.func.id
+                            
+                            # Appel méthode : obj.method()
+                            elif isinstance(body_node.func, ast.Attribute):
+                                called_name = body_node.func.attr
+                            
+                            if called_name and called_name not in func_info['calls']:
+                                func_info['calls'].append(called_name)
+                                func_info['calls_detailed'].append({
+                                    'name': called_name,
+                                    'line': call_line,
+                                    'type': 'function_call'
+                                })
+                    
                     functions.append(func_info)
+                    
         except SyntaxError:
-            # Fallback regex amélioré pour async, lambda, etc.
+            # Fallback (sans code)
             func_pattern = r'(?:async\s+)?def\s+(\w+)|lambda\s*:'
             for match in re.finditer(func_pattern, content, re.MULTILINE):
                 name = match.group(1) or 'lambda'
@@ -222,85 +589,100 @@ class MultiLanguageDependencyParser:
                     'line': content[:match.start()].count('\n') + 1,
                     'type': 'function',
                     'uid': f"func_{name}_approx",
-                    'calls': []
+                    'calls': [],
+                    'codeContent': ""  # Vide pour fallback
                 })
-        return functions
-
-    def _extract_python_variables(self, content: str) -> List[Dict[str, Any]]:
-        """
-        ✅ CORRIGÉ : Extrait les variables Python avec AST.
         
-        Correction de l'erreur targets vs target pour ast.Assign vs ast.AnnAssign.
-        """
+        return functions
+    
+    
+    def _extract_python_variables(self, content: str) -> List[Dict[str, Any]]:
         variables = []
         try:
             tree = ast.parse(content)
-            
-            # ✅ Parcourir l'AST pour trouver les assignments
-            for node in ast.walk(tree):
-                # ✅ CORRECTION : ast.Assign utilise node.targets (PLURIEL)
+
+            # === 1️⃣ Variables globales (au niveau module) ===
+            for node in tree.body:
+                # Assignation simple : x = ...
                 if isinstance(node, ast.Assign):
-                    for target in node.targets:  # ✅ Correct : targets au pluriel
+                    for target in node.targets:
                         if isinstance(target, ast.Name):
-                            var_info = {
+                            variables.append({
                                 'name': target.id,
                                 'line': node.lineno,
-                                'type': 'local',  # Simplifié
+                                'type': 'global',
                                 'scope': 'global',
                                 'uid': f"var_{target.id}_{node.lineno}"
-                            }
-                            # Éviter doublons
-                            if not any(v['name'] == target.id and v['line'] == node.lineno for v in variables):
-                                variables.append(var_info)
-                
-                # ✅ CORRECTION : ast.AnnAssign utilise node.target (SINGULIER)
+                            })
+
+                # Assignation annotée : x: int = ...
                 elif isinstance(node, ast.AnnAssign):
-                    if isinstance(node.target, ast.Name):  # ✅ Correct : target au singulier
-                        var_info = {
+                    if isinstance(node.target, ast.Name):
+                        variables.append({
                             'name': node.target.id,
                             'line': node.lineno,
                             'type': 'annotated',
                             'scope': 'global',
                             'uid': f"var_{node.target.id}_{node.lineno}"
-                        }
-                        if not any(v['name'] == node.target.id and v['line'] == node.lineno for v in variables):
-                            variables.append(var_info)
-                
-                # ✅ Pour attributs de classe (self.x = ...)
+                        })
+
+                # Imports (facultatif : considérés comme variables globales)
+                elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        name = alias.asname or alias.name.split('.')[0]
+                        variables.append({
+                            'name': name,
+                            'line': node.lineno,
+                            'type': 'import',
+                            'scope': 'global',
+                            'uid': f"var_{name}_{node.lineno}"
+                        })
+
+                # === 2️⃣ Variables de classe ===
                 elif isinstance(node, ast.ClassDef):
                     for body_node in node.body:
+                        # Variables de classe directes : a = 10
                         if isinstance(body_node, ast.Assign):
                             for target in body_node.targets:
-                                if isinstance(target, ast.Attribute):
-                                    attr_info = {
-                                        'name': target.attr,
+                                if isinstance(target, ast.Name):  # On exclut self.x
+                                    variables.append({
+                                        'name': target.id,
                                         'line': body_node.lineno,
-                                        'type': 'attribute',
-                                        'scope': node.name,
-                                        'uid': f"attr_{target.attr}_{body_node.lineno}"
-                                    }
-                                    if not any(v['name'] == target.attr and v['line'] == body_node.lineno for v in variables):
-                                        variables.append(attr_info)
-            
-            logger.debug(f"✅ {len(variables)} variables extraites avec succès")
-            
+                                        'type': 'class',
+                                        'scope': f"class:{node.name}",
+                                        'uid': f"var_{node.name}_{target.id}_{body_node.lineno}"
+                                    })
+                        # Variables annotées dans la classe
+                        elif isinstance(body_node, ast.AnnAssign):
+                            if isinstance(body_node.target, ast.Name):
+                                variables.append({
+                                    'name': body_node.target.id,
+                                    'line': body_node.lineno,
+                                    'type': 'class_annotated',
+                                    'scope': f"class:{node.name}",
+                                    'uid': f"var_{node.name}_{body_node.target.id}_{body_node.lineno}"
+                                })
+                        # ❌ Ignorer tout ce qui est dans des fonctions (méthodes)
+                        elif isinstance(body_node, ast.FunctionDef):
+                            continue
+
+            logger.debug(f"✅ {len(variables)} variables globales et de classe extraites.")
+
         except SyntaxError as e:
             logger.warning(f"⚠️ Syntaxe Python invalide, fallback regex: {e}")
-            # Fallback regex amélioré
-            var_pattern = r'^(\s*[\w_][\w\d_]*)\s*=\s*(?!(?:def|class|import|from|if|for|while|try|with|async)\s)'
+            # Fallback simple : variables globales au début de ligne (sans indentation)
+            var_pattern = r'^(?!\s)([\w_][\w\d_]*)\s*='
             for match in re.finditer(var_pattern, content, re.MULTILINE):
-                var_name = match.group(1).strip()
+                var_name = match.group(1)
                 line = content[:match.start()].count('\n') + 1
-                var_info = {
+                variables.append({
                     'name': var_name,
                     'line': line,
-                    'type': 'local',
+                    'type': 'global',
                     'scope': 'global',
                     'uid': f"var_{var_name}_approx_{line}"
-                }
-                if not any(v['name'] == var_name and v['line'] == line for v in variables):
-                    variables.append(var_info)
-        
+                })
+
         return variables
 
     def _extract_java_classes(self, content: str) -> List[Dict[str, Any]]:
@@ -437,22 +819,6 @@ class MultiLanguageDependencyParser:
         return variables
     
     def _parse_python(self, content: str, file_path: str) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Parsing Python complet avec AST pour imports, héritage, appels de fonctions, usages de variables.
-        
-        Détecte:
-        - Imports (import, from...import)
-        - Héritage de classes (extends)
-        - Appels de fonctions/méthodes (intra/inter)
-        - Usages de variables
-        
-        Args:
-            content: Code Python
-            file_path: Chemin du fichier
-        
-        Returns:
-            Dictionnaire des relations détectées
-        """
         relations = defaultdict(list)
         
         try:
@@ -475,6 +841,18 @@ class MultiLanguageDependencyParser:
                     })
             
             # Imports relatifs: from module import name
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    target = alias.name.split('.')[0] + '.py'
+                    relations['import'].append({
+                        'target': target,
+                        'target_uid': '',  # À mapper plus tard
+                        'type': 'import',
+                        'alias': alias.asname or None,
+                        'line': node.lineno,
+                        'intra_file': False
+                    })
+
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ''
                 for alias in node.names:
@@ -483,6 +861,7 @@ class MultiLanguageDependencyParser:
                         'target': target,
                         'target_uid': '',
                         'type': 'from_import',
+                        'alias': alias.asname or alias.name,
                         'line': node.lineno,
                         'intra_file': False
                     })

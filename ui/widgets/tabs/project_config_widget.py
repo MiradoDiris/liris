@@ -1,13 +1,14 @@
 import os
+import qtawesome as qta
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import uuid
 from datetime import datetime
-import sqlite3
 from PyQt5 import QtWidgets, QtGui
+from PyQt5.QtCore import Qt, pyqtSignal, QSize
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QFileDialog, QDialog, QVBoxLayout, QListWidgetItem, QHBoxLayout, QLabel, QPushButton, QInputDialog
+from PyQt5.QtWidgets import QFileDialog, QDialog, QVBoxLayout, QListWidgetItem, QHBoxLayout, QLabel, QPushButton, QInputDialog, QListWidget
 from collections import defaultdict
 from utils.logger import logger
 from ui.styles.platform_config_style import PlatformConfigStyle
@@ -26,6 +27,71 @@ from ui.widgets.tabs.relations_config import RelationsConfig
 from utils.project_storage_manager import ProjectStorageManager
 from utils.dgraph_project_manager import DgraphProjectManager
 from ui.widgets.dialogs.code_dialogs import CodeDialogs
+from utils.complete_call_resolver import CompleteCallResolver
+
+class BackButton(QtWidgets.QPushButton):
+    """
+    🎨 Bouton retour personnalisé avec rendu garanti (VERSION COMPACTE)
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(28, 28)  # ✅ Taille réduite de 40x32 → 28x28
+        self.setToolTip("Retour au niveau précédent")
+        self.setCursor(Qt.PointingHandCursor)
+        
+        # Style direct
+        self.setStyleSheet("""
+            BackButton {
+                background-color: #ffffff;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+            }
+            BackButton:hover {
+                background-color: #e5f3ff;
+                border-color: #0078d4;
+            }
+            BackButton:pressed {
+                background-color: #cce8ff;
+            }
+            BackButton:disabled {
+                background-color: #f3f3f3;
+                color: #cccccc;
+            }
+        """)
+    
+    def paintEvent(self, event):
+        """Dessine la flèche directement avec QPainter"""
+        super().paintEvent(event)
+        
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        
+        # Définir la couleur selon l'état
+        if not self.isEnabled():
+            painter.setPen(QtGui.QPen(QtGui.QColor("#cccccc"), 2.5))
+        elif self.underMouse():
+            painter.setPen(QtGui.QPen(QtGui.QColor("#0078d4"), 2.5))
+        else:
+            painter.setPen(QtGui.QPen(QtGui.QColor("#2c3e50"), 2.5))
+        
+        # Dessiner la flèche (chevron gauche) - AJUSTÉE POUR TAILLE 28x28
+        path = QtGui.QPainterPath()
+        
+        # Centre du bouton
+        cx = self.width() / 2
+        cy = self.height() / 2
+        
+        # Taille de la flèche réduite
+        arrow_size = 6  # ✅ Réduit de 8 → 6
+        
+        # Dessiner le chevron : >
+        path.moveTo(cx + 2, cy - arrow_size)  # Haut
+        path.lineTo(cx - 2, cy)                # Milieu
+        path.lineTo(cx + 2, cy + arrow_size)  # Bas
+        
+        painter.drawPath(path)
+        painter.end()
+
 
 class ProjectConfigWidget(QtWidgets.QWidget):
     """Widget pour configurer les profils de projet et l'ontologie de Turing avec liaison hiérarchique."""
@@ -52,6 +118,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         self.dependency_parser = MultiLanguageDependencyParser()
         self.project_scanner = ProjectStructureScanner(self.dependency_parser)
+        self.call_resolver = None
         
 
         self.project_profiles = {}
@@ -136,10 +203,10 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.dgraph_manager.project_storage_manager = self.project_storage_manager
         self.dgraph_manager.project_profiles = self.project_profiles
         self.dgraph_manager.current_project_name = self.current_project_name
-        self.dgraph_manager.label_uid_to_info = self.label_uid_to_info  # ✅ NOUVEAU
-        self.dgraph_manager.pending_relations = self.pending_relations  # ✅ NOUVEAU
-        self.dgraph_manager.local_to_dgraph = self.local_to_dgraph      # ✅ NOUVEAU
-        self.dgraph_manager.dgraph_to_local = self.dgraph_to_local      # ✅ NOUVEAU
+        self.dgraph_manager.label_uid_to_info = self.label_uid_to_info
+        self.dgraph_manager.pending_relations = self.pending_relations 
+        self.dgraph_manager.local_to_dgraph = self.local_to_dgraph 
+        self.dgraph_manager.dgraph_to_local = self.dgraph_to_local
 
         logger.info(f"🔍 Insertion Dgraph demandée pour le projet : {self.current_project_name}")
 
@@ -153,7 +220,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self.window().showMaximized()
 
     def _get_improved_list_style(self):
-        """Style amélioré pour les listes avec sélection gris clair"""
         return """
             QListWidget {
                 background-color: #ffffff;
@@ -163,10 +229,11 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 font-size: 13px;
             }
             QListWidget::item {
-                padding: 8px;
+                padding: 8px 8px 8px 32px;  /* Espace pour l'icône à gauche */
                 border-radius: 3px;
                 margin: 2px 0px;
                 color: #000000;
+                min-height: 24px;
             }
             QListWidget::item:selected {
                 background-color: #e0e0e0;
@@ -439,47 +506,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         hierarchy_group_layout.addLayout(level1_buttons_layout)
     
         # --- 3. Labels Enfants avec Bouton Retour ---
-        # Layout horizontal pour titre + bouton retour
-        child_header_layout = QtWidgets.QHBoxLayout()
-        child_header_layout.setSpacing(15)
-        child_header_layout.setContentsMargins(0, 0, 0, 5)
-    
-        # Titre "Labels enfants"
-        self.child_label_title = QtWidgets.QLabel("Labels enfants")
-        self.child_label_title.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 11px;")
-        child_header_layout.addWidget(self.child_label_title)
-    
-        # Bouton retour moderne noir
-        self.back_navigation_btn = QtWidgets.QPushButton("← Retour")
-        self.back_navigation_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #2c3e50;
-                border: none;
-                font-size: 11px;
-                padding: 2px 8px;
-                font-weight: 600;
-                text-align: left;
-            }
-            QPushButton:hover {
-                color: #000000;
-                text-decoration: underline;
-            }
-            QPushButton:disabled {
-                color: #bdc3c7;
-            }
-        """)
-        self.back_navigation_btn.clicked.connect(self._on_child_navigation_back)
-        self.back_navigation_btn.setEnabled(False)
-        self.back_navigation_btn.setCursor(QtGui.QCursor(Qt.PointingHandCursor))
-        child_header_layout.addWidget(self.back_navigation_btn)
-    
-        # Label indicateur de profondeur (chemin)
-        self.depth_indicator_label = QtWidgets.QLabel("")
-        self.depth_indicator_label.setStyleSheet("color: #7f8c8d; font-size: 10px; font-style: italic;")
-        child_header_layout.addWidget(self.depth_indicator_label)
-    
-        child_header_layout.addStretch()
+        child_header_layout = self._create_back_button_section()
         hierarchy_group_layout.addLayout(child_header_layout)
     
         # Liste des enfants
@@ -561,35 +588,180 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.level1_list_widget.itemDoubleClicked.connect(self._on_double_click_item)
         self.child_list_widget.itemDoubleClicked.connect(self._on_double_click_item)
 
+    def _create_back_button_section(self):
+        """Crée la section avec bouton retour et titre des labels enfants"""
+        child_header_layout = QtWidgets.QHBoxLayout()
+        child_header_layout.setSpacing(15)
+        child_header_layout.setContentsMargins(0, 0, 0, 5)
+
+        # ✅ BOUTON RETOUR AVEC FALLBACK ROBUSTE
+        self.back_navigation_btn = QtWidgets.QPushButton()
+        self.back_navigation_btn.setToolTip("Retour au niveau précédent")
+
+        # 🔹 TENTATIVE 1 : Charger depuis resources/icons
+        icon_loaded = False
+        icon_path = self._ensure_icon_exists()
+
+        if os.path.exists(icon_path):
+            try:
+                icon = QtGui.QIcon(icon_path)
+                if not icon.isNull():
+                    pixmap = icon.pixmap(20, 20)
+                    if not pixmap.isNull():
+                        self.back_navigation_btn.setIcon(icon)
+                        self.back_navigation_btn.setIconSize(QSize(20, 20))
+                        icon_loaded = True
+                        logger.debug(f"✅ Icône chargée depuis : {icon_path}")
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur chargement icône : {e}")
+
+        # 🔹 TENTATIVE 2 : Utiliser QStyle (icône système)
+        if not icon_loaded:
+            try:
+                style = self.style()
+                if style:
+                    system_icon = style.standardIcon(QtWidgets.QStyle.SP_ArrowBack)
+                    if not system_icon.isNull():
+                        self.back_navigation_btn.setIcon(system_icon)
+                        self.back_navigation_btn.setIconSize(QSize(20, 20))
+                        icon_loaded = True
+                        logger.debug("✅ Icône système chargée (SP_ArrowBack)")
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur icône système : {e}")
+
+        # 🔹 FALLBACK FINAL : Texte Unicode
+        if not icon_loaded:
+            self.back_navigation_btn.setText("←")
+            logger.info("ℹ️ Fallback texte Unicode activé")
+
+        # ✅ STYLE UNIFIÉ (LARGEUR RÉDUITE)
+        self.back_navigation_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ffffff;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                padding: 4px 6px;
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+                font-size: 14px;
+                font-weight: bold;
+                color: #2c3e50;
+            }
+            QPushButton:hover {
+                background-color: #e5f3ff;
+                border-color: #0078d4;
+            }
+            QPushButton:pressed {
+                background-color: #cce8ff;
+                border-color: #005499;
+            }
+            QPushButton:disabled {
+                background-color: #f3f3f3;
+                border-color: #d9d9d9;
+                color: #cccccc;
+            }
+        """)
+
+        self.back_navigation_btn.clicked.connect(self._on_child_navigation_back)
+        self.back_navigation_btn.setEnabled(False)
+        self.back_navigation_btn.setCursor(QtGui.QCursor(Qt.PointingHandCursor))
+        child_header_layout.addWidget(self.back_navigation_btn)
+
+        # Titre "Labels enfants" avec numéro de niveau centré
+        self.child_label_title = QtWidgets.QLabel("Labels enfants")
+        self.child_label_title.setStyleSheet("""
+            font-weight: bold; 
+            color: #2c3e50; 
+            font-size: 12px;
+            padding: 4px 8px;
+        """)
+        self.child_label_title.setAlignment(Qt.AlignCenter)
+        child_header_layout.addWidget(self.child_label_title)
+
+        # Label indicateur de profondeur (chemin)
+        self.depth_indicator_label = QtWidgets.QLabel("")
+        self.depth_indicator_label.setStyleSheet("""
+            color: #7f8c8d; 
+            font-size: 10px; 
+            font-style: italic;
+            padding: 4px 8px;
+        """)
+        self.depth_indicator_label.setAlignment(Qt.AlignCenter)
+        child_header_layout.addWidget(self.depth_indicator_label)
+
+        child_header_layout.addStretch()
+        return child_header_layout
+
+    def _ensure_icon_exists(self):
+        """
+        ✅ VERSION AMÉLIORÉE : Crée l'icône SVG optimisée
+        """
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        icons_dir = os.path.join(base_dir, '..', 'resources', 'icons')
+        icons_dir = os.path.normpath(icons_dir)
+
+        # Créer le dossier si nécessaire
+        try:
+            os.makedirs(icons_dir, exist_ok=True)
+        except Exception as e:
+            logger.error(f"❌ Impossible de créer le dossier icons : {e}")
+            return ""
+
+        icon_path = os.path.join(icons_dir, 'retour.svg')
+
+        # Créer l'icône si elle n'existe pas
+        if not os.path.exists(icon_path):
+            # ✅ SVG OPTIMISÉ avec viewBox correct
+            svg_content = '''<?xml version="1.0" encoding="UTF-8"?>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Flèche gauche simple et visible -->
+      <path d="M15 18L9 12L15 6" 
+            stroke="#2c3e50" 
+            stroke-width="2.5" 
+            stroke-linecap="round" 
+            stroke-linejoin="round"
+            fill="none"/>
+    </svg>'''
+            try:
+                with open(icon_path, 'w', encoding='utf-8') as f:
+                    f.write(svg_content)
+                logger.info(f"✅ Icône créée : {icon_path}")
+            except Exception as e:
+                logger.error(f"❌ Erreur création icône : {e}")
+                return ""
+
+        return icon_path
+
     def _update_child_navigation_ui(self):
-        """
-        Met à jour l'interface de navigation des enfants (titre, bouton retour, indicateur).
-        """
         current_depth = len(self.child_navigation_stack)
-        
+
         if current_depth == 0:
-            self.child_label_title.setText("Labels enfants (Niveau 2)")
+            level_text = "Labels enfants - Niveau 1"
         else:
-            level = 2 + current_depth
-            self.child_label_title.setText(f"Labels enfants (Niveau {level})")
-        
+            child_level = current_depth + 1
+            level_text = f"Labels enfants - Niveau {child_level}"
+
+        self.child_label_title.setText(level_text)
+
         self.back_navigation_btn.setEnabled(current_depth > 0)
-        
+
         if current_depth > 0:
             path_parts = []
             for state in self.child_navigation_stack:
                 parent = state.get('parent')
                 if parent:
                     path_parts.append(parent.get('label', parent.get('name', '?')))
-            
+
             if self.current_child_parent:
                 path_parts.append(self.current_child_parent.get('label', self.current_child_parent.get('name', '?')))
-            
-            path_text = " > ".join(path_parts[-3:])  # Limiter à 3 niveaux affichés
+
+            path_text = " > ".join(path_parts[-3:])
             if len(self.child_navigation_stack) > 3:
                 path_text = "... > " + path_text
-            
-            self.depth_indicator_label.setText(f"📁 {path_text}")
+
+            self.depth_indicator_label.setText(f"📂 {path_text}")
         else:
             self.depth_indicator_label.setText("")
 
@@ -615,8 +787,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         # Fallback : lecture directe du disque
         return self._read_file_content(file_path)  # Méthode existante
     #Interface a ameliorer
-    
-
 
     def _on_double_click_item(self, item):
         """
@@ -627,14 +797,11 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         if not item:
             return
 
-        item_type = item.data(Qt.UserRole + 1)  # Type stocké (ex. 'class', 'function', 'variable', 'file')
-
+        item_type = item.data(Qt.UserRole + 1)
         if item_type in ['class', 'function', 'variable', 'method']:
-            # Cas spécifique : snippet pour élément de code
-            file_path = item.data(Qt.UserRole + 2)  # Chemin du fichier stocké
-            line_num = item.data(Qt.UserRole + 3) or 1  # Numéro de ligne (int)
+            file_path = item.data(Qt.UserRole + 2)
+            line_num = item.data(Qt.UserRole + 3) or 1
 
-            # Récupérer le contenu du fichier (depuis current_root_data ou project_profile_data)
             content = self._get_file_content(file_path)
             if not content:
                 QtWidgets.QMessageBox.warning(self, "Erreur", f"Impossible de charger le fichier {file_path}.")
@@ -648,15 +815,13 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             uid = item.data(Qt.UserRole)
             label = self._find_label_by_uid(uid)
             if label:
-                self._on_double_click_label(item)  # Réutilise la méthode existante si applicable
+                self._on_double_click_label(item)
             else:
-                # Ou directement afficher le fichier
                 content = self._get_file_content(file_path)
                 if content:
                     self.code_dialogs._show_file_content_dialog(file_path, content, {'label': item.text()})
 
         else:
-            # Pour les dossiers/labels généraux : affichage existant
             self._on_double_click_label(item)
 
     def _update_project_combo(self):
@@ -717,11 +882,9 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.current_project_name = project_name
         self.current_project_profile_data = json.loads(json.dumps(self.project_profiles[project_name]))
 
-        # Restore relations
         pending_relations_data = self.current_project_profile_data.get("pending_relations", {})
         self.pending_relations = defaultdict(list, pending_relations_data)
 
-        # ✅ NOUVEAU : Synchroniser les données avec les widgets enfants
         self.global_relations_config.current_project_profile_data = self.current_project_profile_data
         self.relations_graph.current_project_profile_data = self.current_project_profile_data
 
@@ -775,18 +938,41 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             details += f"Fichiers: {len(self.current_project_profile_data.get('files', []))}"
             self.details_text.setPlainText(details)
 
+    def _get_icon_for_item(self, item_data: Dict[str, Any], default_color: str = '#2c3e50') -> QtGui.QIcon:
+        item_type = item_data.get('type', 'folder')
+        label = item_data.get('label', item_data.get('name', ''))
+
+        # Logique pour déterminer si c'est un fichier
+        is_file = (
+            item_type == 'file' or
+            label.lower().endswith((
+                '.ts', '.py', '.js', '.java', '.cpp', '.json', '.c', '.h', '.tsx', 
+                '.jsx', '.cs', '.php', '.rb', '.go', '.html', '.css', '.xml', 
+                '.txt', '.md', '.yaml', '.yml', '.net'
+            ))
+        )
+
+        if is_file:
+            return qta.icon('fa5s.file-code', color='#666666')  # Noir pour les fichiers
+        else:
+            return qta.icon('fa5s.folder', color=default_color)
+
     def _refresh_cluster_list(self):
         """Rafraîchit la liste des clusters sans charger les niveaux inférieurs."""
         self.cluster_list_widget.clear()
         clusters = self.current_project_profile_data.get("turing_ontology", {}).get("clusters_detailed", [])
+        folder_color = "#FFD700"  # Couleur orange pour les dossiers/clusters
         for cluster in clusters:
-            self.cluster_list_widget.addItem(cluster["name"])
+            cluster_item = QListWidgetItem(cluster["name"])
+            # Utiliser la méthode helper pour l'icône (clusters sont des dossiers)
+            icon = self._get_icon_for_item(cluster, folder_color)
+            cluster_item.setIcon(icon)
+            cluster_item.setData(Qt.UserRole, cluster.get('uid', ''))
+            cluster_item.setData(Qt.UserRole + 1, 'cluster')
+            cluster_item.setForeground(QtGui.QColor(folder_color))
+            self.cluster_list_widget.addItem(cluster_item)
 
     def _on_cluster_selected(self, current):
-        """
-        Gère la sélection d'un cluster.
-        Affiche les root labels + classes/fonctions/variables des fichiers du cluster.
-        """
         if not current:
             self.current_cluster_data = None
             self._reset_hierarchy_ui()
@@ -807,8 +993,11 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.current_level1_data = None
         self.current_level2_data = None
 
-        # Afficher root labels + éléments de code des fichiers du cluster
-        self._populate_root_list_with_cluster_files()
+        # ❌ ANCIEN CODE (affiche juste les noms)
+        # self._populate_root_list_with_cluster_files()
+
+        # ✅ NOUVEAU CODE (affiche fichiers ET dossiers)
+        self._populate_root_list()
 
         self.level1_list_widget.clear()
         self.child_list_widget.clear()
@@ -888,102 +1077,12 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self.child_list_widget.clear()
 
         self._update_button_states()
-
-    def _populate_level1_list(self):
-        """Affiche niveau 1 AVEC préfixes pour classes/fonctions/variables"""
-        self.level1_list_widget.clear()
-
-        if not self.current_root_data:
-            return
-
-        for level1 in self.current_root_data.get("children", []):
-            child_type = level1.get('type', 'folder')
-
-            # ✅ TRAITER LES ÉLÉMENTS DE CODE AVEC PRÉFIXES
-            if child_type == 'class':
-                display = f"[CLASS] {level1.get('name', 'Classe')} (ligne {level1.get('line', '?')})"
-                item = QListWidgetItem(display)
-
-                cls_uid = level1.get('uid', str(uuid.uuid4()))
-                if 'uid' not in level1:
-                    level1['uid'] = cls_uid
-
-                item.setData(Qt.UserRole, cls_uid)
-                item.setData(Qt.UserRole + 1, "class")
-                item.setData(Qt.UserRole + 2, level1.get('file', ''))
-                item.setData(Qt.UserRole + 3, level1.get('line', 0))
-                item.setForeground(QtGui.QColor("#FF9800"))
-                self.level1_list_widget.addItem(item)
-                continue
-            
-            elif child_type in ['function', 'method']:
-                func_type = level1.get('type', 'function')
-                prefix = "[METH]" if func_type == "method" else "[FUNC]"
-                display = f"{prefix} {level1.get('name', 'Fonction')} (ligne {level1.get('line', '?')})"
-                item = QListWidgetItem(display)
-
-                func_uid = level1.get('uid', str(uuid.uuid4()))
-                if 'uid' not in level1:
-                    level1['uid'] = func_uid
-
-                item.setData(Qt.UserRole, func_uid)
-                item.setData(Qt.UserRole + 1, func_type)
-                item.setData(Qt.UserRole + 2, level1.get('file', ''))
-                item.setData(Qt.UserRole + 3, level1.get('line', 0))
-                item.setForeground(QtGui.QColor("#2196F3"))
-                self.level1_list_widget.addItem(item)
-                continue
-            
-            elif child_type == 'variable':
-                display = f"[VAR] {level1.get('name', 'Variable')} (ligne {level1.get('line', '?')})"
-                item = QListWidgetItem(display)
-
-                var_uid = level1.get('uid', str(uuid.uuid4()))
-                if 'uid' not in level1:
-                    level1['uid'] = var_uid
-
-                item.setData(Qt.UserRole, var_uid)
-                item.setData(Qt.UserRole + 1, "variable")
-                item.setData(Qt.UserRole + 2, level1.get('file', ''))
-                item.setData(Qt.UserRole + 3, level1.get('line', 0))
-                item.setForeground(QtGui.QColor("#4CAF50"))
-                self.level1_list_widget.addItem(item)
-                continue
-            
-            # === FICHIERS/DOSSIERS NORMAUX ===
-            label = level1.get('label', level1.get('name', 'Sans nom'))
-
-            is_file = (
-                child_type == 'file' or 
-                label.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net'))
-            )
-
-            if is_file:
-                display = label  # PAS d'icône
-            elif child_type in ['folder', 'directory']:
-                display = f"📁 {label}"  # AVEC icône
-            else:
-                display = label
-
-            item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, level1.get("uid", level1.get("id", "")))
-            item.setData(Qt.UserRole + 1, child_type)
-            self.level1_list_widget.addItem(item)
-
-        self._update_button_states()
-
+    
     def _add_child_to_list(self, child: Dict, list_widget, indent: str = ""):
-        """Ajoute un enfant SANS icône"""
         child_type = child.get('type', 'folder')
         child_label = child.get('label', child.get('name', 'Sans nom'))
 
-        # ✅ SKIP COMPLET des éléments de code
-        if child_type in ['class', 'function', 'variable', 'method']:
-            return  # Ne pas afficher dans cette fonction récursive
-
-        # ✅ Affichage SANS icône
-        display = f"{indent}{child_label}"  # PAS d'icône du tout
-
+        display = f"{indent}{child_label}"
         item = QListWidgetItem(display)
 
         child_uid = child.get('uid', child.get('id', str(uuid.uuid4())))
@@ -994,7 +1093,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         item.setData(Qt.UserRole + 1, child_type)
         list_widget.addItem(item)
 
-        # Récursion UNIQUEMENT pour dossiers
+        # Récursion pour dossiers
         if child_type in ['folder', 'directory']:
             for grandchild in child.get("children", []):
                 self._add_child_to_list(grandchild, list_widget, indent + "  ")
@@ -1059,114 +1158,110 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         dialog.exec_()
 
-    def _populate_children_for_file(self, file_data: Dict, list_widget):
-        """Affiche enfants d'un fichier AVEC préfixes [CLASS], [FUNC], [VAR]"""
-        list_widget.clear()
-        if not file_data:
+    def _populate_level1_list(self):
+        self.level1_list_widget.clear()
+
+        if not self.current_root_data:
             return
 
-        children = file_data.get('children', [])
+        # Couleurs
+        primary = '#A23B2D'
+        dark_gray = '#424242'
+        medium_gray = '#666666'
+        strong_gray = '#555555'
 
-        if not children:
-            list_widget.addItem(QListWidgetItem("(Aucun élément trouvé)"))
-            return
+        def modulate_color(base_color: str, lvl: int = 1):
+            if lvl > 1:
+                if base_color == primary:
+                    return '#D35A4A'
+                elif base_color == dark_gray:
+                    return '#5A5A5A'
+                elif base_color == medium_gray:
+                    return '#888888'
+            return base_color
 
-        for child in children:
-            child_type = child.get('type', 'unknown')
-            child_uid = child.get('uid')
+        modulated_primary = modulate_color(primary)
+        modulated_dark = modulate_color(dark_gray)
 
-            if not child_uid:
-                child_uid = child.get('id', str(uuid.uuid4()))
+        has_items = False
+
+        # === NOUVEAU : Afficher TOUS les children (fichiers + éléments de code) ===
+        for child in self.current_root_data.get("children", []):
+            has_items = True
+
+            child_type = child.get('type', 'folder')
+            label = child.get('label', child.get('name', 'Sans nom'))
+            child_uid = child.get('uid', str(uuid.uuid4()))
+            if 'uid' not in child:
                 child['uid'] = child_uid
 
-            # === CLASSE (AVEC préfixe [CLASS]) ===
+            line_num = child.get('line', 0)
+            file_path = child.get('file', '')
+
+            # === TRAITEMENT PAR TYPE ===
+            icon = None
+            color = QtGui.QColor("#000000")
+            display = label
+
             if child_type == 'class':
-                class_name = child.get('name', 'Class')
-                line_num = child.get('line', '?')
-                methods_count = len(child.get('children', []))
+                icon = qta.icon('fa5s.cube', color=strong_gray)
+                color = QtGui.QColor(strong_gray)
+                display = f"[CLASS] {label} (ligne {line_num})"
 
-                display = f"[CLASS] {class_name}"
-                if methods_count > 0:
-                    display += f" ({methods_count} methods)"
-                display += f" - ligne {line_num}"
-
-                item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, child_uid)
-                item.setData(Qt.UserRole + 1, 'class')
-                item.setData(Qt.UserRole + 2, line_num)
-                item.setForeground(QtGui.QColor("#FF9800"))  # Orange
-                list_widget.addItem(item)
-
-                # Ajouter les méthodes avec indentation
-                for method in child.get('children', []):
-                    method_uid = method.get('uid')
-                    if not method_uid:
-                        method_uid = str(uuid.uuid4())
-                        method['uid'] = method_uid
-
-                    method_name = method.get('name', 'method')
-                    method_line = method.get('line', '?')
-
-                    method_display = f"  ├─ [METH] {method_name} (ligne {method_line})"
-                    method_item = QListWidgetItem(method_display)
-                    method_item.setData(Qt.UserRole, method_uid)
-                    method_item.setData(Qt.UserRole + 1, 'method')
-                    method_item.setData(Qt.UserRole + 2, method_line)
-                    method_item.setForeground(QtGui.QColor("#FFA500"))  # Orange clair
-                    list_widget.addItem(method_item)
-
-            # === FONCTION (AVEC préfixe [FUNC]) ===
             elif child_type in ['function', 'method']:
-                func_name = child.get('name', 'Function')
-                line_num = child.get('line', '?')
-
+                icon = qta.icon('fa5s.cog', color=modulated_primary)
+                color = QtGui.QColor(modulated_primary)
                 prefix = "[METH]" if child_type == 'method' else "[FUNC]"
-                display = f"{prefix} {func_name} - ligne {line_num}"
+                display = f"{prefix} {label} (ligne {line_num})"
 
-                item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, child_uid)
-                item.setData(Qt.UserRole + 1, child_type)
-                item.setData(Qt.UserRole + 2, line_num)
-                item.setForeground(QtGui.QColor("#2196F3"))  # Bleu
-                list_widget.addItem(item)
-
-            # === VARIABLE (AVEC préfixe [VAR]) ===
             elif child_type == 'variable':
-                var_name = child.get('name', 'Variable')
-                var_type = child.get('var_type', 'local')
-                line_num = child.get('line', '?')
+                icon = qta.icon('fa5s.tag', color=medium_gray)
+                color = QtGui.QColor(medium_gray)
+                display = f"[VAR] {label} (ligne {line_num})"
 
-                display = f"[VAR] {var_name} ({var_type}) - ligne {line_num}"
+            elif label.endswith((
+                '.ts', '.py', '.js', '.java', '.cpp', '.json', '.net',
+                '.c', '.h', '.tsx', '.jsx', '.cs', '.php', '.rb', '.go',
+                '.html', '.css', '.xml', '.txt', '.md', '.yaml', '.yml'
+            )):
+                icon = qta.icon('fa5s.file-code', color=medium_gray)
+                color = QtGui.QColor(medium_gray)
+                display = label
 
-                item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, child_uid)
-                item.setData(Qt.UserRole + 1, 'variable')
-                item.setData(Qt.UserRole + 2, line_num)
-                item.setForeground(QtGui.QColor("#4CAF50"))  # Vert
-                list_widget.addItem(item)
+            elif child_type in ['folder', 'directory']:
+                icon = qta.icon('fa5s.folder', color=modulated_dark)
+                color = QtGui.QColor(modulated_dark)
+                display = label
 
-            # === FICHIERS/DOSSIERS ===
             else:
-                child_name = child.get('label', child.get('name', 'unknown'))
+                icon = qta.icon('fa5s.question-circle', color="#16a085")
+                color = QtGui.QColor("#16a085")
+                display = f"[UNKNOWN] {label}"
 
-                is_file = (
-                    child_type == 'file' or 
-                    child_name.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net',
-                                        '.c', '.h', '.tsx', '.jsx', '.cs', '.php', '.rb', '.go',
-                                        '.html', '.css', '.xml', '.txt', '.md'))
-                )
+            # === CRÉER L'ITEM ===
+            item = QListWidgetItem(display)
+            item.setIcon(icon)
+            item.setData(Qt.UserRole, child_uid)
+            item.setData(Qt.UserRole + 1, child_type)
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setData(Qt.UserRole + 3, line_num)
+            item.setForeground(color)
 
-                if is_file:
-                    display = child_name  # PAS d'icône
-                elif child_type in ['folder', 'directory']:
-                    display = f"{child_name}"  # AVEC icône
-                else:
-                    display = child_name
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            font.setBold(False)
+            item.setFont(font)
 
-                item = QListWidgetItem(display)
-                item.setData(Qt.UserRole, child_uid)
-                item.setData(Qt.UserRole + 1, child_type)
-                list_widget.addItem(item)
+            self.level1_list_widget.addItem(item)
+
+        # === Message vide ===
+        if not has_items:
+            empty_item = QListWidgetItem("(Aucun élément trouvé)")
+            empty_item.setForeground(QtGui.QColor("#95a5a6"))
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            empty_item.setFont(font)
+            self.level1_list_widget.addItem(empty_item)
 
         self._update_button_states()
 
@@ -1178,13 +1273,26 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         item_type = current.data(Qt.UserRole + 1)
         item_uid = current.data(Qt.UserRole)
 
+        # Skip les items de navigation
         if item_type == 'navigation':
             return
 
+        # ✅ CAS 1 : Dossier (navigation hiérarchique)
         if item_type in ['folder', 'directory', 'child']:
+            # ✅ PROTECTION : Vérifier que current_level1_data existe
+            if not self.current_level1_data:
+                logger.warning("⚠️ current_level1_data est None, impossible de naviguer")
+                QtWidgets.QMessageBox.warning(
+                    self, 
+                    "Erreur", 
+                    "Aucun label parent sélectionné. Veuillez d'abord sélectionner un élément dans la liste niveau 1."
+                )
+                return
+
             folder_data = self._find_child_by_uid(self.current_level1_data, item_uid)
 
             if folder_data:
+                # Sauvegarder l'état actuel pour retour arrière
                 self.child_navigation_stack.append({
                     'parent': self.current_child_parent,
                     'list_items': self._save_list_state(self.child_list_widget)
@@ -1195,15 +1303,22 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 self.current_selected_label_uid = item_uid
 
                 self._populate_child_list_for_folder(folder_data)
-                self._update_child_navigation_ui()  # ✅ NOUVEAU
+                self._update_child_navigation_ui()
 
                 self._update_selected_details("Dossier", folder_data)
 
                 self.global_relations_config.update_current(item_uid)
                 self.relations_graph.update_graph(item_uid)
+            else:
+                logger.warning(f"⚠️ Dossier introuvable pour UID: {item_uid}")
 
         elif item_type == 'level1_file':
             file_path = current.data(Qt.UserRole + 2)
+
+            if not file_path:
+                logger.warning("⚠️ Chemin de fichier manquant")
+                return
+
             content = self.current_project_profile_data.get('file_contents', {}).get(file_path, '')
 
             if content:
@@ -1211,6 +1326,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 functions = self.dependency_parser.extract_functions(content, file_path)
                 variables = self.dependency_parser.extract_variables(content, file_path)
 
+                # Sauvegarder l'état pour retour
                 self.child_navigation_stack.append({
                     'parent': self.current_child_parent,
                     'list_items': self._save_list_state(self.child_list_widget)
@@ -1237,12 +1353,28 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 details += f"Variables: {len(variables)}\n"
                 self.details_text.setPlainText(details)
 
+        # ✅ CAS 3 : Élément de code (classe, fonction, variable, méthode)
         elif item_type in ['class', 'function', 'variable', 'method']:
             file_path = current.data(Qt.UserRole + 2)
             line = current.data(Qt.UserRole + 3)
 
+            # ✅ Extraire le nom proprement
+            text = current.text()
+
+            # Retirer l'icône et le préfixe [CLASS], [FUNC], etc.
+            if '[' in text:
+                name_part = text.split(']', 1)[1].strip()
+            else:
+                name_part = text.strip()
+
+            # Retirer la partie "(ligne X)"
+            if '(' in name_part:
+                element_name = name_part.split('(')[0].strip()
+            else:
+                element_name = name_part
+
             details = f"Type: {item_type.upper()}\n"
-            details += f"Nom: {current.text().split('[')[1].split(']')[1].strip().split('(')[0].strip()}\n"
+            details += f"Nom: {element_name}\n"
             details += f"Fichier: {os.path.basename(file_path) if file_path else 'N/A'}\n"
             details += f"Ligne: {line}\n"
             self.details_text.setPlainText(details)
@@ -1381,72 +1513,122 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         self._on_child_label_selected(item)
 
-    def _populate_child_list_for_folder(self, folder_data: Dict):
-        """Affiche contenu dossier SANS icônes."""
+    def _populate_child_list_for_folder(self, folder_data: Dict, level: int = 1):
         self.child_list_widget.clear()
 
         if not folder_data:
             return
 
         has_items = False
+
+        primary = '#A23B2D'
+        dark_gray = '#424242'
+        medium_gray = '#666666'
+        strong_gray = '#555555'
+
+        def modulate_color(base_color: str, lvl: int):
+            """Renvoie une teinte légèrement modifiée selon le niveau hiérarchique"""
+            if lvl > 1:
+                if base_color == primary:
+                    return '#D35A4A'  # Rouge plus clair
+                elif base_color == dark_gray:
+                    return '#5A5A5A'  # Gris plus clair
+                elif base_color == medium_gray:
+                    return '#888888'
+            return base_color
+
+        # Couleurs modulées selon le niveau
+        modulated_primary = modulate_color(primary, level)
+        modulated_dark = modulate_color(dark_gray, level)
+
         for child in folder_data.get('children', []):
-            child_type = child.get('type', 'folder')
+            has_items = True
+
             child_label = child.get('label', child.get('name', 'Sans nom'))
+            label_lower = child_label.lower()
             child_uid = child.get('uid', str(uuid.uuid4()))
             child['uid'] = child_uid
 
-            # ✅ SKIP complet des éléments de code
-            if child_type in ['class', 'function', 'variable', 'method']:
-                continue
-            
-            has_items = True
+            file_path = child.get('file', '')
+            line_num = child.get('line', 0)
+            display_type = "unknown"
+            icon = None
+            color = QtGui.QColor("#000000")
 
-            # ✅ PLUS D'ICÔNE - Affichage simple du nom
-            display = child_label  # PAS d'icône du tout
+            # === Détection par préfixe ===
+            if label_lower.startswith(("class", "[class", "classe")):
+                display_type = "class"
+                icon = qta.icon('fa5s.cube', color=strong_gray)
+                color = QtGui.QColor(strong_gray)
 
-            # Déterminer le type pour le stockage interne
-            is_file = (
-                child_type == 'file' or 
-                child_label.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net', 
-                                     '.c', '.h', '.tsx', '.jsx', '.cs', '.php', '.rb', '.go',
-                                     '.html', '.css', '.xml', '.txt', '.md', '.yaml', '.yml',
-                                     '.sh', '.bat', '.sql', '.vue', '.svelte'))
-            )
+            elif label_lower.startswith(("function", "[func", "fonction")):
+                display_type = "function"
+                icon = qta.icon('fa5s.cog', color=modulated_primary)
+                color = QtGui.QColor(modulated_primary)
 
-            if is_file:
-                display_type = 'level1_file'
-                color = QtGui.QColor("#7f8c8d")
-            elif child_type in ['folder', 'directory']:
-                display_type = 'folder'
-                color = QtGui.QColor("#f39c12")
+            elif label_lower.startswith(("method", "[meth", "methode")):
+                display_type = "function"  # méthode assimilée à fonction
+                icon = qta.icon('fa5s.cog', color=modulated_primary)
+                color = QtGui.QColor(modulated_primary)
+
+            elif label_lower.startswith(("variable", "[var", "var_")):
+                display_type = "variable"
+                icon = qta.icon('fa5s.tag', color=medium_gray)
+                color = QtGui.QColor(medium_gray)
+
+            elif label_lower.endswith((
+                '.py', '.js', '.ts', '.tsx', '.jsx', '.java', '.cpp', '.c', '.h',
+                '.php', '.rb', '.cs', '.go', '.html', '.css', '.xml', '.json',
+                '.yml', '.yaml', '.md', '.txt', '.vue', '.svelte', '.sql', '.bat', '.sh'
+            )):
+                display_type = "file"
+                icon = qta.icon('fa5s.file-code', color=medium_gray)
+                color = QtGui.QColor(medium_gray)
+
+            elif label_lower.startswith(("folder", "dir", "📁")):
+                display_type = "folder"
+                icon = qta.icon('fa5s.folder', color=modulated_dark)
+                color = QtGui.QColor(modulated_dark)
+
+            elif label_lower.startswith(("dependency", "dependance")):
+                display_type = "dependency"
+                icon = qta.icon('fa5s.cubes', color=modulated_dark)
+                color = QtGui.QColor(modulated_dark)
+
             else:
-                # Fallback : vérifier extension
-                if any(child_label.endswith(ext) for ext in ['.ts', '.py', '.js', '.java', '.cpp', '.json', '.net']):
-                    display_type = 'level1_file'
-                    color = QtGui.QColor("#7f8c8d")
-                else:
-                    display_type = 'folder'
-                    color = QtGui.QColor("#f39c12")
+                display_type = "unknown"
+                icon = qta.icon('fa5s.question-circle', color="#16a085")
+                color = QtGui.QColor("#16a085")
 
-            item = QListWidgetItem(display)
+            # === Création de l’élément ===
+            item = QListWidgetItem(child_label)
+            item.setIcon(icon)
             item.setData(Qt.UserRole, child_uid)
             item.setData(Qt.UserRole + 1, display_type)
-
-            if display_type == 'level1_file':
-                files = child.get('files', [])
-                file_path = files[0] if files else None
-                item.setData(Qt.UserRole + 2, file_path)
-            else:
-                item.setData(Qt.UserRole + 2, None)
-
-            item.setData(Qt.UserRole + 3, None)
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setData(Qt.UserRole + 3, line_num)
             item.setForeground(color)
+
+            # Police sobre et petite
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            font.setBold(False)
+            item.setFont(font)
+
             self.child_list_widget.addItem(item)
 
+        # === Dossier vide ===
         if not has_items:
             empty_item = QListWidgetItem("(Dossier vide)")
             empty_item.setForeground(QtGui.QColor("#95a5a6"))
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            empty_item.setFont(font)
             self.child_list_widget.addItem(empty_item)
+
+
+    def _setup_navigation_button_style(self):
+        self.back_navigation_btn.installEventFilter(self)
     
     def _save_list_state(self, list_widget):
         items = []
@@ -1463,16 +1645,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         return items
 
     def _display_code_elements_in_list(self, list_widget, classes, functions, variables, file_path):
-        """
-        Affiche classes/fonctions/variables dans une liste avec préfixes distinctifs.
-
-        Args:
-            list_widget: QListWidget cible
-            classes: Liste des classes
-            functions: Liste des fonctions
-            variables: Liste des variables
-            file_path: Chemin du fichier source
-        """
         list_widget.clear()
 
         if not classes and not functions and not variables:
@@ -1481,66 +1653,70 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             list_widget.addItem(empty_item)
             return
 
-        # === CLASSES ===
+        # === CLASSES avec icône ===
         for cls in classes:
             cls_uid = cls.get('uid', str(uuid.uuid4()))
             if 'uid' not in cls:
                 cls['uid'] = cls_uid
 
-            item = QListWidgetItem(f"[CLASS] {cls['name']} (ligne {cls.get('line', '?')})")
+            icon = self._get_element_icon('class')
+            item = QListWidgetItem(f"{icon} [CLASS] {cls['name']} (ligne {cls.get('line', '?')})")
             item.setData(Qt.UserRole, cls_uid)
             item.setData(Qt.UserRole + 1, 'class')
             item.setData(Qt.UserRole + 2, cls.get('line', 0))
             item.setData(Qt.UserRole + 3, file_path)
-            item.setForeground(QtGui.QColor("#e74c3c"))  # Rouge
+            item.setForeground(QtGui.QColor("#e74c3c"))
             item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
             list_widget.addItem(item)
 
-            # Méthodes indentées
+            # Méthodes indentées avec icône
             for method in cls.get('methods', []):
-                method_item = QListWidgetItem(f"  ↳ {method.get('name', 'method')} (ligne {method.get('line', '?')})")
+                method_icon = self._get_element_icon('method')
+                method_item = QListWidgetItem(f"  {method_icon} {method.get('name', 'method')} (ligne {method.get('line', '?')})")
                 method_item.setData(Qt.UserRole, str(uuid.uuid4()))
                 method_item.setData(Qt.UserRole + 1, 'method')
                 method_item.setData(Qt.UserRole + 2, method.get('line', 0))
                 method_item.setForeground(QtGui.QColor("#c0392b"))
                 list_widget.addItem(method_item)
 
-        # === FONCTIONS ===
+        # === FONCTIONS avec icône ===
         for func in functions:
             func_uid = func.get('uid', str(uuid.uuid4()))
             if 'uid' not in func:
                 func['uid'] = func_uid
 
             func_type = func.get('type', 'function')
+            icon = self._get_element_icon(func_type)
             prefix = "[METH]" if func_type == 'method' else "[FUNC]"
 
-            item = QListWidgetItem(f"{prefix} {func['name']} (ligne {func.get('line', '?')})")
+            item = QListWidgetItem(f"{icon} {prefix} {func['name']} (ligne {func.get('line', '?')})")
             item.setData(Qt.UserRole, func_uid)
             item.setData(Qt.UserRole + 1, func_type)
             item.setData(Qt.UserRole + 2, func.get('line', 0))
             item.setData(Qt.UserRole + 3, file_path)
-            item.setForeground(QtGui.QColor("#3498db"))  # Bleu
+            item.setForeground(QtGui.QColor("#3498db"))
             item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
             list_widget.addItem(item)
 
-        # === VARIABLES ===
+        # === VARIABLES avec icône ===
         for var in variables:
             var_uid = var.get('uid', str(uuid.uuid4()))
             if 'uid' not in var:
                 var['uid'] = var_uid
 
             var_type = var.get('type', 'local')
+            icon = self._get_element_icon('variable')
 
-            item = QListWidgetItem(f"[VAR] {var['name']} ({var_type}, ligne {var.get('line', '?')})")
+            item = QListWidgetItem(f"{icon} [VAR] {var['name']} ({var_type}, ligne {var.get('line', '?')})")
             item.setData(Qt.UserRole, var_uid)
             item.setData(Qt.UserRole + 1, 'variable')
             item.setData(Qt.UserRole + 2, var.get('line', 0))
             item.setData(Qt.UserRole + 3, file_path)
-            item.setForeground(QtGui.QColor("#2ecc71"))  # Vert
+            item.setForeground(QtGui.QColor("#2ecc71"))
             item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
             list_widget.addItem(item)
 
-        logger.info(f"Affiché {len(classes)} classes, {len(functions)} fonctions, {len(variables)} variables")
+        logger.info(f"Affiché {len(classes)} classes, {len(functions)} fonctions, {len(variables)} variables avec icônes")
 
     def _on_any_label_selected(self, current):
         """
@@ -2648,9 +2824,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 self.project_name_edit.text().strip() and
                 len(self.current_project_profile_data.get('turing_ontology', {}).get('clusters_detailed', [])) > 0)
 
-
-
-
     def _process_hierarchy_recursive(self, node_data, parent_mutation, cluster_uid, 
                                  mutations, label_uids, level):
         """
@@ -2724,15 +2897,15 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.global_relations_config.remove_button.setEnabled(has_rel_selected)
 
     def _on_browse_project(self):
-        """Version avec barre de progression moderne."""
+        """Version avec résolution complète des appels."""
         if not self.current_project_profile_data:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Aucun projet sélectionné")
             return
-    
+
         project_name = self.current_project_profile_data.get("name", "Projet inconnu")
         files = self.current_project_profile_data.get("files", [])
         file_contents = self.current_project_profile_data.get("file_contents", {})
-    
+
         if not files:
             QtWidgets.QMessageBox.warning(
                 self, 
@@ -2740,105 +2913,89 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 f"Aucun fichier enregistré pour le projet '{project_name}'."
             )
             return
-    
+
         logger.info(f"🔍 Analyse du projet '{project_name}'...")
-    
-        # 🎨 CRÉER LE DIALOGUE DE PROGRESSION
+
+        # Créer dialogue de progression
         progress = ModernProgressDialog(
             title=f"Analyse du projet : {project_name}",
             parent=self,
-            show_log=True,  # Activer le log détaillé
+            show_log=True,
             cancelable=True
         )
         progress.set_title(f"📊 Scan du projet {project_name}")
         progress.set_status(f"Analyse de {len(files)} fichiers...")
         progress.set_progress(0, len(files))
         progress.show()
-    
+
         self.parsed_relations_cache = {}
         files_processed = 0
-        files_with_content = 0
-        files_with_relations = 0
-    
+
         try:
+            # ✅ ÉTAPE 1 : Extraction classique (classes, fonctions, variables)
             for i, file_path in enumerate(files, 1):
-                # 🔄 MISE À JOUR DE LA PROGRESSION
                 progress.set_progress(i, len(files))
                 progress.set_status(f"Traitement du fichier {i}/{len(files)}")
                 progress.set_details(f"📄 {os.path.basename(file_path)}")
                 progress.add_log(f"[{i}/{len(files)}] Traitement: {file_path}")
-                
+
                 QtWidgets.QApplication.processEvents()
-    
-                # Vérifier annulation
+
                 if progress.is_cancelled:
                     progress.add_log("❌ Opération annulée par l'utilisateur")
                     logger.warning("Scan annulé par l'utilisateur")
                     progress.reject()
                     return
-    
-                # Récupérer le contenu
+
                 content = file_contents.get(file_path, "")
-                
-                if content:
-                    files_with_content += 1
-                    progress.add_log(f"   ✅ Contenu récupéré ({len(content)} chars)")
-                else:
-                    if os.path.exists(file_path):
-                        try:
-                            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                                content = f.read()
-                            files_with_content += 1
-                            progress.add_log(f"   ✅ Contenu lu depuis disque ({len(content)} chars)")
-                        except Exception as e:
-                            progress.add_log(f"   ⚠️ Erreur lecture: {e}")
-                            logger.warning(f"Impossible de lire {file_path}: {e}")
-                            continue
-                    else:
-                        progress.add_log(f"   ❌ Fichier introuvable sur disque")
-                        continue
-                    
+
                 if not content:
                     progress.add_log(f"   ⚠️ Contenu vide, skip")
                     continue
                 
                 # Parser les relations
                 parsed_rels = self.dependency_parser.parse_content(content, file_path)
-                
+
                 if parsed_rels:
                     total_rels = sum(len(v) for v in parsed_rels.values())
                     progress.add_log(f"   ✅ {total_rels} relations détectées")
-                    files_with_relations += 1
                     self.parsed_relations_cache[file_path] = parsed_rels
-                else:
-                    progress.add_log(f"   ℹ️ Aucune relation détectée")
-                
-                # Extraire classes/fonctions/variables
+
+                # Extraire classes/fonctions/variables avec code source
                 classes = self.dependency_parser.extract_classes(content, file_path)
                 functions = self.dependency_parser.extract_functions(content, file_path)
                 variables = self.dependency_parser.extract_variables(content, file_path)
-                
+
+                # ✅ Extraire le code source
+                for cls in classes:
+                    cls['codeContent'] = self._extract_class_code(content, cls)
+                    for method in cls.get('methods', []):
+                        method['codeContent'] = self._extract_method_code(content, method)
+
+                for func in functions:
+                    func['codeContent'] = self._extract_function_code(content, func)
+
                 progress.add_log(
                     f"   📦 Extraits: {len(classes)} classes, "
                     f"{len(functions)} fonctions, {len(variables)} variables"
                 )
-    
+
                 # Trouver le label correspondant
                 target_label = self._find_label_by_file_path(file_path)
-                
+
                 if target_label:
                     # Stocker le dict relations
                     target_label['relations'] = parsed_rels
-                    
+
                     # Intégrer dans outgoing_relations
                     if parsed_rels:
                         self._integrate_parsed_relations_to_label(target_label, parsed_rels, file_path)
-                    
+
                     # Stocker les éléments
                     target_label['classes'] = classes
                     target_label['functions'] = functions
                     target_label['variables'] = variables
-                    
+
                     # Créer les enfants
                     for cls in classes:
                         cls['file'] = file_path
@@ -2846,57 +3003,72 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                             cls['uid'] = str(uuid.uuid4())
                         child = self._create_child_node_from_extracted(cls, 'class')
                         target_label.setdefault('children', []).append(child)
-    
+
                     for func in functions:
                         func['file'] = file_path
                         if 'uid' not in func:
                             func['uid'] = str(uuid.uuid4())
                         child = self._create_child_node_from_extracted(func, 'function')
                         target_label.setdefault('children', []).append(child)
-    
+
                     for var in variables:
                         var['file'] = file_path
                         if 'uid' not in var:
                             var['uid'] = str(uuid.uuid4())
                         child = self._create_child_node_from_extracted(var, 'variable')
                         target_label.setdefault('children', []).append(child)
-                    
+
                     files_processed += 1
-                else:
-                    progress.add_log(f"   ⚠️ Aucun label trouvé pour ce fichier")
-    
-            # Construction du graphe
+
+            # ✅ ÉTAPE 2 : RÉSOLUTION COMPLÈTE DES APPELS (NOUVEAU)
             progress.set_indeterminate(True)
+            progress.set_status("🔗 Résolution complète des appels...")
+            progress.add_log("\n🔗 Initialisation CompleteCallResolver...")
+            QtWidgets.QApplication.processEvents()
+
+            # Initialiser le resolver avec la structure du projet
+            self.call_resolver = CompleteCallResolver(self.current_project_profile_data)
+
+            # Résoudre TOUS les appels
+            progress.add_log("📞 Résolution de tous les appels du projet...")
+            resolved_calls = self.call_resolver.resolve_all_calls()
+
+            # Intégrer les appels résolus
+            calls_integrated = self._integrate_resolved_calls_to_structure(resolved_calls)
+            progress.add_log(f"   ✅ {calls_integrated} appels résolus et intégrés")
+
+            progress.set_indeterminate(False)
+
+            # Construction du graphe
             progress.set_status("🔗 Construction du graphe de relations...")
             progress.add_log("\n🔗 Construction du graphe de relations...")
             QtWidgets.QApplication.processEvents()
-            
+
             self._build_complete_relations_graph()
-            
-            progress.set_indeterminate(False)
-    
+
             # Validation
             progress.set_status("🔍 Validation des relations...")
             progress.add_log("🔍 Validation des relations parsées...")
             validation_stats = self._validate_parsed_relations()
-    
+
             # Rafraîchir l'UI
             progress.set_status("♻️ Rafraîchissement de l'interface...")
             progress.add_log("♻️ Rafraîchissement de l'interface...")
             self._collect_all_labels()
             self._refresh_cluster_list()
-            
+
             # Sauvegarde
             progress.set_status("💾 Sauvegarde dans SQLite et Dgraph...")
             progress.add_log("\n💾 Démarrage de la sauvegarde...")
-            
+
             save_success = self._save_scan_results_to_storage()
-            
+
             if save_success:
                 progress.finish(
                     success=True,
                     message=f"✅ {files_processed} fichiers traités, "
-                            f"{validation_stats['total_parsed_in_dict']} relations détectées"
+                            f"{validation_stats['total_parsed_in_dict']} relations détectées, "
+                            f"{calls_integrated} appels résolus"
                 )
                 progress.add_log("\n✅ Sauvegarde complète réussie!")
             else:
@@ -2905,17 +3077,263 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     message="Le scan a réussi mais la sauvegarde a échoué"
                 )
                 progress.add_log("\n❌ Échec de la sauvegarde")
-    
+
         except Exception as e:
             logger.error(f"Erreur lors du scan: {str(e)}")
             import traceback
             traceback.print_exc()
-            
+
             progress.finish(
                 success=False,
                 message=f"Erreur : {str(e)}"
             )
             progress.add_log(f"\n❌ ERREUR: {str(e)}")
+
+    def _integrate_resolved_calls_to_structure(self, resolved_calls: Dict[str, List[Dict]]) -> int:
+        count = 0
+
+        if not resolved_calls:
+            logger.warning("⚠️ Aucun appel résolu à intégrer")
+            return 0
+
+        # Index pour recherche rapide
+        all_nodes = self.dgraph_manager._get_all_nodes(self.current_project_profile_data)
+        node_by_uid = {n['uid']: n for n in all_nodes if 'uid' in n}
+
+        # Index par nom + fichier
+        node_by_name_file = {}
+        for node in all_nodes:
+            if node.get('type') in ['function', 'method', 'class']:
+                key = (node.get('name'), node.get('file') or self._get_parent_file_path_simple(node))
+                node_by_name_file[key] = node
+
+        for file_path, calls in resolved_calls.items():
+            for call in calls:
+                # Skip non résolus
+                if not call.get('resolved'):
+                    continue
+                
+                source_uid = call.get('source_uid')
+                target_uid = call.get('target_uid')
+                target_file = call.get('target_file')
+                target_name = call.get('target_name')
+                call_type = call.get('call_type')
+                line = call.get('line', 0)
+                scope = call.get('scope', 'unknown')
+
+                # Trouver le nœud source
+                source_node = node_by_uid.get(source_uid)
+                if not source_node:
+                    source_key = (call.get('source_func'), file_path)
+                    source_node = node_by_name_file.get(source_key)
+
+                # Trouver le nœud cible
+                target_node = node_by_uid.get(target_uid)
+                if not target_node and target_file:
+                    target_key = (target_name, target_file)
+                    target_node = node_by_name_file.get(target_key)
+
+                if source_node and target_node:
+                    # Déterminer le type de relation
+                    relation_type = self._map_call_type_to_relation(call_type)
+
+                    # Ajouter la relation sortante
+                    outgoing = {
+                        'target_uid': target_node['uid'],
+                        'target_name': target_name,
+                        'relation_type': relation_type,
+                        'category': 'parsed',
+                        'line': line,
+                        'scope': scope,
+                        'call_type': call_type,
+                        'full_call': call.get('full_call', ''),
+                        'intra_file': call.get('scope') in ['same_file', 'same_class']
+                    }
+
+                    if outgoing not in source_node.setdefault('outgoing_relations', []):
+                        source_node['outgoing_relations'].append(outgoing)
+                        count += 1
+
+                    # Ajouter la relation entrante
+                    incoming = {
+                        'source_uid': source_node['uid'],
+                        'source_name': source_node.get('label', source_node.get('name', 'Unknown')),
+                        'relation_type': relation_type,
+                        'category': 'parsed',
+                        'line': line,
+                        'scope': scope
+                    }
+
+                    if incoming not in target_node.setdefault('incoming_relations', []):
+                        target_node['incoming_relations'].append(incoming)
+                else:
+                    logger.debug(
+                        f"Appel non lié : {call.get('source_func')} -> {target_name} "
+                        f"(source={source_node is not None}, target={target_node is not None})"
+                    )
+
+        logger.info(f"✅ {count} appels intégrés dans la structure")
+        return count
+    
+    def _map_call_type_to_relation(self, call_type: str) -> str:
+        # Mapping des types d'appels vers relations
+        mapping = {
+            'function_call': 'calls',
+            'method_call': 'calls',
+            'constructor': 'instantiates',
+            'super_call': 'calls_super',
+            'static_call': 'calls_static',
+            'async_call': 'calls_async',
+            'callback': 'uses_callback',
+            'decorator': 'decorated_by',
+            'generator': 'yields_from',
+            'comprehension': 'uses_in_comprehension',
+
+            # Fallback pour types non reconnus
+            'call': 'calls',
+            'invoke': 'calls',
+            'execute': 'calls'
+        }
+
+        # Retourner le type mappé ou 'calls' par défaut
+        return mapping.get(call_type, 'calls')
+    
+    def _get_parent_file_path_simple(self, node: Dict[str, Any]) -> Optional[str]:
+        """
+        Remonte la hiérarchie pour trouver le fichier parent d'un nœud.
+        Version simplifiée pour éviter les dépendances circulaires.
+
+        Args:
+            node: Nœud dont on cherche le fichier parent
+
+        Returns:
+            Chemin du fichier parent ou None
+        """
+        # Vérifier si le nœud a déjà un fichier
+        if node.get('file'):
+            return node['file']
+
+        # Vérifier dans les fichiers du nœud
+        files = node.get('files', [])
+        if files:
+            return files[0]
+
+        # Chercher dans label_uid_to_info
+        node_uid = node.get('uid')
+        if node_uid and node_uid in self.label_uid_to_info:
+            info = self.label_uid_to_info[node_uid]
+            if info.get('file'):
+                return info['file']
+
+        return None
+
+    def _extract_class_code(self, content: str, cls: Dict) -> str:
+        """
+        ✅ Extrait le code source complet d'une classe
+        """
+        try:
+            lines = content.split('\n')
+            start_line = cls.get('line', 1) - 1  # Index 0
+            
+            if start_line >= len(lines):
+                return ""
+            
+            # Trouver la fin de la classe (indentation)
+            base_indent = len(lines[start_line]) - len(lines[start_line].lstrip())
+            end_line = start_line + 1
+            
+            while end_line < len(lines):
+                line = lines[end_line]
+                
+                # Ligne vide ou commentaire : continuer
+                if not line.strip() or line.strip().startswith('#'):
+                    end_line += 1
+                    continue
+                
+                # Si indentation <= base, c'est la fin de la classe
+                current_indent = len(line) - len(line.lstrip())
+                if current_indent <= base_indent:
+                    break
+                
+                end_line += 1
+            
+            # Extraire le code
+            code_lines = lines[start_line:end_line]
+            return '\n'.join(code_lines)
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur extraction code classe {cls.get('name')}: {e}")
+            return ""
+
+    def _extract_method_code(self, content: str, method: Dict) -> str:
+        """
+        ✅ Extrait le code source d'une méthode
+        """
+        try:
+            lines = content.split('\n')
+            start_line = method.get('line', 1) - 1
+
+            if start_line >= len(lines):
+                return ""
+
+            # Trouver la fin de la méthode
+            base_indent = len(lines[start_line]) - len(lines[start_line].lstrip())
+            end_line = start_line + 1
+
+            while end_line < len(lines):
+                line = lines[end_line]
+
+                if not line.strip() or line.strip().startswith('#'):
+                    end_line += 1
+                    continue
+                
+                current_indent = len(line) - len(line.lstrip())
+                if current_indent <= base_indent:
+                    break
+                
+                end_line += 1
+
+            code_lines = lines[start_line:end_line]
+            return '\n'.join(code_lines)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur extraction code méthode {method.get('name')}: {e}")
+            return ""
+
+    def _extract_function_code(self, content: str, func: Dict) -> str:
+        """
+        ✅ Extrait le code source d'une fonction
+        """
+        try:
+            lines = content.split('\n')
+            start_line = func.get('line', 1) - 1
+
+            if start_line >= len(lines):
+                return ""
+
+            # Trouver la fin de la fonction
+            base_indent = len(lines[start_line]) - len(lines[start_line].lstrip())
+            end_line = start_line + 1
+
+            while end_line < len(lines):
+                line = lines[end_line]
+
+                if not line.strip() or line.strip().startswith('#'):
+                    end_line += 1
+                    continue
+                
+                current_indent = len(line) - len(line.lstrip())
+                if current_indent <= base_indent:
+                    break
+                
+                end_line += 1
+
+            code_lines = lines[start_line:end_line]
+            return '\n'.join(code_lines)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur extraction code fonction {func.get('name')}: {e}")
+            return ""
 
     def _create_child_node_from_item(self, item: Dict, item_type: str) -> Dict[str, Any]:
         """
@@ -3118,15 +3536,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self.current_project_profile_data['turing_ontology'] = turing_ontology
 
     def _find_label_uid_by_name(self, name: str) -> Optional[str]:
-        """
-        Trouve l'UID d'un label par son nom (sans extension).
-        
-        Args:
-            name: Nom du label à chercher
-        
-        Returns:
-            UID du label ou None
-        """
         if not name:
             return None
         
@@ -3142,11 +3551,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         return None
 
     def _on_root_label_selected(self, current):
-        """
-        Gère la sélection dans root_list.
-        - Si FICHIER → affiche directement classes/fonctions/variables dans level1_list
-        - Si DOSSIER → affiche fichiers + children dans level1_list
-        """
         if not current:
             self.current_root_data = None
             self.level1_list_widget.clear()
@@ -3167,52 +3571,122 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.current_root_data = root_labels[self.current_root_label_index]
         self.current_selected_label_uid = current.data(Qt.UserRole)
 
-        # 🔍 LOG: Vérifier les relations du fichier sélectionné
+        # 📊 LOG: Vérifier les relations du fichier sélectionné
         file_name = self.current_root_data.get('label', 'Unknown')
-        logger.info(f"📂 Fichier sélectionné: {file_name} (UID: {self.current_selected_label_uid})")
-        
-        # Log des relations sortantes
-        outgoing = self.current_root_data.get('outgoing_relations', [])
-        logger.info(f"   → Relations sortantes: {len(outgoing)}")
-        for rel in outgoing:
-            target_uid = rel.get('target_uid', 'N/A')
-            rel_type = rel.get('relation_type', 'N/A')
-            category = rel.get('category', 'unknown')
-            target_name = self.label_uid_to_info.get(target_uid, {}).get('name', 'Unknown')
-            logger.debug(f"      • {rel_type} [{category}] → {target_name} (UID: {target_uid})")
-        
-        # Log des relations entrantes
-        incoming = self.current_root_data.get('incoming_relations', [])
-        logger.info(f"   ← Relations entrantes: {len(incoming)}")
-        for rel in incoming:
-            source_uid = rel.get('source_uid', 'N/A')
-            rel_type = rel.get('relation_type', 'N/A')
-            category = rel.get('category', 'unknown')
-            source_name = self.label_uid_to_info.get(source_uid, {}).get('name', 'Unknown')
-            logger.debug(f"      • {source_name} (UID: {source_uid}) {rel_type} [{category}] →")
-        
-        # Log des relations en attente (pending_relations)
-        pending = self.pending_relations.get(self.current_selected_label_uid, [])
-        logger.info(f"   ⏳ Relations en attente: {len(pending)}")
-        for rel in pending:
-            target_uid = rel.get('target_uid', 'N/A')
-            rel_type = rel.get('relation_type', 'N/A')
-            target_name = self.label_uid_to_info.get(target_uid, {}).get('name', 'Unknown')
-            logger.debug(f"      • {rel_type} → {target_name} (UID: {target_uid})")
+        logger.info(f"📂 Sélectionné: {file_name} (type: {item_type}, UID: {self.current_selected_label_uid})")
 
         # Réinitialiser niveaux inférieurs
         self.current_level1_data = None
         self.current_level2_data = None
         self.child_list_widget.clear()
 
-        # Logique selon le type
+        # ✅ TRAITEMENT UNIFIÉ pour fichiers ET dossiers
+        self._update_selected_details("Label Racine", self.current_root_data)
+
+        # ✅ Si c'est un FICHIER : créer les children à partir des éléments de code
         if item_type == 'file':
-            # FICHIER : afficher détails + éléments de code directement
-            self._update_selected_details("Fichier", self.current_root_data)
-            self._populate_level1_with_file_elements(self.current_root_data)
+            files = self.current_root_data.get('files', [])
+            if files:
+                file_path = files[0]
+                content = self.current_root_data.get('file_contents', {}).get(file_path, '')
+
+                if not content:
+                    content = self.current_project_profile_data.get('file_contents', {}).get(file_path, '')
+
+                if content:
+                    logger.info(f"   📄 Extraction depuis: {file_path} ({len(content)} chars)")
+
+                    # Extraire les éléments de code
+                    classes = self.dependency_parser.extract_classes(content, file_path)
+                    functions = self.dependency_parser.extract_functions(content, file_path)
+                    variables = self.dependency_parser.extract_variables(content, file_path)
+
+                    logger.info(f"   ✅ Trouvés: {len(classes)} classes, {len(functions)} fonctions, {len(variables)} variables")
+
+                    # ✅ CRÉER LES CHILDREN à partir des éléments extraits
+                    children = []
+
+                    # Ajouter les classes
+                    for cls in classes:
+                        if 'uid' not in cls:
+                            cls['uid'] = str(uuid.uuid4())
+
+                        child_node = {
+                            'label': cls['name'],
+                            'name': cls['name'],
+                            'uid': cls['uid'],
+                            'type': 'class',
+                            'line': cls.get('line', 0),
+                            'file': file_path,
+                            'description': f"Class {cls['name']} at line {cls.get('line', 0)}",
+                            'children': [],
+                            'outgoing_relations': [],
+                            'incoming_relations': []
+                        }
+                        children.append(child_node)
+
+                    # Ajouter les fonctions
+                    for func in functions:
+                        if 'uid' not in func:
+                            func['uid'] = str(uuid.uuid4())
+
+                        child_node = {
+                            'label': func['name'],
+                            'name': func['name'],
+                            'uid': func['uid'],
+                            'type': func.get('type', 'function'),
+                            'line': func.get('line', 0),
+                            'file': file_path,
+                            'description': f"Function {func['name']} at line {func.get('line', 0)}",
+                            'children': [],
+                            'outgoing_relations': [],
+                            'incoming_relations': []
+                        }
+                        children.append(child_node)
+
+                    # Ajouter les variables
+                    for var in variables:
+                        if 'uid' not in var:
+                            var['uid'] = str(uuid.uuid4())
+
+                        child_node = {
+                            'label': var['name'],
+                            'name': var['name'],
+                            'uid': var['uid'],
+                            'type': 'variable',
+                            'line': var.get('line', 0),
+                            'file': file_path,
+                            'description': f"Variable {var['name']} at line {var.get('line', 0)}",
+                            'children': [],
+                            'outgoing_relations': [],
+                            'incoming_relations': []
+                        }
+                        children.append(child_node)
+
+                    # ✅ INJECTER dans current_root_data
+                    self.current_root_data['children'] = children
+                    self.current_root_data['classes'] = classes
+                    self.current_root_data['functions'] = functions
+                    self.current_root_data['variables'] = variables
+
+                    logger.info(f"   ✅ {len(children)} children créés pour {file_name}")
+
+                    # ✅ Afficher dans level1_list
+                    self._populate_level1_list()
+                else:
+                    # Fichier vide
+                    logger.warning(f"   ⚠️ Fichier vide: {file_path}")
+                    self.level1_list_widget.clear()
+                    empty_item = QListWidgetItem("(Fichier vide)")
+                    empty_item.setForeground(QtGui.QColor("#95a5a6"))
+                    self.level1_list_widget.addItem(empty_item)
+            else:
+                logger.warning(f"   ⚠️ Aucun fichier associé")
+                self.level1_list_widget.clear()
+
+        # ✅ Si c'est un DOSSIER : afficher sa hiérarchie normale
         else:
-            # DOSSIER : afficher détails + hiérarchie
-            self._update_selected_details("Label Racine", self.current_root_data)
+            logger.info(f"   📁 Dossier - affichage hiérarchie normale")
             self._populate_level1_list_with_root_files()
 
         # Mettre à jour relations
@@ -3233,41 +3707,117 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         if not parent_data:
             return
 
+        primary_orange = '#FFD700'  # pour dossiers
+        orange = '#FFD700'           # pour classes
+        blue_light = '#3498db'       # methodes
+        blue = '#2196F3'             # fonctions
+        green = '#4CAF50'            # variables
+        gray = '#7f8c8d'             # fichiers
+        turquoise = '#16a085'        # autres
+
         for child in parent_data.get('children', []):
             child_type = child.get('type', 'child')
             label = child.get('label', child.get('name', 'Sans nom'))
             uid = child.get('uid', str(uuid.uuid4()))
             child['uid'] = uid
 
-            # ✅ SKIP COMPLET des éléments de code
-            if child_type in ['class', 'function', 'variable', 'method']:
+            # ✅ CLASSE avec icône cube (orange)
+            if child_type == 'class':
+                display = f"[CLASS] {label} (ligne {child.get('line', '?')})"
+                item = QListWidgetItem(display)
+                icon = qta.icon('fa5s.cube', color=orange)
+                item.setIcon(icon)
+                item.setData(Qt.UserRole, uid)
+                item.setData(Qt.UserRole + 1, 'class')
+                item.setData(Qt.UserRole + 2, child.get('file', ''))
+                item.setData(Qt.UserRole + 3, child.get('line', 0))
+                item.setForeground(QtGui.QColor(orange))
+                item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+                list_widget.addItem(item)
                 continue
 
-            # ✅ Affichage SANS icône
-            display = label  # PAS d'icône
+            # ✅ MÉTHODE avec icône cog (bleu clair)
+            if child_type == 'method':
+                display = f"[METH] {label} (ligne {child.get('line', '?')})"
+                item = QListWidgetItem(display)
+                icon = qta.icon('fa5s.cog', color=blue_light)
+                item.setIcon(icon)
+                item.setData(Qt.UserRole, uid)
+                item.setData(Qt.UserRole + 1, 'method')
+                item.setData(Qt.UserRole + 2, child.get('file', ''))
+                item.setData(Qt.UserRole + 3, child.get('line', 0))
+                item.setForeground(QtGui.QColor(blue_light))
+                item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+                list_widget.addItem(item)
+                continue
+
+            # ✅ FONCTION avec icône bolt (bleu)
+            if child_type == 'function':
+                display = f"[FUNC] {label} (ligne {child.get('line', '?')})"
+                item = QListWidgetItem(display)
+                icon = qta.icon('fa5s.bolt', color=blue)
+                item.setIcon(icon)
+                item.setData(Qt.UserRole, uid)
+                item.setData(Qt.UserRole + 1, 'function')
+                item.setData(Qt.UserRole + 2, child.get('file', ''))
+                item.setData(Qt.UserRole + 3, child.get('line', 0))
+                item.setForeground(QtGui.QColor(blue))
+                item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+                list_widget.addItem(item)
+                continue
+
+            # ✅ VARIABLE avec icône tag (vert)
+            if child_type == 'variable':
+                display = f"[VAR] {label} (ligne {child.get('line', '?')})"
+                item = QListWidgetItem(display)
+                icon = qta.icon('fa5s.tag', color=green)
+                item.setIcon(icon)
+                item.setData(Qt.UserRole, uid)
+                item.setData(Qt.UserRole + 1, 'variable')
+                item.setData(Qt.UserRole + 2, child.get('file', ''))
+                item.setData(Qt.UserRole + 3, child.get('line', 0))
+                item.setForeground(QtGui.QColor(green))
+                item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
+                list_widget.addItem(item)
+                continue
+
+            # ✅ FICHIERS ET DOSSIERS (détection par extension)
+            is_file = (
+                child_type == 'file' or 
+                label.endswith((
+                    '.ts', '.py', '.js', '.java', '.cpp', '.json', '.net',
+                    '.c', '.h', '.tsx', '.jsx', '.cs', '.php', '.rb', '.go',
+                    '.html', '.css', '.xml', '.txt', '.md', '.yaml', '.yml'
+                ))
+            )
+
+            if is_file:
+                icon = qta.icon('fa5s.file-code', color=gray)
+                display = label
+                display_type = 'file'
+                color = QtGui.QColor(gray)
+            elif child_type in ['folder', 'directory']:
+                icon = qta.icon('fa5s.folder', color=primary_orange)
+                display = label
+                display_type = 'folder'
+                color = QtGui.QColor(primary_orange)
+            else:
+                icon = qta.icon('fa5s.question-circle', color=turquoise)
+                display = label
+                display_type = child_type
+                color = QtGui.QColor(turquoise)
 
             item = QListWidgetItem(display)
+            item.setIcon(icon)
             item.setData(Qt.UserRole, uid)
-            item.setData(Qt.UserRole + 1, child_type)
-
-            # Couleur selon le type
-            if child_type == 'file' or label.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net')):
-                item.setForeground(QtGui.QColor("#7f8c8d"))
-            else:
-                item.setForeground(QtGui.QColor("#16a085"))
-
+            item.setData(Qt.UserRole + 1, display_type)
+            item.setForeground(color)
+            item.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Bold))
             list_widget.addItem(item)
 
         self._update_button_states()
 
     def _populate_level1_with_file_elements(self, file_data: Dict):
-        """
-        Affiche UNIQUEMENT les classes/fonctions/variables d'un fichier dans level1_list.
-        PAS de réaffichage du fichier lui-même.
-
-        Args:
-            file_data: Dictionnaire du fichier (root_data)
-        """
         self.level1_list_widget.clear()
 
         if not file_data:
@@ -3294,18 +3844,45 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         functions = self.dependency_parser.extract_functions(content, file_path)
         variables = self.dependency_parser.extract_variables(content, file_path)
 
+        # Couleurs (identiques à celles du style précédent)
+        primary = '#A23B2D'
+        dark_gray = '#424242'
+        medium_gray = '#666666'
+        strong_gray = '#555555'
+
+        def modulate_color(base_color: str, lvl: int = 1):
+            if lvl > 1:
+                if base_color == primary:
+                    return '#D35A4A'
+                elif base_color == dark_gray:
+                    return '#5A5A5A'
+                elif base_color == medium_gray:
+                    return '#888888'
+            return base_color
+
+        # On suppose un niveau 1 ici (pas d'indication différente)
+        modulated_primary = modulate_color(primary, 1)
+
         # === Afficher les CLASSES ===
         for cls in classes:
             cls_uid = cls.get('uid', str(uuid.uuid4()))
             if 'uid' not in cls:
                 cls['uid'] = cls_uid
 
-            item = QListWidgetItem(f"[CLASS] {cls['name']} (ligne {cls.get('line', '?')})")
+            icon = qta.icon('fa5s.cube', color=strong_gray)
+            display = f"[CLASS] {cls['name']} (ligne {cls.get('line', '?')})"
+
+            item = QListWidgetItem(display)
+            item.setIcon(icon)
             item.setData(Qt.UserRole, cls_uid)
             item.setData(Qt.UserRole + 1, 'class')
             item.setData(Qt.UserRole + 2, file_path)
             item.setData(Qt.UserRole + 3, cls.get('line', 0))
-            item.setForeground(QtGui.QColor("#e74c3c"))  # Rouge
+            item.setForeground(QtGui.QColor(strong_gray))
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            font.setBold(False)
+            item.setFont(font)
             self.level1_list_widget.addItem(item)
 
         # === Afficher les FONCTIONS ===
@@ -3315,14 +3892,21 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 func['uid'] = func_uid
 
             func_type = func.get('type', 'function')
+            icon = qta.icon('fa5s.cog', color=modulated_primary)
             prefix = "[METH]" if func_type == 'method' else "[FUNC]"
+            display = f"{prefix} {func['name']} (ligne {func.get('line', '?')})"
 
-            item = QListWidgetItem(f"{prefix} {func['name']} (ligne {func.get('line', '?')})")
+            item = QListWidgetItem(display)
+            item.setIcon(icon)
             item.setData(Qt.UserRole, func_uid)
             item.setData(Qt.UserRole + 1, func_type)
             item.setData(Qt.UserRole + 2, file_path)
             item.setData(Qt.UserRole + 3, func.get('line', 0))
-            item.setForeground(QtGui.QColor("#3498db"))  # Bleu
+            item.setForeground(QtGui.QColor(modulated_primary))
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            font.setBold(False)
+            item.setFont(font)
             self.level1_list_widget.addItem(item)
 
         # === Afficher les VARIABLES ===
@@ -3331,28 +3915,42 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             if 'uid' not in var:
                 var['uid'] = var_uid
 
-            var_type = var.get('type', 'variable')
+            icon = qta.icon('fa5s.tag', color=medium_gray)
+            display = f"[VAR] {var['name']} (ligne {var.get('line', '?')})"
 
-            item = QListWidgetItem(f"[VAR] {var['name']} (ligne {var.get('line', '?')})")
+            item = QListWidgetItem(display)
+            item.setIcon(icon)
             item.setData(Qt.UserRole, var_uid)
             item.setData(Qt.UserRole + 1, 'variable')
             item.setData(Qt.UserRole + 2, file_path)
             item.setData(Qt.UserRole + 3, var.get('line', 0))
-            item.setForeground(QtGui.QColor("#2ecc71"))  # Vert
+            item.setForeground(QtGui.QColor(medium_gray))
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            font.setBold(False)
+            item.setFont(font)
             self.level1_list_widget.addItem(item)
 
         # Message si aucun élément trouvé
         if not classes and not functions and not variables:
-            self.level1_list_widget.addItem(QListWidgetItem("(Aucun élément de code trouvé)"))
+            empty_item = QListWidgetItem("(Aucun élément de code trouvé)")
+            empty_item.setForeground(QtGui.QColor("#95a5a6"))
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            empty_item.setFont(font)
+            self.level1_list_widget.addItem(empty_item)
 
         self._update_button_states()
 
     def _populate_root_list(self):
-        """Affiche les root labels - icône 📁 UNIQUEMENT pour dossiers."""
+        """Affiche les root labels - icône dossier uniquement."""
         self.root_list_widget.clear()
 
         if not self.current_cluster_data:
             return
+
+        folder_color = '#FFD700'  # Bleu pour TOUS les dossiers
+        file_color = '#7f8c8d'    # Gris pour TOUS les fichiers
 
         for root in self.current_cluster_data.get("root_labels", []):
             root_type = root.get('type', 'folder')
@@ -3361,21 +3959,25 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             # Détection fichier vs dossier
             is_file = (
                 root_type == 'file' or 
-                root_label.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net', '.c', '.h'))
+                root_label.endswith((
+                    '.ts', '.py', '.js', '.java', '.cpp', '.json', '.net', '.c', '.h'
+                ))
             )
 
             if is_file:
-                # Fichier : PAS d'icône
+                icon = qta.icon('fa5s.file-code', color=file_color)
                 display = root_label
                 item_type = 'file'
-                color = QtGui.QColor("#7f8c8d")
+                color = QtGui.QColor(file_color)
             else:
-                # Dossier : AVEC icône 📁
-                display = f"📁 {root_label}"
+                # ✅ COULEUR HOMOGÈNE pour les dossiers
+                icon = qta.icon('fa5s.folder', color=folder_color)
+                display = root_label
                 item_type = 'root_label'
-                color = QtGui.QColor("#2980b9")
+                color = QtGui.QColor(folder_color)
 
             root_item = QListWidgetItem(display)
+            root_item.setIcon(icon)
             root_item.setData(Qt.UserRole, root.get("uid"))
             root_item.setData(Qt.UserRole + 1, item_type)
             root_item.setForeground(color)
@@ -3517,9 +4119,11 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         return next((n for n in all_nodes if n.get('uid') == uid), None)
 
     def _find_child_by_uid(self, parent: Dict, uid: str) -> Optional[Dict]:
-        """
-        Cherche récursivement un enfant par son UID dans la structure.
-        """
+        if not parent or not isinstance(parent, dict):
+            logger.warning(f"⚠️ Parent invalide dans _find_child_by_uid: {type(parent)}")
+            return None
+
+        # Chercher dans les enfants directs
         for child in parent.get("children", []):
             if child.get('uid') == uid or child.get('id') == uid:
                 return child
@@ -3685,17 +4289,19 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self.cluster_list_widget.addItem(cluster_item)
 
     def _populate_root_list_with_cluster_files(self):   
-        """Affiche dans root_list : icône 📁 UNIQUEMENT pour dossiers."""
+        """Affiche dans root_list : icône dossiers et fichiers avec icônes et couleurs précédentes."""
         self.root_list_widget.clear()
 
         if not self.current_cluster_data:
             return
 
+        folder_color = '#FFD700'  # orange comme avant
+        file_color = '#7f8c8d'    # gris comme avant
+
         for root in self.current_cluster_data.get("root_labels", []):
             root_label = root.get('label', root.get('name', 'Sans nom'))
             root_uid = root.get("uid")
 
-            # Détection automatique
             root_type = root.get('type', 'folder')
             is_file = (
                 root_type == 'file' or 
@@ -3703,17 +4309,18 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             )
 
             if is_file:
-                # Fichier : PAS d'icône
+                icon = qta.icon('fa5s.file-code', color=file_color)
                 display = root_label
                 item_type = 'file'
-                color = QtGui.QColor("#7f8c8d")
+                color = QtGui.QColor(file_color)
             else:
-                # Dossier : AVEC icône 📁
-                display = f"📁 {root_label}"
+                icon = qta.icon('fa5s.folder', color=folder_color)
+                display = root_label
                 item_type = 'root_label'
-                color = QtGui.QColor("#2980b9")
+                color = QtGui.QColor(folder_color)
 
             root_item = QListWidgetItem(display)
+            root_item.setIcon(icon)
             root_item.setData(Qt.UserRole, root_uid)
             root_item.setData(Qt.UserRole + 1, item_type)
             root_item.setForeground(color)
@@ -3722,21 +4329,27 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self._update_button_states()
 
     def _populate_level1_list_with_root_files(self):
-        """Affiche fichiers (sans icône) et dossiers (avec 📁)."""
+        """Affiche fichiers (avec icône) et dossiers (avec icône)."""
         self.level1_list_widget.clear()
 
         if not self.current_root_data:
             return
 
-        # 1. Fichiers : PAS d'icône
+        # ✅ COULEURS HOMOGÈNES
+        folder_color = '#FFD700'   # Bleu uniforme pour dossiers
+        file_color = '#7f8c8d'     # Gris uniforme pour fichiers
+
+        # 1. Fichiers : AVEC icône fichier
         for file_path in self.current_root_data.get('files', []):
             file_name = os.path.basename(file_path)
-            file_item = QListWidgetItem(file_name)  # PAS d'icône
-            file_item.setData(Qt.UserRole, f"root_file_{file_path}")
-            file_item.setData(Qt.UserRole + 1, 'root_file')
-            file_item.setData(Qt.UserRole + 2, file_path)
-            file_item.setForeground(QtGui.QColor("#7f8c8d"))
-            self.level1_list_widget.addItem(file_item)
+            item = QListWidgetItem(file_name)
+            icon = qta.icon('fa5s.file-code', color=file_color)
+            item.setIcon(icon)
+            item.setData(Qt.UserRole, f"root_file_{file_path}")
+            item.setData(Qt.UserRole + 1, 'root_file')
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setForeground(QtGui.QColor(file_color))
+            self.level1_list_widget.addItem(item)
 
         # 2. Children (fichiers et dossiers)
         for child in self.current_root_data.get("children", []):
@@ -3754,110 +4367,159 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             )
 
             if is_file:
-                display = label  # PAS d'icône
-            elif child_type in ['folder', 'directory']:
-                display = f"📁 {label}"  # AVEC icône
-            else:
+                icon = qta.icon('fa5s.file-code', color=file_color)
                 display = label
+                color = QtGui.QColor(file_color)
+            elif child_type in ['folder', 'directory']:
+                # ✅ COULEUR HOMOGÈNE
+                icon = qta.icon('fa5s.folder', color=folder_color)
+                display = label
+                color = QtGui.QColor(folder_color)
+            else:
+                icon = qta.icon('fa5s.question-circle', color="#16a085")
+                display = label
+                color = QtGui.QColor("#16a085")
 
             item = QListWidgetItem(display)
+            item.setIcon(icon)
             item.setData(Qt.UserRole, child.get("uid"))
             item.setData(Qt.UserRole + 1, child_type)
-            item.setForeground(QtGui.QColor("#16a085"))
+            item.setForeground(color)
             self.level1_list_widget.addItem(item)
 
-        self._update_button_states()
+        self._update_button_states()    
 
     def _populate_child_list_with_parent_files(self):
+        """Affiche les fichiers parents et leurs enfants avec un style unifié."""
         self.child_list_widget.clear()
 
         if not self.current_level1_data:
             return
 
-        # === FICHIERS - PAS d'icône ===
+        has_items = False
+
+        primary = '#A23B2D'
+        dark_gray = '#424242'
+        medium_gray = '#666666'
+        strong_gray = '#555555'
+
+        def modulate_color(base_color: str, lvl: int = 1):
+            if lvl > 1:
+                if base_color == primary:
+                    return '#D35A4A'
+                elif base_color == dark_gray:
+                    return '#5A5A5A'
+                elif base_color == medium_gray:
+                    return '#888888'
+            return base_color
+
+        modulated_primary = modulate_color(primary)
+        modulated_dark = modulate_color(dark_gray)
+
+        # === Fichiers parents ===
         for file_path in self.current_level1_data.get('files', []):
+            has_items = True
             file_name = os.path.basename(file_path)
-            file_item = QListWidgetItem(file_name)  # ✅ PAS d'icône
-            file_item.setData(Qt.UserRole, f"level1_file_{file_path}")
-            file_item.setData(Qt.UserRole + 1, 'level1_file')
-            file_item.setData(Qt.UserRole + 2, file_path)
-            file_item.setForeground(QtGui.QColor("#7f8c8d"))
-            self.child_list_widget.addItem(file_item)
+            item = QListWidgetItem(file_name)
+            item.setIcon(qta.icon('fa5s.file-code', color=medium_gray))
+            item.setData(Qt.UserRole, f"level1_file_{file_path}")
+            item.setData(Qt.UserRole + 1, 'level1_file')
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setForeground(QtGui.QColor(medium_gray))
 
-        # === CHILDREN HIÉRARCHIQUES ===
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            font.setBold(False)
+            item.setFont(font)
+            self.child_list_widget.addItem(item)
+
+        # === Enfants ===
         for child in self.current_level1_data.get("children", []):
+            has_items = True
             child_type = child.get('type', 'folder')
-
-            # ✅ Traiter les éléments de code avec préfixes
-            if child_type == 'class':
-                display = f"[CLASS] {child.get('name', 'Classe')} (ligne {child.get('line', '?')})"
-                item = QListWidgetItem(display)
-
-                cls_uid = child.get('uid', str(uuid.uuid4()))
-                if 'uid' not in child:
-                    child['uid'] = cls_uid
-
-                item.setData(Qt.UserRole, cls_uid)
-                item.setData(Qt.UserRole + 1, 'class')
-                item.setData(Qt.UserRole + 2, child.get('file', ''))
-                item.setData(Qt.UserRole + 3, child.get('line', 0))
-                item.setForeground(QtGui.QColor("#FF9800"))
-                self.child_list_widget.addItem(item)
-                continue
-            
-            elif child_type in ['function', 'method']:
-                func_type = child.get('type', 'function')
-                prefix = "[METH]" if func_type == "method" else "[FUNC]"
-                display = f"{prefix} {child.get('name', 'Fonction')} (ligne {child.get('line', '?')})"
-                item = QListWidgetItem(display)
-
-                func_uid = child.get('uid', str(uuid.uuid4()))
-                if 'uid' not in child:
-                    child['uid'] = func_uid
-
-                item.setData(Qt.UserRole, func_uid)
-                item.setData(Qt.UserRole + 1, func_type)
-                item.setData(Qt.UserRole + 2, child.get('file', ''))
-                item.setData(Qt.UserRole + 3, child.get('line', 0))
-                item.setForeground(QtGui.QColor("#2196F3"))
-                self.child_list_widget.addItem(item)
-                continue
-            
-            elif child_type == 'variable':
-                display = f"[VAR] {child.get('name', 'Variable')} (ligne {child.get('line', '?')})"
-                item = QListWidgetItem(display)
-
-                var_uid = child.get('uid', str(uuid.uuid4()))
-                if 'uid' not in child:
-                    child['uid'] = var_uid
-
-                item.setData(Qt.UserRole, var_uid)
-                item.setData(Qt.UserRole + 1, 'variable')
-                item.setData(Qt.UserRole + 2, child.get('file', ''))
-                item.setData(Qt.UserRole + 3, child.get('line', 0))
-                item.setForeground(QtGui.QColor("#4CAF50"))
-                self.child_list_widget.addItem(item)
-                continue
-            
-            # === FICHIERS/DOSSIERS - PAS d'icône ===
             label = child.get('label', child.get('name', 'Sans nom'))
-            display = label  # ✅ PAS d'icône du tout
+            child_uid = child.get('uid', str(uuid.uuid4()))
+            child['uid'] = child_uid
+            line_num = child.get('line', 0)
+            file_path = child.get('file', '')
 
-            is_file = (
-                child_type == 'file' or 
-                label.endswith(('.ts', '.py', '.js', '.java', '.cpp', '.json', '.net'))
-            )
+            # --- AJOUT: détection du type selon préfixe label ---
+            label_lower = label.lower()
+            if child_type == 'folder' or not child_type:
+                if label_lower.startswith(('function', 'func', 'fonction')):
+                    child_type = 'function'
+                elif label_lower.startswith(('method', 'meth', 'methode')):
+                    child_type = 'method'
+                elif label_lower.startswith(('class', 'classe')):
+                    child_type = 'class'
+                elif label_lower.startswith(('variable', 'var')):
+                    child_type = 'variable'
+            # --- FIN ajout ---
+
+            icon = None
+            color = QtGui.QColor("#000000")
+
+            # === Typage et icônes cohérents ===
+            if child_type == 'class':
+                icon = qta.icon('fa5s.cube', color=strong_gray)
+                color = QtGui.QColor(strong_gray)
+                display = f"[CLASS] {label} (ligne {line_num})"
+
+            elif child_type in ['function', 'method']:
+                icon = qta.icon('fa5s.cog', color=modulated_primary)
+                color = QtGui.QColor(modulated_primary)
+                prefix = "[METH]" if child_type == 'method' else "[FUNC]"
+                display = f"{prefix} {label} (ligne {line_num})"
+
+            elif child_type == 'variable':
+                icon = qta.icon('fa5s.tag', color=medium_gray)
+                color = QtGui.QColor(medium_gray)
+                display = f"[VAR] {label} (ligne {line_num})"
+
+            elif label.endswith((
+                '.ts', '.py', '.js', '.java', '.cpp', '.json', '.net',
+                '.c', '.h', '.tsx', '.jsx', '.cs', '.php', '.rb', '.go',
+                '.html', '.css', '.xml', '.txt', '.md', '.yaml', '.yml'
+            )):
+                icon = qta.icon('fa5s.file-code', color=medium_gray)
+                color = QtGui.QColor(medium_gray)
+                display = label
+
+            elif child_type in ['folder', 'directory']:
+                icon = qta.icon('fa5s.folder', color=modulated_dark)
+                color = QtGui.QColor(modulated_dark)
+                display = label
+
+            else:
+                icon = qta.icon('fa5s.question-circle', color="#16a085")
+                color = QtGui.QColor("#16a085")
+                display = f"[UNKNOWN] {label}"
 
             item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, child.get("uid"))
+            item.setIcon(icon)
+            item.setData(Qt.UserRole, child_uid)
             item.setData(Qt.UserRole + 1, child_type)
+            item.setData(Qt.UserRole + 2, file_path)
+            item.setData(Qt.UserRole + 3, line_num)
+            item.setForeground(color)
 
-            if is_file:
-                item.setForeground(QtGui.QColor("#7f8c8d"))
-            else:
-                item.setForeground(QtGui.QColor("#27ae60"))
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            font.setBold(False)
+            item.setFont(font)
 
             self.child_list_widget.addItem(item)
+
+        # === Aucun élément trouvé ===
+        if not has_items:
+            empty_item = QListWidgetItem("(Aucun élément trouvé)")
+            empty_item.setForeground(QtGui.QColor("#95a5a6"))
+            font = QtGui.QFont()
+            font.setPointSize(7)
+            empty_item.setFont(font)
+            self.child_list_widget.addItem(empty_item)
+
+        self._update_button_states()
 
     def _integrate_parsed_relations_to_node(self, node: Dict, parsed_relations: Dict, node_type: str):
         """
@@ -4271,18 +4933,36 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
     def _build_complete_relations_graph(self):
         """
-        - Résout les UIDs temporaires
-        - Crée les relations inverses
-        - Valide la cohérence
+        ✅ VERSION CORRIGÉE : Résout les UIDs avec recherche améliorée
         """
         logger.info("🔗 Construction du graphe de relations...")
-
+    
         all_nodes = self.dgraph_manager._get_all_nodes(self.current_project_profile_data)
         resolved_count = 0
         inverse_count = 0
-
+    
+        # Étape 0 : Créer des index pour recherche rapide
+        logger.info("📊 Création des index de recherche...")
+        
+        # Index par UID
+        node_by_uid = {n['uid']: n for n in all_nodes if 'uid' in n}
+        
+        # Index par nom (pour résolution)
+        node_by_name = {}
+        for node in all_nodes:
+            name = node.get('name') or node.get('label', '')
+            if name:
+                normalized = name.lower().strip()
+                if normalized not in node_by_name:
+                    node_by_name[normalized] = []
+                node_by_name[normalized].append(node)
+        
+        logger.info(f"  ✅ {len(node_by_uid)} nœuds indexés par UID")
+        logger.info(f"  ✅ {len(node_by_name)} noms indexés")
+    
         # Étape 1 : Résoudre les UIDs temporaires
         logger.info("📝 Résolution des UIDs temporaires...")
+        
         for node in all_nodes:
             node_uid = node.get('uid')
             if not node_uid:
@@ -4290,25 +4970,62 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             
             for rel in node.get('outgoing_relations', []):
                 target_uid = rel.get('target_uid', '')
-
+                
                 # Si c'est un UID temporaire, essayer de le résoudre
                 if target_uid.startswith('temp_'):
                     target_name = rel.get('target_name', '')
-                    normalized = normalize_node_name(target_name)
-
-                    if normalized:
-                        real_uid = self._find_label_uid_by_name(normalized)
-                        if real_uid:
-                            rel['target_uid'] = real_uid
-                            resolved_count += 1
-                            logger.debug(f"✅ UID résolu: {target_uid} -> {real_uid}")
-
+                    
+                    # ✅ AMÉLIORATION : Essayer plusieurs stratégies de résolution
+                    real_uid = None
+                    
+                    # Stratégie 1 : Recherche par nom exact
+                    if target_name:
+                        normalized_target = target_name.lower().strip()
+                        
+                        # Essayer avec le nom complet
+                        candidates = node_by_name.get(normalized_target, [])
+                        
+                        # Si pas trouvé, essayer sans extension
+                        if not candidates and '.' in target_name:
+                            base_name = target_name.rsplit('.', 1)[0].lower()
+                            candidates = node_by_name.get(base_name, [])
+                        
+                        # Si trouvé, choisir le premier candidat du bon type
+                        if candidates:
+                            target_type = rel.get('target_type', '')
+                            
+                            # Filtrer par type si spécifié
+                            if target_type:
+                                typed_candidates = [c for c in candidates if c.get('type') == target_type]
+                                if typed_candidates:
+                                    real_uid = typed_candidates[0]['uid']
+                                else:
+                                    real_uid = candidates[0]['uid']
+                            else:
+                                real_uid = candidates[0]['uid']
+                    
+                    # Stratégie 2 : Recherche via label_uid_to_info
+                    if not real_uid and target_name:
+                        real_uid = self._find_label_uid_by_name(target_name)
+                    
+                    # Si résolu, mettre à jour
+                    if real_uid:
+                        rel['target_uid'] = real_uid
+                        resolved_count += 1
+                        
+                        # Mettre à jour aussi les infos de target
+                        target_node = node_by_uid.get(real_uid)
+                        if target_node:
+                            rel['target_name'] = target_node.get('label') or target_node.get('name', target_name)
+                            rel['target_type'] = target_node.get('type', 'unknown')
+                    else:
+                        logger.debug(f"⚠️ UID temporaire non résolu: {target_name} ({target_uid})")
+    
         logger.info(f"✅ {resolved_count} UIDs temporaires résolus")
-
+    
         # Étape 2 : Créer les relations inverses
         logger.info("🔄 Création des relations inverses...")
-        node_by_uid = {n['uid']: n for n in all_nodes if 'uid' in n}
-
+        
         for node in all_nodes:
             node_uid = node.get('uid')
             if not node_uid:
@@ -4316,7 +5033,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             
             for rel in node.get('outgoing_relations', []):
                 target_uid = rel.get('target_uid')
-
+                
                 # Skip si c'est toujours un UID temporaire
                 if not target_uid or target_uid.startswith('temp_'):
                     continue
@@ -4329,20 +5046,39 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 inverse = {
                     'source_uid': node_uid,
                     'relation_type': rel['relation_type'],
-                    'category': rel.get('category', 'custom'),
-                    'source_name': node.get('label', node.get('name', 'Unknown'))
+                    'category': rel.get('category', 'parsed'),
+                    'source_name': node.get('label', node.get('name', 'Unknown')),
+                    'source_type': node.get('type', 'unknown'),
+                    'source_path': node.get('path', ''),
+                    'line': rel.get('line', 0)
                 }
-
+                
                 incoming = target_node.setdefault('incoming_relations', [])
-                if not any(r['source_uid'] == node_uid and r['relation_type'] == rel['relation_type'] for r in incoming):
+                
+                # Vérifier si déjà présent
+                is_duplicate = any(
+                    r['source_uid'] == node_uid and 
+                    r['relation_type'] == rel['relation_type']
+                    for r in incoming
+                )
+                
+                if not is_duplicate:
                     incoming.append(inverse)
                     inverse_count += 1
-
+    
         logger.info(f"✅ {inverse_count} relations inverses créées")
-
-        # Étape 3 : Log statistiques
+    
+        # Étape 3 : Statistiques finales
         total_relations = sum(len(n.get('outgoing_relations', [])) for n in all_nodes)
+        resolved_relations = sum(
+            1 for n in all_nodes 
+            for r in n.get('outgoing_relations', []) 
+            if not r.get('target_uid', '').startswith('temp_')
+        )
+        
         logger.info(f"📊 Graphe complet: {len(all_nodes)} nœuds, {total_relations} relations")
+        logger.info(f"  ✅ {resolved_relations}/{total_relations} relations résolues ({resolved_relations*100//total_relations if total_relations > 0 else 0}%)")
+        logger.info(f"  ⚠️ {total_relations - resolved_relations} relations non résolues")
 
     def _save_scan_results_to_storage(self):
         """
@@ -4516,6 +5252,169 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             logger.warning("⚠️ Échec batch Dgraph, retry manuel requis")
 
         logger.info("Finalisation terminée ✓")
+
+    def _get_element_icon(self, element_type: str) -> str:
+        icons = {
+            # Éléments de code
+            'class': '🏛️',      # Temple/bâtiment pour représenter une structure de classe
+            'function': '⚡',    # Éclair pour fonction autonome (rapide, indépendante)
+            'method': '⚙️',     # Engrenage pour méthode (partie d'un mécanisme de classe)
+            'variable': '💠',    # Losange pour variable
+
+            # Fichiers et dossiers
+            'file': '📄',
+            'folder': '📁',
+            'directory': '📁',
+
+            # Types spéciaux
+            'root_file': '📄',
+            'level1_file': '📄',
+            'root_label': '📁',
+            'child': '📁',
+
+            # Relations
+            'import': '📦',
+            'extends': '🔗',
+            'calls': '📞',
+            'uses': '🔸'
+        }
+        return icons.get(element_type, '📌')
+    
+    def _extract_and_save_inter_element_relations(self, file_path: str, content: str):
+        """
+        ✅ NOUVEAU : Extrait et sauvegarde les relations inter-éléments
+
+        Args:
+            file_path: Chemin du fichier
+            content: Contenu du fichier
+        """
+        if not content:
+            return
+
+        # Extraire classes et fonctions
+        classes = self.dependency_parser.extract_classes(content, file_path)
+        functions = self.dependency_parser.extract_functions(content, file_path)
+
+        if not classes and not functions:
+            return
+
+        # Extraire les relations détaillées
+        detailed_relations = self.dependency_parser.extract_detailed_relations(
+            content, file_path, classes, functions
+        )
+
+        # Enregistrer dans la structure
+        self._register_inter_element_relations(detailed_relations, file_path)
+
+        # Log
+        total_rels = sum(len(v) for v in detailed_relations.values())
+        if total_rels > 0:
+            logger.info(f"  📊 {total_rels} relations inter-éléments détectées:")
+            for rel_type, rel_list in detailed_relations.items():
+                if rel_list:
+                    logger.info(f"    • {rel_type}: {len(rel_list)}")
+
+    def _register_inter_element_relations(self, detailed_relations: Dict, file_path: str):
+        """
+        ✅ Enregistre les relations dans la structure du projet
+
+        Args:
+            detailed_relations: Dict avec les relations extraites
+            file_path: Chemin du fichier source
+        """
+        # Classe → Classe
+        for rel in detailed_relations.get('class_to_class', []):
+            source_uid = rel['source_uid']
+
+            # Ajouter à outgoing_relations
+            source_node = self._find_label_by_uid(source_uid)
+            if source_node:
+                source_node.setdefault('outgoing_relations', []).append({
+                    'target_uid': rel['target_uid'],
+                    'target_name': rel['target_name'],
+                    'relation_type': rel['relation_type'],
+                    'category': 'parsed',
+                    'line': rel['line'],
+                    'source_name': rel['source_name'],
+                    'source_uid': source_uid,
+                    'intra_file': True
+                })
+
+            # Ajouter aux pending_relations
+            self.pending_relations[source_uid].append({
+                'target_uid': rel['target_uid'],
+                'target_name': rel['target_name'],
+                'relation_type': rel['relation_type']
+            })
+
+        # Classe → Fonction
+        for rel in detailed_relations.get('class_to_function', []):
+            source_uid = rel['source_uid']
+
+            source_node = self._find_label_by_uid(source_uid)
+            if source_node:
+                source_node.setdefault('outgoing_relations', []).append({
+                    'target_uid': rel['target_uid'],
+                    'target_name': rel['target_name'],
+                    'relation_type': rel['relation_type'],
+                    'category': 'parsed',
+                    'line': rel['line'],
+                    'source_name': rel['source_name'],
+                    'source_uid': source_uid,
+                    'intra_file': True
+                })
+
+            self.pending_relations[source_uid].append({
+                'target_uid': rel['target_uid'],
+                'target_name': rel['target_name'],
+                'relation_type': rel['relation_type']
+            })
+
+        # Fonction → Fonction
+        for rel in detailed_relations.get('function_to_function', []):
+            source_uid = rel['source_uid']
+
+            source_node = self._find_label_by_uid(source_uid)
+            if source_node:
+                source_node.setdefault('outgoing_relations', []).append({
+                    'target_uid': rel['target_uid'],
+                    'target_name': rel['target_name'],
+                    'relation_type': rel['relation_type'],
+                    'category': 'parsed',
+                    'line': rel['line'],
+                    'source_name': rel['source_name'],
+                    'source_uid': source_uid,
+                    'intra_file': True
+                })
+
+            self.pending_relations[source_uid].append({
+                'target_uid': rel['target_uid'],
+                'target_name': rel['target_name'],
+                'relation_type': rel['relation_type']
+            })
+
+        # Fonction → Classe
+        for rel in detailed_relations.get('function_to_class', []):
+            source_uid = rel['source_uid']
+
+            source_node = self._find_label_by_uid(source_uid)
+            if source_node:
+                source_node.setdefault('outgoing_relations', []).append({
+                    'target_uid': rel['target_uid'],
+                    'target_name': rel['target_name'],
+                    'relation_type': rel['relation_type'],
+                    'category': 'parsed',
+                    'line': rel['line'],
+                    'source_name': rel['source_name'],
+                    'source_uid': source_uid,
+                    'intra_file': True
+                })
+
+            self.pending_relations[source_uid].append({
+                'target_uid': rel['target_uid'],
+                'target_name': rel['target_name'],
+                'relation_type': rel['relation_type']
+            })
 
     def _save_label_and_children_recursive(self, cursor, label_data, cluster_uid, parent_uid, level):
         """
@@ -4719,7 +5618,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     cursor, child, cluster_uid, label_uid, level + 1
                 )
 
-    
     def closeEvent(self, event):
         """Ferme proprement le connector lors de la fermeture du widget."""
         if self.dgraph_connector: 

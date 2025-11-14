@@ -236,7 +236,7 @@ class GeminiWorker(QThread):
             self.test_completed.emit(False, error_msg, duration, f"Erreur: {str(e)}")
 
     def _parse_snippets(self, response_text):
-        """Parse la réponse pour extraire les snippets - VERSION CORRIGÉE"""
+        """Parse la réponse pour extraire les snippets - VERSION AMÉLIORÉE"""
         snippets = []
 
         snippet_pattern = r'###\s*SNIPPET\s+\[([^\]]+)\]:\s*(.+?)(?:\n|$)'
@@ -250,83 +250,146 @@ class GeminiWorker(QThread):
             end_pos = snippet_matches[i + 1].start() if i + 1 < len(snippet_matches) else len(response_text)
             snippet_content = response_text[start_pos:end_pos]
 
-            # 🔧 AMÉLIORATION: Extraction du fichier avec plusieurs patterns
+            # 🔧 AMÉLIORATION 1: Extraction du fichier avec patterns multiples
             file_match = None
 
             # Pattern 1: **Fichier**: `path/to/file.py`
-            file_match = re.search(r'\*\*Fichier\*\*:\s*`([^`]+)`', snippet_content)
+            file_match = re.search(r'\*\*Fichier\*\*:\s*`([^`]+)`', snippet_content, re.IGNORECASE)
 
             # Pattern 2: Fichier: path/to/file.py (sans backticks)
             if not file_match:
-                file_match = re.search(r'\*\*Fichier\*\*:\s*([^\n]+?)(?:\n|\*\*)', snippet_content)
+                file_match = re.search(r'\*\*Fichier\*\*:\s*([^\n]+?)(?:\n|\*\*)', snippet_content, re.IGNORECASE)
 
-            # Pattern 3: Dans le titre ou la description
+            # Pattern 3: File: (anglais)
             if not file_match:
-                file_match = re.search(
-                    r'(?:dans|fichier|file)\s+[`"]?([a-zA-Z0-9_/\-\.]+\.(?:py|js|cpp|java|html|css|json|txt))[`"]?',
+                file_match = re.search(r'\*\*File\*\*:\s*`?([^`\n]+)`?', snippet_content, re.IGNORECASE)
+
+            # 🔧 AMÉLIORATION 2: Extraction de la cible avec patterns multiples
+            target_match = None
+
+            # Pattern 1: **Classe/Fonction**: `ClassName.method()`
+            target_match = re.search(
+                r'\*\*(?:Classe/Fonction|Cible|Target|Classe|Function)\*\*:\s*`([^`]+)`', 
+                snippet_content, 
+                re.IGNORECASE
+            )
+
+            # Pattern 2: Sans backticks
+            if not target_match:
+                target_match = re.search(
+                    r'\*\*(?:Classe/Fonction|Cible|Target|Classe|Function)\*\*:\s*([^\n]+?)(?:\n|\*\*)', 
                     snippet_content,
                     re.IGNORECASE
                 )
 
-            # Extraction de la cible
-            target_match = re.search(r'\*\*(?:Classe/Fonction|Cible)\*\*:\s*`([^`]+)`', snippet_content)
-
-            # Si pas trouvé, chercher sans backticks
+            # Pattern 3: Détecter "dans la méthode X" ou "in method X"
             if not target_match:
-                target_match = re.search(r'\*\*(?:Classe/Fonction|Cible)\*\*:\s*([^\n]+?)(?:\n|\*\*)', snippet_content)
+                target_match = re.search(
+                    r'(?:dans|in)\s+(?:la\s+)?(?:méthode|method|fonction|function|classe|class)\s+[`"]?([a-zA-Z0-9_\.]+)[`"]?',
+                    snippet_content,
+                    re.IGNORECASE
+                )
 
-            # Extraction de l'action
-            action_match = re.search(r'\*\*Action\*\*:\s*(\w+)', snippet_content)
+            # Pattern 4: Chercher dans le titre si action == REMPLACER
+            if not target_match and action in ['REMPLACER', 'REPLACE', 'MODIFIER', 'MODIFY']:
+                # Ex: "Remplacer la méthode _build_prompt"
+                target_match = re.search(
+                    r'(?:remplacer|replace|modifier|modify|update)\s+(?:la\s+)?(?:méthode|method|fonction|function|classe|class)?\s*[`"]?([a-zA-Z0-9_\.]+)[`"]?',
+                    title,
+                    re.IGNORECASE
+                )
 
-            # 🔧 AMÉLIORATION: Extraction de la description SANS les métadonnées
+            # 🔧 AMÉLIORATION 3: Extraction de l'action avec synonymes
+            action_match = re.search(r'\*\*Action\*\*:\s*(\w+)', snippet_content, re.IGNORECASE)
+
+            detected_action = action
+            if action_match:
+                raw_action = action_match.group(1).strip().upper()
+                # Normaliser les actions
+                action_mapping = {
+                    'ADD': 'AJOUTER',
+                    'CREATE': 'AJOUTER',
+                    'INSERT': 'AJOUTER',
+                    'MODIFY': 'MODIFIER',
+                    'UPDATE': 'MODIFIER',
+                    'CHANGE': 'MODIFIER',
+                    'REPLACE': 'REMPLACER'
+                }
+                detected_action = action_mapping.get(raw_action, raw_action)
+
+            # 🔧 AMÉLIORATION 4: Description nettoyée
             desc_match = re.search(
                 r'\*\*Description\*\*:\s*(.+?)(?=\n\n```|\n```|\*\*Fichier\*\*|\*\*Action\*\*|$)', 
                 snippet_content, 
                 re.DOTALL
             )
 
-            code_match = re.search(r'```(\w+)?\n(.*?)```', snippet_content, re.DOTALL)
-
-            # 🔧 NETTOYAGE: Description sans les métadonnées de fichier
             description = ""
             if desc_match:
                 raw_desc = desc_match.group(1).strip()
                 desc_lines = []
                 for line in raw_desc.split('\n'):
                     line = line.strip()
-                    # 🔧 IGNORER les lignes contenant des infos de fichier
                     if line and not any(marker in line.lower() for marker in [
                         '**fichier**', '**action**', '**cible**', '**classe',
-                        'fichier:', 'file:', 'dans le fichier', 'in file'
+                        'fichier:', 'file:', '```'
                     ]):
-                        # 🔧 NETTOYER les chemins de fichier dans la description
                         clean_line = re.sub(r'[a-zA-Z0-9_/\-\.]+\.(?:py|js|cpp|java|html|css)', '', line)
                         clean_line = clean_line.strip()
                         if clean_line and not clean_line.startswith('**'):
                             desc_lines.append(clean_line)
-
                 description = ' '.join(desc_lines)
 
-            # 🔧 EXTRACTION: Nom de fichier propre
+            # 🔧 AMÉLIORATION 5: Extraction du code
+            code_match = re.search(r'```(\w+)?\n(.*?)```', snippet_content, re.DOTALL)
+
+            # 🔧 AMÉLIORATION 6: Si target manquant et action=REMPLACER, tenter extraction du code
+            target_value = None
+            if target_match:
+                target_value = target_match.group(1).strip()
+            elif detected_action in ['REMPLACER', 'MODIFIER'] and code_match:
+                # Tenter d'extraire le nom de la fonction/classe du code
+                code_text = code_match.group(2).strip()
+
+                # Pattern Python: def function_name( ou class ClassName
+                func_match = re.search(r'(?:def|class)\s+([a-zA-Z0-9_]+)', code_text)
+                if func_match:
+                    target_value = func_match.group(1)
+                    logger.info(f"🎯 Target extrait automatiquement du code: {target_value}")
+
+            # 🔧 Nom de fichier nettoyé
             file_name = "Non spécifié"
             if file_match:
                 raw_file = file_match.group(1).strip()
-                # Nettoyer les backticks, guillemets, etc.
                 file_name = raw_file.strip('`\'"').strip()
 
             snippet = {
-                'action': action_match.group(1).strip().upper() if action_match else action,
+                'action': detected_action,
                 'title': title,
-                'file': file_name,  # 🔧 CORRECTION: Nom de fichier nettoyé
-                'target': target_match.group(1).strip() if target_match else None,
-                'description': description,  # 🔧 CORRECTION: Description sans métadonnées
+                'file': file_name,
+                'target': target_value,  # 🔧 PEUT ÊTRE None si non trouvé
+                'description': description,
                 'code': code_match.group(2).strip() if code_match else "",
                 'language': code_match.group(1).strip() if code_match and code_match.group(1) else "python",
                 'order': i + 1
             }
 
+            # 🔧 AMÉLIORATION 7: Logging détaillé
+            if detected_action in ['REMPLACER', 'MODIFIER'] and not target_value:
+                logger.warning(
+                    f"⚠️ Snippet {i+1} ({detected_action}): Target manquant!\n"
+                    f"   Titre: {title}\n"
+                    f"   Fichier: {file_name}\n"
+                    f"   Extrait: {snippet_content[:200]}..."
+                )
+            else:
+                logger.info(
+                    f"✅ Snippet {i+1} parsé: {detected_action} - {title}\n"
+                    f"   Fichier: {file_name}\n"
+                    f"   Target: {target_value or 'N/A'}"
+                )
+
             snippets.append(snippet)
-            logger.debug(f"Snippet parsé: {snippet['action']} - {snippet['title']} ({snippet['file']})")
 
         if not snippets:
             logger.warning("Aucun snippet formaté trouvé, tentative de parsing alternatif")
@@ -335,7 +398,7 @@ class GeminiWorker(QThread):
         return snippets
 
     def _parse_legacy_format(self, response_text):
-        """Parse l'ancien format de réponse - VERSION CORRIGÉE"""
+        """Parse l'ancien format - VERSION AMÉLIORÉE"""
         snippets = []
         code_blocks = re.finditer(r'```(\w+)?\n(.*?)```', response_text, re.DOTALL)
         
@@ -343,40 +406,36 @@ class GeminiWorker(QThread):
             language = match.group(1) or "python"
             code = match.group(2).strip()
             
-            # Chercher le contexte AVANT le bloc de code
-            context_start = max(0, match.start() - 500)  # 🔧 Augmenté à 500 chars
+            # Contexte AVANT le bloc
+            context_start = max(0, match.start() - 500)
             context = response_text[context_start:match.start()]
             
-            # 🔧 AMÉLIORATION: Patterns multiples pour détecter le fichier
-            file_match = None
-            
-            # Pattern 1: Fichier avec extension claire
+            # 🔧 AMÉLIORATION: Extraction du fichier
             file_match = re.search(
-                r'(?:fichier|file|dans|in|modifier|update|ajouter|add)\s*[:`]?\s*([a-zA-Z0-9_/\-\.]+\.(?:py|js|cpp|java|html|css|json|txt|md))',
+                r'(?:fichier|file|dans|in|path)\s*[:`]?\s*([a-zA-Z0-9_/\-\.]+\.(?:py|js|cpp|java|html|css|json|txt|md))',
                 context,
                 re.IGNORECASE
             )
             
-            # Pattern 2: Chemin complet
-            if not file_match:
-                file_match = re.search(
-                    r'([a-zA-Z0-9_\-]+/[a-zA-Z0-9_/\-\.]+\.(?:py|js|cpp|java|html|css))',
-                    context,
-                    re.IGNORECASE
-                )
+            file_name = file_match.group(1).strip('`\'"').strip() if file_match else "Non spécifié"
             
-            # Pattern 3: Nom de fichier simple
-            if not file_match:
-                file_match = re.search(
-                    r'\b([a-zA-Z0-9_\-]+\.(?:py|js|cpp|java|html|css))\b',
-                    context,
-                    re.IGNORECASE
-                )
+            # 🔧 AMÉLIORATION: Extraction du target
+            target_match = None
             
-            # 🔧 EXTRACTION: Nom de fichier nettoyé
-            file_name = "Non spécifié"
-            if file_match:
-                file_name = file_match.group(1).strip('`\'"').strip()
+            # Pattern 1: "remplacer la méthode X"
+            target_match = re.search(
+                r'(?:remplacer|replace|modifier|modify)\s+(?:la\s+)?(?:méthode|method|fonction|function|classe|class)?\s*[`"]?([a-zA-Z0-9_\.]+)[`"]?',
+                context,
+                re.IGNORECASE
+            )
+            
+            # Pattern 2: Extraire du code lui-même
+            if not target_match:
+                func_match = re.search(r'(?:def|class)\s+([a-zA-Z0-9_]+)', code)
+                if func_match:
+                    target_match = type('obj', (object,), {'group': lambda self, x: func_match.group(x)})()
+            
+            target_value = target_match.group(1) if target_match else None
             
             # 🔧 Détection de l'action
             detected_action = "MODIFIER"
@@ -391,30 +450,29 @@ class GeminiWorker(QThread):
                     detected_action = action
                     break
                 
-            # 🔧 AMÉLIORATION: Description nettoyée SANS le nom de fichier
+            # Description nettoyée
             context_lines = [line.strip() for line in context.split('\n') if line.strip()]
-            clean_desc_lines = []
-            
-            for line in context_lines[-3:]:
-                # 🔧 IGNORER les lignes avec métadonnées ou noms de fichiers
-                if not any(marker in line.lower() for marker in [
-                    '**fichier**', '**action**', '```', 'snippet',
-                    '.py', '.js', '.cpp', '.java', '.html', '.css'
-                ]):
-                    clean_desc_lines.append(line)
-            
+            clean_desc_lines = [
+                line for line in context_lines[-3:]
+                if not any(marker in line.lower() for marker in ['**fichier**', '**action**', '```', 'snippet'])
+            ]
             description = ' '.join(clean_desc_lines) if clean_desc_lines else ""
             
             snippet = {
                 'action': detected_action,
                 'title': f"Snippet {i + 1}",
-                'file': file_name,  # 🔧 CORRECTION: Nom de fichier extrait
-                'target': None,
-                'description': description[:200],  # 🔧 Description sans nom de fichier
+                'file': file_name,
+                'target': target_value,  # 🔧 Maintenant extrait
+                'description': description[:200],
                 'code': code,
                 'language': language,
                 'order': i + 1
             }
+            
+            logger.info(
+                f"✅ Legacy snippet {i+1}: {detected_action} - {file_name}\n"
+                f"   Target: {target_value or 'Non trouvé'}"
+            )
             
             snippets.append(snippet)
         

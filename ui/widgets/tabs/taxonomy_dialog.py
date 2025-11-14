@@ -1,5 +1,6 @@
 # taxonomy_dialog.py - Version intégrée avec GraphWidget et Loader Professionnel
 import os
+import json
 import uuid
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QSize, QThread, pyqtSlot
@@ -24,7 +25,6 @@ class LoadingOverlay(QtWidgets.QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
 
         self.animation_timer = QTimer()
-        self.animation_timer.timeout.connect(self._animate)
 
         self.current_message = "Chargement..."
         self.current_progress = 0
@@ -107,9 +107,6 @@ class LoadingOverlay(QtWidgets.QWidget):
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         painter.fillRect(self.rect(), QtGui.QColor(0, 0, 0, 100))
 
-    def _animate(self):
-        self.update()
-
     def show_loading(self, message="Chargement...", detail=""):
         self.current_message = message
         self.current_detail = detail
@@ -124,7 +121,7 @@ class LoadingOverlay(QtWidgets.QWidget):
 
         self.show()
         self.raise_()
-        self.animation_timer.start(30)
+        #self.animation_timer.start(30)
         QtWidgets.QApplication.processEvents()
 
     def update_progress(self, value, message=None, detail=None):
@@ -144,7 +141,7 @@ class LoadingOverlay(QtWidgets.QWidget):
         QtWidgets.QApplication.processEvents()
 
     def hide_loading(self):
-        self.animation_timer.stop()
+        #self.animation_timer.stop()
         self.hide()
         QtWidgets.QApplication.processEvents()
 
@@ -167,33 +164,43 @@ class DataLoaderThread(QThread):
         try:
             if self.is_cancelled:
                 return
-            self.progress_update.emit(10, "Initialisation...", "Chargement des mappings UID")
+
+            self.progress_update.emit(10, "Initialisation...", "Chargement mappings UID")
             self.dialog._load_uid_mappings()
-            
+
             if self.is_cancelled:
                 return
-            self.progress_update.emit(30, "Analyse du nœud...", f"Récupération des détails pour {self.dialog.current_central_name}")
+
+            self.progress_update.emit(30, "Analyse du nœud...", f"UID {self.uid}")
             node_details = self.dialog._get_node_details(self.uid)
-            
+
+            # ✅ AJOUT : Estimation du nombre de relations
+            estimated_relations = len(node_details.get('outgoing_relations', [])) + \
+                                 len(node_details.get('incoming_relations', []))
+
             relations_list = []
             if self.level == 1:
                 if self.is_cancelled:
                     return
-                self.progress_update.emit(50, "Chargement...", "Récupération des relations directes (Niveau 1)")
+                self.progress_update.emit(
+                    50, 
+                    "Niveau 1...", 
+                    f"~{estimated_relations} relations estimées"
+                )
                 relations_list = self.dialog._get_level_1_relations(self.uid)
-                self.progress_update.emit(90, "Chargement...", f"{len(relations_list)} relations trouvées")
-                
+                self.progress_update.emit(90, "Finalisation...", f"{len(relations_list)} trouvées")
+
             elif self.level == 2:
                 if self.is_cancelled:
                     return
-                self.progress_update.emit(50, "Chargement...", "Récupération des relations de niveau 1")
-                relations_list = self.dialog._get_level_1_relations(self.uid)
-                
+                self.progress_update.emit(50, "Niveau 1...", "Relations directes")
+                level1_rels = self.dialog._get_level_1_relations(self.uid)
+
                 if self.is_cancelled:
                     return
-                self.progress_update.emit(70, "Chargement...", "Récupération des relations de niveau 2")
+                self.progress_update.emit(70, "Niveau 2...", "Relations indirectes")
                 relations_list = self.dialog._get_level_2_relations(self.uid)
-                self.progress_update.emit(90, "Chargement...", f"{len(relations_list)} relations trouvées")
+                self.progress_update.emit(90, "Finalisation...", f"{len(relations_list)} trouvées")
             
             if self.is_cancelled:
                 return
@@ -1085,7 +1092,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
                   line
                   bases
                   uses_vars
-                  methods { uid name description line params returns }
+                  codeContent
+                  methods { uid name description line codeContent params returns }
                   variables { uid name description line var_type scope }
                 }
 
@@ -1096,6 +1104,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                   line
                   params
                   returns
+                  codeContent
                   variables { uid name description line var_type scope }
                 }
 
@@ -1125,14 +1134,15 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     name
                     description
                     line
-                    methods { uid name description line }
-                    variables { uid name description line }
+                    methods { uid name description line codeContent}
+                    variables { uid name description line codeContent}
                   }
 
                   functions {
                     uid
                     name
                     description
+                    codeContent
                     line
                     variables { uid name description line }
                   }
@@ -1160,14 +1170,16 @@ class TaxonomyDialog(QtWidgets.QDialog):
                       uid
                       name
                       description
+                      codeContent
                       line
-                      methods { uid name description line }
+                      methods { uid name description line codeContent }
                     }
 
                     functions {
                       uid
                       name
                       description
+                      codeContent
                       line
                     }
 
@@ -1190,8 +1202,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
                       files
                       fileContents
 
-                      classes { uid name description line }
-                      functions { uid name description line }
+                      classes { uid name description line codeContent }
+                      functions { uid name description line  codeContent}
                       variables { uid name description line }
 
                       # ✅ NIVEAU 4
@@ -1206,8 +1218,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
                         files
                         fileContents
 
-                        classes { uid name description line }
-                        functions { uid name description line }
+                        classes { uid name description line codeContent }
+                        functions { uid name description line codeContent }
                         variables { uid name description line }
                       }
                     }
@@ -2387,7 +2399,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
     def _load_file_content(self, file_item):
         """
-        ✅ VERSION SANS FALLBACK : Chargement strict des noms réels
+        ✅ VERSION CORRIGÉE : Recharge TOUJOURS depuis Dgraph pour avoir le code
         """
         file_data = file_item.item_data
         file_name = file_data.get('name') or file_data.get('label', 'Unknown')
@@ -2395,38 +2407,45 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
         logger.info(f"📄 Chargement fichier: {file_name} (uid={file_uid})")
 
-        # ✅ Si l'UID existe, recharger depuis Dgraph
+        # ✅ TOUJOURS RECHARGER depuis Dgraph
         if file_uid and self.dgraph_connector:
             detailed_data = self._fetch_file_complete_data(file_uid)
             if detailed_data:
                 file_data = detailed_data
                 file_item.item_data = detailed_data
+                logger.info(f"   ✅ Données rechargées depuis Dgraph")
+            else:
+                logger.warning(f"   ⚠️ Impossible de recharger depuis Dgraph")
 
+        # Validation stricte
         def has_valid_name(element):
-            """Validation stricte du nom"""
             name = element.get('name')
             if not name:
                 return False
             name = name.strip()
-            if not name or name.startswith(('Unnamed', 'class-', 'func-', 'var-', 'method-')):
-                return False
-            return True
+            return bool(name) and not name.startswith(('Unnamed', 'class-', 'func-', 'var-', 'method-'))
 
-        # ✅ Récupérer éléments de code
+        # Récupérer éléments de code
         classes = file_data.get('classes', [])
         functions = file_data.get('functions', [])
         variables = file_data.get('variables', [])
 
-        # Compter uniquement les éléments avec noms valides
-        valid_count = sum([
-            1 for cls in classes if has_valid_name(cls)
-        ]) + sum([
-            1 for func in functions if has_valid_name(func)
-        ]) + sum([
-            1 for var in variables if has_valid_name(var)
-        ])
+        # ✅ VÉRIFIER que le code est présent
+        for cls in classes:
+            if has_valid_name(cls):
+                code_check = cls.get('codeContent', '')
+                if code_check:
+                    logger.debug(f"   ✓ Classe '{cls['name']}' : {len(code_check)} chars")
+                else:
+                    logger.warning(f"   ⚠️ Classe '{cls['name']}' : AUCUN code")
 
-        logger.info(f"   📊 {valid_count} éléments valides trouvés")
+        for func in functions:
+            if has_valid_name(func):
+                code_check = func.get('codeContent', '')
+                if code_check:
+                    logger.debug(f"   ✓ Fonction '{func['name']}' : {len(code_check)} chars")
+                else:
+                    logger.warning(f"   ⚠️ Fonction '{func['name']}' : AUCUN code")
 
         # ✅ CLASSES avec méthodes
         for cls in classes:
@@ -2435,9 +2454,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
             if cls_uid and cls_uid in self._uid_set:
                 continue
             
-            # ✅ STRICT : Ignorer si pas de nom valide
             if not has_valid_name(cls):
-                logger.debug(f"   ⏭️ Classe sans nom ignorée")
                 continue
             
             cls_name = cls.get('name').strip()
@@ -2446,7 +2463,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 file_item,
                 cls_name,
                 'class',
-                cls,
+                cls,  # ✅ Contient maintenant codeContent
                 file_item.level + 1
             )
             cls_item.loaded = True
@@ -2471,7 +2488,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     cls_item,
                     method_name,
                     'function',
-                    method,
+                    method,  # ✅ Contient maintenant codeContent
                     cls_item.level + 1
                 )
                 method_item.loaded = True
@@ -2488,7 +2505,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 continue
             
             if not has_valid_name(func):
-                logger.debug(f"   ⏭️ Fonction sans nom ignorée")
                 continue
             
             func_name = func.get('name').strip()
@@ -2497,7 +2513,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 file_item,
                 func_name,
                 'function',
-                func,
+                func,  # ✅ Contient maintenant codeContent
                 file_item.level + 1
             )
             func_item.loaded = True
@@ -2506,7 +2522,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 self._node_cache[func_uid] = func_item
                 self._uid_set.add(func_uid)
 
-        # ✅ VARIABLES
+        # ✅ VARIABLES (pas de code pour elles)
         for var in variables:
             var_uid = var.get('uid', '')
 
@@ -2514,7 +2530,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 continue
             
             if not has_valid_name(var):
-                logger.debug(f"   ⏭️ Variable sans nom ignorée")
                 continue
             
             var_name = var.get('name').strip()
@@ -2536,36 +2551,47 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
     def _fetch_file_complete_data(self, file_uid: str) -> Optional[Dict]:
         """
-        ✅ NOUVEAU : Recharge les données complètes d'un fichier depuis Dgraph
+        🆕 RECHARGE TOUTES LES DONNÉES D'UN NŒUD AVEC LE CODE COMPLET
         """
+        if not file_uid or not self.dgraph_connector:
+            return None
+    
         query = f"""
         {{
-          file(func: uid({file_uid})) {{
+          node(func: uid({file_uid})) {{
             uid
             name
             label
             nodeType
             path
-            files
-            fileContents
             description
-
+            fileContents
+            codeContent
+            docstring
+            line
+            
+            # ✅ CLASSES COMPLÈTES avec code
             classes {{
               uid
               name
               description
               line
+              codeContent
               bases
-
+              uses_vars
+              
+              # ✅ MÉTHODES avec code
               methods {{
                 uid
                 name
                 description
                 line
+                codeContent  # ✅ CRITIQUE
                 params
                 returns
+                docstring
               }}
-
+              
               variables {{
                 uid
                 name
@@ -2575,15 +2601,18 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 scope
               }}
             }}
-
+            
+            # ✅ FONCTIONS COMPLÈTES avec code
             functions {{
               uid
               name
               description
               line
+              codeContent  # ✅ CRITIQUE
               params
               returns
-
+              docstring
+              
               variables {{
                 uid
                 name
@@ -2593,7 +2622,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 scope
               }}
             }}
-
+            
             variables {{
               uid
               name
@@ -2602,24 +2631,60 @@ class TaxonomyDialog(QtWidgets.QDialog):
               var_type
               scope
             }}
-
-            children: ~parents {{
-              uid
-              name
-              label
-              nodeType
-              level
-            }}
           }}
         }}
         """
-
-        result = self._execute_dgraph_query(query)
-
-        if result and 'file' in result and result['file']:
-            return result['file'][0]
-
-        return None
+    
+        try:
+            txn = self.dgraph_connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+    
+            result = self.dgraph_connector._parse_response(resp)
+            
+            if result and 'node' in result and result['node']:
+                node_data = result['node'][0]
+                
+                # 📊 DIAGNOSTIC DÉTAILLÉ
+                code = node_data.get('codeContent', '') or node_data.get('fileContents', '')
+                classes = node_data.get('classes', [])
+                functions = node_data.get('functions', [])
+                
+                logger.info(f"   📥 Nœud rechargé: {node_data.get('name', 'N/A')}")
+                logger.info(f"      - Code fichier: {len(code)} chars")
+                logger.info(f"      - Classes: {len(classes)}")
+                logger.info(f"      - Fonctions: {len(functions)}")
+                
+                # ✅ VÉRIFIER CODE DES CLASSES/FONCTIONS
+                for cls in classes:
+                    cls_code = cls.get('codeContent', '')
+                    methods = cls.get('methods', [])
+                    logger.info(f"         🗂️ Classe '{cls.get('name')}': {len(cls_code)} chars")
+                    
+                    for method in methods:
+                        method_code = method.get('codeContent', '')
+                        if method_code:
+                            logger.info(f"            ✓ Méthode '{method.get('name')}': {len(method_code)} chars")
+                        else:
+                            logger.warning(f"            ⚠️ Méthode '{method.get('name')}': AUCUN code")
+                
+                for func in functions:
+                    func_code = func.get('codeContent', '')
+                    if func_code:
+                        logger.info(f"         ✓ Fonction '{func.get('name')}': {len(func_code)} chars")
+                    else:
+                        logger.warning(f"         ⚠️ Fonction '{func.get('name')}': AUCUN code")
+                
+                return node_data
+            else:
+                logger.warning(f"⚠️ Aucun nœud trouvé pour UID {file_uid}")
+                return None
+    
+        except Exception as e:
+            logger.error(f"❌ Erreur rechargement nœud {file_uid}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def _load_folder_children(self, folder_item):
         """
@@ -2717,16 +2782,28 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
             self._add_loading_placeholder(it)
 
-        # ✅ Ajouter codes
         for ch in codes:
             name = ch.get('name') or 'Code'
             ch_uid = ch.get('uid', '')
+
+            # ✅ NOUVEAU : RECHARGER LE CODE si c'est une classe/fonction/méthode
+            if ch_uid and self.dgraph_connector:
+                complete_ch_data = self._fetch_complete_node_data(ch_uid)
+                if complete_ch_data:
+                    ch.update(complete_ch_data)
+                    logger.info(f"      ✅ Code rechargé pour {name}")
+
+                    code = ch.get('codeContent', '')
+                    if code:
+                        logger.info(f"         📦 {len(code)} chars")
+                    else:
+                        logger.warning(f"         ⚠️ AUCUN code")
 
             code_item = TaxonomyItem(
                 folder_item, 
                 name, 
                 ch.get('nodeType', 'function'), 
-                ch, 
+                ch,  # ✅ Contient maintenant codeContent
                 next_level
             )
             code_item.loaded = True
@@ -2810,205 +2887,170 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
     def _load_item_detailed_content(self, item, uid):
         """
-        ✅ VERSION SANS FALLBACK : Charge uniquement les éléments avec noms valides
+        ✅ VERSION CORRIGÉE : Charge ET recharge le code complet
         """
-        query = f"""
-        {{
-          node(func: uid({uid})) {{
-            uid
-            name
-            id
-            label
-            path
-            category
-            nodeType
-            codeContent
-            description
-            level
-            files
-            fileContents
+        # ✅ TOUJOURS RECHARGER depuis Dgraph
+        complete_data = self._fetch_complete_node_data(uid)
 
-            classes {{
-              uid
-              name 
-              description
-              line
-              bases
-              uses_vars
+        if complete_data:
+            # ✅ REMPLACER les données existantes
+            item.item_data.update(complete_data)
+            logger.info(f"✅ Données rechargées pour UID {uid}")
 
-              methods {{
-                uid
-                name   
-                description
-                line
-                params
-                returns
-              }}
+            # 📊 DIAGNOSTIC
+            code = complete_data.get('codeContent', '') or complete_data.get('fileContents', '')
+            classes = complete_data.get('classes', [])
+            functions = complete_data.get('functions', [])
 
-              variables {{
-                uid
-                name
-                description
-                line
-                var_type
-                scope
-              }}
-            }}
+            logger.info(f"   📦 Code: {len(code)} chars")
+            logger.info(f"   🗂️ {len(classes)} classes, {len(functions)} fonctions")
 
-            functions {{
-              uid
-              name       
-              description
-              line
-              params
-              returns
+            # Vérifier code des classes/fonctions
+            for cls in classes:
+                cls_code = cls.get('codeContent', '')
+                if cls_code:
+                    logger.info(f"      ✓ Classe '{cls.get('name')}': {len(cls_code)} chars")
+                else:
+                    logger.warning(f"      ⚠️ Classe '{cls.get('name')}': AUCUN code")
 
-              variables {{
-                uid
-                name 
-                description
-                line
-                var_type
-                scope
-              }}
-            }}
+            for func in functions:
+                func_code = func.get('codeContent', '')
+                if func_code:
+                    logger.info(f"      ✓ Fonction '{func.get('name')}': {len(func_code)} chars")
+                else:
+                    logger.warning(f"      ⚠️ Fonction '{func.get('name')}': AUCUN code")
 
-            variables {{
-              uid
-              name     
-              description
-              line
-              var_type
-              scope
-            }}
+        else:
+            logger.warning(f"⚠️ Impossible de recharger les données pour UID {uid}")
+            # Fallback : utiliser les données locales
+            complete_data = item.item_data
 
-            children: ~parents {{
-              uid
-              name 
-              id
-              label
-              nodeType
-              level
-            }}
-          }}
-        }}
-        """
+        # ✅ CONSTRUCTION DE L'ARBRE avec données rechargées
+        def has_valid_name(element):
+            """Validation stricte"""
+            name = element.get('name')
+            if not name:
+                return False
+            name = name.strip()
+            if not name or name.startswith(('Unnamed', 'class-', 'func-', 'var-', 'method-')):
+                return False
+            return True
 
-        result = self._execute_dgraph_query(query)
+        # ✅ CLASSES
+        classes = [cls for cls in complete_data.get('classes', []) if has_valid_name(cls)]
+        if classes:
+            logger.info(f"   🗂️ {len(classes)} classes valides")
+            for cls in classes:
+                cls_name = cls.get('name').strip()
+                cls_uid = cls.get('uid', '')
 
-        if result and 'node' in result and result['node']:
-            node_data = result['node'][0]
-            item.item_data.update(node_data)
+                if cls_uid and cls_uid in self._uid_set:
+                    continue
 
-            def has_valid_name(element):
-                """Validation stricte"""
-                name = element.get('name')
-                if not name:
-                    return False
-                name = name.strip()
-                if not name or name.startswith(('Unnamed', 'class-', 'func-', 'var-', 'method-')):
-                    return False
-                return True
-
-            # ✅ CLASSES
-            classes = [cls for cls in node_data.get('classes', []) if has_valid_name(cls)]
-            if classes:
-                logger.info(f"   🗂️ {len(classes)} classes valides")
-                for cls in classes:
-                    cls_name = cls.get('name').strip()
-
-                    cls_item = TaxonomyItem(
-                        item,
-                        cls_name,
-                        'class',
-                        cls,
-                        item.level + 1
-                    )
-                    cls_item.loaded = True
-                    cls_item.is_expandable = False
-
-                    if cls.get('uid'):
-                        self._node_cache[cls['uid']] = cls_item
-                        self._uid_set.add(cls['uid'])
-
-                    # ✅ MÉTHODES
-                    methods = [m for m in cls.get('methods', []) if has_valid_name(m)]
-                    for method in methods:
-                        method_name = method.get('name').strip()
-
-                        method_item = TaxonomyItem(
-                            cls_item,
-                            method_name,
-                            'function',
-                            method,
-                            cls_item.level + 1
-                        )
-                        method_item.loaded = True
-
-                        if method.get('uid'):
-                            self._node_cache[method['uid']] = method_item
-                            self._uid_set.add(method['uid'])
-
-            # ✅ FONCTIONS
-            functions = [f for f in node_data.get('functions', []) if has_valid_name(f)]
-            if functions:
-                logger.info(f"   ⚙️ {len(functions)} fonctions valides")
-                for func in functions:
-                    func_name = func.get('name').strip()
-
-                    func_item = TaxonomyItem(
-                        item,
-                        func_name,
-                        'function',
-                        func,
-                        item.level + 1
-                    )
-                    func_item.loaded = True
-
-                    if func.get('uid'):
-                        self._node_cache[func['uid']] = func_item
-                        self._uid_set.add(func['uid'])
-
-            # ✅ VARIABLES
-            variables = [v for v in node_data.get('variables', []) if has_valid_name(v)]
-            for var in variables:
-                var_name = var.get('name').strip()
-
-                var_item = TaxonomyItem(
+                cls_item = TaxonomyItem(
                     item,
-                    var_name,
-                    'variable',
-                    var,
+                    cls_name,
+                    'class',
+                    cls,  # ✅ Contient maintenant codeContent
                     item.level + 1
                 )
-                var_item.loaded = True
+                cls_item.loaded = True
+                cls_item.is_expandable = False
 
-                if var.get('uid'):
-                    self._node_cache[var['uid']] = var_item
-                    self._uid_set.add(var['uid'])
+                if cls_uid:
+                    self._node_cache[cls_uid] = cls_item
+                    self._uid_set.add(cls_uid)
 
-            # ✅ ENFANTS HIÉRARCHIQUES
-            children = node_data.get('children', [])
-            if children:
-                logger.info(f"   📁 {len(children)} enfants hiérarchiques")
-                for child in children:
-                    child_name = child.get('name') or child.get('label') or child.get('id', 'Item')
+                # ✅ MÉTHODES
+                methods = [m for m in cls.get('methods', []) if has_valid_name(m)]
+                for method in methods:
+                    method_name = method.get('name').strip()
+                    method_uid = method.get('uid', '')
 
-                    if not child_name or child_name.startswith('Unnamed'):
+                    if method_uid and method_uid in self._uid_set:
                         continue
 
-                    child_type = self._detect_item_type(child, child_name, item)
-
-                    child_item = TaxonomyItem(
-                        item,
-                        child_name,
-                        child_type,
-                        child,
-                        item.level + 1
+                    method_item = TaxonomyItem(
+                        cls_item,
+                        method_name,
+                        'function',
+                        method,  # ✅ Contient maintenant codeContent
+                        cls_item.level + 1
                     )
-                    child_item.loaded = False
-                    child_item.is_expandable = True
-                    self._add_loading_placeholder(child_item)
+                    method_item.loaded = True
+
+                    if method_uid:
+                        self._node_cache[method_uid] = method_item
+                        self._uid_set.add(method_uid)
+
+        # ✅ FONCTIONS
+        functions = [f for f in complete_data.get('functions', []) if has_valid_name(f)]
+        if functions:
+            logger.info(f"   ⚙️ {len(functions)} fonctions valides")
+            for func in functions:
+                func_name = func.get('name').strip()
+                func_uid = func.get('uid', '')
+
+                if func_uid and func_uid in self._uid_set:
+                    continue
+
+                func_item = TaxonomyItem(
+                    item,
+                    func_name,
+                    'function',
+                    func,  # ✅ Contient maintenant codeContent
+                    item.level + 1
+                )
+                func_item.loaded = True
+
+                if func_uid:
+                    self._node_cache[func_uid] = func_item
+                    self._uid_set.add(func_uid)
+
+        # ✅ VARIABLES
+        variables = [v for v in complete_data.get('variables', []) if has_valid_name(v)]
+        for var in variables:
+            var_name = var.get('name').strip()
+            var_uid = var.get('uid', '')
+
+            if var_uid and var_uid in self._uid_set:
+                continue
+
+            var_item = TaxonomyItem(
+                item,
+                var_name,
+                'variable',
+                var,
+                item.level + 1
+            )
+            var_item.loaded = True
+
+            if var_uid:
+                self._node_cache[var_uid] = var_item
+                self._uid_set.add(var_uid)
+
+        # ✅ ENFANTS HIÉRARCHIQUES
+        children = complete_data.get('children', [])
+        if children:
+            logger.info(f"   📁 {len(children)} enfants hiérarchiques")
+            for child in children:
+                child_name = child.get('name') or child.get('label') or child.get('id', 'Item')
+
+                if not child_name or child_name.startswith('Unnamed'):
+                    continue
+
+                child_type = self._detect_item_type(child, child_name, item)
+
+                child_item = TaxonomyItem(
+                    item,
+                    child_name,
+                    child_type,
+                    child,
+                    item.level + 1
+                )
+                child_item.loaded = False
+                child_item.is_expandable = True
+                self._add_loading_placeholder(child_item)
 
     def _debug_item_structure(self, item):
         """
@@ -3518,10 +3560,21 @@ class TaxonomyDialog(QtWidgets.QDialog):
             return None
 
     def _get_node_details(self, uid: str) -> Dict:
-        """Récupère les détails complets d'un nœud."""
+        """
+        ✅ VERSION ALIGNÉE : Récupère détails complets avec enfants récursifs
+        """
         if not uid:
             return {}
 
+        cache_key = f"node_details_{uid}"
+        if hasattr(self, 'query_cache'):
+            cached_data = self.query_cache.get(cache_key)
+            if cached_data:
+                return cached_data
+
+        logger.info(f"🔎 Récupération des détails complets pour UID: {uid}")
+
+        # ✅ Requête étendue : inclut path, sourcePath, full_path
         query = f"""
         {{
           node(func: uid({uid})) {{
@@ -3530,76 +3583,573 @@ class TaxonomyDialog(QtWidgets.QDialog):
             label
             level
             nodeType
+            category
+            description
+            path
+            sourcePath
+            full_path
+
+            outgoing_relations {{
+              target_uid
+              target_name
+              relation_type
+              category
+              line
+            }}
+
+            incoming_relations {{
+              source_uid
+              source_name
+              relation_type
+              category
+            }}
+
+            relations
 
             parents {{
               uid
               name
+              label
+              nodeType
+              level
+              category
+              path
+              sourcePath
             }}
 
+            # ✅ Enfants récursifs jusqu'à 3 niveaux
             children: ~parents {{
               uid
               name
-            }}
-          }}
+              label
+              nodeType
+              level
+              category
+              path
+              sourcePath
 
-          outgoing_relations(func: type(Relation)) @filter(uid_in(source, {uid})) {{
-            uid
-            relationType
-            target {{
+              children: ~parents {{
+                uid
+                name
+                label
+                nodeType
+                level
+                category
+                path
+                sourcePath
+
+                children: ~parents {{
+                  uid
+                  name
+                  label
+                  nodeType
+                  level
+                  category
+                  path
+                  sourcePath
+                }}
+              }}
+            }}
+
+            clusters {{
               uid
               name
-            }}
-          }}
-
-          incoming_relations(func: type(Relation)) @filter(uid_in(target, {uid})) {{
-            uid
-            relationType
-            source {{
-              uid
-              name
+              path
             }}
           }}
         }}
         """
 
-        result = self._execute_dgraph_query(query)
+        try:
+            result = self._execute_dgraph_query(query)
+            if result and 'node' in result and result['node']:
+                node = result['node'][0]
 
-        if result and 'node' in result and result['node']:
-            node = result['node'][0]
-            node['outgoing_relations'] = result.get('outgoing_relations', [])
-            node['incoming_relations'] = result.get('incoming_relations', [])
-            return node
+                # ✅ Nettoyage : filtrer les enfants sans nom
+                def _clean_children(data):
+                    if not data or not isinstance(data, list):
+                        return []
+                    cleaned = []
+                    for c in data:
+                        name = c.get('name') or c.get('label', '')
+                        if not name or name.strip() == "":
+                            continue
+                        c['name'] = name.strip()
+                        if 'children' in c:
+                            c['children'] = _clean_children(c['children'])
+                        cleaned.append(c)
+                    return cleaned
 
-        return {}
+                node['children'] = _clean_children(node.get('children', []))
+
+                # ✅ Cache résultat
+                if hasattr(self, 'query_cache'):
+                    self.query_cache.set(cache_key, node)
+
+                logger.info(
+                    f"✅ Nœud trouvé: {node.get('name', 'N/A')} "
+                    f"avec {len(node.get('children', []))} enfants "
+                    f"et {len(node.get('outgoing_relations', []))} relations sortantes"
+                )
+                return node
+
+            logger.warning(f"⚠️  Aucun nœud trouvé pour UID: {uid}")
+            return {}
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la récupération du nœud {uid}: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
 
     # taxonomy_dialog.py - Méthode corrigée
     def _get_level_1_relations(self, uid: str) -> List[Dict]:
         """
-        ✅ VERSION FINALE : Force le rechargement
+        ✅ VERSION ALIGNÉE avec relation_import_widget.py
+        Récupère les relations niveau 1 avec tri hiérarchiques/externes
         """
-        if not uid:
-            logger.warning("⚠️ UID manquant")
+        if not uid or not self.current_central_name:
             return []
 
+        cache_key = f"level1_{uid}"
+        cached_data = self.query_cache.get(cache_key) if hasattr(self, 'query_cache') else None
+
+        if cached_data:
+            return cached_data
+
+        relations = []
+        dgraph_to_local = self._get_dgraph_to_local_mapping()
+
+        self._show_progress(f"Chargement relations niveau 1...", 10)
+
+        # ✅ 1. Récupérer détails du nœud avec relations complètes
+        node_details = self._get_node_details(uid)
+
+        if not node_details:
+            self._hide_progress()
+            return []
+
+        central_name = self.current_central_name
+
+        # ========== RELATIONS SORTANTES ==========
+        self._update_progress(30, "Relations sortantes...")
+        try:
+            for rel in node_details.get('outgoing_relations', []):
+                target_uid = rel.get('target_uid', '')
+
+                if target_uid.startswith('0x'):
+                    target_uid = dgraph_to_local.get(target_uid, target_uid)
+
+                if target_uid.startswith('temp_'):
+                    continue
+                
+                target_name = rel.get('target_name', '')
+                if not target_name or target_name.strip() == '':
+                    target_name = self._get_node_name_by_uid(target_uid)
+
+                target_name = self.normalize_node_name(target_name)
+
+                if target_name:
+                    relations.append({
+                        'source': central_name,
+                        'target': target_name,
+                        'relation_type': rel.get('relation_type', 'relation'),
+                        'category': rel.get('category', 'custom'),
+                        'is_analyzed': True
+                    })
+        except Exception as e:
+            logger.error(f"Erreur traitement outgoing_relations: {e}")
+
+        # ========== RELATIONS PARSÉES (JSON) ==========
+        self._update_progress(50, "Relations parsées...")
+        try:
+            relations_json = node_details.get('relations', '{}')
+            if isinstance(relations_json, str):
+                parsed_relations = json.loads(relations_json) if relations_json else {}
+            else:
+                parsed_relations = relations_json or {}
+
+            for rel_type, rel_list in parsed_relations.items():
+                if not isinstance(rel_list, list):
+                    continue
+
+                for rel in rel_list:
+                    target_name = self.normalize_node_name(rel.get('target', ''))
+                    if target_name:
+                        relations.append({
+                            'source': central_name,
+                            'target': target_name,
+                            'relation_type': rel_type,
+                            'category': 'parsed',
+                            'is_analyzed': True,
+                            'line': rel.get('line', 0)
+                        })
+        except Exception as e:
+            logger.warning(f"Erreur parsing relations JSON: {e}")
+
+        # ========== RELATIONS ENTRANTES ==========
+        self._update_progress(70, "Relations entrantes...")
+        try:
+            for rel in node_details.get('incoming_relations', []):
+                source_uid = rel.get('source_uid', '')
+
+                if source_uid.startswith('0x'):
+                    source_uid = dgraph_to_local.get(source_uid, source_uid)
+
+                if source_uid.startswith('temp_'):
+                    continue
+                
+                source_name = rel.get('source_name', '')
+                if not source_name or source_name.strip() == '':
+                    source_name = self._get_node_name_by_uid(source_uid)
+
+                source_name = self.normalize_node_name(source_name)
+
+                if source_name:
+                    relations.append({
+                        'source': source_name,
+                        'target': central_name,
+                        'relation_type': rel.get('relation_type', 'relation'),
+                        'category': rel.get('category', 'custom'),
+                        'is_analyzed': True
+                    })
+        except Exception as e:
+            logger.error(f"Erreur traitement incoming_relations: {e}")
+
+        # ========== HIÉRARCHIE (PARENTS) ==========
+        self._update_progress(80, "Hiérarchie...")
+        try:
+            for parent in node_details.get('parents', []):
+                parent_name = self.normalize_node_name(parent.get('name') or parent.get('label', ''))
+                if parent_name:
+                    relations.append({
+                        'source': parent_name,
+                        'target': central_name,
+                        'relation_type': 'parent',
+                        'category': 'hierarchy',
+                        'is_analyzed': True
+                    })
+        except Exception as e:
+            logger.error(f"Erreur traitement parents: {e}")
+
+        # ========== HIÉRARCHIE (CHILDREN) ==========
+        try:
+            for child in node_details.get('children', []):
+                child_name = self.normalize_node_name(child.get('name') or child.get('label', ''))
+                if child_name:
+                    relations.append({
+                        'source': central_name,
+                        'target': child_name,
+                        'relation_type': 'child',
+                        'category': 'hierarchy',
+                        'is_analyzed': True
+                    })
+        except Exception as e:
+            logger.error(f"Erreur traitement children: {e}")
+
+        # ========== RELATIONS TYPE RELATION ==========
+        self._update_progress(90, "Relations additionnelles...")
+        try:
+            relation_type_relations = self._get_relation_type_relations(uid)
+
+            # Fusionner en évitant les doublons
+            existing_keys = set()
+            for rel in relations:
+                key = (
+                    rel.get('source'),
+                    rel.get('target'),
+                    rel.get('relation_type')
+                )
+                existing_keys.add(key)
+
+            added_count = 0
+            for rel in relation_type_relations:
+                key = (
+                    rel.get('source'),
+                    rel.get('target'),
+                    rel.get('relation_type')
+                )
+
+                if key not in existing_keys:
+                    relations.append(rel)
+                    existing_keys.add(key)
+                    added_count += 1
+
+            logger.info(f"  🔗 Relations type Relation: {len(relation_type_relations)} récupérées, {added_count} ajoutées")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération relations type Relation: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # ✅ TRI : hiérarchiques d'abord, puis externes
+        def sort_relations(relations_list):
+            hierarchical = []
+            external = []
+
+            for rel in relations_list:
+                rel_type = rel.get('relation_type', '').lower()
+                category = rel.get('category', '').lower()
+
+                is_hierarchical = (
+                    rel_type in ['parent', 'child', 'contains', 'belongs_to'] or
+                    category in ['hierarchy', 'internal']
+                )
+
+                if is_hierarchical:
+                    hierarchical.append(rel)
+                else:
+                    external.append(rel)
+
+            return hierarchical + external
+
+        relations = sort_relations(relations)
+
+        # Sauvegarder dans le cache
+        if hasattr(self, 'query_cache'):
+            self.query_cache.set(cache_key, relations)
+
+        self._hide_progress()
+
+        # Log du résultat
+        hierarchical_count = sum(1 for r in relations if r.get('category') in ['hierarchy', 'internal'])
+        external_count = len(relations) - hierarchical_count
+
+        logger.info(f"Niveau 1: {len(relations)} relations trouvées pour {central_name}")
+        logger.info(f"  📊 {hierarchical_count} hiérarchiques (à gauche), {external_count} externes (à droite)")
+
+        return relations
+    
+    def _get_dgraph_to_local_mapping(self):
+        """Retourne le mapping Dgraph UID -> Local UID."""
+        if not hasattr(self, 'dgraph_to_local') or not self.dgraph_to_local:
+            self._load_uid_mappings()
+        return getattr(self, 'dgraph_to_local', {})
+    
+    def _hide_progress(self):
+        """Cache la progression."""
+        if hasattr(self, 'loading_overlay') and self.loading_overlay:
+            self.loading_overlay.hide_loading()
+        QtWidgets.QApplication.processEvents()
+    
+    def _show_progress(self, message: str, value: int):
+        """Affiche la progression."""
+        if hasattr(self, 'loading_overlay') and self.loading_overlay:
+            self.loading_overlay.update_progress(value, message)
+        QtWidgets.QApplication.processEvents()
+
+    def _update_progress(self, value: int, message: str = ""):
+        """Met à jour la progression."""
+        if hasattr(self, 'loading_overlay') and self.loading_overlay:
+            self.loading_overlay.update_progress(value, message)
+        QtWidgets.QApplication.processEvents()
+    
+    def _get_relation_type_relations(self, uid: str) -> List[Dict]:
+        """
+        ✅ VERSION COMPLÈTE — corrige les appels manquants inter-fichiers.
+        Récupère toutes les relations (calls/call) où le nœud est source ou cible,
+        peu importe le fichier. Compatible avec le checkbox 1 (inter-fonctions globales).
+        """
+        if not uid or not self.dgraph_connector:
+            logger.error("❌ Pas d'UID ou pas de connecteur")
+            return []
+    
         logger.info(f"\n{'='*70}")
-        logger.info(f"📊 NIVEAU 1 via graph_widget : {uid}")
+        logger.info(f"🔗 RÉCUPÉRATION RELATIONS TYPE RELATION")
+        logger.info(f"  UID central: {uid}")
         logger.info(f"{'='*70}")
-
-        # ✅ VALIDATION
-        if not self._validate_uid_exists(uid):
-            logger.error(f"❌ UID {uid} introuvable dans Dgraph")
+    
+        # 1️⃣ — Récupérer les infos du nœud (nom et chemin)
+        node_query = f"""
+        {{
+          node(func: uid({uid})) {{
+            uid
+            name
+            path
+            label
+            id
+          }}
+        }}
+        """
+    
+        node_result = self._execute_dgraph_query(node_query)
+        if not node_result or 'node' not in node_result or not node_result['node']:
+            logger.error(f"❌ Nœud {uid} introuvable")
             return []
-
-        # ✅ FORCER LE RECHARGEMENT (pas de cache)
-        relations_list = self.graph_helper._get_complete_relations(
-            uid, 
-            level=1,
-            use_cache=False  # ← NOUVEAU
-        )
-
-        # Statistiques
-        self._log_relation_stats(relations_list, "NIVEAU 1")
-
+    
+        node_data = node_result['node'][0]
+        node_name = node_data.get('name', '')
+        node_path = node_data.get('path', '')
+    
+        # 2️⃣ — Construire les variantes de recherche
+        search_variants = set()
+        if node_name:
+            search_variants.add(node_name)
+            search_variants.add(os.path.basename(node_name))
+            name_no_ext = os.path.splitext(node_name)[0]
+            search_variants.add(name_no_ext)
+            search_variants.add(os.path.basename(name_no_ext))
+        if node_path:
+            search_variants.add(node_path)
+            search_variants.add(os.path.basename(node_path))
+        search_variants = {v for v in search_variants if v and v.strip()}
+    
+        logger.info("🔍 Identifiants à rechercher:")
+        for variant in sorted(search_variants):
+            logger.info(f"   • {variant}")
+    
+        if not search_variants:
+            logger.error("❌ Aucun identifiant valide")
+            return []
+    
+        # 3️⃣ — Nouvelle requête UID : relations entrantes + sortantes globales
+        query_by_uid = f"""
+        {{
+          related_calls(func: type(Relation)) @filter(
+            (eq(relationType, "calls") OR eq(relationType, "call")) AND
+            (uid_in(source, {uid}) OR uid_in(target, {uid}))
+          ) {{
+            uid
+            relationType
+            category
+            line
+            intraFile
+            source {{
+              uid
+              name
+              nodeType
+              path
+              sourcePath
+            }}
+            target {{
+              uid
+              name
+              nodeType
+              path
+              targetPath
+            }}
+            sourceName
+            sourceType
+            sourcePath
+            sourceDescription
+            targetName
+            targetType
+            targetPath
+            targetDescription
+          }}
+        }}
+        """
+    
+        result_uid = self._execute_dgraph_query(query_by_uid)
+        relations_by_uid = result_uid.get('related_calls', []) if result_uid else []
+        logger.info(f"🎯 Mode UID: {len(relations_by_uid)} relations trouvées")
+    
+        # 4️⃣ — Recherche additionnelle par nom / path
+        relations_by_name = []
+        for variant in search_variants:
+            escaped = variant.replace('"', '\\"')
+            query_by_name = f"""
+            {{
+              related_calls(func: type(Relation)) @filter(
+                (eq(relationType, "calls") OR eq(relationType, "call")) AND
+                (regexp(sourcePath, /{escaped}/i) OR regexp(targetPath, /{escaped}/i))
+              ) {{
+                uid
+                relationType
+                category
+                line
+                intraFile
+                source {{
+                  uid
+                  name
+                  nodeType
+                  path
+                }}
+                target {{
+                  uid
+                  name
+                  nodeType
+                  path
+                }}
+                sourceName
+                sourceType
+                sourcePath
+                sourceDescription
+                targetName
+                targetType
+                targetPath
+                targetDescription
+              }}
+            }}
+            """
+            result_name = self._execute_dgraph_query(query_by_name)
+            if result_name:
+                relations_by_name.extend(result_name.get('related_calls', []))
+    
+        logger.info(f"🎯 Mode Nom/Path: {len(relations_by_name)} relations trouvées")
+    
+        # 5️⃣ — Fusion et dé-duplication
+        all_raw_relations = relations_by_uid + relations_by_name
+        seen_uids = set()
+        unique_raw_relations = []
+        for rel in all_raw_relations:
+            rel_uid = rel.get('uid')
+            if rel_uid and rel_uid not in seen_uids:
+                seen_uids.add(rel_uid)
+                unique_raw_relations.append(rel)
+        logger.info(f"📦 {len(unique_raw_relations)} relations uniques après déduplication")
+    
+        # 6️⃣ — Traitement et validation
+        relations_list = []
+        seen_keys = set()
+        for rel in unique_raw_relations:
+            source_node = rel.get('source', {}) or {}
+            target_node = rel.get('target', {}) or {}
+    
+            source_uid_rel = source_node.get('uid')
+            target_uid_rel = target_node.get('uid')
+    
+            source_name = (
+                source_node.get('name') or rel.get('sourceName') or rel.get('sourcePath', '')
+            )
+            target_name = (
+                target_node.get('name') or rel.get('targetName') or rel.get('targetPath', '')
+            )
+    
+            if not source_name or not target_name:
+                continue
+            
+            source_name_norm = os.path.basename(source_name).strip()
+            target_name_norm = os.path.basename(target_name).strip()
+            if not source_name_norm or not target_name_norm or source_name_norm == target_name_norm:
+                continue
+            
+            relation_type = rel.get('relationType', 'relation')
+            unique_key = (
+                source_uid_rel or source_name_norm,
+                target_uid_rel or target_name_norm,
+                relation_type
+            )
+            if unique_key in seen_keys:
+                continue
+            seen_keys.add(unique_key)
+    
+            relations_list.append({
+                'source': source_name_norm,
+                'source_uid': source_uid_rel or uid,
+                'source_type': rel.get('sourceType', 'function'),
+                'target': target_name_norm,
+                'target_uid': target_uid_rel or uid,
+                'target_type': rel.get('targetType', 'function'),
+                'relation_type': relation_type,
+                'category': rel.get('category', 'external'),
+                'line': rel.get('line'),
+                'intraFile': rel.get('intraFile', False)
+            })
+    
+        logger.info(f"✅ {len(relations_list)} relations finales validées")
+        logger.info(f"{'='*70}\n")
+    
         return relations_list
 
 
@@ -4256,6 +4806,153 @@ class TaxonomyDialog(QtWidgets.QDialog):
         # Ajouter à la liste des éléments sélectionnés si pas déjà présent
         self._add_to_selected_list(node_name, node_type)
 
+    def _fetch_function_with_fallback(self, function_uid: str, function_name: str) -> Optional[Dict]:
+        if not function_uid or not self.dgraph_connector:
+            logger.error(f"❌ UID ou connecteur manquant pour {function_name}")
+            return None
+    
+        logger.info(f"\n{'='*70}")
+        logger.info(f"🔍 RÉCUPÉRATION FONCTION : {function_name}")
+        logger.info(f"   UID: {function_uid}")
+        logger.info(f"{'='*70}")
+    
+        # ✅ Normaliser le nom
+        normalized_name = self.normalize_node_name(function_name)
+        search_name = normalized_name.split(':', 1)[-1].strip() if ':' in normalized_name else normalized_name
+    
+        # ✅ ÉTAPE 1 : Essayer avec l'UID direct
+        query_by_uid = f"""
+        {{
+          by_uid(func: uid({function_uid})) {{
+            uid
+            name
+            description
+            line
+            params
+            returns
+            path
+            sourcePath
+            codeContent
+            nodeType
+    
+            # Parent fichier (si fonction globale)
+            ~functions {{
+              uid
+              name
+              path
+              fileContents
+              codeContent
+            }}
+    
+            # Parent classe (si méthode)
+            ~methods {{
+              uid
+              name
+              description
+    
+              # Fichier de la classe
+              ~classes {{
+                uid
+                name
+                path
+                fileContents
+                codeContent
+              }}
+            }}
+          }}
+        }}
+        """
+    
+        result = self._execute_dgraph_query(query_by_uid)
+    
+        if result and 'by_uid' in result and result['by_uid']:
+            node_data = result['by_uid'][0]
+    
+            # Vérifier si on a plus que juste l'UID
+            if len(node_data) > 1:
+                code = node_data.get('codeContent', '').strip()
+    
+                if code:
+                    logger.info(f"✅ Code récupéré avec UID direct ({len(code)} chars)")
+                    return node_data
+    
+        # ✅ ÉTAPE 2 : FALLBACK - Recherche par nom
+        logger.warning(f"🔄 UID {function_uid} vide, recherche par nom '{search_name}'...")
+    
+        query_by_name = f"""
+        {{
+          by_name(func: eq(name, "{search_name}")) {{
+            uid
+            name
+            description
+            line
+            params
+            returns
+            path
+            sourcePath
+            codeContent
+            nodeType
+    
+            ~functions {{
+              uid
+              name
+              path
+              fileContents
+              codeContent
+            }}
+    
+            ~methods {{
+              uid
+              name
+    
+              ~classes {{
+                uid
+                name
+                path
+                fileContents
+                codeContent
+              }}
+            }}
+          }}
+        }}
+        """
+    
+        result = self._execute_dgraph_query(query_by_name)
+    
+        if not result or 'by_name' not in result:
+            logger.error("❌ Aucun résultat par nom")
+            return None
+    
+        candidates = result['by_name']
+    
+        if not candidates:
+            logger.error("❌ Aucune fonction trouvée")
+            return None
+    
+        logger.info(f"📊 {len(candidates)} candidat(s) trouvé(s)")
+    
+        # ✅ Prendre le premier candidat avec du code
+        for i, candidate in enumerate(candidates):
+            code = candidate.get('codeContent', '').strip()
+            candidate_uid = candidate.get('uid')
+    
+            logger.info(f"  Candidat {i+1}: UID={candidate_uid}, code={len(code) if code else 0} chars")
+    
+            if code:
+                logger.info(f"✅ BON nœud trouvé ! UID correct: {candidate_uid} (au lieu de {function_uid})")
+    
+                # ✅ MISE À JOUR CACHE
+                if hasattr(self, '_node_cache') and function_uid in self._node_cache:
+                    old_item = self._node_cache[function_uid]
+                    self._node_cache[candidate_uid] = old_item
+                    old_item.item_data['uid'] = candidate_uid
+                    logger.info(f"🔄 Cache mis à jour : {function_uid} → {candidate_uid}")
+    
+                return candidate
+    
+        logger.error(f"❌ {len(candidates)} nœud(s) trouvé(s) mais tous vides")
+        return None
+    
     def _add_to_selected_list(self, node_name: str, node_type: str):
         """Ajoute un nœud à la liste des éléments sélectionnés."""
         for i in range(self.selected_list.count()):
@@ -4475,9 +5172,26 @@ class TaxonomyDialog(QtWidgets.QDialog):
             self.loader_thread.wait()
 
         self.loader_thread = DataLoaderThread(self, self.current_central_uid, selected_level)
+
+        # ✅ DÉCONNECTER les anciens signaux si existants (pour éviter les doublons)
+        try:
+            self.loader_thread.progress_update.disconnect()
+        except:
+            pass
+        try:
+            self.loader_thread.loading_complete.disconnect()
+        except:
+            pass
+        try:
+            self.loader_thread.loading_error.disconnect()
+        except:
+            pass
+        
+        # ✅ CONNECTER les signaux
         self.loader_thread.progress_update.connect(self._on_loading_progress)
         self.loader_thread.loading_complete.connect(self._on_loading_complete)
         self.loader_thread.loading_error.connect(self._on_loading_error)
+
         self.loader_thread.start()
 
     def _display_multiple_selection_summary(self):
@@ -4720,61 +5434,45 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
     def get_selected_taxonomy(self):
         """
-        ✅ VERSION FINALE : Retourne les taxonomies avec relations complètes
+        ✅ VERSION FINALE : Retourne les taxonomies avec CODE COMPLET + PATH
         """
         logger.info(f"=== get_selected_taxonomy appelé ===")
-
+    
         taxonomy_data = []
         selected_level = self.level_combo.currentData()
-
         total_items = len(self.selected_items)
-
+    
         if total_items == 0:
             logger.warning("⚠️ selected_items est vide !")
-
-            # Fallback : récupérer depuis la liste d'affichage
-            for i in range(self.selected_list.count()):
-                list_item = self.selected_list.item(i)
-                node_name = list_item.data(Qt.UserRole)
-
-                taxonomy_item = self._find_taxonomy_item_by_name(node_name)
-
-                if taxonomy_item:
-                    self.selected_items.append(taxonomy_item)
-
-            total_items = len(self.selected_items)
-
-            if total_items == 0:
-                return taxonomy_data
-
-        # ✅ AFFICHER OVERLAY DE CHARGEMENT
+            return taxonomy_data
+    
+        # ✅ AFFICHER OVERLAY
         self.loading_overlay.show_loading(
             "Préparation des données...",
             f"Traitement de {total_items} élément(s)"
         )
-
+    
         for idx, item in enumerate(self.selected_items):
             if not isinstance(item, TaxonomyItem):
                 continue
             
             data = item.item_data
             item_level = item.level
-
+    
             # ✅ MISE À JOUR PROGRESSION
             progress = int((idx / total_items) * 100)
             self.loading_overlay.update_progress(
                 progress,
                 f"Traitement {idx + 1}/{total_items}",
-                f"Analyse de {item.text(0)}"
+                f"Récupération du code pour {item.text(0)}"
             )
-
+    
             # ✅ RÉCUPÉRATION UID
             temp_uid = data.get('uid')
             temp_name = self.normalize_node_name(data.get('name', data.get('label', '')))
-
+    
             if not temp_uid:
                 temp_uid = self._get_node_uid_by_name(temp_name)
-
                 if not temp_uid:
                     logger.warning(f"⚠️ UID manquant pour {temp_name}, ignoré")
                     continue
@@ -4784,60 +5482,670 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 logger.warning(f"⚠️ UID {temp_uid} invalide, ignoré")
                 continue
             
-            # ✅ RÉCUPÉRATION RELATIONS VIA MÉTHODES UNIFIÉES
+            # ✅ RECHARGEMENT DONNÉES COMPLÈTES
+            complete_data = self._fetch_complete_node_data(temp_uid)
+    
+            if complete_data:
+                # ✅ FUSIONNER les données rechargées avec les données existantes
+                data.update(complete_data)
+                logger.info(f"✅ Code rechargé pour {temp_name}")
+                
+                # ✅ NOUVEAU : Récupérer et ajouter le path si manquant
+                if not data.get('path') and not data.get('sourcePath') and not data.get('full_path'):
+                    function_path = self._get_function_path(temp_uid, temp_name)
+                    if function_path:
+                        data['path'] = function_path
+                        data['sourcePath'] = function_path
+                        data['full_path'] = function_path
+                        logger.info(f"   📂 Path ajouté: {function_path}")
+                    else:
+                        logger.warning(f"   ⚠️ Path non trouvé pour {temp_name}")
+                
+                # 📊 DIAGNOSTIC DÉTAILLÉ
+                code = data.get('codeContent', '') or data.get('fileContents', '')
+                classes = data.get('classes', [])
+                functions = data.get('functions', [])
+                path = data.get('path') or data.get('sourcePath') or data.get('full_path', 'N/A')
+    
+                logger.info(f"   📦 Taille code FICHIER: {len(code)} chars")
+                logger.info(f"   📊 {len(classes)} classes, {len(functions)} fonctions")
+                logger.info(f"   📂 Path: {path}")
+    
+                # ✅ VÉRIFIER CODE DES CLASSES
+                for cls in classes:
+                    cls_code = cls.get('codeContent', '')
+                    methods = cls.get('methods', [])
+    
+                    if cls_code:
+                        logger.info(f"      ✓ Classe '{cls.get('name')}': {len(cls_code)} chars")
+                    else:
+                        logger.warning(f"      ⚠️ Classe '{cls.get('name')}': AUCUN code classe")
+    
+                    # ✅ VÉRIFIER CODE DES MÉTHODES
+                    for method in methods:
+                        method_code = method.get('codeContent', '')
+                        if method_code:
+                            logger.info(f"         ✓ Méthode '{method.get('name')}': {len(method_code)} chars")
+                        else:
+                            logger.warning(f"         ⚠️ Méthode '{method.get('name')}': AUCUN code méthode")
+    
+                # ✅ VÉRIFIER CODE DES FONCTIONS
+                for func in functions:
+                    func_code = func.get('codeContent', '')
+                    if func_code:
+                        logger.info(f"      ✓ Fonction '{func.get('name')}': {len(func_code)} chars")
+                    else:
+                        logger.warning(f"      ⚠️ Fonction '{func.get('name')}': AUCUN code fonction")
+    
+            else:
+                logger.error(f"❌ ÉCHEC rechargement pour {temp_name}")
+                # ✅ FALLBACK : Essayer de récupérer au moins le path
+                if not data.get('path') and not data.get('sourcePath') and not data.get('full_path'):
+                    function_path = self._get_function_path(temp_uid, temp_name)
+                    if function_path:
+                        data['path'] = function_path
+                        data['sourcePath'] = function_path
+                        data['full_path'] = function_path
+                        logger.info(f"   📂 Path ajouté (fallback): {function_path}")
+    
+            # ✅ RÉCUPÉRATION RELATIONS
             relations_list = []
-
             if selected_level == 1:
                 relations_list = self._get_level_1_relations(temp_uid)
             elif selected_level == 2:
                 relations_list = self._get_level_2_relations(temp_uid)
-
+    
             # ✅ CONSTRUIRE RELATED_ITEMS
             related_items = []
             seen_nodes = set([temp_name])
-
+    
             for rel in relations_list:
                 for key in ['source', 'target']:
                     node_name = rel.get(key, '')
                     node_uid = rel.get(f'{key}_uid', '')
-
+    
                     if node_name and node_name not in seen_nodes:
                         seen_nodes.add(node_name)
-
+    
                         if not node_uid:
                             node_uid = self._get_node_uid_by_name(node_name)
-
+    
+                        # ✅ NOUVEAU : Récupérer le path pour les éléments liés aussi
+                        node_path = None
+                        if node_uid:
+                            # Essayer depuis le cache d'abord
+                            if hasattr(self, '_node_cache') and node_uid in self._node_cache:
+                                cached_item = self._node_cache[node_uid]
+                                node_path = (cached_item.item_data.get('path') or 
+                                           cached_item.item_data.get('sourcePath') or 
+                                           cached_item.item_data.get('full_path'))
+                            
+                            # Si pas dans le cache, récupérer via _get_function_path
+                            if not node_path:
+                                node_path = self._get_function_path(node_uid, node_name)
+    
                         related_items.append({
                             'name': node_name,
                             'uid': node_uid,
                             'type': rel.get(f'{key}_type', 'dependency'),
-                            'taxonomy_level': item_level
+                            'taxonomy_level': item_level,
+                            'path': node_path,  # ✅ NOUVEAU
+                            'sourcePath': node_path,  # ✅ NOUVEAU
+                            'full_path': node_path  # ✅ NOUVEAU
                         })
-
+    
             # ✅ AJOUTER À taxonomy_data
-            taxonomy_data.append({
+            taxonomy_entry = {
                 'name': temp_name,
                 'uid': temp_uid,
                 'type': item.item_type,
                 'level': item_level,
                 'search_depth': selected_level,
-                'data': data,
+                'data': data,  # ✅ Contient maintenant le code complet + path
                 'related': related_items,
-                'relations': relations_list
-            })
-
+                'relations': relations_list,
+                # ✅ NOUVEAU : Ajouter le path au niveau racine pour accès facile
+                'path': data.get('path') or data.get('sourcePath') or data.get('full_path'),
+                'sourcePath': data.get('sourcePath') or data.get('path') or data.get('full_path'),
+                'full_path': data.get('full_path') or data.get('path') or data.get('sourcePath')
+            }
+            
+            taxonomy_data.append(taxonomy_entry)
+    
         # ✅ FINALISATION
         self.loading_overlay.update_progress(
             100, 
             "Terminé !", 
             f"{len(taxonomy_data)} taxonomies préparées"
         )
-
+    
         QTimer.singleShot(500, self.loading_overlay.hide_loading)
-
-        logger.info(f"✅ {len(taxonomy_data)} taxonomies retournées")
-
+    
+        # 📊 STATISTIQUES FINALES
+        total_code = 0
+        items_with_code = 0
+        items_with_path = 0
+    
+        logger.info(f"\n{'='*70}")
+        logger.info(f"📊 STATISTIQUES FINALES")
+        logger.info(f"{'='*70}")
+    
+        for tax in taxonomy_data:
+            item_name = tax['name']
+            item_type = tax['type']
+            code = tax['data'].get('codeContent', '') or tax['data'].get('fileContents', '')
+            path = tax.get('path') or tax.get('sourcePath') or tax.get('full_path', 'N/A')
+            
+            if code:
+                total_code += len(code)
+                items_with_code += 1
+            
+            if path and path != 'N/A':
+                items_with_path += 1
+            
+            if item_type in ['function', 'method', 'class']:
+                if code:
+                    logger.info(f"✅ {item_name}: {len(code)} chars de code | Path: {path}")
+                else:
+                    logger.error(f"❌ {item_name}: AUCUN code (problème) | Path: {path}")
+    
+        logger.info(f"\n📊 RÉSUMÉ :")
+        logger.info(f"   • {len(taxonomy_data)} taxonomies retournées")
+        logger.info(f"   • {items_with_code}/{len(taxonomy_data)} avec code")
+        logger.info(f"   • {items_with_path}/{len(taxonomy_data)} avec path")
+        logger.info(f"   • Code total: {total_code:,} caractères")
+        logger.info(f"{'='*70}\n")
+    
         return taxonomy_data
+    
+    def _get_function_path(self, function_uid: str, function_name: str) -> Optional[str]:
+        """
+        ✅ NOUVEAU : Récupère le path complet d'une fonction/méthode
+        Retourne le chemin du fichier source de la fonction
+        """
+        if not function_uid or not self.dgraph_connector:
+            logger.warning(f"⚠️ UID ou connecteur manquant pour {function_name}")
+            return None
+        
+        logger.info(f"\n{'='*70}")
+        logger.info(f"📂 RÉCUPÉRATION PATH : {function_name}")
+        logger.info(f"   UID: {function_uid}")
+        logger.info(f"{'='*70}")
+        
+        # ✅ STRATÉGIE 1 : Chercher dans le cache local
+        if hasattr(self, '_node_cache') and function_uid in self._node_cache:
+            cached_item = self._node_cache[function_uid]
+            path = (cached_item.item_data.get('path') or 
+                   cached_item.item_data.get('sourcePath') or 
+                   cached_item.item_data.get('full_path', ''))
+            
+            if path:
+                logger.info(f"   ✅ Cache local: {path}")
+                return self._normalize_path(path)
+        
+        # ✅ STRATÉGIE 2 : Requête Dgraph avec fallback
+        normalized_name = self.normalize_node_name(function_name)
+        search_name = normalized_name.split(':', 1)[-1].strip() if ':' in normalized_name else normalized_name
+        
+        # 2.1 : Essayer avec l'UID direct
+        query_by_uid = f"""
+        {{
+          by_uid(func: uid({function_uid})) {{
+            uid
+            name
+            path
+            sourcePath
+            full_path
+            
+            # Si c'est une fonction globale
+            ~functions {{
+              uid
+              name
+              path
+              sourcePath
+              full_path
+            }}
+            
+            # Si c'est une méthode de classe
+            ~methods {{
+              uid
+              name
+              path
+              
+              # Remonter au fichier parent
+              ~classes {{
+                uid
+                name
+                path
+                sourcePath
+                full_path
+              }}
+            }}
+          }}
+        }}
+        """
+        
+        result = self._execute_dgraph_query(query_by_uid)
+        
+        if result and 'by_uid' in result and result['by_uid']:
+            node_data = result['by_uid'][0]
+            
+            # Vérifier path direct
+            path = (node_data.get('path') or 
+                   node_data.get('sourcePath') or 
+                   node_data.get('full_path', ''))
+            
+            if path:
+                logger.info(f"   ✅ Dgraph (UID direct): {path}")
+                return self._normalize_path(path)
+            
+            # Vérifier fichier parent (pour fonction globale)
+            parent_files = node_data.get('~functions', [])
+            if parent_files:
+                parent_path = (parent_files[0].get('path') or 
+                              parent_files[0].get('sourcePath') or 
+                              parent_files[0].get('full_path', ''))
+                if parent_path:
+                    logger.info(f"   ✅ Dgraph (parent fichier): {parent_path}")
+                    return self._normalize_path(parent_path)
+            
+            # Vérifier fichier parent (pour méthode de classe)
+            parent_classes = node_data.get('~methods', [])
+            if parent_classes:
+                parent_class = parent_classes[0]
+                class_files = parent_class.get('~classes', [])
+                if class_files:
+                    file_path = (class_files[0].get('path') or 
+                                class_files[0].get('sourcePath') or 
+                                class_files[0].get('full_path', ''))
+                    if file_path:
+                        logger.info(f"   ✅ Dgraph (parent classe): {file_path}")
+                        return self._normalize_path(file_path)
+        
+        # 2.2 : Fallback par nom
+        logger.warning(f"🔄 UID {function_uid} n'a pas donné de path, recherche par nom '{search_name}'...")
+        
+        query_by_name = f"""
+        {{
+          by_name(func: eq(name, "{search_name}")) {{
+            uid
+            name
+            path
+            sourcePath
+            full_path
+            
+            ~functions {{
+              uid
+              name
+              path
+              sourcePath
+              full_path
+            }}
+            
+            ~methods {{
+              uid
+              name
+              path
+              
+              ~classes {{
+                uid
+                name
+                path
+                sourcePath
+                full_path
+              }}
+            }}
+          }}
+        }}
+        """
+        
+        result = self._execute_dgraph_query(query_by_name)
+        
+        if result and 'by_name' in result:
+            candidates = result['by_name']
+            
+            for candidate in candidates:
+                # Essayer path direct
+                path = (candidate.get('path') or 
+                       candidate.get('sourcePath') or 
+                       candidate.get('full_path', ''))
+                
+                if path:
+                    logger.info(f"   ✅ Dgraph (nom - direct): {path}")
+                    return self._normalize_path(path)
+                
+                # Essayer parent fichier
+                parent_files = candidate.get('~functions', [])
+                if parent_files:
+                    parent_path = (parent_files[0].get('path') or 
+                                  parent_files[0].get('sourcePath') or 
+                                  parent_files[0].get('full_path', ''))
+                    if parent_path:
+                        logger.info(f"   ✅ Dgraph (nom - parent fichier): {parent_path}")
+                        return self._normalize_path(parent_path)
+                
+                # Essayer parent classe
+                parent_classes = candidate.get('~methods', [])
+                if parent_classes:
+                    parent_class = parent_classes[0]
+                    class_files = parent_class.get('~classes', [])
+                    if class_files:
+                        file_path = (class_files[0].get('path') or 
+                                    class_files[0].get('sourcePath') or 
+                                    class_files[0].get('full_path', ''))
+                        if file_path:
+                            logger.info(f"   ✅ Dgraph (nom - parent classe): {file_path}")
+                            return self._normalize_path(file_path)
+        
+        # ✅ STRATÉGIE 3 : Relations Dgraph
+        logger.warning(f"🔄 Dernière tentative via relations...")
+        
+        escaped = search_name.replace('"', '\\"')
+        query_relations = f"""
+        {{
+          by_source(func: type(Relation)) @filter(regexp(sourceName, /{escaped}/i)) {{
+            sourceName
+            sourcePath
+          }}
+          
+          by_target(func: type(Relation)) @filter(regexp(targetName, /{escaped}/i)) {{
+            targetName
+            targetPath
+          }}
+        }}
+        """
+        
+        result = self._execute_dgraph_query(query_relations)
+        
+        if result:
+            # Vérifier sourcePath
+            for rel in result.get('by_source', []):
+                source_name = rel.get('sourceName', '')
+                source_path = rel.get('sourcePath', '')
+                
+                if source_name and source_path:
+                    clean_source = source_name.replace('Function: ', '').replace('Method: ', '').strip()
+                    if clean_source == search_name or search_name in clean_source:
+                        path = self._extract_file_path_from_relation(source_path)
+                        if path:
+                            logger.info(f"   ✅ Relations (source): {path}")
+                            return self._normalize_path(path)
+            
+            # Vérifier targetPath
+            for rel in result.get('by_target', []):
+                target_name = rel.get('targetName', '')
+                target_path = rel.get('targetPath', '')
+                
+                if target_name and target_path:
+                    clean_target = target_name.replace('Function: ', '').replace('Method: ', '').strip()
+                    if clean_target == search_name or search_name in clean_target:
+                        path = self._extract_file_path_from_relation(target_path)
+                        if path:
+                            logger.info(f"   ✅ Relations (target): {path}")
+                            return self._normalize_path(path)
+        
+        logger.error(f"❌ Impossible de trouver le path pour {function_name}")
+        return None
+    
+    def _normalize_path(self, path: str) -> str:
+        """
+        ✅ Normalise un path (enlève les suffixes de type, uniformise les séparateurs)
+        """
+        if not path:
+            return ""
+        
+        # Enlever les suffixes de type comme "/Function:xxx"
+        if '/Function:' in path:
+            path = path.split('/Function:')[0]
+        if '/Method:' in path:
+            path = path.split('/Method:')[0]
+        if '/Class:' in path:
+            path = path.split('/Class:')[0]
+        if '/Variable:' in path:
+            path = path.split('/Variable:')[0]
+        
+        # Uniformiser les séparateurs
+        path = path.replace('\\', '/')
+        
+        # Enlever les slashes en début/fin
+        path = path.strip('/')
+        
+        return path
+    
+    def _extract_file_path_from_relation(self, relation_path: str) -> Optional[str]:
+        """
+        ✅ Extrait le path du fichier depuis un path de relation
+        Ex: "src/ui/widgets/graph.py/Function:draw" -> "src/ui/widgets/graph.py"
+        """
+        if not relation_path:
+            return None
+        
+        # Supprimer les éléments après Function:, Method:, etc.
+        clean_path = relation_path
+        for marker in ['/Function:', '/Method:', '/Class:', '/Variable:']:
+            if marker in clean_path:
+                clean_path = clean_path.split(marker)[0]
+                break
+        
+        # Si c'est un fichier valide
+        if clean_path and ('.' in os.path.basename(clean_path)):
+            return clean_path
+        
+        return None
+    
+    def _extract_filename_from_relation_path(self, source_path: str) -> Optional[str]:
+        """
+        ✅ Extrait le nom du fichier depuis un path de relation
+        """
+        file_path = self._extract_file_path_from_relation(source_path)
+        if file_path:
+            return os.path.basename(file_path)
+        return None
+
+    def _fetch_file_complete_data(self, file_uid: str) -> Optional[Dict]:
+        """
+        🆕 RECHARGE TOUTES LES DONNÉES D'UN NŒUD AVEC LE CODE COMPLET
+        """
+        if not file_uid or not self.dgraph_connector:
+            return None
+    
+    def _fetch_complete_node_data(self, uid: str) -> Optional[Dict]:
+        """
+        ✅ VERSION AMÉLIORÉE : Utilise le fallback pour les fonctions/méthodes
+        """
+        if not uid or not self.dgraph_connector:
+            return None
+
+        logger.info(f"🔍 Récupération données complètes pour UID: {uid}")
+
+        # ✅ D'abord, identifier le type de nœud
+        type_query = f"""
+        {{
+          check(func: uid({uid})) {{
+            uid
+            name
+            nodeType
+            dgraph.type
+          }}
+        }}
+        """
+
+        type_result = self._execute_dgraph_query(type_query)
+
+        if not type_result or 'check' not in type_result or not type_result['check']:
+            logger.warning(f"⚠️ Nœud {uid} introuvable")
+            return None
+
+        node_info = type_result['check'][0]
+        node_name = node_info.get('name', '')
+        node_type = node_info.get('nodeType', '')
+        dgraph_types = node_info.get('dgraph.type', [])
+
+        logger.info(f"   Type: {node_type}")
+        logger.info(f"   Dgraph.type: {dgraph_types}")
+
+        # ✅ SI C'EST UNE FONCTION/MÉTHODE → Utiliser le fallback robuste
+        is_function = (
+            node_type in ['function', 'method'] or
+            'Function' in dgraph_types or
+            'Method' in dgraph_types
+        )
+
+        if is_function:
+            logger.info(f"🎯 Fonction/Méthode détectée, utilisation du fallback robuste...")
+            return self._fetch_function_with_fallback(uid, node_name)
+
+        # ✅ SINON → Utiliser la requête standard (pour fichiers/classes)
+        query = f"""
+        {{
+          node(func: uid({uid})) {{
+            uid
+            name
+            label
+            nodeType
+            path
+            description
+            fileContents
+            codeContent
+            docstring
+            line
+
+            # Classes (directes + inverses)
+            classes {{
+              uid
+              name
+              description
+              line
+              codeContent
+
+              methods {{
+                uid
+                name
+                description
+                line
+                codeContent
+              }}
+
+              variables {{
+                uid
+                name
+                description
+                line
+              }}
+            }}
+
+            ~classes {{
+              uid
+              name
+              description
+              line
+              codeContent
+
+              methods {{
+                uid
+                name
+                description
+                line
+                codeContent
+              }}
+
+              variables {{
+                uid
+                name
+                description
+                line
+              }}
+            }}
+
+            # Fonctions (directes + inverses)
+            functions {{
+              uid
+              name
+              description
+              line
+              codeContent
+            }}
+
+            ~functions {{
+              uid
+              name
+              description
+              line
+              codeContent
+            }}
+
+            # Variables
+            variables {{
+              uid
+              name
+              description
+              line
+            }}
+
+            ~variables {{
+              uid
+              name
+              description
+              line
+            }}
+          }}
+        }}
+        """
+
+        try:
+            txn = self.dgraph_connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+
+            result = self.dgraph_connector._parse_response(resp)
+
+            if result and 'node' in result and result['node']:
+                node_data = result['node'][0]
+
+                # Fusionner classes
+                direct_classes = node_data.get('classes', [])
+                inverse_classes = node_data.get('~classes', [])
+                all_classes = direct_classes + inverse_classes
+
+                if all_classes:
+                    node_data['classes'] = all_classes
+                    node_data.pop('~classes', None)
+
+                # Fusionner fonctions
+                direct_functions = node_data.get('functions', [])
+                inverse_functions = node_data.get('~functions', [])
+                all_functions = direct_functions + inverse_functions
+
+                if all_functions:
+                    node_data['functions'] = all_functions
+                    node_data.pop('~functions', None)
+
+                # Fusionner variables
+                direct_variables = node_data.get('variables', [])
+                inverse_variables = node_data.get('~variables', [])
+                all_variables = direct_variables + inverse_variables
+
+                if all_variables:
+                    node_data['variables'] = all_variables
+                    node_data.pop('~variables', None)
+
+                # Diagnostic
+                code = node_data.get('codeContent', '') or node_data.get('fileContents', '')
+                classes = node_data.get('classes', [])
+                functions = node_data.get('functions', [])
+
+                logger.info(f"   📦 Code: {len(code)} chars")
+                logger.info(f"   🗂️ {len(classes)} classes, {len(functions)} fonctions")
+
+                return node_data
+
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Erreur: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def _is_class_name(self, name):
         """Détecte si un nom correspond à une classe"""
