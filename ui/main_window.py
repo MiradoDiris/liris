@@ -7,12 +7,12 @@ Liris/ui/main_window.py - CORRIGÉ pour afficher DashboardPanel via menu IA
 
 import os
 import json
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QFileDialog
 from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
 
 from PyQt5.QtCore import QRectF, QPropertyAnimation, pyqtProperty
-from PyQt5.QtGui import QPainter, QColor, QFont
+from PyQt5.QtGui import QPainter, QColor, QFont, QLinearGradient
 
 from ui.widgets.brainstorming_panel import BrainstormingPanel
 from ui.widgets.coding_panel import CodingPanel
@@ -50,34 +50,72 @@ from utils.logger import logger
 
 # === Switch Glassmorphism pour deux états (Dev/Data) ===
 class GlassSwitch(QtWidgets.QWidget):
+    """
+    Switch glassmorphism avec dégradé identique aux onglets de menu
+    Version responsive avec gestion dynamique de la taille
+    """
     stateChanged = pyqtSignal(int)
     clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(200, 44)
+        
+        # Dimensions min/max
+        self.setMinimumSize(180, 40)
+        self.setMaximumSize(250, 50)
+        
+        # État et animation
         self._state = 0
         self._pill_x = 0.0
         self.animation = QPropertyAnimation(self, b"pill_x", self)
         self.animation.setDuration(220)
 
-        self.pill_color = QColor(Theme.PRIMARY_COLOR)
+        # Importer Theme pour les couleurs
+        from ui.styles.theme import Theme
+        self.pill_primary_color = QColor(Theme.PRIMARY_COLOR)
+        self.pill_secondary_color = QColor(Theme.SECONDARY_COLOR)
         self.font = QFont("Segoe UI", 9, QFont.Bold)
-        self.section_width = 100.0
+        
+        # Largeur de section (sera recalculée dans resizeEvent)
+        self._section_width = 100.0
+
+    def resizeEvent(self, event):
+        """Gère le redimensionnement"""
+        super().resizeEvent(event)
+        # Recalculer la largeur de section
+        self._section_width = self.width() / 2.0
+        # Recalculer la position de la pilule
+        self._pill_x = self._state * self._section_width
+        self.update()
+
+    def sizeHint(self):
+        """Taille suggérée"""
+        return QtCore.QSize(200, 44)
 
     def getState(self):
+        """Retourne l'état actuel (0 pour Dev, 1 pour Data)"""
         return self._state
 
     def setState(self, state: int, animate: bool = True):
+        """
+        Définit l'état du switch
+        
+        Args:
+            state: 0 pour Dev, 1 pour Data
+            animate: Si True, anime la transition
+        """
         if state < 0 or state > 1:
             return
         if state == self._state:
             return
+            
         self._state = state
-        end_x = state * self.section_width
+        end_x = state * self._section_width
+        
         self.animation.stop()
         self.animation.setStartValue(self._pill_x)
         self.animation.setEndValue(end_x)
+        
         if animate:
             self.animation.start()
         else:
@@ -87,44 +125,77 @@ class GlassSwitch(QtWidgets.QWidget):
         self.stateChanged.emit(self._state)
 
     def mousePressEvent(self, event):
+        """Gère le clic sur le switch"""
         if event.button() == Qt.LeftButton:
             x = event.pos().x()
-            section = min(int(x / self.section_width), 1)
+            section = min(int(x / self._section_width), 1)
             self.setState(section)
             self.clicked.emit()
         super().mousePressEvent(event)
 
     def paintEvent(self, event):
+        """Dessine le switch avec dégradé identique aux onglets"""
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
+        # Fond du switch (gris clair comme les onglets non sélectionnés)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(240, 240, 240))
-        p.drawRoundedRect(self.rect(), 22, 22)
+        p.setBrush(QColor(245, 245, 245))  # #F5F5F5
+        radius = min(self.height() / 2, 22)
+        p.drawRoundedRect(self.rect(), radius, radius)
 
-        pill_rect = QRectF(self._pill_x, 2.0, self.section_width - 4.0, self.height() - 4.0)
-        p.setBrush(self.pill_color)
-        radius = (self.height() - 4.0) / 2
-        p.drawRoundedRect(pill_rect, radius, radius)
+        # Pilule mobile avec dégradé vertical
+        pill_rect = QRectF(
+            self._pill_x, 
+            2.0, 
+            self._section_width - 4.0, 
+            self.height() - 4.0
+        )
+        
+        # Créer le dégradé vertical (PRIMARY_COLOR -> SECONDARY_COLOR)
+        # Identique à: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 PRIMARY, stop:1 SECONDARY)
+        gradient = QLinearGradient(
+            pill_rect.center().x(),  # x1: centre horizontal
+            pill_rect.top(),         # y1: haut (0)
+            pill_rect.center().x(),  # x2: centre horizontal
+            pill_rect.bottom()       # y2: bas (1)
+        )
+        gradient.setColorAt(0, self.pill_primary_color)    # stop:0 PRIMARY_COLOR
+        gradient.setColorAt(1, self.pill_secondary_color)  # stop:1 SECONDARY_COLOR
+        
+        p.setBrush(gradient)
+        pill_radius = (self.height() - 4.0) / 2
+        p.drawRoundedRect(pill_rect, pill_radius, pill_radius)
 
+        # Labels
         p.setFont(self.font)
         labels = ["Dev", "Data"]
         for i in range(2):
-            text_rect = QRectF(i * self.section_width, 0, self.section_width, self.height())
+            text_rect = QRectF(
+                i * self._section_width, 
+                0, 
+                self._section_width, 
+                self.height()
+            )
             if i == self._state:
+                # Blanc pour le texte sélectionné (comme QTabBar::tab:selected)
                 p.setPen(QColor(255, 255, 255))
             else:
+                # Gris pour le texte non sélectionné
                 p.setPen(QColor(100, 100, 100))
             p.drawText(text_rect, Qt.AlignCenter, labels[i])
 
     @pyqtProperty(float)
     def pill_x(self):
+        """Getter pour la propriété pill_x (position de la pilule)"""
         return float(self._pill_x)
 
     @pill_x.setter
     def pill_x(self, x):
+        """Setter pour la propriété pill_x (utilisé par l'animation)"""
         self._pill_x = float(x)
         self.update()
+
 
 class MainWindow(QMainWindow):
     """
@@ -136,7 +207,17 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle(tr("app_title"))
-        self.setMinimumSize(1024, 768)
+
+        screen = QtWidgets.QApplication.desktop().screenGeometry()
+        min_width = max(1024, int(screen.width() * 0.6))
+        min_height = max(768, int(screen.height() * 0.6))
+        self.setMinimumSize(min_width, min_height)
+
+        initial_width = int(screen.width() * 0.8)
+        initial_height = int(screen.height() * 0.8)
+        self.resize(initial_width, initial_height)
+
+        self.center_window()
 
         logo_path = os.path.join("ui", "resources", "icons", "logo.ico")
         if os.path.exists(logo_path):
@@ -205,82 +286,121 @@ class MainWindow(QMainWindow):
             f"color: {Theme.PRIMARY_COLOR}; font-weight: bold;"
         )
 
+    def resizeEvent(self, event):
+        """Gère le redimensionnement de la fenêtre principale"""
+        super().resizeEvent(event)
+
+        # Ajuster les éléments si nécessaire
+        if hasattr(self, 'mode_switch') and self.mode_switch:
+            self.mode_switch.updateGeometry()
+
+        # Sauvegarder la géométrie
+        if hasattr(self, 'config_provider'):
+            self._save_window_geometry()
+
+    def _save_window_geometry(self):
+        """Sauvegarde la géométrie actuelle de la fenêtre"""
+        settings = QSettings("Liris", "IACollaborative")
+        settings.setValue("geometry", self.saveGeometry())
+        settings.setValue("windowState", self.saveState())
+
+    def center_window(self):
+        """Centre la fenêtre sur l'écran"""
+        frame_geometry = self.frameGeometry()
+        screen_center = QtWidgets.QApplication.desktop().screenGeometry().center()
+        frame_geometry.moveCenter(screen_center)
+        self.move(frame_geometry.topLeft())
+
     def _init_ui(self):
-        """Configure l'interface utilisateur"""
+        """Configure l'interface utilisateur avec responsivité"""
         central_widget = QtWidgets.QWidget()
         self.setCentralWidget(central_widget)
-    
+
         main_layout = QtWidgets.QVBoxLayout(central_widget)
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
-    
+
         self.tab_widget = QtWidgets.QTabWidget()
         self.tab_widget.setTabsClosable(False)
-    
+
+        # Ajuster la taille des tabs selon la largeur de la fenêtre
+        self.tab_widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding
+        )
+
+        # Stylesheet responsive avec calculs dynamiques
         tab_stylesheet = f"""
             QTabWidget::pane {{
                 border: none;
                 background: white;
                 margin-top: 0px;
             }}
-    
+
             QTabBar {{
                 background: white;
                 border: none;
             }}
-    
+
             QTabBar::tab {{
                 background: #F5F5F5;
                 color: {Theme.TEXT_COLOR};
                 border: none;
                 border-radius: 6px;
-                padding: 10px 24px;
-                margin-right: 8px;
+                padding: 10px 20px;
+                margin-right: 6px;
                 margin-top: 8px;
                 margin-bottom: 4px;
                 font-weight: 500;
                 font-size: 13px;
-                min-width: 90px;
+                min-width: 80px;
                 min-height: 36px;
             }}
-    
+
             QTabBar::tab:selected {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                             stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                                             stop:0 {Theme.PRIMARY_COLOR}, 
+                                             stop:1 {Theme.SECONDARY_COLOR});
                 color: white;
                 font-weight: 600;
             }}
-    
+
             QTabBar::tab:hover:!selected {{
                 background: #EBEBEB;
                 color: {Theme.PRIMARY_COLOR};
             }}
-    
+
             QTabBar::tab:first {{
-                margin-left: 15px;
+                margin-left: 10px;
             }}
         """
         self.tab_widget.setStyleSheet(tab_stylesheet)
-    
+
+        # Container responsive pour le switch
         tab_bar_container = QtWidgets.QWidget()
         tab_bar_layout = QtWidgets.QHBoxLayout(tab_bar_container)
-        tab_bar_layout.setContentsMargins(0, 10, 20, 0)
+        tab_bar_layout.setContentsMargins(0, 10, 15, 0)
         tab_bar_layout.setSpacing(0)
-    
+
         tab_bar_layout.addStretch()
         self.mode_switch = GlassSwitch()
+        self.mode_switch.setSizePolicy(
+            QtWidgets.QSizePolicy.Fixed,
+            QtWidgets.QSizePolicy.Fixed
+        )
         tab_bar_layout.addWidget(self.mode_switch)
-    
+
         self.tab_widget.setCornerWidget(tab_bar_container, Qt.TopRightCorner)
-    
+
+        # Ajouter les tabs
         self.tab_widget.addTab(self.coding_panel, tr("coding_tab"))
         self.tab_widget.addTab(self.audit_panel, "Audit")
         self.tab_widget.setTabPosition(QtWidgets.QTabWidget.North)
         self.tab_widget.setDocumentMode(True)
         self.tab_widget.setMovable(False)
-    
+
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
-    
+
         main_layout.addWidget(self.tab_widget)
 
     def _update_tab_texts(self):
@@ -454,114 +574,140 @@ class MainWindow(QMainWindow):
         help_menu.addAction(docs_action)
 
     def _on_manage_api_keys(self):
-        """
-        Ouvre le DashboardPanel pour gérer les clés API.
-        """
+        """Ouvre le DashboardPanel avec dimensions responsives"""
         try:
             if not self.conductor or not self.config_provider or not self.database:
                 QMessageBox.warning(
                     self,
                     tr("manage_api_keys"),
-                    "Le système n'est pas encore initialisé. Veuillez patienter."
+                    tr("system_not_initialized")
                 )
                 return
-
+    
             if not self.dashboard_dialog_instance:
                 self.dashboard_dialog_instance = QtWidgets.QDialog(self)
-                self.dashboard_dialog_instance.setWindowTitle("Dashboard - Gestion des Clés API")
-                self.dashboard_dialog_instance.setMinimumSize(1200, 800)
+                self.dashboard_dialog_instance.setWindowTitle(tr("dashboard_window_title"))
+                
+                # Dimensions responsives
+                screen = QtWidgets.QApplication.desktop().screenGeometry()
+                dialog_width = min(1400, int(screen.width() * 0.85))
+                dialog_height = min(900, int(screen.height() * 0.85))
+                self.dashboard_dialog_instance.setMinimumSize(
+                    max(1000, int(screen.width() * 0.6)),
+                    max(700, int(screen.height() * 0.6))
+                )
+                self.dashboard_dialog_instance.resize(dialog_width, dialog_height)
                 self.dashboard_dialog_instance.setModal(False)
-
+    
                 dialog_layout = QtWidgets.QVBoxLayout(self.dashboard_dialog_instance)
                 dialog_layout.setContentsMargins(0, 0, 0, 0)
-
+    
                 if not self.dashboard_panel:
                     self.dashboard_panel = DashboardPanel(
                         self.config_provider,
                         self.conductor,
                         self.database
                     )
-
+                    # Assurer que le panel s'adapte
+                    self.dashboard_panel.setSizePolicy(
+                        QtWidgets.QSizePolicy.Expanding,
+                        QtWidgets.QSizePolicy.Expanding
+                    )
+    
                 dialog_layout.addWidget(self.dashboard_panel)
-
+    
                 self.dashboard_dialog_instance.finished.connect(
                     self._on_dashboard_dialog_closed
                 )
-
+                
+                # Centrer le dialogue
+                self._center_dialog(self.dashboard_dialog_instance)
+    
             if hasattr(self.dashboard_panel, 'refresh'):
                 self.dashboard_panel.refresh()
-
+    
             self.dashboard_dialog_instance.show()
             self.dashboard_dialog_instance.raise_()
             self.dashboard_dialog_instance.activateWindow()
-
+    
             logger.info("Dashboard de gestion des clés API ouvert")
-            self.update_status("Dashboard ouvert")
-
+            self.update_status(tr("dashboard_opened"))
+    
         except Exception as e:
             logger.error(f"Erreur lors de l'ouverture du Dashboard: {str(e)}")
             QMessageBox.critical(
                 self,
-                "Erreur",
-                f"Impossible d'ouvrir le Dashboard:\n\n{str(e)}"
+                tr("error"),
+                tr("dashboard_open_error", error=str(e))
             )
-            self.update_status("Erreur lors de l'ouverture du Dashboard")
 
     def _on_dashboard_dialog_closed(self, result):
         """Gère la fermeture de la boîte de dialogue Dashboard"""
         self.dashboard_dialog_instance = None
         logger.info("Fenêtre Dashboard fermée.")
 
+    def _on_ide_dialog_closed(self, result):
+        """Gère la fermeture de la boîte de dialogue IDE"""
+        self.ide_dialog_instance = None
+        logger.info("Fenêtre IDE fermée.")
+
     # NOUVEAU: Méthodes pour le menu IDE
     def _on_open_code_editor(self):
-        """Ouvre la fenêtre IDE pour l'intégration de code"""
+        """Ouvre la fenêtre IDE avec dimensions responsives"""
         try:
-            # Si le dialogue n'existe pas ou a été fermé, le créer
             if not self.ide_dialog_instance:
                 self.ide_dialog_instance = QtWidgets.QDialog(self)
-                self.ide_dialog_instance.setWindowTitle("🔧 IDE - Intégration de Code")
-                self.ide_dialog_instance.setMinimumSize(1400, 900)
+                self.ide_dialog_instance.setWindowTitle(tr("ide_window_title"))
+
+                # Dimensions responsives
+                screen = QtWidgets.QApplication.desktop().screenGeometry()
+                dialog_width = min(1600, int(screen.width() * 0.9))
+                dialog_height = min(1000, int(screen.height() * 0.9))
+                self.ide_dialog_instance.setMinimumSize(
+                    max(1200, int(screen.width() * 0.7)),
+                    max(800, int(screen.height() * 0.7))
+                )
+                self.ide_dialog_instance.resize(dialog_width, dialog_height)
                 self.ide_dialog_instance.setModal(False)
 
-                # Layout du dialogue
                 dialog_layout = QtWidgets.QVBoxLayout(self.ide_dialog_instance)
                 dialog_layout.setContentsMargins(0, 0, 0, 0)
 
-                # Créer le panneau IDE s'il n'existe pas
                 if not self.ide_panel:
                     self.ide_panel = IDEPanel()
+                    self.ide_panel.setSizePolicy(
+                        QtWidgets.QSizePolicy.Expanding,
+                        QtWidgets.QSizePolicy.Expanding
+                    )
 
-                    # Connecter les signaux
                     self.ide_panel.integration_started.connect(self._on_ide_integration_started)
                     self.ide_panel.integration_completed.connect(self._on_ide_integration_completed)
 
-                    # Connecter le signal de sélection de snippet depuis coding_panel
                     if hasattr(self.coding_panel, 'snippet_selected'):
                         self.coding_panel.snippet_selected.connect(self.ide_panel.set_snippet)
 
                 dialog_layout.addWidget(self.ide_panel)
-
-                # Gérer la fermeture
                 self.ide_dialog_instance.finished.connect(self._on_ide_dialog_closed)
 
-            # Rafraîchir le panneau
+                # Centrer le dialogue
+                self._center_dialog(self.ide_dialog_instance)
+
             if hasattr(self.ide_panel, 'refresh'):
                 self.ide_panel.refresh()
 
-            # Afficher le dialogue
             self.ide_dialog_instance.show()
             self.ide_dialog_instance.raise_()
             self.ide_dialog_instance.activateWindow()
 
             logger.info("Fenêtre IDE ouverte")
-            self.update_status("Fenêtre IDE ouverte")
+            self.update_status(tr("ide_window_opened"))
 
         except Exception as e:
             logger.error(f"Erreur lors de l'ouverture de l'IDE: {str(e)}")
             QtWidgets.QMessageBox.critical(
                 self,
-                "Erreur",
-                f"Impossible d'ouvrir la fenêtre IDE:\n\n{str(e)}"
+                tr("error"),
+                tr("ide_open_error", error=str(e))
             )
 
     def _on_open_terminal(self):
@@ -1098,21 +1244,28 @@ class MainWindow(QMainWindow):
         self.update_status(f"Données de test générées: {combinations_count} combinaisons")
 
     def _on_show_platforms(self):
-        """Ouvre la fenêtre de configuration des plateformes"""
+        """Ouvre la configuration des plateformes avec dimensions responsives"""
         if not self.conductor:
             QMessageBox.warning(
                 self,
-                "Configuration des plateformes",
-                "Le système n'est pas encore initialisé.",
+                tr("platforms"),
+                tr("system_not_initialized")
             )
             return
 
         try:
             self.platform_config_dialog = QtWidgets.QDialog(self)
-            self.platform_config_dialog.setWindowTitle(
-                "Configuration des Plateformes d'IA"
+            self.platform_config_dialog.setWindowTitle(tr("platform_config_window_title"))
+
+            # Dimensions responsives
+            screen = QtWidgets.QApplication.desktop().screenGeometry()
+            dialog_width = min(1400, int(screen.width() * 0.85))
+            dialog_height = min(900, int(screen.height() * 0.85))
+            self.platform_config_dialog.setMinimumSize(
+                max(1000, int(screen.width() * 0.6)),
+                max(700, int(screen.height() * 0.6))
             )
-            self.platform_config_dialog.setMinimumSize(1200, 800)
+            self.platform_config_dialog.resize(dialog_width, dialog_height)
             self.platform_config_dialog.setModal(True)
 
             dialog_layout = QtWidgets.QVBoxLayout(self.platform_config_dialog)
@@ -1120,6 +1273,10 @@ class MainWindow(QMainWindow):
 
             platform_config_widget = PlatformConfigWidget(
                 self.config_provider, self.conductor, parent=self.platform_config_dialog
+            )
+            platform_config_widget.setSizePolicy(
+                QtWidgets.QSizePolicy.Expanding,
+                QtWidgets.QSizePolicy.Expanding
             )
 
             dialog_layout.addWidget(platform_config_widget)
@@ -1134,16 +1291,17 @@ class MainWindow(QMainWindow):
                 self._on_platform_config_changed
             )
 
+            # Centrer le dialogue
+            self._center_dialog(self.platform_config_dialog)
+
             self.platform_config_dialog.exec_()
 
         except Exception as e:
-            logger.error(
-                f"Erreur lors de l'ouverture de la configuration des plateformes: {str(e)}"
-            )
+            logger.error(f"Erreur lors de l'ouverture des plateformes: {str(e)}")
             QMessageBox.critical(
                 self,
-                "Erreur",
-                f"Impossible d'ouvrir la configuration des plateformes:\n\n{str(e)}",
+                tr("error"),
+                tr("platforms_open_error", error=str(e))
             )
 
     def _on_platform_config_changed(self, platform_name):
@@ -1175,12 +1333,12 @@ class MainWindow(QMainWindow):
             logger.error(f"Erreur lors de la mise à jour des plateformes: {str(e)}")
 
     def _on_show_project_config(self):
-        """Ouvre la fenêtre de configuration des projets de développement"""
+        """Ouvre la fenêtre de configuration avec dimensions responsives"""
         if not self.conductor:
             QMessageBox.warning(
                 self,
-                "Configuration des projets",
-                "Le système n'est pas encore initialisé.",
+                tr("config_projects_dev"),
+                tr("system_not_initialized")
             )
             return
 
@@ -1188,9 +1346,18 @@ class MainWindow(QMainWindow):
             if not self.project_config_dialog_instance:
                 self.project_config_dialog_instance = QtWidgets.QDialog(self)
                 self.project_config_dialog_instance.setWindowTitle(
-                    "Configuration des Projets de Développement (Turing)"
+                    tr("project_config_window_title")
                 )
-                self.project_config_dialog_instance.setMinimumSize(1000, 700)
+
+                # Dimensions responsives
+                screen = QtWidgets.QApplication.desktop().screenGeometry()
+                dialog_width = min(1200, int(screen.width() * 0.8))
+                dialog_height = min(800, int(screen.height() * 0.8))
+                self.project_config_dialog_instance.setMinimumSize(
+                    max(900, int(screen.width() * 0.55)),
+                    max(650, int(screen.height() * 0.6))
+                )
+                self.project_config_dialog_instance.resize(dialog_width, dialog_height)
                 self.project_config_dialog_instance.setModal(False)
 
                 dialog_layout = QtWidgets.QVBoxLayout(
@@ -1203,11 +1370,18 @@ class MainWindow(QMainWindow):
                     self.conductor,
                     parent=self.project_config_dialog_instance,
                 )
+                project_config_widget.setSizePolicy(
+                    QtWidgets.QSizePolicy.Expanding,
+                    QtWidgets.QSizePolicy.Expanding
+                )
                 dialog_layout.addWidget(project_config_widget)
 
                 self.project_config_dialog_instance.finished.connect(
                     self._on_project_config_dialog_closed
                 )
+
+                # Centrer le dialogue
+                self._center_dialog(self.project_config_dialog_instance)
 
             for child in self.project_config_dialog_instance.findChildren(
                     ProjectConfigOnlyWidget
@@ -1220,13 +1394,11 @@ class MainWindow(QMainWindow):
             self.project_config_dialog_instance.activateWindow()
 
         except Exception as e:
-            logger.error(
-                f"Erreur lors de l'ouverture de la configuration des projets: {str(e)}"
-            )
+            logger.error(f"Erreur lors de l'ouverture de la configuration: {str(e)}")
             QMessageBox.critical(
                 self,
-                "Erreur",
-                f"Impossible d'ouvrir la configuration des projets:\n\n{str(e)}",
+                tr("error"),
+                tr("config_open_error", error=str(e))
             )
 
     def _on_project_config_changed(self, project_name):
@@ -1352,16 +1524,49 @@ class MainWindow(QMainWindow):
         )
     
     def _on_open_brainstorming(self):
-        """Ouvre la fenêtre Brainstorming"""
+        """Ouvre la fenêtre Brainstorming avec dimensions responsives"""
         try:
             dialog = QtWidgets.QDialog(self)
-            dialog.setWindowTitle("Session de Brainstorming")
-            dialog.setMinimumSize(1000, 700)
+            dialog.setWindowTitle(tr("brainstorming_session_window"))
+
+            # Dimensions responsives
+            screen = QtWidgets.QApplication.desktop().screenGeometry()
+            dialog_width = min(1200, int(screen.width() * 0.8))
+            dialog_height = min(800, int(screen.height() * 0.8))
+            dialog.setMinimumSize(
+                max(900, int(screen.width() * 0.55)),
+                max(650, int(screen.height() * 0.6))
+            )
+            dialog.resize(dialog_width, dialog_height)
 
             layout = QtWidgets.QVBoxLayout(dialog)
+            layout.setContentsMargins(0, 0, 0, 0)
+
+            self.brainstorming_panel.setSizePolicy(
+                QtWidgets.QSizePolicy.Expanding,
+                QtWidgets.QSizePolicy.Expanding
+            )
             layout.addWidget(self.brainstorming_panel)
 
             dialog.setModal(False)
+
+            # Centrer le dialogue
+            self._center_dialog(dialog)
+
             dialog.show()
+
         except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Impossible d'ouvrir Brainstorming:\n\n{str(e)}")
+            QMessageBox.critical(
+                self, 
+                tr("error"), 
+                tr("brainstorming_open_error", error=str(e))
+            )
+
+    def _center_dialog(self, dialog):
+        """Centre un dialogue par rapport à la fenêtre principale"""
+        if dialog and self:
+            parent_geometry = self.frameGeometry()
+            dialog_geometry = dialog.frameGeometry()
+            center_point = parent_geometry.center()
+            dialog_geometry.moveCenter(center_point)
+            dialog.move(dialog_geometry.topLeft())

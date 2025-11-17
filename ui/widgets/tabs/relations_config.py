@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt
 from utils.dgraph_connector import LirisDgraphConnector
 from ui.styles.platform_config_style import PlatformConfigStyle
 from utils.logger import logger
+from ui.localization.translator import tr
 from utils.multi_language_parser import (
     normalize_node_name
 )
@@ -32,7 +33,8 @@ class RelationsConfig(QtWidgets.QWidget):
         layout.setSpacing(8)
         layout.setContentsMargins(10, 5, 10, 10)
 
-        title = QtWidgets.QLabel(f"Relations {self.level.capitalize()}")
+        # Titre / Title
+        title = QtWidgets.QLabel(f"{tr('relations_config.title')} {self.level.capitalize()}")
         title.setStyleSheet("""
             font-weight: bold;
             font-size: 12px;
@@ -40,24 +42,24 @@ class RelationsConfig(QtWidgets.QWidget):
         """)
         layout.addWidget(title)
 
-        # === SECTION FILTRAGE ===
+        # === SECTION FILTRAGE / FILTERING SECTION ===
         filter_layout = QHBoxLayout()
         filter_layout.setSpacing(8)
 
-        relations_label = QtWidgets.QLabel("Filtres :")
+        relations_label = QtWidgets.QLabel(tr("relations_config.filters_label"))
         relations_label.setStyleSheet("color: black; font-weight: bold; font-size: 11px;")
         filter_layout.addWidget(relations_label)
 
-        # Bouton Hiérarchie
-        self.hierarchy_btn = QPushButton("Hiérarchie")
+        # Bouton Hiérarchie / Hierarchy Button
+        self.hierarchy_btn = QPushButton(tr("relations_config.filter_hierarchy"))
         self.hierarchy_btn.setCheckable(True)
         self.hierarchy_btn.setChecked(True)
         self.hierarchy_btn.setStyleSheet(self._get_filter_button_style())
         self.hierarchy_btn.clicked.connect(self._on_filter_hierarchy)
         filter_layout.addWidget(self.hierarchy_btn)
 
-        # Bouton Dépendances
-        self.dependencies_btn = QPushButton("Dépendances")
+        # Bouton Dépendances / Dependencies Button
+        self.dependencies_btn = QPushButton(tr("relations_config.filter_dependencies"))
         self.dependencies_btn.setCheckable(True)
         self.dependencies_btn.setChecked(True)
         self.dependencies_btn.setStyleSheet(self._get_filter_button_style())
@@ -71,7 +73,7 @@ class RelationsConfig(QtWidgets.QWidget):
         info_layout = QHBoxLayout()
         info_layout.setSpacing(0)
 
-        source_header = QLabel("Source: ")
+        source_header = QLabel(tr("relations_config.source_label"))
         source_header.setStyleSheet("""
             font-weight: bold;
             font-size: 11px;
@@ -89,7 +91,7 @@ class RelationsConfig(QtWidgets.QWidget):
 
         info_layout.addStretch()
 
-        target_header = QLabel("Target: ")
+        target_header = QLabel(tr("relations_config.target_label"))
         target_header.setStyleSheet("""
             font-weight: bold;
             font-size: 11px;
@@ -107,13 +109,13 @@ class RelationsConfig(QtWidgets.QWidget):
 
         layout.addLayout(info_layout)
 
-        # Séparateur
+        # Séparateur / Separator
         separator = QtWidgets.QFrame()
         separator.setFrameShape(QtWidgets.QFrame.HLine)
         separator.setStyleSheet("background-color: #ccc; max-height: 1px;")
         layout.addWidget(separator)
 
-        # === LISTE DES RELATIONS ===
+        # === LISTE DES RELATIONS / RELATIONS LIST ===
         self.relations_list = QtWidgets.QListWidget()
         self.relations_list.setMaximumHeight(150)
         self.relations_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -143,25 +145,25 @@ class RelationsConfig(QtWidgets.QWidget):
         """)
         layout.addWidget(self.relations_list)
 
-        # === BOUTONS D'ACTION ===
+        # === BOUTONS D'ACTION / ACTION BUTTONS ===
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(8)
 
-        self.add_button = QtWidgets.QPushButton("Nouvelle relation")
+        self.add_button = QtWidgets.QPushButton(tr("relations_config.button_new_relation"))
         self.add_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_button.setMaximumWidth(160)
         self.add_button.clicked.connect(self._on_add_new_relation)
         self.add_button.setEnabled(False)
         buttons_layout.addWidget(self.add_button)
 
-        self.edit_button = QtWidgets.QPushButton(" Modifier")
+        self.edit_button = QtWidgets.QPushButton(tr("relations_config.button_edit"))
         self.edit_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_button.setMaximumWidth(110)
         self.edit_button.clicked.connect(self._on_edit)
         self.edit_button.setEnabled(False)
         buttons_layout.addWidget(self.edit_button)
 
-        self.remove_button = QtWidgets.QPushButton("Supprimer")
+        self.remove_button = QtWidgets.QPushButton(tr("relations_config.button_delete"))
         self.remove_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_button.setMaximumWidth(110)
         self.remove_button.clicked.connect(self._on_remove)

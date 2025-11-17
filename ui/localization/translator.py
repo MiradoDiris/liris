@@ -8,14 +8,24 @@ Gestionnaire de traductions pour l'application Liris
 
 import json
 import os
+import sys
 from PyQt5 import QtCore
+
+
+def get_resource_path(relative_path):
+    """Obtient le chemin absolu vers une ressource"""
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 
 class Translator:
     """Gestionnaire de traductions pour l'application"""
 
     DEFAULT_LANGUAGE = "fr"
-    TRANSLATIONS_DIR = os.path.join("ui", "localization", "translations")
+    TRANSLATIONS_DIR = "ui/localization/translations"  # Chemin relatif
 
     def __init__(self):
         self.current_language = self.DEFAULT_LANGUAGE
@@ -24,26 +34,39 @@ class Translator:
         self._load_languages()
         self._load_translation(self.DEFAULT_LANGUAGE)
 
+    def _get_translations_dir(self):
+        """Retourne le chemin absolu vers le dossier de traductions"""
+        return get_resource_path(self.TRANSLATIONS_DIR)
+
     def _load_languages(self):
         """Charge la liste des langues disponibles"""
-        # Scanner le dossier translations
-        if os.path.exists(self.TRANSLATIONS_DIR):
-            for file in os.listdir(self.TRANSLATIONS_DIR):
+        translations_dir = self._get_translations_dir()
+        
+        if os.path.exists(translations_dir):
+            for file in os.listdir(translations_dir):
                 if file.endswith('.json'):
                     lang_code = file.replace('.json', '')
-                    # Essayer de charger le nom de la langue depuis le fichier
                     try:
-                        with open(os.path.join(self.TRANSLATIONS_DIR, file), 'r',
-                                  encoding='utf-8') as f:
+                        file_path = os.path.join(translations_dir, file)
+                        with open(file_path, 'r', encoding='utf-8') as f:
                             data = json.load(f)
                             self.available_languages[lang_code] = data.get('_language_name', lang_code)
                     except Exception as e:
                         print(f"Erreur lors du chargement des métadonnées de {lang_code}: {e}")
                         self.available_languages[lang_code] = lang_code
+        else:
+            print(f"ATTENTION: Dossier de traductions non trouvé: {translations_dir}")
+            # Fallback sur des langues par défaut
+            self.available_languages = {
+                'fr': 'Français',
+                'en': 'English'
+            }
 
     def _load_translation(self, language_code):
         """Charge un fichier de traduction"""
-        file_path = os.path.join(self.TRANSLATIONS_DIR, f"{language_code}.json")
+        translations_dir = self._get_translations_dir()
+        file_path = os.path.join(translations_dir, f"{language_code}.json")
+        
         if os.path.exists(file_path):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -84,25 +107,19 @@ class Translator:
         parts = key.split('.')
         text = self.translations
 
-        # Navigation dans les objets imbriqués
         try:
             for part in parts:
                 if isinstance(text, dict) and part in text:
                     text = text[part]
                 else:
-                    # Si on ne trouve pas la clé, retourner la clé originale
                     return key
         except (KeyError, TypeError):
             return key
 
-        # S'assurer que le résultat final est une chaîne
         if not isinstance(text, str):
-            # Si on a trouvé un dictionnaire ou autre chose qu'une chaîne,
-            # retourner la clé originale
             print(f"Attention: La clé '{key}' ne pointe pas vers une chaîne mais vers {type(text)}")
             return key
 
-        # Appliquer le formatage si des paramètres sont fournis
         if kwargs:
             try:
                 return text.format(**kwargs)
@@ -148,34 +165,21 @@ class Translator:
 translator = Translator()
 
 
-# Fonction raccourci pour les traductions
 def tr(key, **kwargs):
-    """
-    Fonction raccourci pour les traductions
-
-    Args:
-        key (str): Clé de traduction
-        **kwargs: Paramètres pour le formatage
-
-    Returns:
-        str: Texte traduit
-    """
+    """Fonction raccourci pour les traductions"""
     return translator.translate(key, **kwargs)
 
 
-# Fonction pour changer la langue globalement
 def set_language(language_code):
     """Change la langue de l'application"""
     return translator.set_language(language_code)
 
 
-# Fonction pour obtenir les langues disponibles
 def get_available_languages():
     """Retourne les langues disponibles"""
     return translator.get_available_languages()
 
 
-# Fonction pour obtenir la langue courante
 def get_current_language():
     """Retourne la langue courante"""
     return translator.get_current_language()

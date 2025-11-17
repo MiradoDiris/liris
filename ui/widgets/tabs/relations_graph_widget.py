@@ -4,6 +4,7 @@ import networkx as nx
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from ui.localization.translator import tr
 from utils.logger import logger
 from utils.multi_language_parser import (
     normalize_node_name
@@ -24,24 +25,24 @@ class RelationsGraphWidget(QtWidgets.QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 5, 10, 10)
         layout.setSpacing(5)
-
-        # Titre dynamique
-        self.title_label = QLabel("Graphe des Relations")
+    
+        # Titre dynamique / Dynamic Title
+        self.title_label = QLabel(tr("relations_graph.title"))
         self.title_label.setStyleSheet("font-weight: bold; font-size: 12px; color: #2c3e50;")
         layout.addWidget(self.title_label)
-
-        # Canvas pour le graphe
+    
+        # Canvas pour le graphe / Canvas for the graph
         self.figure = Figure(figsize=(5, 3), facecolor='white', dpi=100)  # Taille optimisée pour le panneau
         self.canvas = FigureCanvas(self.figure)
         self.canvas.setMinimumHeight(250)
         layout.addWidget(self.canvas)
-
-        # Légende simplifiée
-        self.legend_label = QLabel("Aucun nœud sélectionné")
+    
+        # Légende simplifiée / Simplified legend
+        self.legend_label = QLabel(tr("relations_graph.no_node_selected"))
         self.legend_label.setStyleSheet("font-size: 10px; color: #666; font-style: italic;")
         layout.addWidget(self.legend_label)
-
-        # Message initial
+    
+        # Message initial / Initial message
         self._draw_empty_graph()
 
     def _init_uid_mappings(self):

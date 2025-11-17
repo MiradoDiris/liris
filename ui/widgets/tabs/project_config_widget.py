@@ -1,4 +1,7 @@
+import copy
 import os
+import sys
+import time
 import qtawesome as qta
 import json
 from pathlib import Path
@@ -28,6 +31,21 @@ from utils.project_storage_manager import ProjectStorageManager
 from utils.dgraph_project_manager import DgraphProjectManager
 from ui.widgets.dialogs.code_dialogs import CodeDialogs
 from utils.complete_call_resolver import CompleteCallResolver
+from utils.resource_path import (
+    get_database_path,
+    is_frozen
+)
+
+def log_initialization_info():
+    """Log les informations d'initialisation pour le débogage"""
+    logger.info("=" * 60)
+    logger.info("ProjectConfigWidget - Initialisation")
+    logger.info("=" * 60)
+    logger.info(f"Mode frozen: {is_frozen()}")
+    logger.info(f"sys.executable: {sys.executable}")
+    logger.info(f"sys._MEIPASS: {getattr(sys, '_MEIPASS', 'N/A')}")
+    logger.info(f"Database path: {get_database_path()}")
+    logger.info("=" * 60)
 
 class BackButton(QtWidgets.QPushButton):
     """
@@ -92,7 +110,6 @@ class BackButton(QtWidgets.QPushButton):
         painter.drawPath(path)
         painter.end()
 
-
 class ProjectConfigWidget(QtWidgets.QWidget):
     """Widget pour configurer les profils de projet et l'ontologie de Turing avec liaison hiérarchique."""
 
@@ -110,6 +127,10 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             db_path=self.db_path,
             dgraph_connector=self.dgraph_connector
         )
+
+        log_initialization_info()
+        
+        self.config_provider = config_provider
         self.dgraph_manager = DgraphProjectManager(self.dgraph_connector)
         self.project_storage_manager._init_sqlite_db()
 
@@ -183,12 +204,112 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self.project_storage_manager._load_projects_from_sqlite()
             
             # ← NOUVELLE LIGNE :
-            self._update_project_combo()
+            #self._update_project_combo()
             logger.debug(f"Initialisation : {len(self.project_profiles)} projets affichés")
         
         except Exception as e:
             logger.error(f"Erreur lors de l'initialisation : {str(e)}")
-            
+
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(100, self._delayed_combo_update)
+
+    def _delayed_combo_update(self, force_reload: bool = False):
+        """
+        ✅ VERSION AVEC DIAGNOSTIC : Permet de forcer le rechargement si nécessaire
+
+        Args:
+            force_reload: Si True, recharge depuis les sources mĂȘme si des donnĂ©es existent
+        """
+        try:
+            logger.info("🔄 Démarrage mise à jour différée du combo...")
+            logger.info(f"📊 État initial: {len(self.project_profiles)} projet(s) en mémoire")
+
+            # ✅ DIAGNOSTIC : Vérifier contenu AVANT reload
+            if self.project_profiles:
+                logger.info("📋 Projets existants AVANT reload:")
+                for name, profile in self.project_profiles.items():
+                    clusters = profile.get('turing_ontology', {}).get('clusters_detailed', [])
+                    logger.info(f"   • {name}: {len(clusters)} clusters")
+
+            # ✅ Déterminer si rechargement nécessaire
+            needs_reload = force_reload or len(self.project_profiles) == 0
+
+            if needs_reload:
+                reload_reason = "forcé" if force_reload else "profils vides"
+                logger.info(f"📩 Rechargement ({reload_reason})...")
+
+                # Sauvegarder les projets existants pour merge intelligent
+                existing_projects = set(self.project_profiles.keys())
+                loaded_count = 0
+
+                # 1. Dgraph
+                if self.dgraph_connector.client:
+                    try:
+                        logger.info("   📡 Chargement depuis Dgraph...")
+                        dgraph_profiles = self.dgraph_manager._load_project_profiles()
+
+                        if dgraph_profiles:
+                            for name, profile in dgraph_profiles.items():
+                                clusters = profile.get('turing_ontology', {}).get('clusters_detailed', [])
+
+                                # ✅ DIAGNOSTIC : Vérifier contenu
+                                logger.info(f"      ✅ Dgraph: '{name}' = {len(clusters)} clusters")
+
+                                # ✅ Merge : ajouter ou mettre à jour
+                                if force_reload or name not in self.project_profiles:
+                                    self.project_profiles[name] = profile
+                                    loaded_count += 1
+                                else:
+                                    logger.debug(f"      ⭐ '{name}' déjà en mémoire, skip")
+
+                            logger.info(f"   ✅ Dgraph: {len(dgraph_profiles)} profil(s) trouvé(s), {loaded_count} ajouté(s)")
+                        else:
+                            logger.warning("   ⚠ Dgraph: Aucun profil récupéré")
+                    except Exception as e:
+                        logger.error(f"   ❌ Erreur Dgraph: {e}")
+
+                # 2. SQLite
+                try:
+                    logger.info("   💟 Chargement depuis SQLite...")
+                    before_count = len(self.project_profiles)
+                    sqlite_loaded = self.project_storage_manager._load_projects_from_sqlite()
+                    after_count = len(self.project_profiles)
+
+                    if sqlite_loaded:
+                        added = after_count - before_count
+                        logger.info(f"   ✅ SQLite: {added} profil(s) ajouté(s)")
+                    else:
+                        logger.warning("   ⚠ SQLite: Aucun profil récupéré")
+                except Exception as e:
+                    logger.error(f"   ❌ Erreur SQLite: {e}")
+
+                # Afficher les nouveaux projets
+                new_projects = set(self.project_profiles.keys()) - existing_projects
+                if new_projects:
+                    logger.info(f"   📄 Nouveaux projets: {', '.join(sorted(new_projects))}")
+            else:
+                logger.info("✓ Profils déjà en mémoire, pas de rechargement")
+
+            # 3. Statistiques finales
+            total_projects = len(self.project_profiles)
+            logger.info(f"📊 Total final: {total_projects} projet(s)")
+
+            if total_projects > 0:
+                logger.info("📋 Projets en mémoire APRÈs reload:")
+                for name in sorted(self.project_profiles.keys()):
+                    clusters = self.project_profiles[name].get('turing_ontology', {}).get('clusters_detailed', [])
+                    total_labels = sum(len(c.get('root_labels', [])) for c in clusters)
+                    logger.info(f"   • {name}: {len(clusters)} clusters, {total_labels} labels")
+
+            # 4. Mettre à jour le combo
+            self._update_project_combo()
+            logger.info(f"✅ Combo mis à jour avec {total_projects} projet(s)")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur mise à jour différée : {e}")
+            import traceback
+            traceback.print_exc()
+
     def _on_insert_dgraph_clicked(self):
         """
         ✅ CORRECTION: Prépare et lance l'insertion avec synchronisation correcte
@@ -284,21 +405,21 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.project_combo.currentIndexChanged.connect(self._on_project_selected)
         project_selection_layout.addWidget(self.project_combo)
     
-        # Bouton "Ajouter"
-        self.add_project_button = QtWidgets.QPushButton("Ajouter")
+        # Bouton "Ajouter" / "Add"
+        self.add_project_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_project_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_project_button.clicked.connect(self._on_add_new_project)
         project_selection_layout.addWidget(self.add_project_button)
     
-        # Bouton "Supprimer"
-        self.delete_project_button = QtWidgets.QPushButton("Supprimer")
+        # Bouton "Supprimer" / "Delete"
+        self.delete_project_button = QtWidgets.QPushButton(tr("project_config.button_delete"))
         self.delete_project_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.delete_project_button.clicked.connect(self._on_delete_project)
         self.delete_project_button.setEnabled(False)
         project_selection_layout.addWidget(self.delete_project_button)
     
-        # Bouton "Uploader"
-        self.upload_local_button = QtWidgets.QPushButton("📂 Uploader")
+        # Bouton "📂 Uploader" / "📂 Upload"
+        self.upload_local_button = QtWidgets.QPushButton(tr("project_config.button_upload"))
         self.upload_local_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.upload_local_button.clicked.connect(self._on_upload_local_project)
         project_selection_layout.addWidget(self.upload_local_button)
@@ -329,8 +450,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.project_name_edit.setMaximumWidth(350)
         project_name_layout.addWidget(self.project_name_edit)
     
-        # Bouton Scanner les noeuds
-        self.browse_button = QtWidgets.QPushButton("Scanner les noeuds")
+        # Bouton "Scanner les noeuds" / "Scan Nodes"
+        self.browse_button = QtWidgets.QPushButton(tr("project_config.button_scan_nodes"))
         self.browse_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.browse_button.setMaximumWidth(120)
         if hasattr(self, '_on_browse_project'):
@@ -340,9 +461,9 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         project_name_layout.addStretch()
         details_form_layout.addRow("", project_name_widget)
     
-        # Description du projet
+        # Description du projet / Project Description
         self.project_description_edit = QtWidgets.QTextEdit()
-        self.project_description_edit.setPlaceholderText("Description du projet...")
+        self.project_description_edit.setPlaceholderText(tr("project_config.description_placeholder"))
         self.project_description_edit.setStyleSheet("""
             QTextEdit {
                 background-color: white;
@@ -356,7 +477,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             }
         """)
         self.project_description_edit.setMaximumHeight(80)
-        details_form_layout.addRow("Description:", self.project_description_edit)
+        details_form_layout.addRow(tr("project_config.description_label"), self.project_description_edit)
     
         # --- Liste des clusters ---
         cluster_list_layout = QtWidgets.QVBoxLayout()
@@ -374,15 +495,15 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         cluster_buttons_layout = QtWidgets.QHBoxLayout()
         cluster_buttons_layout.setSpacing(5)
     
-        self.add_cluster_button = QtWidgets.QPushButton("Ajouter")
+        self.add_cluster_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_cluster_button.clicked.connect(self._add_cluster)
     
-        self.edit_cluster_button = QtWidgets.QPushButton("Modifier")
+        self.edit_cluster_button = QtWidgets.QPushButton(tr("project_config.button_edit"))
         self.edit_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_cluster_button.clicked.connect(self._edit_cluster)
     
-        self.remove_cluster_button = QtWidgets.QPushButton("Supprimer")
+        self.remove_cluster_button = QtWidgets.QPushButton(tr("project_config.button_delete"))
         self.remove_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_cluster_button.clicked.connect(self._remove_cluster)
     
@@ -395,8 +516,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         details_form_layout.addRow(cluster_list_layout)
         left_column_layout.addWidget(details_group)
     
-        # --- Groupe détails sélectionné ---
-        details_selected_group = QtWidgets.QGroupBox("Détails sélectionné")
+        # --- Groupe détails sélectionné / Selected Details Group ---
+        details_selected_group = QtWidgets.QGroupBox(tr("project_config.selected_details_group"))
         details_selected_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         details_selected_layout = QtWidgets.QVBoxLayout(details_selected_group)
     
@@ -435,7 +556,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         hierarchy_group_layout = QtWidgets.QVBoxLayout(hierarchy_group)
         hierarchy_group_layout.setSpacing(8)
     
-        # --- 1. Labels Racines ---
+        # --- 1. Labels Racines / Root Labels ---
         root_label_title = QtWidgets.QLabel(tr("project_config.root_labels_list_label"))
         root_label_title.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 11px;")
         hierarchy_group_layout.addWidget(root_label_title)
@@ -451,15 +572,15 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         root_buttons_layout = QtWidgets.QHBoxLayout()
         root_buttons_layout.setSpacing(5)
     
-        self.add_root_button = QtWidgets.QPushButton("Ajouter")
+        self.add_root_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_root_button.clicked.connect(self._add_root_label)
     
-        self.edit_root_button = QtWidgets.QPushButton("Modifier")
+        self.edit_root_button = QtWidgets.QPushButton(tr("project_config.button_edit"))
         self.edit_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_root_button.clicked.connect(self._edit_root_label)
     
-        self.remove_root_button = QtWidgets.QPushButton("Supprimer")
+        self.remove_root_button = QtWidgets.QPushButton(tr("project_config.button_delete"))
         self.remove_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_root_button.clicked.connect(self._remove_root_label)
     
@@ -469,7 +590,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         root_buttons_layout.addStretch()
         hierarchy_group_layout.addLayout(root_buttons_layout)
     
-        # --- 2. Labels Niveau 1 ---
+        # --- 2. Labels Niveau 1 / Level 1 Labels ---
         level1_label_title = QtWidgets.QLabel(
             tr("project_config.parent_labels_list_for_root_label")
         )
@@ -487,15 +608,15 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         level1_buttons_layout = QtWidgets.QHBoxLayout()
         level1_buttons_layout.setSpacing(5)
     
-        self.add_level1_button = QtWidgets.QPushButton("Ajouter")
+        self.add_level1_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_level1_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_level1_button.clicked.connect(self._add_level1_label)
     
-        self.edit_level1_button = QtWidgets.QPushButton("Modifier")
+        self.edit_level1_button = QtWidgets.QPushButton(tr("project_config.button_edit"))
         self.edit_level1_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_level1_button.clicked.connect(self._edit_level1_label)
     
-        self.remove_level1_button = QtWidgets.QPushButton("Supprimer")
+        self.remove_level1_button = QtWidgets.QPushButton(tr("project_config.button_delete"))
         self.remove_level1_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_level1_button.clicked.connect(self._remove_level1_label)
     
@@ -505,11 +626,11 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         level1_buttons_layout.addStretch()
         hierarchy_group_layout.addLayout(level1_buttons_layout)
     
-        # --- 3. Labels Enfants avec Bouton Retour ---
+        # --- 3. Labels Enfants avec Bouton Retour / Child Labels with Back Button ---
         child_header_layout = self._create_back_button_section()
         hierarchy_group_layout.addLayout(child_header_layout)
     
-        # Liste des enfants
+        # Liste des enfants / Children list
         self.child_list_widget = QtWidgets.QListWidget()
         self.child_list_widget.setStyleSheet(self._get_improved_list_style())
         self.child_list_widget.setMinimumHeight(100)
@@ -521,15 +642,15 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         child_buttons_layout = QtWidgets.QHBoxLayout()
         child_buttons_layout.setSpacing(5)
     
-        self.add_child_button = QtWidgets.QPushButton("Ajouter")
+        self.add_child_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_child_button.clicked.connect(self._add_child_label)
     
-        self.edit_child_button = QtWidgets.QPushButton("Modifier")
+        self.edit_child_button = QtWidgets.QPushButton(tr("project_config.button_edit"))
         self.edit_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_child_button.clicked.connect(self._edit_child_label)
     
-        self.remove_child_button = QtWidgets.QPushButton("Supprimer")
+        self.remove_child_button = QtWidgets.QPushButton(tr("project_config.button_delete"))
         self.remove_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_child_button.clicked.connect(self._remove_child_label)
     
@@ -547,32 +668,32 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         # ==================== COLONNE DE DROITE: RELATIONS ====================
         right_column_layout = QtWidgets.QVBoxLayout()
     
-        # Configuration des Relations en haut
-        relations_group = QtWidgets.QGroupBox("Configuration des Relations")
+        # Configuration des Relations en haut / Relations Configuration (top)
+        relations_group = QtWidgets.QGroupBox(tr("project_config.relations_config_group"))
         relations_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         relations_layout = QtWidgets.QVBoxLayout(relations_group)
         relations_layout.addWidget(self.global_relations_config)
         right_column_layout.addWidget(relations_group)
     
-        # Section graphe des relations
-        graph_group = QtWidgets.QGroupBox("Graphe des Relations")
+        # Section graphe des relations / Relations Graph Section
+        graph_group = QtWidgets.QGroupBox(tr("project_config.relations_graph_group"))
         graph_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         graph_layout = QtWidgets.QVBoxLayout(graph_group)
         graph_layout.addWidget(self.relations_graph)
         graph_group.setMinimumHeight(350)
         right_column_layout.addWidget(graph_group)
     
-        # Boutons de sauvegarde/export/insert en bas
+        # Boutons de sauvegarde/export/insert en bas / Save/Export/Insert buttons (bottom)
         save_layout = QtWidgets.QHBoxLayout()
     
-        self.save_button = QtWidgets.QPushButton("💾 Sauvegarder Profil")
+        self.save_button = QtWidgets.QPushButton(tr("project_config.button_save_profile"))
         self.save_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.save_button.clicked.connect(self._on_save_project)
         self.save_button.setEnabled(False)
         self.save_button.setMaximumWidth(120)
         save_layout.addWidget(self.save_button)
     
-        self.export_profile_button = QtWidgets.QPushButton("📤 Exporter Profil")
+        self.export_profile_button = QtWidgets.QPushButton(tr("project_config.button_export_profile"))
         self.export_profile_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.export_profile_button.clicked.connect(self._on_export_profile)
         self.export_profile_button.setEnabled(False)
@@ -875,24 +996,280 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             traceback.print_exc()
 
     def _on_project_selected(self, index):
-        """Gère la sélection d'un projet dans la combo."""
+        """
+        ✅ VERSION AMÉLIORÉE : Détection .exe + copie adaptative + diagnostic complet
+        """
+        start_time = time.time()
+    
         if index < 0:
+            logger.debug("Index < 0, sélection annulée")
             return
+    
         project_name = self.project_combo.currentText()
+        
+        # ✅ DÉTECTION ENVIRONNEMENT
+        is_frozen = getattr(sys, 'frozen', False)
+        env_mode = "🔧 .EXE" if is_frozen else "🐍 DEV"
+        
+        logger.info("=" * 80)
+        logger.info(f"📂 SÉLECTION PROJET : {project_name} [{env_mode}]")
+        logger.info("=" * 80)
+        logger.info(f"⏱ [T+0.000s] Début du processus")
+    
+        # ✅ ÉTAPE 1 : Vérifier que le projet existe
+        if project_name not in self.project_profiles:
+            logger.error(f"❌ Projet '{project_name}' introuvable!")
+            logger.error(f"   Projets disponibles : {list(self.project_profiles.keys())}")
+            return
+    
+        logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] ✅ Projet trouvé dans project_profiles")
+    
+        # ✅ ÉTAPE 2 : Récupérer les données originales
+        original_data = self.project_profiles[project_name]
+    
+        # ✅ ÉTAPE 3 : Analyser la structure AVANT copie
+        logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 📊 Analyse des données originales...")
+    
+        original_ontology = original_data.get('turing_ontology', {})
+        original_clusters = original_ontology.get('clusters_detailed', [])
+        original_files = original_data.get('files', [])
+        original_file_contents = original_data.get('file_contents', {})
+    
+        logger.info(f"   📩 Clusters : {len(original_clusters)}")
+        logger.info(f"   📄 Fichiers : {len(original_files)}")
+        logger.info(f"   💟 File contents : {len(original_file_contents)} entrées")
+    
+        # Détails par cluster
+        total_labels = 0
+        for i, cluster in enumerate(original_clusters):
+            c_name = cluster.get('name', f'Cluster_{i}')
+            root_labels = cluster.get('root_labels', [])
+            c_files = cluster.get('files', [])
+    
+            logger.info(f"      [{i}] {c_name}")
+            logger.info(f"          Root labels : {len(root_labels)}")
+            logger.info(f"          Fichiers : {len(c_files)}")
+    
+            # Vérifier le type des labels
+            if root_labels:
+                first_label = root_labels[0]
+                if isinstance(first_label, dict):
+                    logger.info(f"          ✅ Premier label est un dict")
+                else:
+                    logger.warning(f"          ⚠ Premier label n'est PAS un dict : {type(first_label)}")
+    
+            total_labels += len(root_labels)
+    
+        logger.info(f"   📊 Total labels : {total_labels}")
+    
+        # ✅ ÉTAPE 4 : Calculer la taille des données
+        def get_size(obj, seen=None):
+            """Calcule la taille récursive d'un objet"""
+            size = sys.getsizeof(obj)
+            if seen is None:
+                seen = set()
+    
+            obj_id = id(obj)
+            if obj_id in seen:
+                return 0
+    
+            seen.add(obj_id)
+    
+            if isinstance(obj, dict):
+                size += sum([get_size(v, seen) for v in obj.values()])
+                size += sum([get_size(k, seen) for k in obj.keys()])
+            elif hasattr(obj, '__dict__'):
+                size += get_size(obj.__dict__, seen)
+            elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
+                try:
+                    size += sum([get_size(i, seen) for i in obj])
+                except:
+                    pass
+                
+            return size
+    
+        try:
+            total_size = get_size(original_data)
+            logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 💟 Taille des données : {total_size / (1024*1024):.2f} MB")
+    
+            if total_size > 100 * 1024 * 1024:
+                logger.warning(f"⚠ DONNÉES VOLUMINEUSES : {total_size / (1024*1024):.2f} MB")
+                logger.warning("   La copie peut être lente")
+        except Exception as e:
+            logger.warning(f"⚠ Impossible de calculer la taille : {e}")
+    
+        # ✅ ÉTAPE 5 : Copie profonde ADAPTATIVE selon l'environnement
         self.current_project_name = project_name
-        self.current_project_profile_data = json.loads(json.dumps(self.project_profiles[project_name]))
-
+        copy_method = "unknown"
+    
+        # 🔧 STRATÉGIE .EXE vs DEV
+        if is_frozen:
+            # ==================== MODE .EXE ====================
+            logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 🔧 MODE .EXE DÉTECTÉ")
+            logger.info("   → Utilisation deepcopy (plus fiable que JSON dans PyInstaller)")
+            
+            try:
+                self.current_project_profile_data = copy.deepcopy(original_data)
+                copy_method = "deepcopy_exe"
+                logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] ✅ deepcopy réussi")
+    
+            except Exception as e:
+                logger.error(f"❌ deepcopy échoué : {e}")
+                
+                # FALLBACK : Copie manuelle sécurisée
+                logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 🔄 Tentative copie manuelle sécurisée...")
+                try:
+                    self.current_project_profile_data = self._manual_copy_secure(original_data)
+                    copy_method = "manual_secure"
+                    logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] ✅ Copie manuelle réussie")
+                
+                except Exception as e2:
+                    logger.error(f"❌ Copie manuelle échouée : {e2}")
+                    logger.error("❌ ÉCHEC COMPLET - Utilisation référence directe (DANGEREUX)")
+                    self.current_project_profile_data = original_data
+                    copy_method = "reference"
+    
+        else:
+            # ==================== MODE DEV ====================
+            logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 🐍 MODE DEV")
+            logger.info("   → Tentative JSON (rapide et propre)")
+            
+            try:
+                json_str = json.dumps(original_data, ensure_ascii=False, indent=None)
+                logger.info(f"   JSON string : {len(json_str):,} caractÚres ({len(json_str)/(1024*1024):.2f} MB)")
+    
+                self.current_project_profile_data = json.loads(json_str)
+                copy_method = "json"
+                logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] ✅ JSON serialization réussie")
+    
+            except Exception as e:
+                logger.error(f"❌ JSON échoué : {e}")
+                
+                # FALLBACK : deepcopy
+                try:
+                    logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 🔄 Fallback deepcopy...")
+                    self.current_project_profile_data = copy.deepcopy(original_data)
+                    copy_method = "deepcopy"
+                    logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] ✅ deepcopy réussi")
+    
+                except Exception as e2:
+                    logger.error(f"❌ deepcopy échoué : {e2}")
+                    
+                    # DERNIER RECOURS : Copie manuelle
+                    logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 🔄 Dernier recours : copie manuelle...")
+                    try:
+                        self.current_project_profile_data = self._manual_copy_secure(original_data)
+                        copy_method = "manual_secure"
+                    except Exception as e3:
+                        logger.error(f"❌ Toutes méthodes échouées : {e3}")
+                        self.current_project_profile_data = original_data
+                        copy_method = "reference"
+    
+        logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 📋 Méthode de copie : {copy_method}")
+    
+        # ✅ ÉTAPE 6 : Vérifier l'intégrité APRÈs copie
+        logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 🔍 Vérification de l'intégrité...")
+    
+        copied_ontology = self.current_project_profile_data.get('turing_ontology', {})
+        copied_clusters = copied_ontology.get('clusters_detailed', [])
+        copied_files = self.current_project_profile_data.get('files', [])
+    
+        logger.info(f"   APRÈs copie :")
+        logger.info(f"   📩 Clusters : {len(copied_clusters)} (original: {len(original_clusters)})")
+        logger.info(f"   📄 Fichiers : {len(copied_files)} (original: {len(original_files)})")
+    
+        # Comparer cluster par cluster
+        integrity_ok = True
+        for i, copied_cluster in enumerate(copied_clusters):
+            c_name = copied_cluster.get('name', f'Cluster_{i}')
+            copied_labels = copied_cluster.get('root_labels', [])
+    
+            original_cluster = original_clusters[i] if i < len(original_clusters) else {}
+            original_labels = original_cluster.get('root_labels', [])
+    
+            match = "✅" if len(copied_labels) == len(original_labels) else "❌"
+            logger.info(f"      [{i}] {c_name}: {len(copied_labels)} labels (original: {len(original_labels)}) {match}")
+    
+            if len(copied_labels) != len(original_labels):
+                integrity_ok = False
+                logger.error(f"         ❌ PERTE DE DONNÉES : {len(original_labels) - len(copied_labels)} labels manquants")
+    
+                # Détails sur les labels perdus
+                if original_labels and not copied_labels:
+                    logger.error(f"         Labels originaux existaient mais copie vide!")
+                    logger.error(f"         Premiers labels originaux : {[l.get('label', l.get('name', '?')) for l in original_labels[:3]]}")
+    
+        # 🚹 Si perte de données détectée
+        if not integrity_ok:
+            logger.error(f"⏱ [T+{time.time()-start_time:.3f}s] ❌ PERTE DE DONNÉES DÉTECTÉE")
+            logger.error(f"   Méthode de copie utilisée : {copy_method}")
+    
+            # 🔧 TENTATIVE DE RÉCUPÉRATION
+            logger.warning("   🔧 Tentative de récupération via re-load...")
+            try:
+                if hasattr(self, 'dgraph_manager') and self.dgraph_connector and self.dgraph_connector.client:
+                    logger.info("   📡 Re-chargement depuis Dgraph...")
+                    fresh_profiles = self.dgraph_manager._load_project_profiles()
+    
+                    if project_name in fresh_profiles:
+                        # Remplacer les données
+                        self.current_project_profile_data = fresh_profiles[project_name]
+    
+                        # Re-vérifier
+                        recovered_clusters = self.current_project_profile_data.get('turing_ontology', {}).get('clusters_detailed', [])
+                        logger.info(f"   ✅ Récupéré {len(recovered_clusters)} clusters depuis Dgraph")
+    
+                        if len(recovered_clusters) == len(original_clusters):
+                            integrity_ok = True
+                            copy_method = "dgraph_recovery"
+                            logger.info(f"   ✅ Récupération réussie!")
+                        else:
+                            logger.error(f"   ❌ Récupération partielle : {len(recovered_clusters)}/{len(original_clusters)} clusters")
+                    else:
+                        logger.error(f"   ❌ Projet '{project_name}' introuvable dans Dgraph")
+                else:
+                    logger.error(f"   ❌ Dgraph non disponible pour récupération")
+    
+            except Exception as e:
+                logger.error(f"   ❌ Échec récupération : {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] ✅ Intégrité des données vérifiée")
+    
+        # ✅ ÉTAPE 7 : Charger les pending_relations
         pending_relations_data = self.current_project_profile_data.get("pending_relations", {})
         self.pending_relations = defaultdict(list, pending_relations_data)
-
+        logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 📊 Pending relations : {len(self.pending_relations)} entrées")
+    
+        # ✅ ÉTAPE 8 : Synchroniser avec les autres composants
         self.global_relations_config.current_project_profile_data = self.current_project_profile_data
         self.relations_graph.current_project_profile_data = self.current_project_profile_data
-
+        logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] ✅ Composants synchronisés")
+    
+        # ✅ ÉTAPE 9 : Charger dans l'UI
+        logger.info(f"⏱ [T+{time.time()-start_time:.3f}s] 🎹 Chargement dans l'UI...")
         self._load_project_data_into_ui()
+    
+        # ✅ ÉTAPE 10 : Mettre à jour les détails et boutons
         self._update_project_details()
         self._update_button_states()
+    
+        # ✅ ÉTAPE 11 : Test des relations
         self.dgraph_manager._test_relations_loading()
-
+    
+        # ✅ RÉSUMÉ FINAL
+        total_time = time.time() - start_time
+        logger.info("=" * 80)
+        logger.info(f"✅ SÉLECTION TERMINÉE en {total_time:.3f}s")
+        logger.info(f"   Environnement : {env_mode}")
+        logger.info(f"   Projet : {project_name}")
+        logger.info(f"   Méthode copie : {copy_method}")
+        logger.info(f"   Intégrité : {'✅ OK' if integrity_ok else '❌ ERREUR'}")
+        logger.info(f"   Clusters : {len(copied_clusters)}")
+        logger.info(f"   Total labels : {sum(len(c.get('root_labels', [])) for c in copied_clusters)}")
+        logger.info("=" * 80)
+    
     def _load_project_data_into_ui(self):
         """Charge les données du projet dans l'UI avec réinitialisation complète."""
         if not self.current_project_profile_data:

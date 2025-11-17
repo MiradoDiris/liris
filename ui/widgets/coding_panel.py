@@ -76,6 +76,9 @@ class CodingPanel(QtWidgets.QWidget):
         self.text_color = "#333333"
         self.accent_color = "#E8E0DF"
 
+        self.setMinimumWidth(800)
+        self.setMinimumHeight(600)
+
         self._init_style()
         self._init_ui()
         self._update_ui_texts()
@@ -175,6 +178,12 @@ class CodingPanel(QtWidgets.QWidget):
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(15, 15, 15, 15)
 
+        # ✅ NOUVEAU : Calcul des dimensions responsives
+        screen = QtWidgets.QApplication.primaryScreen()
+        screen_size = screen.availableGeometry()
+        self.base_width = screen_size.width()
+        self.base_height = screen_size.height()
+
         # ===== CONTENEUR PRINCIPAL (Paramètres + Graphe) =====
         main_content = QtWidgets.QWidget()
         content_layout = QtWidgets.QHBoxLayout(main_content)
@@ -208,7 +217,11 @@ class CodingPanel(QtWidgets.QWidget):
 
         # ===== BOUTON SWITCH MODE =====
         self.mode_switch_container = QtWidgets.QWidget()
-        self.mode_switch_container.setFixedSize(280, 40)
+        # ✅ RESPONSIVE : Largeur adaptative avec limites raisonnables
+        switch_width = max(180, min(280, int(self.base_width * 0.15)))
+        self.mode_switch_container.setMinimumWidth(180)
+        self.mode_switch_container.setMaximumWidth(280)
+        self.mode_switch_container.setFixedHeight(40)
 
         switch_layout = QtWidgets.QHBoxLayout(self.mode_switch_container)
         switch_layout.setContentsMargins(3, 3, 3, 3)
@@ -222,16 +235,19 @@ class CodingPanel(QtWidgets.QWidget):
             }
         """)
 
-        # Bouton Mode API
+        # ✅ CRÉER LES BOUTONS AVANT DE LES UTILISER
         self.api_mode_button = QtWidgets.QPushButton("Mode API")
-        self.api_mode_button.setFixedSize(135, 34)
-        self.api_mode_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.api_mode_button.clicked.connect(lambda: self._switch_mode(False))
-
-        # Bouton Navigation Auto
         self.browser_mode_button = QtWidgets.QPushButton("Navigation Auto")
-        self.browser_mode_button.setFixedSize(135, 34)
+
+        # ✅ RESPONSIVE : Calculer la largeur après création
+        button_width = (switch_width - 10) // 2
+        self.api_mode_button.setFixedSize(button_width, 34)
+        self.browser_mode_button.setFixedSize(button_width, 34)
+
+        self.api_mode_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.browser_mode_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.api_mode_button.clicked.connect(lambda: self._switch_mode(False))
         self.browser_mode_button.clicked.connect(lambda: self._switch_mode(True))
 
         switch_layout.addWidget(self.api_mode_button)
@@ -256,40 +272,67 @@ class CodingPanel(QtWidgets.QWidget):
         # Projet + Plateforme
         proj_platform_layout = QtWidgets.QHBoxLayout()
 
-        project_label = QtWidgets.QLabel("📁 Projet")
+        # 📁 Projet
+        project_label = QtWidgets.QLabel(f"📁 {tr('project')}")
         project_label.setStyleSheet("font-weight: 600; font-size: 12px;")
+        
         self.project_combo = QtWidgets.QComboBox()
-        self.project_combo.setMinimumWidth(180)
+        # ✅ RESPONSIVE : Largeur dynamique selon la taille d'écran
+        min_width = 180  # Minimum garanti
+        preferred_width = max(200, int(self.base_width * 0.12))  # 12% de la largeur écran
+        max_width = 400  # Maximum pour éviter d'être trop large
+        
+        self.project_combo.setMinimumWidth(min_width)
+        self.project_combo.setMaximumWidth(max_width)
+        self.project_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred,  # Préféré au lieu d'Expanding
+            QtWidgets.QSizePolicy.Fixed
+        )
         self.project_combo.currentIndexChanged.connect(self._on_project_selected)
 
-        platform_label = QtWidgets.QLabel("Plateforme IA")
+        # 🤖 Plateforme IA
+        platform_label = QtWidgets.QLabel(tr('ai_platform'))
         platform_label.setStyleSheet("font-weight: 600; font-size: 12px; margin-left: 20px;")
+        
         self.platforms_combo = QtWidgets.QComboBox()
-        self.platforms_combo.setMinimumWidth(180)
+        # ✅ RESPONSIVE : Même logique pour la plateforme
+        self.platforms_combo.setMinimumWidth(min_width)
+        self.platforms_combo.setMaximumWidth(max_width)
+        self.platforms_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred,
+            QtWidgets.QSizePolicy.Fixed
+        )
 
         proj_platform_layout.addWidget(project_label)
         proj_platform_layout.addWidget(self.project_combo)
         proj_platform_layout.addWidget(platform_label)
         proj_platform_layout.addWidget(self.platforms_combo)
-        proj_platform_layout.addStretch()
+        proj_platform_layout.addStretch()  # ✅ Garder le stretch pour aligner à gauche
         session_layout.addLayout(proj_platform_layout)
 
         # Contexte
-        context_label = QtWidgets.QLabel("💡 Contexte (Fonctionnalité souhaitée)")
+        context_label = QtWidgets.QLabel(f"💡 {tr('context_label')}")
         context_label.setStyleSheet("font-weight: 600; font-size: 12px;")
         session_layout.addWidget(context_label)
 
         self.context_edit = QtWidgets.QTextEdit()
         self.context_edit.setPlaceholderText("Décrivez la fonctionnalité à implémenter...")
-        self.context_edit.setMinimumHeight(250)
+        # ✅ RESPONSIVE : Hauteur préférée (pas de minimum strict)
+        self.context_edit.setMinimumHeight(80)  # Réduire de 150 à 80
+        preferred_height = max(120, int(self.base_height * 0.15))
+        self.context_edit.setMaximumHeight(int(self.base_height * 0.35))
+        self.context_edit.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, 
+            QtWidgets.QSizePolicy.Preferred
+        )
         session_layout.addWidget(self.context_edit)
 
-        # Périmètre
+        # Périmètre (CODE ORIGINAL INCHANGÉ)
         perimeter_container = QtWidgets.QVBoxLayout()
         perimeter_container.setSpacing(10)
 
         perimeter_header = QtWidgets.QHBoxLayout()
-        perimeter_label_title = QtWidgets.QLabel("🎯 Périmètre d'implémentation")
+        perimeter_label_title = QtWidgets.QLabel(f"🎯 {tr('implementation_perimeter')}")
         perimeter_label_title.setStyleSheet("font-weight: 600; font-size: 12px;")
         perimeter_header.addWidget(perimeter_label_title)
         perimeter_header.addStretch()
@@ -356,7 +399,12 @@ class CodingPanel(QtWidgets.QWidget):
         status_container.addWidget(self.progress_bar)
         left_column.addLayout(status_container)
 
-        content_layout.addLayout(left_column, 3)
+        if self.base_width < 1200:
+            # Petit écran : 40/60 (inchangé, car déjà adapté)
+            content_layout.addLayout(left_column, 4)
+        else:
+            # Grand écran : 35/65 (augmentation de 30→35)
+            content_layout.addLayout(left_column, 7) 
 
         # ===== COLONNE MILIEU : Graphe (70%) =====
         graph_container = QtWidgets.QWidget()
@@ -379,7 +427,10 @@ class CodingPanel(QtWidgets.QWidget):
 
         # ===== BOUTON TOGGLE SNIPPETS MODERNE (Widget personnalisé) =====
         self.toggle_snippets_button = QtWidgets.QWidget()
-        self.toggle_snippets_button.setFixedSize(36, 140)
+        # ✅ RESPONSIVE : Hauteur adaptative
+        button_height = min(140, int(self.base_height * 0.15))
+        self.toggle_snippets_button.setMinimumSize(36, 100)
+        self.toggle_snippets_button.setMaximumSize(36, button_height)
         self.toggle_snippets_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.toggle_snippets_button.setStyleSheet(f"""
             QWidget {{
@@ -450,7 +501,7 @@ class CodingPanel(QtWidgets.QWidget):
 
         # En-tête du panneau
         snippets_header = QtWidgets.QHBoxLayout()
-        snippets_title = QtWidgets.QLabel("💻 Code Généré")
+        snippets_title = QtWidgets.QLabel(f"💻 {tr('generated_code')}")
         snippets_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
         snippets_header.addWidget(snippets_title)
         snippets_header.addStretch()
@@ -491,7 +542,7 @@ class CodingPanel(QtWidgets.QWidget):
         snippets_panel_layout.addWidget(scroll_area)
 
         # Label initial
-        self.no_snippets_label = QtWidgets.QLabel("Aucun code généré pour le moment")
+        self.no_snippets_label = QtWidgets.QLabel(tr("no_code_generated"))
         self.no_snippets_label.setAlignment(Qt.AlignCenter)
         self.no_snippets_label.setStyleSheet("""
             font-size: 13px;
@@ -505,7 +556,11 @@ class CodingPanel(QtWidgets.QWidget):
         self.snippets_panel.setParent(graph_container)
         self.snippets_panel.raise_()
 
-        content_layout.addWidget(graph_container, 7)
+        if self.base_width < 1200:
+            content_layout.addWidget(graph_container, 6)
+        else:
+            content_layout.addWidget(graph_container, 13)
+
         main_layout.addWidget(main_content)
 
         # Connecter le resize
@@ -513,18 +568,19 @@ class CodingPanel(QtWidgets.QWidget):
 
 
     def _switch_mode(self, is_browser_mode):
-        """Change le mode de génération (API ou Browser)"""
+        """Change le mode avec messages traduits"""
         if self.is_browser_mode == is_browser_mode:
-            return  # Déjà dans ce mode
+            return
 
         self.is_browser_mode = is_browser_mode
         self._update_switch_style()
 
-        mode_name = "Navigation Automatique" if is_browser_mode else "Mode API"
-        logger.info(f"Mode changé vers: {mode_name}")
+        if is_browser_mode:
+            message = tr("browser_mode_active")
+        else:
+            message = tr("api_mode_active")
 
-        # Message de confirmation visuel
-        self.update_status(f"✓ Basculé vers {mode_name}", None)
+        self.update_status(message, None)
 
     def _update_switch_style(self):
         """Met à jour le style visuel du switch selon le mode actif"""
@@ -581,20 +637,25 @@ class CodingPanel(QtWidgets.QWidget):
         """
         selected_platform_name = self.platforms_combo.currentData()
 
+        """Démarrage avec messages traduits"""
+        selected_platform_name = self.platforms_combo.currentData()
+
         if not selected_platform_name:
-            self.update_status("Erreur: Sélectionnez une plateforme IA", 0)
+            self.update_status(tr("no_platform_selected"), 0)
             QtWidgets.QMessageBox.warning(
-                self, "Plateforme non sélectionnée",
-                "Veuillez sélectionner une plateforme IA."
+                self, 
+                tr("no_platform_selected"),
+                tr("select_platform")
             )
             return
 
         test_message = self.context_edit.toPlainText().strip()
         if not test_message:
-            self.update_status("Erreur: Décrivez le contexte", 0)
+            self.update_status(tr("empty_context"), 0)
             QtWidgets.QMessageBox.warning(
-                self, "Contexte vide",
-                "Veuillez décrire la fonctionnalité à implémenter."
+                self,
+                tr("empty_context"),
+                tr("context_placeholder")
             )
             return
 
@@ -721,54 +782,63 @@ class CodingPanel(QtWidgets.QWidget):
             self.update_status(f"[{platform_name}] {message}")
 
     def _toggle_snippets_panel(self):
-            """Affiche/Cache le panneau de snippets avec animation (40% de l'écran)"""
-            container = self.snippets_panel.parent()
-            if not container:
-                return
-            
-            container_width = container.width()
-            container_height = container.height()
-            target_width = int(container_width * 0.4) if not self.snippets_panel_visible else 0
-            
-            # Animation de la largeur
-            self.animation = QPropertyAnimation(self.snippets_panel, b"maximumWidth")
-            self.animation.setDuration(300)
-            self.animation.setStartValue(self.snippets_panel.width())
-            self.animation.setEndValue(target_width)
-            self.animation.setEasingCurve(QEasingCurve.InOutQuad)
-            
-            # Animation simultanée pour ajuster la géométrie
-            def update_geometry(value):
-                x_pos = container_width - value
-                self.snippets_panel.setGeometry(x_pos, 0, value, container_height)
-                
-                # Repositionner le bouton
-                if value > 0:
-                    button_x = x_pos - 36
-                else:
-                    button_x = container_width - 46
-                
-                button_y = (container_height - 140) // 2
-                self.toggle_snippets_button.move(button_x, max(80, button_y))
-            
-            self.animation.valueChanged.connect(update_geometry)
-            
-            # Changer l'icône du chevron
-            if not self.snippets_panel_visible:
-                self.chevron_icon_label.setPixmap(
-                    qta.icon('fa5s.chevron-right', color='white').pixmap(18, 18)
-                )
-                self.toggle_snippets_button.setToolTip("Masquer les snippets")
+        """Affiche/Cache le panneau de snippets avec animation RESPONSIVE"""
+        container = self.snippets_panel.parent()
+        if not container:
+            return
+
+        container_width = container.width()
+        container_height = container.height()
+
+        # ✅ RESPONSIVE : Largeur adaptative selon la taille d'écran
+        if container_width < 1400:
+            target_percentage = 0.30  # 30% sur petits écrans
+        elif container_width < 1920:
+            target_percentage = 0.35  # 35% sur écrans moyens
+        else:
+            target_percentage = 0.40  # 40% sur grands écrans
+
+        target_width = int(container_width * target_percentage) if not self.snippets_panel_visible else 0
+
+        # Animation de la largeur
+        self.animation = QPropertyAnimation(self.snippets_panel, b"maximumWidth")
+        self.animation.setDuration(300)
+        self.animation.setStartValue(self.snippets_panel.width())
+        self.animation.setEndValue(target_width)
+        self.animation.setEasingCurve(QEasingCurve.InOutQuad)
+
+        # Animation simultanée pour ajuster la géométrie
+        def update_geometry(value):
+            x_pos = container_width - value
+            self.snippets_panel.setGeometry(x_pos, 0, value, container_height)
+
+            # Repositionner le bouton
+            if value > 0:
+                button_x = x_pos - 36
             else:
-                self.chevron_icon_label.setPixmap(
-                    qta.icon('fa5s.chevron-left', color='white').pixmap(18, 18)
-                )
-                self.toggle_snippets_button.setToolTip("Afficher les snippets de code")
-            
-            self.snippets_panel_visible = not self.snippets_panel_visible
-            self.animation.start()
-            
-            logger.info(f"Panneau snippets: {'ouvert (40%)' if self.snippets_panel_visible else 'fermé'}")
+                button_x = container_width - 46
+
+            button_y = (container_height - 140) // 2
+            self.toggle_snippets_button.move(button_x, max(80, button_y))
+
+        self.animation.valueChanged.connect(update_geometry)
+
+        # Changer l'icône du chevron
+        if not self.snippets_panel_visible:
+            self.chevron_icon_label.setPixmap(
+                qta.icon('fa5s.chevron-right', color='white').pixmap(18, 18)
+            )
+            self.toggle_snippets_button.setToolTip("Masquer les snippets")
+        else:
+            self.chevron_icon_label.setPixmap(
+                qta.icon('fa5s.chevron-left', color='white').pixmap(18, 18)
+            )
+            self.toggle_snippets_button.setToolTip("Afficher les snippets de code")
+
+        self.snippets_panel_visible = not self.snippets_panel_visible
+        self.animation.start()
+
+        logger.info(f"Panneau snippets: {'ouvert' if self.snippets_panel_visible else 'fermé'} ({int(target_percentage*100)}%)")
 
     def _update_snippets_count(self):
         """Met à jour le badge compteur de snippets"""
@@ -844,6 +914,91 @@ class CodingPanel(QtWidgets.QWidget):
                 self.toggle_snippets_button.move(button_x, max(80, button_y))
 
         QtWidgets.QWidget.resizeEvent(self.snippets_panel.parent(), event)
+
+    def resizeEvent(self, event):
+        """Gestion responsive améliorée"""
+        super().resizeEvent(event)
+
+        current_width = self.width()
+        current_height = self.height()
+        self._detect_screen_mode()
+
+        # 🔄 Ajuster context_edit dynamiquement
+        if hasattr(self, 'context_edit'):
+            if current_height < 700:
+                # Petit écran : réduire la hauteur max
+                self.context_edit.setMaximumHeight(int(current_height * 0.25))
+            else:
+                # Grand écran : hauteur normale
+                self.context_edit.setMaximumHeight(int(current_height * 0.35))
+
+        # 🔄 Ajuster les proportions colonnes en live
+        if hasattr(self, 'left_column') and hasattr(self, 'graph_container'):
+            # Forcer une mise à jour du layout
+            self.update()
+
+        # 🔄 Repositionner le panneau snippets
+        if hasattr(self, 'snippets_panel') and self.snippets_panel_visible:
+            container = self.snippets_panel.parent()
+            if container:
+                container_width = container.width()
+
+                # Pourcentage adaptatif selon largeur
+                if container_width < 1000:
+                    target_percentage = 0.40  # 40% sur très petit écran
+                elif container_width < 1400:
+                    target_percentage = 0.35  # 35% sur petit écran
+                elif container_width < 1920:
+                    target_percentage = 0.30  # 30% sur écran moyen
+                else:
+                    target_percentage = 0.25  # 25% sur grand écran
+
+                new_width = int(container_width * target_percentage)
+                self.snippets_panel.setMaximumWidth(new_width)
+                self.snippets_panel.setGeometry(
+                    container_width - new_width,
+                    0,
+                    new_width,
+                    container.height()
+                )
+
+        # 🔄 Repositionner le bouton toggle
+        if hasattr(self, 'toggle_snippets_button'):
+            container = self.snippets_panel.parent() if hasattr(self, 'snippets_panel') else None
+            if container:
+                panel_width = self.snippets_panel.width() if self.snippets_panel_visible else 0
+                container_width = container.width()
+                container_height = container.height()
+
+                if self.snippets_panel_visible:
+                    button_x = container_width - panel_width - 36
+                else:
+                    button_x = container_width - 46
+
+                # Centrer verticalement (avec hauteur adaptative du bouton)
+                button_height = self.toggle_snippets_button.height()
+                button_y = max(80, (container_height - button_height) // 2)
+
+                self.toggle_snippets_button.move(button_x, button_y)
+
+    def _detect_screen_mode(self):
+        """Détecte le mode d'affichage selon la taille d'écran"""
+        width = self.width()
+
+        if width < 1024:
+            # Mode TRÈS compact
+            self.session_group.setVisible(True)
+            self.graph_group.setVisible(True)
+            # Forcer les colonnes en vertical si nécessaire
+            logger.info("🖥️ Mode COMPACT activé")
+
+        elif width < 1366:
+            # Mode compact
+            logger.info("🖥️ Mode NORMAL-COMPACT activé")
+
+        else:
+            # Mode normal
+            logger.info("🖥️ Mode LARGE activé")
 
     def _create_no_snippets_label(self):
         """Crée ou recrée le label 'aucun snippet'"""
@@ -949,22 +1104,16 @@ class CodingPanel(QtWidgets.QWidget):
                 snippet_count = len(snippets)
                 
                 self.update_status(
-                    f"✅ {snippet_count} snippets générés par {platform_name} en {duration:.2f}s",
+                    tr("snippets_generated").format(snippet_count, platform_name, duration),
                     100
                 )
-                
-                logger.info(f"✅ {snippet_count} snippets affichés pour {platform_name}")
             else:
                 self.update_status(
-                    f"✅ Code généré avec succès par {platform_name} en {duration:.2f}s",
+                    tr("code_generated_success").format(platform_name, duration),
                     100
                 )
-
-            self.progress_bar.setValue(100)
-            self.export_button.setEnabled(True)
-
         else:
-            self.update_status(f"❌ Erreur {platform_name}: {message}", 0)
+            self.update_status(tr("error_occurred").format(platform_name, message), 0)
             QtWidgets.QMessageBox.critical(
                 self,
                 f"Erreur {platform_name}",
@@ -1276,7 +1425,7 @@ class CodingPanel(QtWidgets.QWidget):
         self.project_combo.clear()
         self.project_combo.addItem(
             qta.icon('fa5s.folder-open', color='#999999'),
-            "Sélectionnez un projet...",
+            tr("select_project"),
             None
         )
     
@@ -1627,15 +1776,16 @@ class CodingPanel(QtWidgets.QWidget):
     def _update_perimeter_display(self):
         """Met à jour l'affichage du périmètre défini"""
         if not self.selected_taxonomy:
-            self.perimeter_status_label.setText("⚪ Aucun périmètre défini")
+            self.perimeter_status_label.setText(f"⚪ {tr('no_perimeter_defined')}")
             self.perimeter_details_label.setVisible(False)
-            self.graph_widget._clear_graph()
             return
 
         count = len(self.selected_taxonomy)
         level = self.selected_taxonomy[0]['search_depth'] if self.selected_taxonomy else 1
 
-        self.perimeter_status_label.setText(f"✅ {count} élément(s) sélectionné(s) • Niveau {level}")
+        self.perimeter_status_label.setText(
+            f"✅ {count} {tr('elements_selected')} • {tr('level')} {level}"
+        )
         self.perimeter_status_label.setStyleSheet("""
             font-size: 13px;
             color: #2E7D32;
@@ -1643,7 +1793,7 @@ class CodingPanel(QtWidgets.QWidget):
         """)
 
         details_html = f"<div style='line-height: 1.8;'><p style='margin: 0 0 12px 0;'>"
-        details_html += "<span style='color: #A23B2D; font-weight: bold;'>📋 Éléments sélectionnés:</span></p>"
+        details_html += f"<span style='color: #A23B2D; font-weight: bold;'>📋 {tr('selected_elements')}</span></p>"
 
         for tax in self.selected_taxonomy:
             node_name = tax['name']
@@ -2353,12 +2503,12 @@ class CodingPanel(QtWidgets.QWidget):
             self.graph_widget.conductor = conductor
 
     def set_platforms(self, profiles=None):
-        """Définit la liste des plateformes"""
+        """Plateformes avec traduction"""
         self.platforms_combo.clear()
 
         self.platforms_combo.addItem(
             qta.icon('fa5s.robot', color='#999999'),
-            "Sélectionnez une plateforme IA",
+            tr("select_platform"),
             None
         )
 
@@ -2468,13 +2618,15 @@ class CodingPanel(QtWidgets.QWidget):
             self._update_vscode_status_indicator(False)
 
     def _on_vscode_merge(self, snippet_data):
-        """Gère le merge dans VS Code - SANS DIALOGUES"""
+        """Gère le merge dans VS Code - AVEC VALIDATION"""
         logger.info(f"🔀 Demande de merge VS Code: {snippet_data.get('title', 'N/A')}")
         
-        # ✅ VALIDATION STRICTE : Vérifier que toutes les infos nécessaires sont présentes
+        # ✅ VALIDATION STRICTE
         action = snippet_data.get('action', '').upper()
         file_path = snippet_data.get('file', '').strip()
         code = snippet_data.get('code', '').strip()
+        target = snippet_data.get('target', '').strip()
+        position = snippet_data.get('position', '').strip().lower()
         
         if not file_path:
             logger.error("❌ Aucun chemin de fichier dans snippet_data")
@@ -2491,40 +2643,99 @@ class CodingPanel(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Données manquantes",
-                "Le code n'est pas fourni par l'IA.\n\n"
-                "Assurez-vous que l'IA inclut le champ 'code' dans sa réponse."
+                "Le code n'est pas fourni par l'IA."
             )
             return
         
-        logger.info(f"📋 Action: {action}")
-        logger.info(f"📁 File: {file_path}")
-        logger.info(f"💻 Code length: {len(code)} chars")
-        
-        # Router vers la bonne méthode selon l'action
+        # ✅ NOUVEAU : Validation TARGET + POSITION pour AJOUTER
         if action == 'AJOUTER':
-            logger.info("➡️ Appel _vscode_insert()")
-            self._vscode_insert(snippet_data)
-        elif action in ['MODIFIER', 'REMPLACER']:
-            logger.info("➡️ Appel _vscode_replace()")
+            if not target:
+                # Proposer à l'utilisateur de choisir
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Informations manquantes",
+                    f"L'IA n'a pas spécifié où insérer le code dans '{file_path}'.\n\n"
+                    "Voulez-vous l'insérer au début du fichier ?",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.Yes
+                )
+                
+                if reply == QtWidgets.QMessageBox.No:
+                    # Demander le target à l'utilisateur
+                    target, ok = QtWidgets.QInputDialog.getText(
+                        self,
+                        "Fonction/Classe de référence",
+                        "Entrez le nom de la fonction ou classe de référence:\n"
+                        "(Ex: 'def ma_fonction' ou 'class MaClasse')",
+                        QtWidgets.QLineEdit.Normal,
+                        ""
+                    )
+                    
+                    if not ok or not target.strip():
+                        logger.info("❌ Utilisateur a annulé")
+                        return
+                    
+                    # Demander la position
+                    positions = ['before', 'after', 'inside']
+                    position, ok = QtWidgets.QInputDialog.getItem(
+                        self,
+                        "Position d'insertion",
+                        "Où insérer le code par rapport à la référence ?",
+                        positions,
+                        1,  # Défaut: 'after'
+                        False
+                    )
+                    
+                    if not ok:
+                        logger.info("❌ Utilisateur a annulé")
+                        return
+                    
+                    # Mettre à jour snippet_data
+                    snippet_data['target'] = target.strip()
+                    snippet_data['position'] = position.lower()
+                else:
+                    # Insertion au début du fichier (lineNumber = 0)
+                    snippet_data['target'] = ''
+                    snippet_data['position'] = ''
+                    snippet_data['lineNumber'] = 0
             
-            # ✅ VALIDATION : Vérifier que le target existe pour REPLACE
-            target = snippet_data.get('target', '').strip()
+            # Si target fourni mais pas de position
+            elif not position:
+                positions = ['before', 'after', 'inside']
+                position, ok = QtWidgets.QInputDialog.getItem(
+                    self,
+                    "Position d'insertion",
+                    f"Où insérer le code par rapport à '{target}' ?",
+                    positions,
+                    1,  # Défaut: 'after'
+                    False
+                )
+                
+                if ok:
+                    snippet_data['position'] = position.lower()
+                else:
+                    snippet_data['position'] = 'after'  # Défaut
+            
+            logger.info(f"📋 Action: {action}")
+            logger.info(f"📁 File: {file_path}")
+            logger.info(f"🎯 Target: {snippet_data.get('target', 'N/A')}")
+            logger.info(f"📍 Position: {snippet_data.get('position', 'N/A')}")
+            logger.info(f"💻 Code length: {len(code)} chars")
+            
+            self._vscode_insert(snippet_data)
+        
+        elif action in ['MODIFIER', 'REMPLACER']:
+            # ... code existant pour REPLACE
             if not target:
                 logger.error("❌ Action REPLACE sans target")
                 QtWidgets.QMessageBox.critical(
                     self,
                     "Données manquantes",
-                    f"L'action '{action}' nécessite un champ 'target' (nom de fonction/classe à remplacer).\n\n"
-                    "Assurez-vous que l'IA inclut ce champ dans sa réponse."
+                    f"L'action '{action}' nécessite un champ 'target'."
                 )
                 return
             
             self._vscode_replace(snippet_data)
-        else:
-            logger.warning(f"⚠️ Action inconnue: {action}, utilisation de INSERT par défaut")
-            self._vscode_insert(snippet_data)
-        
-        logger.info("✅ _on_vscode_merge terminé")
 
     def _prompt_file_path(self, snippet_data):
         """Demande le chemin du fichier à l'utilisateur"""
@@ -2561,14 +2772,18 @@ class CodingPanel(QtWidgets.QWidget):
         return None
 
     def _vscode_insert(self, snippet):
-        """Insère du code via VS Code - SANS DIALOGUES"""
+        """Insère du code via VS Code - VERSION CORRIGÉE avec TARGET + POSITION"""
         logger.info(f"📝 _vscode_insert démarré pour: {snippet.get('file', 'N/A')}")
-        
+
         file_path = snippet.get('file', '').strip()
         code = snippet.get('code', '').strip()
+
+        # ✅ NOUVEAUX CHAMPS
+        target = snippet.get('target', '').strip()  # Fonction/classe de référence
+        position = snippet.get('position', '').strip().lower()  # before/after/inside
         line_number = snippet.get('lineNumber', 0)
-        
-        # ✅ VALIDATION : Pas de dialogue, juste vérification
+
+        # ✅ VALIDATION
         if not file_path:
             logger.error("❌ file_path manquant dans snippet")
             QtWidgets.QMessageBox.critical(
@@ -2578,7 +2793,7 @@ class CodingPanel(QtWidgets.QWidget):
                 "L'IA doit fournir le champ 'file' dans sa réponse."
             )
             return
-        
+
         if not code:
             logger.error("❌ code manquant dans snippet")
             QtWidgets.QMessageBox.critical(
@@ -2588,41 +2803,60 @@ class CodingPanel(QtWidgets.QWidget):
                 "L'IA doit fournir le champ 'code' dans sa réponse."
             )
             return
-        
+
+        # ✅ CONSTRUCTION PAYLOAD ADAPTATIF
         payload = {
             "action": "insert",
             "filePath": file_path,
-            "code": code,
-            "lineNumber": line_number
+            "code": code
         }
-        
+
+        # ✅ SI TARGET FOURNI : Ajout contextuel avec position
+        if target:
+            if not position:
+                logger.warning("⚠️ TARGET fourni sans POSITION, utilisation de 'after' par défaut")
+                position = "after"
+
+            payload["target"] = target
+            payload["position"] = position
+
+            logger.info(f"   📍 Insertion CONTEXTUELLE:")
+            logger.info(f"      Target: {target}")
+            logger.info(f"      Position: {position}")
+        else:
+            # ✅ SI PAS DE TARGET : Utiliser lineNumber (défaut début fichier)
+            payload["lineNumber"] = line_number
+            logger.info(f"   📍 Insertion SIMPLE à la ligne {line_number}")
+
         logger.info(f"📤 Payload VS Code:")
         logger.info(f"   - Action: {payload['action']}")
         logger.info(f"   - File: {payload['filePath']}")
-        logger.info(f"   - Line: {payload['lineNumber']}")
-        
+
         try:
             response = requests.post(
                 f"{self.vscode_url}/update",
                 json=payload,
                 timeout=10
             )
-            
+
             logger.info(f"📥 Réponse VS Code: {response.status_code}")
-            
+
             if response.status_code == 200:
                 result = response.json()
                 if result.get('success'):
                     logger.info("✅ Code inséré avec succès dans VS Code")
-                    QtWidgets.QMessageBox.information(
-                        self,
-                        "Succès",
-                        f"✅ Code inséré avec succès dans:\n{file_path}"
-                    )
+
+                    # Message adapté selon le mode
+                    if target:
+                        msg = f"✅ Code inséré {position} '{target}' dans:\n{file_path}"
+                    else:
+                        msg = f"✅ Code inséré à la ligne {line_number} dans:\n{file_path}"
+
+                    QtWidgets.QMessageBox.information(self, "Succès", msg)
                 else:
                     error_msg = result.get('error', 'Unknown error')
                     logger.error(f"❌ Échec VS Code: {error_msg}")
-                    
+
                     if result.get('userCancelled'):
                         QtWidgets.QMessageBox.information(
                             self,
@@ -2644,7 +2878,7 @@ class CodingPanel(QtWidgets.QWidget):
                     "Erreur serveur",
                     f"Le serveur VS Code a retourné une erreur:\n{error_msg}"
                 )
-        
+
         except requests.exceptions.Timeout:
             logger.error("⏱️ Timeout connexion VS Code")
             QtWidgets.QMessageBox.critical(
@@ -2669,14 +2903,14 @@ class CodingPanel(QtWidgets.QWidget):
             )
 
     def _vscode_replace(self, snippet):
-        """Remplace du code via VS Code - SANS DIALOGUES"""
+        """Remplace du code via VS Code - INCHANGÉ (déjà correct)"""
         logger.info(f"📝 _vscode_replace démarré pour: {snippet.get('file', 'N/A')}")
-        
+
         file_path = snippet.get('file', '').strip()
         code = snippet.get('code', '').strip()
         target = snippet.get('target', '').strip()
-        
-        # ✅ VALIDATION STRICTE : Tous les champs requis doivent être présents
+
+        # ✅ VALIDATION STRICTE
         if not file_path:
             logger.error("❌ file_path manquant")
             QtWidgets.QMessageBox.critical(
@@ -2686,7 +2920,7 @@ class CodingPanel(QtWidgets.QWidget):
                 "L'IA doit fournir le champ 'file' dans sa réponse."
             )
             return
-        
+
         if not code:
             logger.error("❌ code manquant")
             QtWidgets.QMessageBox.critical(
@@ -2696,7 +2930,7 @@ class CodingPanel(QtWidgets.QWidget):
                 "L'IA doit fournir le champ 'code' dans sa réponse."
             )
             return
-        
+
         if not target:
             logger.error("❌ target manquant pour action REPLACE")
             QtWidgets.QMessageBox.critical(
@@ -2707,34 +2941,33 @@ class CodingPanel(QtWidgets.QWidget):
                 "Exemple: 'target': 'def old_function():'"
             )
             return
-        
+
         payload = {
             "action": "replace",
             "filePath": file_path,
             "code": code,
             "target": target
         }
-        
+
         logger.info(f"📤 Payload VS Code:")
         logger.info(f"   - Action: {payload['action']}")
         logger.info(f"   - File: {payload['filePath']}")
         logger.info(f"   - Target: {payload['target'][:50]}...")
-        
+
         try:
             response = requests.post(
                 f"{self.vscode_url}/update",
                 json=payload,
                 timeout=10
             )
-            
+
             logger.info(f"📥 Réponse VS Code: {response.status_code}")
-            
+
             if response.status_code == 200:
                 result = response.json()
                 if result.get('success'):
                     logger.info("✅ Code remplacé avec succès dans VS Code")
-                    
-                    # Message différent si le fichier a été créé
+
                     if result.get('created'):
                         QtWidgets.QMessageBox.information(
                             self,
@@ -2750,8 +2983,7 @@ class CodingPanel(QtWidgets.QWidget):
                 else:
                     error_msg = result.get('error', 'Unknown error')
                     logger.error(f"❌ Échec VS Code: {error_msg}")
-                    
-                    # Gérer l'erreur de fichier inexistant
+
                     if 'non-existent file' in error_msg.lower():
                         self._handle_missing_file(snippet, payload)
                     elif result.get('userCancelled'):
@@ -2770,8 +3002,7 @@ class CodingPanel(QtWidgets.QWidget):
                 result = response.json() if response.content else {}
                 error_msg = result.get('error', f'HTTP {response.status_code}')
                 logger.error(f"❌ Erreur HTTP: {error_msg}")
-                
-                # Gérer l'erreur de fichier inexistant
+
                 if 'non-existent file' in error_msg.lower():
                     self._handle_missing_file(snippet, payload)
                 else:
@@ -2780,7 +3011,7 @@ class CodingPanel(QtWidgets.QWidget):
                         "Erreur serveur",
                         f"Le serveur VS Code a retourné une erreur:\n{error_msg}"
                     )
-        
+
         except requests.exceptions.Timeout:
             logger.error("⏱️ Timeout connexion VS Code")
             QtWidgets.QMessageBox.critical(
@@ -2924,8 +3155,39 @@ class CodingPanel(QtWidgets.QWidget):
             return False
 
     def _update_ui_texts(self):
-        """Met à jour les textes de l'interface"""
-        pass
+        """Met à jour les textes de l'interface avec traductions"""
+        
+        # EN-TÊTE
+        self.title_label.setText(tr("coding_panel_title"))
+        
+        # MODE SWITCH
+        self.api_mode_button.setText(tr("mode_api"))
+        self.browser_mode_button.setText(tr("mode_browser"))
+        
+        # GROUPE PARAMÈTRES
+        self.session_group.setTitle(tr("session_parameters"))
+        
+        # BOUTONS
+        self.taxonomy_button.setText(f"  {tr('define_perimeter')}")
+        self.start_button.setText(f"  {tr('start')}")
+        self.export_button.setText(f"  {tr('export')}")
+        
+        # STATUTS
+        self.status_label.setText(tr("ready"))
+        self.perimeter_status_label.setText(tr("no_perimeter_defined"))
+        
+        # GRAPHE
+        self.graph_group.setTitle(tr("relationship_graph"))
+        
+        # SNIPPETS
+        self.no_snippets_label.setText(tr("no_code_generated"))
+        
+        # PLACEHOLDERS
+        self.context_edit.setPlaceholderText(tr("context_placeholder"))
+        
+        # TOOLTIPS
+        tooltip = tr("show_snippets") if not self.snippets_panel_visible else tr("hide_snippets")
+        self.toggle_snippets_button.setToolTip(tooltip)
 
     def closeEvent(self, event):
         """Fermeture propre du panneau"""

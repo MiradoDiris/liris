@@ -122,236 +122,68 @@ class UniversalBrowserHandler:
             logger.error(f"❌ Erreur clipboard: {e}")
             return {'success': False, 'snippets': [], 'method': 'error', 'error': str(e)}
         
-    def _wait_for_code_blocks(self, max_wait: int = 10  ) -> bool:
-        """
-        ✅ VERSION CORRIGÉE FINALE - API MCP BrowserOS
-        """
-        logger.debug("🔍 Attente des blocs de code...")
-
-        # ✅ DIAGNOSTIC INITIAL
-        try:
-            initial_diag_result = self.client.execute_javascript("""
-                (() => {
-                    return {
-                        url: window.location.href,
-                        title: document.title,
-                        bodyLength: document.body?.innerText?.length || 0,
-                        hasMain: !!document.querySelector('main'),
-                        totalElements: document.querySelectorAll('*').length,
-                        pre: document.querySelectorAll('pre').length,
-                        code: document.querySelectorAll('code').length,
-                        div: document.querySelectorAll('div').length,
-                        buttons: document.querySelectorAll('button').length,
-                        claudePatterns: {
-                            articles: document.querySelectorAll('article').length,
-                            codeBlocks: document.querySelectorAll('[class*="code"]').length,
-                            fontClaude: document.querySelectorAll('[class*="font-claude"]').length
-                        }
-                    };
-                })();
-            """)
-
-            # Extraire résultat MCP
-            if isinstance(initial_diag_result, dict) and "error" in initial_diag_result:
-                logger.error(f"❌ Erreur MCP: {initial_diag_result['error']}")
-                return False
-
-            initial_diag = initial_diag_result.get("result", initial_diag_result) if isinstance(initial_diag_result, dict) else {}
-
-            logger.info(f"🔍 DIAGNOSTIC PAGE INITIALE:")
-            logger.info(f"   URL: {initial_diag.get('url', 'N/A')}")
-            logger.info(f"   Title: {initial_diag.get('title', 'N/A')}")
-            logger.info(f"   Body length: {initial_diag.get('bodyLength', 0)} chars")
-            logger.info(f"   Total elements: {initial_diag.get('totalElements', 0)}")
-            logger.info(f"   <pre>: {initial_diag.get('pre', 0)}, <code>: {initial_diag.get('code', 0)}")
-            logger.info(f"   Buttons: {initial_diag.get('buttons', 0)}")
-            logger.info(f"   Claude patterns: {initial_diag.get('claudePatterns', {})}")
-
-            # Vérifications
-            if 'claude.ai' not in str(initial_diag.get('url', '')):
-                logger.error(f"❌ MAUVAISE PAGE: {initial_diag.get('url', 'N/A')}")
-                return False
-
-            if initial_diag.get('bodyLength', 0) < 100:
-                logger.error("❌ PAGE VIDE OU NON CHARGÉE")
-                return False
-
-        except Exception as e:
-            logger.error(f"❌ Erreur diagnostic initial: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-        # Sélecteurs
-        code_block_selectors = [
-            'pre',
-            'code',
-            'pre > code',
-            'pre code',
-            '[class*="code-block"]',
-            '[class*="codeblock"]',
-            'div pre',
-            'main pre',
-            'article pre',
-            'article code',
-        ]
+    def _wait_for_code_blocks(self, max_wait: int = 10) -> bool:
+        logger.info("⏳ Attente du contenu Claude.ai...")
 
         start_time = time.time()
-        last_log_time = start_time
+        last_length = 0
+        stable_count = 0
 
         while time.time() - start_time < max_wait:
             try:
-                # Vérifier génération
-                gen_status_result = self.client.execute_javascript("""
+                # ✅ APPROCHE MINIMALISTE : Juste vérifier la taille du body
+                check_result = self.client.execute_javascript("""
                     (() => {
-                        const streamingIndicators = [
-                            'button[aria-label*="Stop"]',
-                            'button[aria-label*="Arrêt"]',
-                            '[data-testid*="streaming"]',
-                            '.animate-pulse',
-                            '[class*="generating"]'
-                        ];
+                        const body = document.body;
+                        const text = body ? body.innerText : '';
 
-                        let isGenerating = false;
-                        for (let selector of streamingIndicators) {
-                            if (document.querySelector(selector)) {
-                                isGenerating = true;
-                                break;
-                            }
-                        }
+                        // Indicateurs de génération active
+                        const stopBtn = document.querySelector('button[aria-label*="Stop"], button[aria-label*="stop"]');
+                        const isGenerating = stopBtn && stopBtn.offsetParent !== null;
 
                         return {
+                            length: text.length,
                             generating: isGenerating,
-                            bodyLength: document.body?.innerText?.length || 0,
-                            pre: document.querySelectorAll('pre').length,
-                            code: document.querySelectorAll('code').length
+                            hasContent: text.length > 5000
                         };
                     })();
                 """)
 
-                if isinstance(gen_status_result, dict) and "error" in gen_status_result:
-                    logger.debug(f"   ⚠️ Erreur check génération: {gen_status_result['error']}")
-                    time.sleep(1)
-                    continue
-                
-                generation_status = gen_status_result.get("result", gen_status_result) if isinstance(gen_status_result, dict) else {}
+                if isinstance(check_result, dict) and "error" not in check_result:
+                    data = check_result.get("result", check_result)
 
-                current_time = time.time()
-                elapsed = int(current_time - start_time)
+                    current_length = data.get('length', 0)
+                    is_generating = data.get('generating', False)
+                    has_content = data.get('hasContent', False)
 
-                # Log périodique
-                if current_time - last_log_time >= 5:
-                    logger.debug(f"   ⏳ {elapsed}s - Génération: {generation_status.get('generating', 'unknown')}")
-                    logger.debug(f"      Body: {generation_status.get('bodyLength', 0)} chars")
-                    logger.debug(f"      <pre>: {generation_status.get('pre', 0)}, <code>: {generation_status.get('code', 0)}")
-                    last_log_time = current_time
-
-                if generation_status.get('generating'):
-                    time.sleep(2)
-                    continue
-                
-                # Chercher blocs de code
-                for selector in code_block_selectors:
-                    try:
-                        search_result = self.client.execute_javascript(f"""
-                            (() => {{
-                                const blocks = document.querySelectorAll('{selector}');
-
-                                let validBlocks = 0;
-                                let blockDetails = [];
-
-                                blocks.forEach(block => {{
-                                    const text = block.textContent || '';
-                                    const rect = block.getBoundingClientRect();
-
-                                    if (text.trim().length > 20 && rect.height > 0) {{
-                                        validBlocks++;
-                                        blockDetails.push({{
-                                            tag: block.tagName,
-                                            length: text.length,
-                                            className: block.className,
-                                            visible: rect.height > 0
-                                        }});
-                                    }}
-                                }});
-
-                                return {{
-                                    count: validBlocks,
-                                    details: blockDetails.slice(0, 3)
-                                }};
-                            }})();
-                        """)
-
-                        if isinstance(search_result, dict) and "error" in search_result:
-                            logger.debug(f"   ⚠️ Erreur sélecteur '{selector}': {search_result['error']}")
-                            continue
-                        
-                        result = search_result.get("result", search_result) if isinstance(search_result, dict) else {}
-
-                        if result.get('count', 0) > 0:
-                            logger.info(f"   ✅ {result['count']} bloc(s) trouvé(s) avec '{selector}'")
-                            logger.debug(f"      Détails: {result.get('details', [])}")
-                            time.sleep(2)
-                            return True
-
-                    except Exception as e:
-                        logger.debug(f"   ⚠️ Exception sélecteur '{selector}': {e}")
+                    # Si génération en cours, attendre
+                    if is_generating:
+                        logger.debug(f"   🔄 Génération active... ({current_length} chars)")
+                        time.sleep(2)
                         continue
                     
-                time.sleep(1)
+                    # Si contenu substantiel et stable
+                    if has_content:
+                        if current_length == last_length:
+                            stable_count += 1
+                            if stable_count >= 2:  # 4 secondes de stabilité
+                                logger.info(f"   ✅ Contenu stable détecté ({current_length} chars)")
+                                return True
+                        else:
+                            stable_count = 0
+
+                        last_length = current_length
+
+                    logger.debug(f"   ⏳ {int(time.time() - start_time)}s - {current_length} chars")
+
+                time.sleep(2)
 
             except Exception as e:
                 logger.debug(f"   ⚠️ Erreur vérification: {e}")
-                time.sleep(1)
+                time.sleep(2)
 
-        logger.warning(f"⚠️ Aucun bloc de code détecté après {max_wait}s")
-
-        # DIAGNOSTIC FINAL
-        try:
-            final_diag_result = self.client.execute_javascript("""
-                (() => {
-                    const structure = {
-                        pre: document.querySelectorAll('pre').length,
-                        code: document.querySelectorAll('code').length,
-                        preCode: document.querySelectorAll('pre code').length,
-
-                        firstPre: (() => {
-                            const pre = document.querySelector('pre');
-                            if (!pre) return null;
-                            return {
-                                text: pre.textContent?.substring(0, 100) || '',
-                                className: pre.className,
-                                hasCode: !!pre.querySelector('code')
-                            };
-                        })(),
-
-                        articles: document.querySelectorAll('article').length,
-                        bodyLength: document.body?.innerText?.length || 0
-                    };
-
-                    return structure;
-                })();
-            """)
-
-            final_diag = final_diag_result.get("result", final_diag_result) if isinstance(final_diag_result, dict) else {}
-
-            if final_diag:
-                logger.warning(f"🔍 DIAGNOSTIC FINAL:")
-                logger.warning(f"   <pre>: {final_diag.get('pre', 0)}, <code>: {final_diag.get('code', 0)}")
-                logger.warning(f"   <pre><code>: {final_diag.get('preCode', 0)}")
-
-                if final_diag.get('firstPre'):
-                    logger.warning(f"   Premier <pre> trouvé:")
-                    logger.warning(f"      Texte: {final_diag['firstPre'].get('text', '')[:50]}...")
-                    logger.warning(f"      Classe: {final_diag['firstPre'].get('className', 'N/A')}")
-
-                logger.warning(f"   Articles: {final_diag.get('articles', 0)}")
-                logger.warning(f"   Body: {final_diag.get('bodyLength', 0)} chars")
-
-        except Exception as e:
-            logger.error(f"❌ Erreur diagnostic final: {e}")
-
-        return False
+        logger.warning(f"⚠️ Timeout après {max_wait}s")
+        return last_length > 5000
 
     # ============================================================================
     # MÉTHODES EXISTANTES (inchangées)
@@ -798,7 +630,7 @@ class UniversalBrowserHandler:
     
     def _extract_snippets(self, response: str) -> List[Dict]:
         """
-        🔧 VERSION CORRIGÉE : Reconstruction tokens IMMÉDIATE après extraction
+        🔧 VERSION CORRIGÉE : Extraction avec TARGET + POSITION
         """
         snippets = []
 
@@ -808,8 +640,7 @@ class UniversalBrowserHandler:
 
         logger.info(f"📄 Taille réponse: {len(response)} chars")
 
-        # ✅ PHASE 0.1 : RECONSTRUCTION TOKENS ÉCLATÉS (PRIORITAIRE)
-        # Appliquer AVANT toute autre manipulation
+        # ✅ PHASE 0.1 : RECONSTRUCTION TOKENS ÉCLATÉS
         logger.info("⚡ PHASE 0.1 : Reconstruction tokens éclatés (PRIORITAIRE)")
 
         try:
@@ -823,7 +654,7 @@ class UniversalBrowserHandler:
         except Exception as e:
             logger.warning(f"⚠️ Erreur reconstruction tokens globale: {e}")
 
-        # ✅ PHASE 0.2 : FUSION LIGNES ÉCLATÉES (UltimateLineMerger)
+        # ✅ PHASE 0.2 : FUSION LIGNES ÉCLATÉES
         logger.info("🔗 PHASE 0.2 : Fusion intelligente des lignes éclatées")
 
         try:
@@ -845,10 +676,20 @@ class UniversalBrowserHandler:
         cleaned_response = self._clean_dom_pollution(cleaned_response)
         logger.info(f"🧹 Après nettoyage pollution: {len(cleaned_response)} chars")
 
-        # PHASE 0.5 : Extraction normale (le code est déjà propre maintenant)
-        metadata_pattern = r'#\s*ACTION\s*:\s*(\w+)\s*[\r\n]+\s*#\s*FILE\s*:\s*([^\r\n]+?)[\r\n]+(?:\s*#\s*TARGET\s*:\s*([^\r\n]+?)[\r\n]+)?(?:\s*#\s*DESCRIPTION\s*:\s*([^\r\n]+?)[\r\n]+)?'
+        # ✅ NOUVEAU : Pattern étendu avec TARGET + POSITION
+        metadata_pattern = r'''
+            \#\s*ACTION\s*:\s*(\w+)\s*[\r\n]+
+            \s*\#\s*FILE\s*:\s*([^\r\n]+?)[\r\n]+
+            (?:\s*\#\s*TARGET\s*:\s*([^\r\n]+?)[\r\n]+)?
+            (?:\s*\#\s*POSITION\s*:\s*([^\r\n]+?)[\r\n]+)?
+            (?:\s*\#\s*DESCRIPTION\s*:\s*([^\r\n]+?)[\r\n]+)?
+        '''
 
-        metadata_matches = list(re.finditer(metadata_pattern, cleaned_response, re.IGNORECASE | re.MULTILINE))
+        metadata_matches = list(re.finditer(
+            metadata_pattern, 
+            cleaned_response, 
+            re.IGNORECASE | re.MULTILINE | re.VERBOSE
+        ))
 
         logger.info(f"🎯 Blocs détectés: {len(metadata_matches)}")
 
@@ -858,11 +699,18 @@ class UniversalBrowserHandler:
                     action = meta_match.group(1).strip().upper()
                     file_path = meta_match.group(2).strip()
                     target = meta_match.group(3).strip() if meta_match.group(3) else ""
-                    description = meta_match.group(4).strip() if meta_match.group(4) else ""
+                    position = meta_match.group(4).strip().lower() if meta_match.group(4) else ""
+                    description = meta_match.group(5).strip() if meta_match.group(5) else ""
 
                     meta_end_pos = meta_match.end()
 
                     logger.info(f"\n📦 Snippet {idx}: {action} -> {file_path}")
+
+                    # ✅ LOGS DÉTAILLÉS
+                    if target:
+                        logger.info(f"   📍 TARGET: {target}")
+                    if position:
+                        logger.info(f"   🎯 POSITION: {position}")
 
                     # ✅ Extraction simplifiée (le code est déjà propre)
                     code = self._extract_code_after_metadata_clean(cleaned_response, meta_end_pos, idx)
@@ -878,6 +726,11 @@ class UniversalBrowserHandler:
                     }
                     action = action_map.get(action, 'AJOUTER')
 
+                    # ✅ VALIDATION POSITION
+                    if position and position not in ['before', 'after', 'inside']:
+                        logger.warning(f"   ⚠️ Position invalide '{position}', utilisation 'after'")
+                        position = 'after'
+
                     snippet = {
                         'action': action,
                         'title': self._generate_title(action, file_path, target),
@@ -886,12 +739,19 @@ class UniversalBrowserHandler:
                         'language': 'python',
                         'description': description or f"Code généré par {self.config['name']}",
                         'lineNumber': 0,
-                        'target': target,
+                        'target': target,  # ✅ NOUVEAU
+                        'position': position,  # ✅ NOUVEAU
                         'platform': self.config['name']
                     }
 
                     snippets.append(snippet)
                     logger.info(f"   ✅ Extrait: {len(code)} chars")
+
+                    # ✅ LOG TARGET + POSITION
+                    if target:
+                        logger.info(f"   ✅ TARGET capturé: {target}")
+                    if position:
+                        logger.info(f"   ✅ POSITION capturée: {position}")
 
                 except Exception as e:
                     logger.error(f"❌ Erreur snippet {idx}: {e}")
@@ -906,6 +766,57 @@ class UniversalBrowserHandler:
         logger.info(f"{'='*80}\n")
 
         return snippets
+    
+    def _extract_content_universal(self) -> str:
+        logger.info("📄 Extraction universelle du contenu...")
+
+        # ✅ MÉTHODE 1 : body.innerText (le plus simple et robuste)
+        content = self.client.execute_javascript("""
+            (() => {
+                const body = document.body;
+                if (!body) return '';
+
+                // Cloner pour nettoyer
+                const clone = body.cloneNode(true);
+
+                // Supprimer éléments parasites
+                const toRemove = clone.querySelectorAll(`
+                    script, style, noscript,
+                    button, [role="button"],
+                    nav, header, footer,
+                    [aria-hidden="true"],
+                    [style*="display: none"],
+                    [style*="visibility: hidden"]
+                `);
+
+                toRemove.forEach(el => el.remove());
+
+                return clone.innerText || clone.textContent || '';
+            })();
+        """)
+
+        if isinstance(content, dict):
+            content = content.get("result", "")
+
+        if content and len(content) > 1000:
+            logger.info(f"   ✅ Extraction universelle : {len(content)} chars")
+            return content
+
+        # ✅ MÉTHODE 2 : Fallback get_page_content
+        logger.info("   🔄 Fallback get_page_content...")
+
+        response = self.client.get_page_content(content_type="text")
+
+        if "error" not in response:
+            content_data = response.get("result", {}).get("content", [])
+            if isinstance(content_data, list) and len(content_data) > 0:
+                text = content_data[0].get("text", "") if isinstance(content_data[0], dict) else str(content_data[0])
+                if text and len(text) > 1000:
+                    logger.info(f"   ✅ Fallback réussi : {len(text)} chars")
+                    return text
+
+        logger.error("❌ Échec extraction contenu")
+        return ""
 
     def _extract_fallback_snippets(self, response: str) -> List[Dict]:
         """Extraction fallback INTELLIGENTE"""
@@ -1031,14 +942,14 @@ class UniversalBrowserHandler:
         return snippets
     
     def build_prompt(self, context: str, perimeter_data: List[Dict]) -> str:
-        """Construction du prompt AVEC FORMAT ULTRA-STRICT"""
+        """Construction du prompt AVEC FORMAT ULTRA-STRICT + POSITION"""
 
         prompt = f"""Tu es un assistant de développement Python expert.
 
-**CONTEXTE:**
-{context}
+    **CONTEXTE:**
+    {context}
 
-"""
+    """
 
         if perimeter_data and len(perimeter_data) > 0:
             prompt += "**📦 FICHIERS DU PROJET AVEC LEUR CODE:**\n\n"
@@ -1071,151 +982,585 @@ class UniversalBrowserHandler:
 
         prompt += """
 
-================================================================================
-⚠️ FORMAT DE RÉPONSE OBLIGATOIRE - AUCUNE EXCEPTION
-================================================================================
+    ================================================================================
+    ⚠️ FORMAT DE RÉPONSE OBLIGATOIRE - AUCUNE EXCEPTION
+    ================================================================================
 
-Tu DOIS répondre UNIQUEMENT avec des blocs de code formatés EXACTEMENT comme suit :
+    Tu DOIS répondre UNIQUEMENT avec des blocs de code formatés EXACTEMENT comme suit :
 
-```python
-# ACTION: AJOUTER
-# FILE: core/orchestration/advanced_code_recovery.py
-# DESCRIPTION: Nouvelle méthode de détection
+    **🆕 POUR AJOUTER DU NOUVEAU CODE (ACTION: AJOUTER) :**
 
-def detect_corruption_v6(code: str) -> int:
-    # Votre code ici
-    pass
-```
+    ```python
+    # ACTION: AJOUTER
+    # FILE: core/orchestration/advanced_code_recovery.py
+    # TARGET: def detect_corruption_v5()
+    # POSITION: after
+    # DESCRIPTION: Nouvelle méthode de détection améliorée
 
-**RÈGLES STRICTES :**
-1. ✅ Chaque bloc DOIT commencer par ```python
-2. ✅ La première ligne DOIT être # ACTION: [AJOUTER ou MODIFIER ou REMPLACER]
-3. ✅ La deuxième ligne DOIT être # FILE: [chemin/fichier.py]
-4. ✅ Pour MODIFIER : ajouter # TARGET: [nom de la fonction/classe]
-5. ✅ Ligne # DESCRIPTION: optionnelle mais recommandée
-6. ✅ Chaque bloc DOIT se terminer par ```
-7. ❌ AUCUN texte explicatif en dehors des blocs
-8. ❌ AUCUN commentaire en dehors des blocs
+    def detect_corruption_v6(code: str) -> int:
+        # Votre code ici
+        score = 0
+        # ... implémentation
+        return score
+    ```
 
-**EXEMPLE COMPLET DE RÉPONSE VALIDE :**
+    **🚨 RÈGLES ABSOLUES POUR ACTION: AJOUTER :**
 
-```python
-# ACTION: AJOUTER
-# FILE: utils/new_helper.py
-# DESCRIPTION: Nouvelle fonction helper
+    1. ✅ Si vous ajoutez du code DANS UN CONTEXTE EXISTANT :
+       - Vous DEVEZ fournir # TARGET: (fonction/classe de référence)
+       - Vous DEVEZ fournir # POSITION: (before/after/inside)
 
-def calculate_score(data: dict) -> float:
-    return sum(data.values()) / len(data)
-```
+    2. ✅ Si vous créez un NOUVEAU FICHIER ou ajoutez au DÉBUT :
+       - Omettez TARGET et POSITION
+       - Le code sera inséré à la ligne 0
 
-```python
-# ACTION: MODIFIER
-# FILE: core/main.py
-# TARGET: def process_data()
-# DESCRIPTION: Ajout validation
+    **❌ CAS INVALIDES (seront rejetés) :**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: utils.py
+    # ❌ MANQUE TARGET + POSITION
 
-def process_data(input_data):
-    if not input_data:
-        raise ValueError("Data cannot be empty")
-    return input_data
-```
+    def new_function():
+        pass
+    ```
 
-================================================================================
-⚠️ RAPPEL : NE PAS ÉCRIRE DE TEXTE EXPLICATIF, UNIQUEMENT DES BLOCS DE CODE
-================================================================================
+    **✅ CAS VALIDES :**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: utils.py
+    # TARGET: def existing_function()
+    # POSITION: after
 
-Maintenant, génère le code selon le contexte fourni :
-"""
+    def new_function():
+        pass
+    ```
+
+    OU (pour début de fichier) :
+    ```python
+    # ACTION: AJOUTER
+    # FILE: new_module.py
+    # DESCRIPTION: Nouveau module
+
+    # Imports
+    import os
+
+    **⚡ POUR MODIFIER/REMPLACER DU CODE EXISTANT :**
+
+    ```python
+    # ACTION: MODIFIER
+    # FILE: core/main.py
+    # TARGET: def process_data()
+    # DESCRIPTION: Ajout validation des données
+
+    def process_data(input_data):
+        # ✅ NOUVEAU CODE COMPLET de la fonction
+        if not input_data:
+            raise ValueError("Data cannot be empty")
+
+        # Traitement...
+        return processed_data
+    ```
+
+    **RÈGLES POUR ACTION: MODIFIER :**
+    1. ✅ # ACTION: MODIFIER ou REMPLACER
+    2. ✅ # FILE: [chemin/fichier.py] (OBLIGATOIRE)
+    3. ✅ # TARGET: [signature de la fonction/classe À REMPLACER] (OBLIGATOIRE)
+       - Doit être la signature EXACTE : def ma_fonction(arg1, arg2):
+    4. ✅ Fournir le code COMPLET de remplacement (pas de "...")
+
+    ================================================================================
+    ⚠️ EXEMPLES COMPLETS
+    ================================================================================
+
+    **Exemple 1 : AJOUTER une fonction APRÈS une fonction existante**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: utils/helpers.py
+    # TARGET: def calculate_score(data)
+    # POSITION: after
+    # DESCRIPTION: Nouvelle fonction de validation
+
+    def validate_score(score: float) -> bool:
+        return 0 <= score <= 100
+    ```
+
+    **Exemple 2 : AJOUTER une méthode DANS une classe**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: core/models.py
+    # TARGET: class DataProcessor
+    # POSITION: inside
+    # DESCRIPTION: Nouvelle méthode de nettoyage
+
+    def clean_data(self, data: dict) -> dict:
+        cleaned = {k: v for k, v in data.items() if v is not None}
+        return cleaned
+    ```
+
+    **Exemple 3 : AJOUTER une fonction au DÉBUT du fichier**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: utils/constants.py
+    # DESCRIPTION: Nouvelles constantes
+
+    MAX_RETRIES = 3
+    TIMEOUT_SECONDS = 30
+    ```
+
+    **Exemple 4 : MODIFIER une fonction existante**
+    ```python
+    # ACTION: MODIFIER
+    # FILE: core/processor.py
+    # TARGET: def process_data(input_data)
+    # DESCRIPTION: Ajout validation et logging
+
+    def process_data(input_data):
+        # Validation
+        if not input_data:
+            raise ValueError("Input cannot be empty")
+
+        # Logging
+        logger.info(f"Processing {len(input_data)} items")
+
+        # Traitement
+        result = [item.upper() for item in input_data]
+        return result
+    ```
+
+    ================================================================================
+    ⚠️ RAPPELS CRITIQUES
+    ================================================================================
+
+    1. ❌ NE PAS écrire de texte explicatif en dehors des blocs de code
+    2. ✅ TOUJOURS fournir TARGET + POSITION pour ACTION: AJOUTER (sauf ajout début fichier)
+    3. ✅ TOUJOURS fournir TARGET exact pour ACTION: MODIFIER
+    4. ✅ Générer le code COMPLET (pas de "..." ou "# reste du code")
+    5. ✅ Utiliser des noms de fonctions/classes EXACTS (copier depuis le contexte fourni)
+
+    ================================================================================
+    Maintenant, génère le code selon le contexte fourni :
+    """
 
         return prompt
-    
 
-    def _wait_for_claude_completion(self, max_wait: int = 30) -> bool:
-        """⏳ Attendre que Claude ait VRAIMENT fini de générer"""
+    def _wait_for_complete_generation(self, max_wait: int = 60, stability_threshold: int = 3) -> bool:
+        """
+        ✅ FONCTION AMÉLIORÉE : Attente intelligente de la fin complète de génération
 
+        Stratégie multi-niveaux :
+        1. Détection indicateurs de streaming actif
+        2. Surveillance croissance du contenu
+        3. Vérification présence de code complet
+        4. Validation stabilité sur plusieurs cycles
+
+        Args:
+            max_wait: Temps maximum d'attente en secondes
+            stability_threshold: Nombre de vérifications stables requises
+
+        Returns:
+            bool: True si génération complète détectée, False si timeout
+        """
         if self.client is None:
             logger.error("❌ Client non initialisé")
             return False
 
-        logger.info("⏳ Surveillance active de la génération Claude...")
+        logger.info("🎯 Surveillance intelligente de la génération...")
+        logger.info(f"   ⏱️  Timeout: {max_wait}s | Seuil stabilité: {stability_threshold}")
 
         start_time = time.time()
         last_content_length = 0
-        stable_count = 0
+        last_code_blocks = 0
+        stability_count = 0
+        check_interval = 2  # Intervalle entre vérifications
         last_log_time = start_time
+
+        # Compteurs pour diagnostics
+        checks_done = 0
+        generation_detected = False
 
         while time.time() - start_time < max_wait:
             try:
-                if self.client is None:
-                    logger.error("❌ Client est devenu None")
-                    return False
+                checks_done += 1
+                current_time = time.time()
+                elapsed = int(current_time - start_time)
 
-                content_result = self.client.get_page_content(content_type="text")
+                # ============================================================
+                # ÉTAPE 1 : Vérifier si génération toujours active
+                # ============================================================
+                streaming_check_result = self.client.execute_javascript("""
+                    (() => {
+                        // Indicateurs de génération active
+                        const streamingSelectors = [
+                            'button[aria-label*="Stop"]',
+                            'button[aria-label*="Arrêt"]',
+                            'button[aria-label*="stop"]',
+                            '[data-testid*="streaming"]',
+                            '[data-testid*="stop"]',
+                            '.animate-pulse',
+                            '[class*="generating"]',
+                            '[class*="streaming"]',
+                            '[class*="loading"]',
+                            'svg.animate-spin'  // Spinner
+                        ];
 
-                if "error" not in content_result and "result" in content_result:
-                    content_data = content_result["result"].get("content", [])
+                        let isGenerating = false;
+                        let activeIndicator = null;
 
-                    content = ""
-                    if isinstance(content_data, list) and len(content_data) > 0:
-                        if isinstance(content_data[0], dict):
-                            content = content_data[0].get("text", "")
-                        else:
-                            content = str(content_data[0])
+                        for (let selector of streamingSelectors) {
+                            const element = document.querySelector(selector);
+                            if (element && element.offsetParent !== null) {  // Visible
+                                isGenerating = true;
+                                activeIndicator = selector;
+                                break;
+                            }
+                        }
 
-                    current_length = len(content.strip())
+                        // Vérifier aussi les boutons "Stop" spécifiques
+                        const buttons = document.querySelectorAll('button');
+                        for (let btn of buttons) {
+                            const text = btn.textContent?.toLowerCase() || '';
+                            const label = btn.getAttribute('aria-label')?.toLowerCase() || '';
+                            if ((text.includes('stop') || text.includes('arrêt') || 
+                                 label.includes('stop') || label.includes('arrêt')) &&
+                                btn.offsetParent !== null) {
+                                isGenerating = true;
+                                activeIndicator = 'button:stop';
+                                break;
+                            }
+                        }
 
-                    # Log périodique réduit
-                    current_time = time.time()
-                    elapsed = int(current_time - start_time)
+                        return {
+                            isGenerating: isGenerating,
+                            indicator: activeIndicator,
+                            timestamp: Date.now()
+                        };
+                    })();
+                """)
 
-                    if current_time - last_log_time >= 5:  # ✅ OK
-                        logger.info(f"   ⏳ {elapsed}s - Contenu: {current_length} chars")
+                if isinstance(streaming_check_result, dict) and "error" not in streaming_check_result:
+                    streaming_status = streaming_check_result.get("result", streaming_check_result)
+                    is_generating = streaming_status.get('isGenerating', False)
+
+                    if is_generating:
+                        indicator = streaming_status.get('indicator', 'unknown')
+                        if not generation_detected:
+                            logger.info(f"   🔄 Génération active détectée (indicateur: {indicator})")
+                            generation_detected = True
+
+                        # Reset stabilité si génération détectée
+                        stability_count = 0
+                        last_content_length = 0
+
+                        # Log périodique pendant génération
+                        if current_time - last_log_time >= 5:
+                            logger.info(f"   ⏳ {elapsed}s - Génération en cours...")
+                            last_log_time = current_time
+
+                        time.sleep(check_interval)
+                        continue
+                    
+                # ============================================================
+                # ÉTAPE 2 : Analyser le contenu actuel
+                # ============================================================
+                content_analysis_result = self.client.execute_javascript("""
+                    (() => {
+                        // Récupérer le contenu principal
+                        const mainSelectors = [
+                            'main',
+                            '[role="main"]',
+                            'article',
+                            '.conversation',
+                            '#chat-content'
+                        ];
+
+                        let mainContent = null;
+                        for (let selector of mainSelectors) {
+                            mainContent = document.querySelector(selector);
+                            if (mainContent) break;
+                        }
+
+                        if (!mainContent) {
+                            mainContent = document.body;
+                        }
+
+                        const fullText = mainContent.innerText || '';
+
+                        // Compter blocs de code
+                        const codeBlockSelectors = [
+                            'pre code',
+                            'pre',
+                            '[class*="code-block"]',
+                            '[class*="codeblock"]'
+                        ];
+
+                        let totalCodeBlocks = 0;
+                        let codeBlocksWithContent = 0;
+
+                        for (let selector of codeBlockSelectors) {
+                            const blocks = mainContent.querySelectorAll(selector);
+                            blocks.forEach(block => {
+                                const text = block.textContent || '';
+                                if (text.trim().length > 20) {
+                                    totalCodeBlocks++;
+                                    if (text.length > 100) {
+                                        codeBlocksWithContent++;
+                                    }
+                                }
+                            });
+                        }
+
+                        // Rechercher métadonnées de snippets
+                        const hasActionMetadata = /# ACTION:/i.test(fullText);
+                        const hasFileMetadata = /# FILE:/i.test(fullText);
+                        const actionCount = (fullText.match(/# ACTION:/gi) || []).length;
+
+                        // Détecter patterns Python
+                        const pythonPatterns = [
+                            /\bdef\s+\w+\s*\(/g,
+                            /\bclass\s+\w+/g,
+                            /\bimport\s+\w+/g,
+                            /\bfrom\s+\w+\s+import/g
+                        ];
+
+                        let pythonPatternCount = 0;
+                        pythonPatterns.forEach(pattern => {
+                            const matches = fullText.match(pattern);
+                            if (matches) pythonPatternCount += matches.length;
+                        });
+
+                        return {
+                            contentLength: fullText.length,
+                            totalCodeBlocks: totalCodeBlocks,
+                            substantialCodeBlocks: codeBlocksWithContent,
+                            hasMetadata: hasActionMetadata && hasFileMetadata,
+                            actionCount: actionCount,
+                            pythonPatternCount: pythonPatternCount,
+                            hasSubstantialContent: fullText.length > 1000,
+                            timestamp: Date.now()
+                        };
+                    })();
+                """)
+
+                if isinstance(content_analysis_result, dict) and "error" not in content_analysis_result:
+                    content_data = content_analysis_result.get("result", content_analysis_result)
+
+                    current_length = content_data.get('contentLength', 0)
+                    current_code_blocks = content_data.get('substantialCodeBlocks', 0)
+                    has_metadata = content_data.get('hasMetadata', False)
+                    action_count = content_data.get('actionCount', 0)
+                    python_patterns = content_data.get('pythonPatternCount', 0)
+
+                    # Log périodique détaillé
+                    if current_time - last_log_time >= 5:
+                        logger.info(f"   📊 {elapsed}s - Contenu: {current_length} chars, "
+                                  f"Blocs: {current_code_blocks}, Actions: {action_count}, "
+                                  f"Patterns Python: {python_patterns}")
                         last_log_time = current_time
 
-                    # ✅ Stabilité réduite
-                    if current_length == last_content_length:
-                        stable_count += 1
+                    # ============================================================
+                    # ÉTAPE 3 : Vérifier stabilité du contenu
+                    # ============================================================
+                    content_stable = (current_length == last_content_length)
+                    code_blocks_stable = (current_code_blocks == last_code_blocks)
 
-                        if stable_count >= 2:
-                            logger.info(f"   ✅ Contenu stable à {current_length} chars")
+                    if content_stable and code_blocks_stable:
+                        stability_count += 1
 
-                            has_code = any([
-                                '```python' in content,
-                                '# ACTION:' in content and '# FILE:' in content,
-                                ('def ' in content or 'class ' in content) and current_length > 1000
-                            ])
+                        logger.debug(f"   ✓ Stabilité {stability_count}/{stability_threshold}")
 
-                            if has_code:
-                                logger.info("   ✅ Code détecté dans la réponse")
+                        # ========================================================
+                        # ÉTAPE 4 : Validation complétude si stabilité atteinte
+                        # ========================================================
+                        if stability_count >= stability_threshold:
+                            logger.info(f"   🎯 Contenu stable sur {stability_threshold} vérifications")
+
+                            # Critères de complétude
+                            has_content = current_length > 500
+                            has_code = current_code_blocks > 0 or python_patterns > 0
+                            has_structured_response = has_metadata or action_count > 0
+
+                            logger.info(f"   📋 Validation complétude:")
+                            logger.info(f"      - Contenu suffisant: {has_content} ({current_length} chars)")
+                            logger.info(f"      - Code présent: {has_code} ({current_code_blocks} blocs, {python_patterns} patterns)")
+                            logger.info(f"      - Structure détectée: {has_structured_response} ({action_count} actions)")
+
+                            if has_content and (has_code or has_structured_response):
+                                logger.info("   ✅ Génération complète confirmée")
                                 return True
-                            elif current_length > 500:
-                                logger.warning("   ⚠️ Contenu présent mais pas de code Python détecté")
-                                return True
+                            elif has_content:
+                                logger.warning("   ⚠️ Contenu présent mais structure incomplète")
+                                logger.warning("      Attente supplémentaire...")
+                                stability_count = 0  # Reset pour réessayer
                             else:
-                                stable_count = 0
+                                logger.warning("   ⚠️ Contenu insuffisant, poursuite surveillance")
+                                stability_count = 0
                     else:
-                        stable_count = 0
+                        # Contenu en changement
+                        stability_count = 0
+
+                        # Détecter croissance significative
+                        growth = current_length - last_content_length
+                        if growth > 100:
+                            logger.debug(f"   📈 Croissance: +{growth} chars")
 
                     last_content_length = current_length
-                else:
-                    logger.debug(f"   ⚠️ Erreur get_page_content")
+                    last_code_blocks = current_code_blocks
 
-                time.sleep(2)
+                time.sleep(check_interval)
 
             except AttributeError as e:
                 logger.error(f"   ❌ Erreur AttributeError: {e}")
                 return False
-
             except Exception as e:
-                logger.warning(f"   ⚠️ Erreur surveillance: {e}")
-                time.sleep(2)
+                logger.warning(f"   ⚠️ Erreur vérification: {e}")
+                time.sleep(check_interval)
 
-        logger.error(f"❌ Timeout après {max_wait}s")
+        # ====================================================================
+        # TIMEOUT : Diagnostic final
+        # ====================================================================
+        logger.error(f"❌ Timeout après {max_wait}s ({checks_done} vérifications)")
+        logger.error(f"   État final: {last_content_length} chars, {last_code_blocks} blocs")
+        logger.error(f"   Stabilité atteinte: {stability_count}/{stability_threshold}")
+
+        # Décider si on peut quand même continuer
+        if last_content_length > 1000 and last_code_blocks > 0:
+            logger.warning("   ⚠️ Contenu substantiel détecté malgré timeout")
+            logger.warning("   ➡️ Poursuite avec extraction partielle")
+            return True
+
         return False
     
-    def send_to_platform(self, context: str, perimeter_data: List[Dict], 
-                        status_callback: Optional[Callable] = None) -> Dict:
+    def _verify_generation_readiness(self) -> Dict[str, any]:
+        """
+        🔍 Vérification ponctuelle de l'état de génération
+
+        Returns:
+            dict: État détaillé de la génération
+        """
         try:
+            result = self.client.execute_javascript("""
+                (() => {
+                    // État génération
+                    const stopBtn = document.querySelector('button[aria-label*="Stop"], button[aria-label*="stop"]');
+                    const isGenerating = stopBtn && stopBtn.offsetParent !== null;
+
+                    // Contenu
+                    const main = document.querySelector('main') || document.body;
+                    const content = main.innerText || '';
+
+                    // Code
+                    const codeBlocks = main.querySelectorAll('pre code, pre');
+                    let validCodeBlocks = 0;
+                    codeBlocks.forEach(block => {
+                        if (block.textContent.trim().length > 50) validCodeBlocks++;
+                    });
+
+                    // Métadonnées
+                    const hasStructure = /# ACTION:/i.test(content) && /# FILE:/i.test(content);
+
+                    return {
+                        isGenerating: isGenerating,
+                        contentLength: content.length,
+                        codeBlocks: validCodeBlocks,
+                        hasStructure: hasStructure,
+                        ready: !isGenerating && content.length > 500 && (validCodeBlocks > 0 || hasStructure)
+                    };
+                })();
+            """)
+
+            if isinstance(result, dict) and "result" in result:
+                return result["result"]
+
+            return {'ready': False, 'error': 'Invalid response'}
+
+        except Exception as e:
+            logger.error(f"❌ Erreur vérification état: {e}")
+            return {'ready': False, 'error': str(e)}
+        
+    def _diagnose_html_structure(self) -> Dict:
+        """
+        🔍 Diagnostic complet de la structure HTML pour debugging
+        """
+        logger.info("🔍 Diagnostic structure HTML...")
+        
+        result = self.client.execute_javascript("""
+            (() => {
+                return {
+                    // Structure générale
+                    url: window.location.href,
+                    title: document.title,
+                    
+                    // Balises principales
+                    hasMain: !!document.querySelector('main'),
+                    hasArticle: !!document.querySelector('article'),
+                    hasBody: !!document.body,
+                    
+                    // Dimensions
+                    bodyLength: document.body?.innerText?.length || 0,
+                    htmlLength: document.documentElement?.innerHTML?.length || 0,
+                    
+                    // Éléments de contenu
+                    divCount: document.querySelectorAll('div').length,
+                    pCount: document.querySelectorAll('p').length,
+                    preCount: document.querySelectorAll('pre').length,
+                    codeCount: document.querySelectorAll('code').length,
+                    
+                    // Éléments Claude spécifiques
+                    claudeClasses: Array.from(document.querySelectorAll('[class*="claude"]')).length,
+                    messageClasses: Array.from(document.querySelectorAll('[class*="message"]')).length,
+                    
+                    // Premier élément avec beaucoup de texte
+                    largestElement: (() => {
+                        let largest = null;
+                        let maxLength = 0;
+                        
+                        document.querySelectorAll('div, article, section, main').forEach(el => {
+                            const text = el.innerText || '';
+                            if (text.length > maxLength && text.length > 1000) {
+                                maxLength = text.length;
+                                largest = {
+                                    tag: el.tagName,
+                                    className: el.className,
+                                    id: el.id,
+                                    textLength: text.length,
+                                    preview: text.substring(0, 200)
+                                };
+                            }
+                        });
+                        
+                        return largest;
+                    })()
+                };
+            })();
+        """)
+        
+        if isinstance(result, dict) and "result" in result:
+            diagnostic = result["result"]
+            
+            logger.info("📊 DIAGNOSTIC HTML:")
+            logger.info(f"   URL: {diagnostic.get('url')}")
+            logger.info(f"   Title: {diagnostic.get('title')}")
+            logger.info(f"   Body length: {diagnostic.get('bodyLength')} chars")
+            logger.info(f"   Has <main>: {diagnostic.get('hasMain')}")
+            logger.info(f"   <pre>: {diagnostic.get('preCount')}, <code>: {diagnostic.get('codeCount')}")
+            logger.info(f"   Elements Claude: {diagnostic.get('claudeClasses')}")
+            
+            if diagnostic.get('largestElement'):
+                largest = diagnostic['largestElement']
+                logger.info(f"   Plus grand élément: <{largest['tag']}> ({largest['textLength']} chars)")
+                logger.info(f"      Class: {largest.get('className', 'N/A')}")
+                logger.info(f"      Preview: {largest.get('preview', '')[:100]}...")
+            
+            return diagnostic
+        
+        return {}
+    
+    def send_to_platform(self, context: str, perimeter_data: List[Dict], 
+                    status_callback: Optional[Callable] = None) -> Dict:
+        try:
+            # ====================================================================
+            # PHASE 1 : CONSTRUCTION DU PROMPT
+            # ====================================================================
             if status_callback:
                 status_callback("Construction du prompt", 5)
 
@@ -1230,6 +1575,9 @@ Maintenant, génère le code selon le contexte fourni :
                     adjusted_progress = 10 + int(progress * 0.75)
                     status_callback(msg, adjusted_progress)
 
+            # ====================================================================
+            # PHASE 2 : ENVOI DU MESSAGE
+            # ====================================================================
             if status_callback:
                 status_callback(f"Connexion à {self.config['name']}", 10)
 
@@ -1243,159 +1591,66 @@ Maintenant, génère le code selon le contexte fourni :
                 status_callback=wrapped_callback
             )
 
+            # ====================================================================
+            # PHASE 3 : ATTENTE DE LA GÉNÉRATION COMPLÈTE
+            # ====================================================================
             if status_callback:
-                status_callback("Récupération de la réponse", 85)
+                status_callback("Attente de la génération complète", 85)
 
-            logger.info("⏳ Vérification rapide du contenu...")
+            # ✅ CORRECTION 1 : Attente simplifiée
+            logger.info("⏳ Attente contenu Claude.ai...")
+            time.sleep(10)  # Délai initial pour que la génération commence
 
-            content_ready = False
-
-            # Quick check seulement si client existe
-            if self.client is not None:
-                try:
-                    quick_content = self.client.get_page_content(content_type="text")
-
-                    if "error" not in quick_content and "result" in quick_content:
-                        content_data = quick_content["result"].get("content", [])
-                        if content_data and len(str(content_data)) > 1000:
-                            content_ready = True
-                            logger.info("✅ Contenu déjà disponible, pas d'attente")
-                except Exception as e:
-                    logger.debug(f"⚠️ Quick check échoué: {e}")
+            # Attendre que le contenu soit présent et stable
+            content_ready = self._wait_for_code_blocks(max_wait=60)
 
             if not content_ready:
-                logger.info("⏳ Attente complète de la génération Claude...")
-                if not self._wait_for_claude_completion(max_wait=30):
-                    logger.warning("⚠️ Timeout: génération Claude non terminée")
+                logger.warning("⚠️ Timeout, tentative extraction malgré tout...")
+            else:
+                logger.info("✅ Contenu détecté et stable")
 
-            # Attente sécurité réduite
-            time.sleep(1)
+            # Attente sécurité finale
+            time.sleep(3)
 
-            snippets = []
-            extraction_method = "none"
-            
-            if self.try_clipboard:
-                clipboard_result = self._try_clipboard_extraction(status_callback)
-                
-                if clipboard_result.get('success'):
-                    snippets = clipboard_result['snippets']
-                    extraction_method = "clipboard"
-                    
-                    logger.info("\n" + "="*80)
-                    logger.info("✅ EXTRACTION CLIPBOARD RÉUSSIE - PASSAGE DIRECT AU FORMATAGE")
-                    logger.info("="*80)
-                    
-                    # ✅ Snippets de clipboard sont déjà propres, on saute la réparation
-                    # et on passe directement au formatage
-                    if self.auto_format and len(snippets) > 0:
-                        if status_callback:
-                            status_callback("🎨 Formatage des snippets", 95)
-                        
-                        logger.info(f"\n{'='*80}")
-                        logger.info("🎨 FORMATAGE - ÉTAPE FINALE")
-                        logger.info(f"{'='*80}")
-                        
-                        try:
-                            formatted_snippets = format_extracted_snippets(snippets)
-                            if formatted_snippets:
-                                snippets = formatted_snippets
-                                logger.info(f"✅ {len(snippets)} snippet(s) formatés")
-                        except Exception as e:
-                            logger.warning(f"⚠️ Erreur formatage: {e}")
-                    
-                    # Validation finale
-                    for snippet in snippets:
-                        if 'syntax_valid' not in snippet:
-                            code = snippet.get('code', '')
-                            snippet['syntax_valid'] = self._validate_python_syntax(code)
-                            snippet['quality_score'] = snippet.get('quality_score', 95)
-                    
-                    valid_count = sum(1 for s in snippets if s.get('syntax_valid', False))
-                    
-                    logger.info(f"\n{'='*80}")
-                    logger.info(f"📊 RÉSULTATS FINAUX (CLIPBOARD):")
-                    logger.info(f"   ✅ Snippets valides: {valid_count}")
-                    logger.info(f"   📦 Total: {len(snippets)}")
-                    logger.info(f"   🎯 Méthode: CLIPBOARD (qualité optimale)")
-                    logger.info(f"{'='*80}")
-                    
-                    if status_callback:
-                        status_callback("Terminé", 100)
-                    
-                    return {
-                        'success': True,
-                        'message': f"✅ {len(snippets)} snippets via clipboard",
-                        'snippets': snippets,
-                        'raw_response': '',
-                        'extraction_method': 'clipboard'
-                    }
-                else:
-                    logger.warning(f"\n⚠️ Clipboard échoué: {clipboard_result.get('message', 'Unknown')}")
-                    logger.info("➡️ Fallback vers extraction DOM classique\n")
-            
-            if self.use_playwright:
-                logger.info("🎭 Extraction avec BrowserOS natif")
-                try:
-                    # ✅ NOUVEAU : Extraction directe depuis BrowserOS
-                    from core.orchestration.playwright_content_extractor import extract_response_with_browseros
+            # ====================================================================
+            # PHASE 4 : EXTRACTION DU CONTENU
+            # ====================================================================
+            if status_callback:
+                status_callback("Récupération du contenu", 88)
 
-                    playwright_result = extract_response_with_browseros(
-                        browser_client=self.client,  # ✅ Passer le client BrowserOS actif
-                        platform_name=self.platform_name,
-                        wait_response=True,
-                        max_wait=30
-                    )
+            # ✅ CORRECTION 2 : Extraction universelle robuste
+            logger.info("📄 Récupération du contenu...")
 
-                    if playwright_result.get('success'):
-                        self.current_response = playwright_result.get('text', '')
-                        logger.info(f"✅ BrowserOS: {len(self.current_response)} chars")
-                        extraction_method = "browseros_direct"
-                    else:
-                        logger.warning("⚠️ Extraction BrowserOS échouée, fallback")
-                        self.use_playwright = False
+            self.current_response = self._extract_content_universal()
 
-                except Exception as e:
-                    logger.warning(f"⚠️ Erreur extraction BrowserOS : {e}")
-                    self.use_playwright = False
-            
-            if not self.use_playwright or not self.current_response:
-                response_result = self.client.get_page_content(content_type="text")
-                
-                if "error" in response_result:
-                    return {
-                        'success': False,
-                        'message': f"Erreur: {response_result['error']}",
-                        'snippets': [],
-                        'raw_response': '',
-                        'extraction_method': 'error'
-                    }
-                
-                content = ""
-                if "result" in response_result:
-                    content_data = response_result["result"].get("content", [])
-                    if isinstance(content_data, list) and len(content_data) > 0:
-                        if isinstance(content_data[0], dict):
-                            content = content_data[0].get("text", "")
-                        else:
-                            content = str(content_data[0])
-                
-                self.current_response = content.strip()
-                extraction_method = "browseros"
-            
-            logger.info(f"📄 Réponse récupérée: {len(self.current_response)} caractères")
+            if not self.current_response or len(self.current_response) < 100:
+                logger.error("❌ Contenu vide ou insuffisant")
+                return {
+                    'success': False,
+                    'message': "❌ Impossible de récupérer le contenu",
+                    'snippets': [],
+                    'raw_response': '',
+                    'extraction_method': 'error'
+                }
+
+            logger.info(f"✅ Contenu récupéré: {len(self.current_response)} chars")
+
+            # ✅ CORRECTION 3 : Debug structure
             if len(self.current_response) > 0:
                 self._debug_response_structure(self.current_response)
-            
+
+            # ====================================================================
+            # PHASE 5 : EXTRACTION DES SNIPPETS
+            # ====================================================================
             if status_callback:
                 status_callback("Extraction des snippets", 90)
 
-            # ✅ ÉTAPE 1: EXTRACTION DOM
             snippets = self._extract_snippets(self.current_response)
             logger.info(f"✅ {len(snippets)} snippet(s) extraits via DOM")
 
-            # ========================================================================
-            # ✅ ÉTAPE 2: RÉPARATION (SAFE ou AGGRESSIVE)
-            # ========================================================================
+            # ====================================================================
+            # PHASE 6 : RÉPARATION DU CODE (SAFE ou AGGRESSIVE)
+            # ====================================================================
             if snippets and len(snippets) > 0 and self.repair_code:
                 repair_mode = "AGGRESSIVE" if self.aggressive_repair else "SAFE"
 
@@ -1403,17 +1658,19 @@ Maintenant, génère le code selon le contexte fourni :
                     status_callback(f"🔧 Réparation {repair_mode} du code", 93)
 
                 logger.info(f"\n{'='*80}")
-                logger.info(f"🔧 RÉPARATION {repair_mode} - ÉTAPE 2/4")
+                logger.info(f"🔧 RÉPARATION {repair_mode} - ÉTAPE 6/8")
                 logger.info(f"{'='*80}")
 
                 try:
                     if self.aggressive_repair:
+                        # Mode AGGRESSIVE : réparation complète avec validation
                         repaired_snippets = DomExtractionFixer.repair_snippets_avec_validation(
                             snippets=snippets,
                             verbose=True,
                             keep_invalid=True
                         )
                     else:
+                        # Mode SAFE : réparation conservative
                         logger.info("🛡️ Mode SAFE activé (réparation conservative)")
                         repaired_snippets = []
 
@@ -1452,15 +1709,15 @@ Maintenant, génère le code selon le contexte fourni :
                     import traceback
                     traceback.print_exc()
 
-            # ========================================================================
-            # ✅ ÉTAPE 3: FORMATAGE
-            # ========================================================================
+            # ====================================================================
+            # PHASE 7 : FORMATAGE
+            # ====================================================================
             if self.auto_format and snippets and len(snippets) > 0:
                 if status_callback:
                     status_callback("🎨 Formatage des snippets", 95)
 
                 logger.info(f"\n{'='*80}")
-                logger.info("🎨 FORMATAGE - ÉTAPE 3/4")
+                logger.info("🎨 FORMATAGE - ÉTAPE 7/8")
                 logger.info(f"{'='*80}")
 
                 try:
@@ -1471,70 +1728,75 @@ Maintenant, génère le code selon le contexte fourni :
                 except Exception as e:
                     logger.warning(f"⚠️ Erreur formatage: {e}")
 
-            # ========================================================================
-            # ✅ ÉTAPE 4: VALIDATION AVEC AUTO-ESCALADE VERS AGGRESSIVE
-            # ========================================================================
+            # ====================================================================
+            # PHASE 8 : VALIDATION FINALE AVEC AUTO-ESCALADE
+            # ====================================================================
             if snippets and len(snippets) > 0:
                 if status_callback:
                     status_callback("🔍 Validation finale", 97)
-            
+
                 logger.info(f"\n{'='*80}")
-                logger.info("🔍 VALIDATION FINALE - ÉTAPE 4/4")
+                logger.info("🔍 VALIDATION FINALE - ÉTAPE 8/8")
                 logger.info(f"{'='*80}")
-            
+
                 for snippet in snippets:
                     code = snippet.get('code', '')
-                    
+
                     if 'syntax_valid' not in snippet:
                         syntax_valid = CodeValidator._validate_syntax(code)
                         quality_score = DomExtractionFixer._calculate_quality_score(code, syntax_valid)
-                        
+
                         snippet['syntax_valid'] = syntax_valid
                         snippet['quality_score'] = quality_score
                         snippet['repair_status'] = snippet.get('repair_status', 'SUCCESS' if syntax_valid else 'PARTIAL')
-            
+
                 valid_count = sum(1 for s in snippets if s.get('syntax_valid', False))
                 invalid_count = len(snippets) - valid_count
-            
+
+                # ✅ AUTO-ESCALADE VERS MODE AGGRESSIVE SI NÉCESSAIRE
                 if invalid_count > 0 and not self.aggressive_repair:
                     logger.warning(f"\n{'='*80}")
                     logger.warning(f"⚠️ {invalid_count} snippet(s) invalide(s) en MODE SAFE")
                     logger.warning(f"🚀 ESCALADE AUTOMATIQUE VERS MODE AGGRESSIVE")
                     logger.warning(f"{'='*80}")
-            
+
                     logger.info("⚡ Lancement réparation AGGRESSIVE...")
                     aggressive_repaired = DomExtractionFixer.repair_snippets_avec_validation(
                         snippets=snippets,
                         verbose=True,
                         keep_invalid=True
                     )
-            
+
                     if self.auto_format and aggressive_repaired:
                         logger.info("🎨 Re-formatage après réparation aggressive...")
                         try:
                             aggressive_repaired = format_extracted_snippets(aggressive_repaired)
                         except Exception as e:
                             logger.warning(f"⚠️ Erreur re-formatage: {e}")
-            
+
                     snippets = aggressive_repaired
-            
+
                     valid_count = sum(1 for s in snippets if s.get('syntax_valid', False))
                     invalid_count = len(snippets) - valid_count
-            
+
+                # ✅ RAPPORT FINAL
                 logger.info(f"\n{'='*80}")
                 logger.info(f"📊 RÉSULTATS FINAUX:")
                 logger.info(f"   ✅ Snippets valides: {valid_count}")
                 logger.info(f"   ⚠️ Snippets partiels: {invalid_count}")
                 logger.info(f"   📦 Total conservé: {len(snippets)}")
-                logger.info(f"   🎯 Méthode: {extraction_method.upper()}")
-                
+                logger.info(f"   🎯 Méthode: UNIVERSAL EXTRACTION")
+
                 if len(snippets) > 0:
                     avg_quality = sum(s.get('quality_score', 0) for s in snippets) / len(snippets)
                     logger.info(f"   🎯 Score moyen: {avg_quality:.1f}/100")
                     logger.info(f"   📈 Taux récupération: 100%")
-                
+
                 logger.info(f"{'='*80}")
 
+            # ====================================================================
+            # RETOUR FINAL
+            # ====================================================================
             if status_callback:
                 status_callback("Terminé", 100)
 
@@ -1543,7 +1805,7 @@ Maintenant, génère le code selon le contexte fourni :
                 'message': f"✅ {len(snippets)} snippets validés",
                 'snippets': snippets,
                 'raw_response': self.current_response,
-                'extraction_method': extraction_method
+                'extraction_method': 'universal'
             }
 
         except Exception as e:

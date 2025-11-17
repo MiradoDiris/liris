@@ -50,34 +50,53 @@ class DgraphProjectManager:
         return False
 
     def _load_project_profiles(self):
-        """✅ Charge depuis Dgraph SANS utiliser self.current_project_profile_data"""
+        """✅ Charge depuis Dgraph AVEC diagnostic détaillé"""
         try:
             logger.info("📡 Chargement des profils depuis Dgraph...")
-
+    
             if not self.dgraph_connector or not self.dgraph_connector.client:
-                logger.warning("⚠️ Dgraph client non disponible")
+                logger.warning("⚠ Dgraph client non disponible")
                 return {}
-
+    
             query_result = self.dgraph_connector.query_workspaces()
-
+    
             if not query_result or 'q' not in query_result:
-                logger.warning("⚠️ Aucun résultat depuis Dgraph")
+                logger.warning("⚠ Aucun résultat depuis Dgraph")
                 return {}
-
+    
             workspaces = query_result['q']
-            logger.info(f"📦 {len(workspaces)} workspace(s) récupéré(s) depuis Dgraph")
-
+            logger.info(f"📩 {len(workspaces)} workspace(s) récupéré(s) depuis Dgraph")
+    
             loaded_profiles = {}
             for ws in workspaces:
                 profile = self._workspace_to_profile(ws)
                 if profile and profile.get('name'):
                     project_name = profile['name']
+                    
+                    # ✅ DIAGNOSTIC : Compter clusters IMMÉDIATEMENT
+                    clusters_count = len(profile.get('turing_ontology', {}).get('clusters_detailed', []))
+                    logger.info(f"   📂 Workspace '{project_name}' : {clusters_count} clusters")
+                    
+                    # ✅ DIAGNOSTIC : Détails par cluster
+                    for i, cluster in enumerate(profile.get('turing_ontology', {}).get('clusters_detailed', [])):
+                        c_name = cluster.get('name', f'Cluster_{i}')
+                        root_labels = cluster.get('root_labels', [])
+                        logger.debug(f"      [{i}] {c_name}: {len(root_labels)} root_labels")
+                    
                     loaded_profiles[project_name] = profile
                     logger.debug(f"   ✅ Chargé: {project_name}")
-
+    
             logger.info(f"✅ Chargement Dgraph terminé: {len(loaded_profiles)} profil(s)")
+            
+            # ✅ DIAGNOSTIC FINAL : Résumé complet
+            logger.info(f"\n📊 RÉSUMÉ DU CHARGEMENT:")
+            for name, profile in loaded_profiles.items():
+                clusters = profile.get('turing_ontology', {}).get('clusters_detailed', [])
+                total_labels = sum(len(c.get('root_labels', [])) for c in clusters)
+                logger.info(f"   • {name}: {len(clusters)} clusters, {total_labels} labels")
+            
             return loaded_profiles
-
+    
         except Exception as e:
             logger.error(f"❌ ERREUR dans _load_project_profiles: {e}")
             import traceback

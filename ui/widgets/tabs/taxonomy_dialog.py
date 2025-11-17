@@ -4563,38 +4563,132 @@ class TaxonomyDialog(QtWidgets.QDialog):
         layout.addLayout(button_layout)
     
     def accept(self):
-        """Surcharge de accept() pour émettre le signal avec les données complètes."""
+        """✅ VERSION AVEC LOADER : Validation avec affichage du chargement"""
         try:
             logger.info(f"=== ACCEPT appelé ===")
             logger.info(f"Nombre d'items dans selected_items: {len(self.selected_items)}")
-            
-            taxonomy_data = self.get_selected_taxonomy()
-            
-            logger.info(f"Taxonomies récupérées: {len(taxonomy_data)}")
-            
-            if not taxonomy_data:
+
+            # ✅ AFFICHER LE LOADER IMMÉDIATEMENT
+            self.loading_overlay.show_loading(
+                "Validation en cours...",
+                "Préparation des données sélectionnées"
+            )
+
+            # ✅ FORCER LE TRAITEMENT DES ÉVÉNEMENTS POUR AFFICHER LE LOADER
+            QtWidgets.QApplication.processEvents()
+
+            # ✅ Petit délai pour que le loader soit visible
+            QTimer.singleShot(100, self._process_validation)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la validation: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+            self.loading_overlay.hide_loading()
+
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Une erreur s'est produite lors de la validation:\n\n{str(e)}"
+            )
+
+    def _process_validation(self):
+        """✅ NOUVEAU : Traite la validation en affichant la progression"""
+        try:
+            # ✅ ÉTAPE 1 : Vérifier la sélection
+            self.loading_overlay.update_progress(
+                10, 
+                "Vérification de la sélection...",
+                f"{len(self.selected_items)} élément(s) sélectionné(s)"
+            )
+            QtWidgets.QApplication.processEvents()
+
+            if not self.selected_items:
+                self.loading_overlay.hide_loading()
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Aucune sélection",
                     "Veuillez sélectionner au moins un élément avant de valider."
                 )
                 return
-            
+
+            # ✅ ÉTAPE 2 : Récupérer les taxonomies (fonction qui prend du temps)
+            self.loading_overlay.update_progress(
+                30,
+                "Récupération des données...",
+                "Chargement du code et des relations"
+            )
+            QtWidgets.QApplication.processEvents()
+
+            taxonomy_data = self.get_selected_taxonomy()
+
+            # ✅ ÉTAPE 3 : Validation des données
+            self.loading_overlay.update_progress(
+                80,
+                "Validation des données...",
+                f"{len(taxonomy_data)} taxonomies récupérées"
+            )
+            QtWidgets.QApplication.processEvents()
+
+            logger.info(f"Taxonomies récupérées: {len(taxonomy_data)}")
+
+            if not taxonomy_data:
+                self.loading_overlay.hide_loading()
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Aucune donnée",
+                    "Impossible de récupérer les données des éléments sélectionnés.\n"
+                    "Veuillez réessayer."
+                )
+                return
+
+            # ✅ ÉTAPE 4 : Émettre le signal
+            self.loading_overlay.update_progress(
+                95,
+                "Finalisation...",
+                "Émission du signal de validation"
+            )
+            QtWidgets.QApplication.processEvents()
+
             self.selection_validated.emit(taxonomy_data)
-            
+
             logger.info(f"✅ Validation du dialogue: {len(taxonomy_data)} taxonomies sélectionnées")
-            
-            super().accept()
-            
+
+            # ✅ ÉTAPE 5 : Masquer le loader et fermer
+            self.loading_overlay.update_progress(
+                100,
+                "Terminé !",
+                "Validation réussie"
+            )
+
+            # Petit délai avant de fermer pour que l'utilisateur voit "Terminé !"
+            QTimer.singleShot(500, self._complete_validation)
+
         except Exception as e:
-            logger.error(f"❌ Erreur lors de la validation: {e}")
+            logger.error(f"❌ Erreur lors du traitement de la validation: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+
+            self.loading_overlay.hide_loading()
+
             QtWidgets.QMessageBox.critical(
                 self,
                 "Erreur",
                 f"Une erreur s'est produite lors de la validation:\n\n{str(e)}"
             )
+
+    def _complete_validation(self):
+        """✅ NOUVEAU : Finalise la validation et ferme le dialogue"""
+        try:
+            self.loading_overlay.hide_loading()
+
+            # Appeler la méthode accept() du parent (QDialog)
+            super(TaxonomyDialog, self).accept()
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la finalisation: {e}")
+            self.loading_overlay.hide_loading()
 
     def resizeEvent(self, event):
         """Redimensionne l'overlay lors du redimensionnement du dialogue."""
@@ -5432,7 +5526,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
         details_html += "</div>"
         self.description_text.setHtml(details_html)
 
-    def get_selected_taxonomy(self):
+    def     get_selected_taxonomy(self):
         """
         ✅ VERSION FINALE : Retourne les taxonomies avec CODE COMPLET + PATH
         """

@@ -1,6 +1,7 @@
 import traceback
 from PyQt5 import QtWidgets, QtCore
 
+from ui.localization.translator import tr
 from utils.logger import logger
 from ui.styles.platform_config_style import PlatformConfigStyle
 from ui.widgets.tabs.project_config_widget import ProjectConfigWidget
@@ -61,46 +62,55 @@ class ProjectConfigOnlyWidget(QtWidgets.QWidget):
             PlatformConfigStyle.MARGIN,
             PlatformConfigStyle.MARGIN,
         )
-
-        title_label = QtWidgets.QLabel("Configuration de Projet et Ontologie")
+    
+        # Titre principal / Main title
+        title_label = QtWidgets.QLabel(tr("project_config_only.main_title"))
         title_label.setStyleSheet(PlatformConfigStyle.get_title_style())
         main_layout.addWidget(title_label)
-
-        # Onglets avec style personnalisé
+    
+        # Onglets avec style personnalisé / Tabs with custom style
         self.tabs = QtWidgets.QTabWidget()
         self._apply_custom_tab_style()
         
-        # Onglet ProjectConfigWidget
+        # Onglet ProjectConfigWidget / ProjectConfigWidget Tab
         self.project_config_widget_instance = ProjectConfigWidget(
             config_provider=self.config_provider, conductor=self.conductor, parent=self
         )
-
+    
         self.project_config_widget_instance.project_selected_signal = self._on_project_selection_changed
         
-        # Créer un widget personnalisé pour l'onglet Config
-        config_tab_widget = self._create_tab_label("1", "Configuration", True)
+        # Créer un widget personnalisé pour l'onglet Config / Create custom widget for Config tab
+        config_tab_widget = self._create_tab_label(
+            tr("project_config_only.tab_config_number"), 
+            tr("project_config_only.tab_config_label"), 
+            True
+        )
         tab_index_0 = self.tabs.addTab(self.project_config_widget_instance, "")
         self.tabs.tabBar().setTabButton(tab_index_0, QtWidgets.QTabBar.LeftSide, config_tab_widget)
-
-        # Onglet RelationImportWidget
+    
+        # Onglet RelationImportWidget / RelationImportWidget Tab
         self.relation_import_widget_instance = RelationImportWidget(
             config_provider=self.config_provider, conductor=self.conductor, parent=self
         )
         
-        relations_tab_widget = self._create_tab_label("2", "Relations des Importations", False)
+        relations_tab_widget = self._create_tab_label(
+            tr("project_config_only.tab_relations_number"), 
+            tr("project_config_only.tab_relations_label"), 
+            False
+        )
         tab_index_1 = self.tabs.addTab(self.relation_import_widget_instance, "")
         self.tabs.tabBar().setTabButton(tab_index_1, QtWidgets.QTabBar.LeftSide, relations_tab_widget)
-
+    
         self.tabs.setTabEnabled(1, False)
         self.tabs.tabBar().setVisible(True)
-
+    
         self.config_tab_widget = config_tab_widget
         self.relations_tab_widget = relations_tab_widget
-
+    
         self.tabs.currentChanged.connect(self._on_tab_changed)
-
+    
         main_layout.addWidget(self.tabs)
-
+    
         self.setLayout(main_layout)
 
     def _on_tab_changed(self, index):

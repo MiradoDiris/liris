@@ -815,6 +815,102 @@ class GraphWidget(QtWidgets.QWidget):
             logger.error("❌ ÉCHEC update_graph - Lancement diagnostic...")
         self._diagnose_graph_display_issue()
 
+    def _diagnose_graph_display_issue(self):
+        """
+        Diagnostic complet des problèmes d'affichage du graphe
+        À ajouter dans la classe GraphWidget
+        """
+        logger.info("\n" + "="*80)
+        logger.info("🔍 DIAGNOSTIC AFFICHAGE GRAPHE")
+        logger.info("="*80)
+        
+        # 1. Vérifier l'état du widget
+        logger.info(f"Widget visible: {self.isVisible()}")
+        logger.info(f"Widget enabled: {self.isEnabled()}")
+        logger.info(f"Widget size: {self.size().width()}x{self.size().height()}")
+        
+        # 2. Vérifier pyvis
+        if not hasattr(self, 'network') or self.network is None:
+            logger.error("❌ self.network n'existe pas ou est None")
+            return
+        
+        logger.info(f"✅ Network object exists: {type(self.network)}")
+        
+        # 3. Vérifier les nœuds et arêtes
+        try:
+            nodes_count = len(self.network.nodes) if hasattr(self.network, 'nodes') else 0
+            edges_count = len(self.network.edges) if hasattr(self.network, 'edges') else 0
+            
+            logger.info(f"📊 Nœuds: {nodes_count}")
+            logger.info(f"📊 Arêtes: {edges_count}")
+            
+            if nodes_count == 0:
+                logger.warning("⚠️ Aucun nœud dans le graphe")
+            
+            # Afficher les premiers nœuds
+            if nodes_count > 0 and hasattr(self.network, 'nodes'):
+                logger.info("📋 Premiers nœuds:")
+                for i, node in enumerate(self.network.nodes[:3]):
+                    logger.info(f"   - Nœud {i+1}: {node}")
+            
+            # Afficher les premières arêtes
+            if edges_count > 0 and hasattr(self.network, 'edges'):
+                logger.info("📋 Premières arêtes:")
+                for i, edge in enumerate(self.network.edges[:3]):
+                    logger.info(f"   - Arête {i+1}: {edge}")
+                    
+        except Exception as e:
+            logger.error(f"❌ Erreur lors du comptage: {e}")
+        
+        # 4. Vérifier le QWebEngineView
+        if not hasattr(self, 'web_view') or self.web_view is None:
+            logger.error("❌ self.web_view n'existe pas ou est None")
+            return
+        
+        logger.info(f"✅ WebView exists: {type(self.web_view)}")
+        logger.info(f"WebView visible: {self.web_view.isVisible()}")
+        logger.info(f"WebView size: {self.web_view.size().width()}x{self.web_view.size().height()}")
+        
+        # 5. Vérifier l'URL chargée
+        try:
+            current_url = self.web_view.url().toString()
+            logger.info(f"📄 URL actuelle: {current_url}")
+            
+            if not current_url or current_url == "about:blank":
+                logger.warning("⚠️ Aucun contenu chargé dans WebView")
+        except Exception as e:
+            logger.error(f"❌ Erreur URL: {e}")
+        
+        # 6. Vérifier le fichier HTML temporaire
+        if hasattr(self, 'temp_html_path') and self.temp_html_path:
+            import os
+            if os.path.exists(self.temp_html_path):
+                file_size = os.path.getsize(self.temp_html_path)
+                logger.info(f"✅ Fichier HTML: {self.temp_html_path}")
+                logger.info(f"   Taille: {file_size} bytes")
+                
+                # Lire un extrait du fichier
+                try:
+                    with open(self.temp_html_path, 'r', encoding='utf-8') as f:
+                        content = f.read(500)  # Premiers 500 caractères
+                        logger.info(f"   Contenu (extrait): {content[:200]}...")
+                except Exception as e:
+                    logger.error(f"❌ Erreur lecture fichier: {e}")
+            else:
+                logger.error(f"❌ Fichier HTML introuvable: {self.temp_html_path}")
+        else:
+            logger.warning("⚠️ Pas de temp_html_path défini")
+        
+        # 7. Vérifier le layout
+        layout = self.layout()
+        if layout:
+            logger.info(f"✅ Layout exists: {type(layout)}")
+            logger.info(f"   Widget count: {layout.count()}")
+        else:
+            logger.error("❌ Pas de layout")
+        
+        logger.info("="*80 + "\n")
+
     def update_graph_with_hierarchical_relations(self, central_node: str, central_uid: str, 
                                            hierarchical_context: Dict, project_data: Dict, 
                                            append_mode: bool = False):
