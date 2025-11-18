@@ -21,6 +21,7 @@ from matplotlib.figure import Figure
 from ui.widgets.tabs.pythonSyntax_highlighter import PythonSyntaxHighlighter
 from utils.dgraph_connector import LirisDgraphConnector
 from utils.logger import logger
+from ui.localization.translator import tr
 
 
 class QueryCache:
@@ -506,7 +507,6 @@ class RelationImportWidget(QtWidgets.QWidget):
     
         return pos, node_orbits
 
-
     def _build_clean_graph(self, relations_list: List[Dict]) -> nx.DiGraph:
         """Construit un graphe NetworkX propre avec regroupement par type de relation + nœuds externes."""
         G = nx.DiGraph()
@@ -733,7 +733,6 @@ class RelationImportWidget(QtWidgets.QWidget):
             logger.info(f"   • {cat}: {count}")
 
         return G
-
 
     def _get_edge_color_by_category(self, category: str, rel_type: str = None) -> str:
         """
@@ -1356,7 +1355,6 @@ class RelationImportWidget(QtWidgets.QWidget):
 
         return extracted_code
 
-    
     def _validate_relations_format(self, relations_list: List[Dict]) -> List[Dict]:
         """
         ✅ NOUVELLE MÉTHODE : Valide et normalise le format des relations
@@ -2574,7 +2572,6 @@ class RelationImportWidget(QtWidgets.QWidget):
 
         self.canvas.mpl_connect('button_press_event', on_cluster_click)
 
-
     def _show_node_context_menu(self, node_uid, node_type, cluster_stats):
         """Menu contextuel clic droit."""
         if node_type == 'cluster':
@@ -3106,8 +3103,7 @@ class RelationImportWidget(QtWidgets.QWidget):
                 pos[node] *= 1.2  # plus de marge entre orbites
 
         return pos
-
-    
+  
     def _get_cluster_all_relations(self, cluster_uid, cluster_info):
         """✅ VERSION OPTIMISÉE : Une seule requête pour tout le cluster."""
         relations_list = []
@@ -3682,8 +3678,9 @@ class RelationImportWidget(QtWidgets.QWidget):
         ax.axis('off')
         self.canvas.draw()
 
-    def _show_progress(self, message: str, value: int):
-        """Affiche la barre de progression."""
+    def _show_progress(self, message_key: str, value: int, **kwargs):
+        """Affiche la barre de progression avec message traduit"""
+        message = tr(f"relation_import.progress.{message_key}", **kwargs)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(value)
         self.progress_bar.setFormat(f"{message} - {value}%")
@@ -3702,13 +3699,15 @@ class RelationImportWidget(QtWidgets.QWidget):
         QtWidgets.QApplication.processEvents()
 
     def _get_stylesheet(self):
-        """Stylesheet sobre moderne."""
+        """Stylesheet responsive avec gestion adaptative - ✅ TOUT EN BLANC."""
         return f"""
         QWidget {{
             background-color: {self.background_color};
             color: {self.text_color};
             font-family: 'Segoe UI', Arial, sans-serif;
         }}
+
+        /* Boutons responsive */
         QPushButton {{
             background-color: {self.primary_color};
             color: white;
@@ -3717,301 +3716,518 @@ class RelationImportWidget(QtWidgets.QWidget):
             border-radius: 4px;
             font-weight: 600;
             font-size: 12px;
+            min-height: 32px;
+            min-width: 80px;
         }}
         QPushButton:hover {{ background-color: {self.secondary_color}; }}
         QPushButton:disabled {{ background-color: #CCCCCC; color: #666666; }}
+
+        /* ComboBox responsive - ✅ FOND BLANC */
         QComboBox {{
             padding: 8px 12px;
             border: 2px solid #E0E0E0;
             border-radius: 6px;
-            background-color: #FFFFFF;
+            background-color: #FFFFFF;  /* ✅ BLANC */
             font-size: 13px;
             font-weight: 500;
             color: {self.text_color};
+            min-height: 32px;
+            min-width: 150px;
         }}
         QComboBox:focus {{ 
             border: 2px solid {self.primary_color}; 
-            background-color: #FAFAFA;
+            background-color: #FFFFFF;  /* ✅ RESTE BLANC au focus */
         }}
+        QComboBox::drop-down {{
+            border: none;
+            width: 25px;
+            background-color: transparent;  /* ✅ TRANSPARENT */
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: #FFFFFF;  /* ✅ Liste déroulante blanche */
+            selection-background-color: #E8F4F8;  /* ✅ Sélection claire */
+            selection-color: #1A1A1A;
+            border: 1px solid #E0E0E0;
+        }}
+
+        /* TreeWidget responsive - ✅ FOND BLANC */
         QTreeWidget {{
             border: 1px solid #E0E0E0;
             border-radius: 4px;
-            background-color: white;
+            background-color: #FFFFFF;  /* ✅ BLANC */
             padding: 3px;
+            min-width: 200px;
         }}
-        QTreeWidget::item {{ padding: 4px; }}
+        QTreeWidget::item {{ 
+            padding: 6px 4px;
+            min-height: 24px;
+            background-color: transparent;  /* ✅ TRANSPARENT par défaut */
+        }}
         QTreeWidget::item:selected {{
-            background-color: #E0E0E0;
-            color: #000000;
+            background-color: #E8F4F8;  /* ✅ Sélection claire */
+            color: #1A1A1A;
         }}
+        QTreeWidget::item:hover {{
+            background-color: #F5F5F5;  /* ✅ Hover très clair */
+        }}
+
+        /* ProgressBar responsive - ✅ FOND BLANC */
         QProgressBar {{
             border: 1px solid #E0E0E0;
             border-radius: 4px;
             text-align: center;
-            background-color: #FFFFFF;
+            background-color: #FFFFFF;  /* ✅ BLANC */
             padding: 1px;
-            height: 20px;
+            height: 24px;
+            min-width: 200px;
+            max-width: 400px;
             font-size: 10px;
             font-weight: 500;
+            color: #333333;
         }}
         QProgressBar::chunk {{
             background-color: {self.primary_color};
             border-radius: 3px;
         }}
+
+        /* Labels responsive - ✅ FOND TRANSPARENT/BLANC */
+        QLabel {{
+            font-size: 12px;
+            padding: 2px;
+            background-color: transparent;  /* ✅ TRANSPARENT (hérite du parent blanc) */
+            color: {self.text_color};
+        }}
+
+        /* Checkboxes responsive - ✅ FOND BLANC */
+        QCheckBox {{
+            font-size: 11px;
+            font-weight: 600;
+            color: #333333;
+            spacing: 8px;
+            padding: 4px;
+            background-color: transparent;  /* ✅ TRANSPARENT */
+        }}
+        QCheckBox::indicator {{
+            width: 18px;
+            height: 18px;
+            border: 2px solid #CCCCCC;
+            border-radius: 3px;
+            background: #FFFFFF;  /* ✅ BLANC */
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: #999999;
+            background: #FFFFFF;  /* ✅ RESTE BLANC */
+        }}
+        QCheckBox::indicator:checked {{
+            border: 2px solid #A23B2D;
+            background-color: #A23B2D;
+        }}
+
+        /* Splitter responsive */
+        QSplitter::handle {{
+            background-color: #E0E0E0;
+            width: 3px;
+        }}
+        QSplitter::handle:hover {{
+            background-color: #CCCCCC;
+        }}
+
+        /* ✅ NOUVEAU : Frame backgrounds (pour popups/dialogs) */
+        QFrame {{
+            background-color: #FFFFFF;
+        }}
+
+        /* ✅ NOUVEAU : TextEdit (pour affichage de code) */
+        QTextEdit {{
+            background-color: #FAFAFA;
+            color: #1A1A1A;
+            border: 1px solid #E0E0E0;
+            selection-background-color: #B3D7FF;
+            selection-color: #000000;
+        }}
+
+        /* ✅ NOUVEAU : ScrollBars (uniformes partout) */
+        QScrollBar:vertical {{
+            background: #F5F5F5;
+            width: 12px;
+            border: none;
+        }}
+        QScrollBar::handle:vertical {{
+            background: #C0C0C0;
+            border-radius: 6px;
+            min-height: 30px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background: #A0A0A0;
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0px;
+        }}
+
+        QScrollBar:horizontal {{
+            background: #F5F5F5;
+            height: 12px;
+            border: none;
+        }}
+        QScrollBar::handle:horizontal {{
+            background: #C0C0C0;
+            border-radius: 6px;
+            min-width: 30px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background: #A0A0A0;
+        }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            width: 0px;
+        }}
+
+        /* ✅ NOUVEAU : TabWidget (si utilisé) */
+        QTabWidget::pane {{
+            background-color: #FFFFFF;
+            border: 1px solid #E0E0E0;
+        }}
+        QTabBar::tab {{
+            background-color: #F5F5F5;
+            color: #666666;
+            padding: 8px 16px;
+            border: 1px solid #E0E0E0;
+            border-bottom: none;
+        }}
+        QTabBar::tab:selected {{
+            background-color: #FFFFFF;
+            color: #1A1A1A;
+        }}
+        QTabBar::tab:hover {{
+            background-color: #FAFAFA;
+        }}
         """
     
     def _init_ui(self):
-        """Interface unifiée avec support zoom - VERSION CORRIGÉE"""
+        """Interface responsive avec layouts adaptatifs."""
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(8)
     
-        header_layout = QtWidgets.QHBoxLayout()
+        # ===== HEADER FIXE =====
+        header_widget = QtWidgets.QWidget()
+        header_widget.setFixedHeight(50)  # HAUTEUR FIXE
+        header_layout = QtWidgets.QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
     
-        proj_label = QtWidgets.QLabel("Projet:")
+        # Label Projet (largeur fixe)
+        proj_label = QtWidgets.QLabel(tr("relation_import.project_label"))
         proj_label.setStyleSheet("font-weight: 600; font-size: 13px;")
+        proj_label.setFixedWidth(50)
         header_layout.addWidget(proj_label)
     
+        # ComboBox Projet
         self.project_combo = QtWidgets.QComboBox()
-        self.project_combo.setMinimumWidth(200)
+        self.project_combo.setFixedWidth(200)
+        self.project_combo.setFixedHeight(32)
         self.project_combo.currentIndexChanged.connect(self._on_project_selected)
         header_layout.addWidget(self.project_combo)
     
-        self.clear_cache_btn = QtWidgets.QPushButton(qta.icon('fa5s.trash', color='white'), " Vider Cache")
-        self.clear_cache_btn.setMaximumWidth(120)
+        # Bouton Clear Cache
+        self.clear_cache_btn = QtWidgets.QPushButton(
+            qta.icon('fa5s.trash', color='white'), 
+            " " + tr("relation_import.clear_cache")
+        )
+        self.clear_cache_btn.setFixedWidth(120)
+        self.clear_cache_btn.setFixedHeight(32)
         self.clear_cache_btn.clicked.connect(self._clear_cache)
         header_layout.addWidget(self.clear_cache_btn)
     
-        self.back_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-left', color='white'), " Retour")
-        self.back_btn.setMaximumWidth(100)
+        # Bouton Back
+        self.back_btn = QtWidgets.QPushButton(
+            qta.icon('fa5s.arrow-left', color='white'), 
+            " " + tr("relation_import.back")
+        )
+        self.back_btn.setFixedWidth(100)
+        self.back_btn.setFixedHeight(32)
         self.back_btn.clicked.connect(self._navigate_back)
         self.back_btn.setEnabled(False)
         header_layout.addWidget(self.back_btn)
     
-        header_layout.addStretch()
+        # Container fixe pour info + progress
+        info_progress_widget = QtWidgets.QWidget()
+        info_progress_widget.setFixedWidth(300)
+        info_progress_layout = QtWidgets.QVBoxLayout(info_progress_widget)
+        info_progress_layout.setContentsMargins(0, 0, 0, 0)
+        info_progress_layout.setSpacing(4)
     
         self.cache_info_label = QtWidgets.QLabel(self.query_cache.get_stats())
         self.cache_info_label.setStyleSheet("font-size: 10px; color: #666666;")
-        header_layout.addWidget(self.cache_info_label)
+        self.cache_info_label.setFixedHeight(16)
+        self.cache_info_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        info_progress_layout.addWidget(self.cache_info_label)
     
         self.progress_bar = QtWidgets.QProgressBar()
-        self.progress_bar.setMaximumWidth(250)
+        self.progress_bar.setFixedHeight(20)
         self.progress_bar.setVisible(False)
-        header_layout.addWidget(self.progress_bar)
+        info_progress_layout.addWidget(self.progress_bar)
     
-        main_layout.addLayout(header_layout)
+        header_layout.addWidget(info_progress_widget)
+        header_layout.addStretch()
     
+        main_layout.addWidget(header_widget)
+    
+        # 👇👇 margin-bottom du header
+        main_layout.addSpacing(6)
+    
+        # ===== SPLITTER =====
         splitter = QtWidgets.QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(3)
+        splitter.setChildrenCollapsible(True)
     
+        # LEFT PANEL
         left_widget = QtWidgets.QWidget()
+        left_widget.setMinimumWidth(200)
+        left_widget.setMaximumWidth(400)
         left_layout = QtWidgets.QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
     
-        tree_label = QtWidgets.QLabel("Structure du Projet")
+        tree_label = QtWidgets.QLabel(tr("relation_import.structure_label"))
         tree_label.setStyleSheet("font-weight: 600; font-size: 12px;")
         left_layout.addWidget(tree_label)
     
         self.tree_widget = QtWidgets.QTreeWidget()
-        self.tree_widget.setHeaderLabel("Éléments")
+        self.tree_widget.setHeaderLabel(tr("relation_import.elements"))
         self.tree_widget.itemSelectionChanged.connect(self._on_tree_selection)
-        self.tree_widget.setMinimumWidth(250)
+        self.tree_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         left_layout.addWidget(self.tree_widget)
     
         splitter.addWidget(left_widget)
     
+        # RIGHT PANEL
         right_widget = QtWidgets.QWidget()
+        right_widget.setMinimumWidth(400)
         right_layout = QtWidgets.QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
     
-        toolbar_layout = QtWidgets.QHBoxLayout()
+        # ===== TOOLBAR =====
+        toolbar_widget = QtWidgets.QWidget()
+        toolbar_layout = QtWidgets.QHBoxLayout(toolbar_widget)
+        toolbar_layout.setSpacing(8)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
     
-        level_label = QtWidgets.QLabel("Niveau:")
+        # Level combo
+        level_label = QtWidgets.QLabel(tr("relation_import.level_label"))
         level_label.setStyleSheet("font-weight: 600; font-size: 11px;")
         toolbar_layout.addWidget(level_label)
     
         self.level_combo = QtWidgets.QComboBox()
-        self.level_combo.setMinimumWidth(200)
-        self.level_combo.addItem(
-            qta.icon('fa5s.th', color=self.primary_color), 
-            "Vue Clusters (Navigation)", 
-            0
-        )
-        self.level_combo.addItem(
-            qta.icon('fa5s.project-diagram', color=self.primary_color), 
-            "Relations directes", 
-            1
-        )
-        self.level_combo.setCurrentIndex(0)  # Par défaut : vue clusters
+        self.level_combo.setMinimumWidth(160)
+        self.level_combo.setMaximumWidth(240)
+        self.level_combo.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
+        self.level_combo.addItem(qta.icon('fa5s.th', color=self.primary_color), tr("relation_import.view_clusters"), 0)
+        self.level_combo.addItem(qta.icon('fa5s.project-diagram', color=self.primary_color), tr("relation_import.direct_relations"), 1)
+        self.level_combo.setCurrentIndex(0)
         self.level_combo.currentIndexChanged.connect(self._on_level_changed)
         toolbar_layout.addWidget(self.level_combo)
     
-        toolbar_layout.addSpacing(20)
-    
-        zoom_label = QtWidgets.QLabel("Zoom:")
-        zoom_label.setStyleSheet("font-weight: 600; font-size: 11px;")
-        toolbar_layout.addWidget(zoom_label)
-    
-        # Boutons de zoom avec fond gris clair et icône noire
-        self.zoom_in_btn = QtWidgets.QPushButton(qta.icon('fa5s.search-plus', color='black'), "")
-        self.zoom_in_btn.setStyleSheet("background-color: #E6E6E6; border: 1px solid #CCCCCC; border-radius: 4px;")
-        self.zoom_in_btn.setMaximumWidth(40)
-        self.zoom_in_btn.setToolTip("Zoom avant")
-        self.zoom_in_btn.clicked.connect(self._zoom_in)
-        toolbar_layout.addWidget(self.zoom_in_btn)
-    
-        self.zoom_out_btn = QtWidgets.QPushButton(qta.icon('fa5s.search-minus', color='black'), "")
-        self.zoom_out_btn.setStyleSheet("background-color: #E6E6E6; border: 1px solid #CCCCCC; border-radius: 4px;")
-        self.zoom_out_btn.setMaximumWidth(40)
-        self.zoom_out_btn.setToolTip("Zoom arrière")
-        self.zoom_out_btn.clicked.connect(self._zoom_out)
-        toolbar_layout.addWidget(self.zoom_out_btn)
-    
-        self.zoom_reset_btn = QtWidgets.QPushButton(qta.icon('fa5s.sync', color='black'), "")
-        self.zoom_reset_btn.setStyleSheet("background-color: #E6E6E6; border: 1px solid #CCCCCC; border-radius: 4px;")
-        self.zoom_reset_btn.setMaximumWidth(40)
-        self.zoom_reset_btn.setToolTip("Réinitialiser zoom")
-        self.zoom_reset_btn.clicked.connect(self._zoom_reset)
-        toolbar_layout.addWidget(self.zoom_reset_btn)
-        
         toolbar_layout.addSpacing(10)
     
-        nav_label = QtWidgets.QLabel("Navigation:")
-        nav_label.setStyleSheet("font-weight: 600; font-size: 11px;")
-        toolbar_layout.addWidget(nav_label)
-    
-        self.pan_up_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-up', color='black'), "")
-        self.pan_up_btn.setStyleSheet("background-color: #E6E6E6; border: 1px solid #CCCCCC; border-radius: 4px;")
-        self.pan_up_btn.setMaximumWidth(40)
-        self.pan_up_btn.setToolTip("Déplacer vers le haut")
-        self.pan_up_btn.clicked.connect(lambda: self._pan_view(0, 50))
-        toolbar_layout.addWidget(self.pan_up_btn)
-    
-        self.pan_down_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-down', color='black'), "")
-        self.pan_down_btn.setStyleSheet("background-color: #E6E6E6; border: 1px solid #CCCCCC; border-radius: 4px;")
-        self.pan_down_btn.setMaximumWidth(40)
-        self.pan_down_btn.setToolTip("Déplacer vers le bas")
-        self.pan_down_btn.clicked.connect(lambda: self._pan_view(0, -50))
-        toolbar_layout.addWidget(self.pan_down_btn)
-    
-        self.pan_left_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-left', color='black'), "")
-        self.pan_left_btn.setStyleSheet("background-color: #E6E6E6; border: 1px solid #CCCCCC; border-radius: 4px;")
-        self.pan_left_btn.setMaximumWidth(40)
-        self.pan_left_btn.setToolTip("Déplacer vers la gauche")
-        self.pan_left_btn.clicked.connect(lambda: self._pan_view(-50, 0))
-        toolbar_layout.addWidget(self.pan_left_btn)
-    
-        self.pan_right_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-right', color='black'), "")
-        self.pan_right_btn.setStyleSheet("background-color: #E6E6E6; border: 1px solid #CCCCCC; border-radius: 4px;")
-        self.pan_right_btn.setMaximumWidth(40)
-        self.pan_right_btn.setToolTip("Déplacer vers la droite")
-        self.pan_right_btn.clicked.connect(lambda: self._pan_view(50, 0))
-        toolbar_layout.addWidget(self.pan_right_btn)
-    
+        # 👇👇 stretch déplacé ici → zoom et navigation vont complètement à droite
         toolbar_layout.addStretch()
     
-        right_layout.addLayout(toolbar_layout)
+        # Zoom controls
+        zoom_widget = QtWidgets.QWidget()
+        zoom_layout = QtWidgets.QHBoxLayout(zoom_widget)
+        zoom_layout.setSpacing(4)
+        zoom_layout.setContentsMargins(0, 0, 0, 0)
     
-        # ✅ NOUVELLE LIGNE EN BAS POUR LES CHECKBOXES
+        zoom_label = QtWidgets.QLabel(tr("relation_import.zoom"))
+        zoom_label.setStyleSheet("font-weight: 600; font-size: 11px;")
+        zoom_layout.addWidget(zoom_label)
+    
+        btn_style = """
+            QPushButton {
+                background-color: #E6E6E6; 
+                border: 1px solid #CCCCCC; 
+                border-radius: 4px;
+                min-width: 32px;
+                max-width: 32px;
+                min-height: 32px;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background-color: #D0D0D0;
+            }
+        """
+    
+        self.zoom_in_btn = QtWidgets.QPushButton(qta.icon('fa5s.search-plus', color='black'), "")
+        self.zoom_in_btn.setStyleSheet(btn_style)
+        self.zoom_in_btn.clicked.connect(self._zoom_in)
+        zoom_layout.addWidget(self.zoom_in_btn)
+    
+        self.zoom_out_btn = QtWidgets.QPushButton(qta.icon('fa5s.search-minus', color='black'), "")
+        self.zoom_out_btn.setStyleSheet(btn_style)
+        self.zoom_out_btn.clicked.connect(self._zoom_out)
+        zoom_layout.addWidget(self.zoom_out_btn)
+    
+        self.zoom_reset_btn = QtWidgets.QPushButton(qta.icon('fa5s.sync', color='black'), "")
+        self.zoom_reset_btn.setStyleSheet(btn_style)
+        self.zoom_reset_btn.clicked.connect(self._zoom_reset)
+        zoom_layout.addWidget(self.zoom_reset_btn)
+    
+        toolbar_layout.addWidget(zoom_widget)
+    
+        # Navigation controls
+        nav_widget = QtWidgets.QWidget()
+        nav_layout = QtWidgets.QHBoxLayout(nav_widget)
+        nav_layout.setSpacing(4)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+    
+        nav_label = QtWidgets.QLabel(tr("relation_import.navigation"))
+        nav_label.setStyleSheet("font-weight: 600; font-size: 11px;")
+        nav_layout.addWidget(nav_label)
+    
+        self.pan_up_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-up', color='black'), "")
+        self.pan_up_btn.setStyleSheet(btn_style)
+        self.pan_up_btn.clicked.connect(lambda: self._pan_view(0, 50))
+        nav_layout.addWidget(self.pan_up_btn)
+    
+        self.pan_down_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-down', color='black'), "")
+        self.pan_down_btn.setStyleSheet(btn_style)
+        self.pan_down_btn.clicked.connect(lambda: self._pan_view(0, -50))
+        nav_layout.addWidget(self.pan_down_btn)
+    
+        self.pan_left_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-left', color='black'), "")
+        self.pan_left_btn.setStyleSheet(btn_style)
+        self.pan_left_btn.clicked.connect(lambda: self._pan_view(-50, 0))
+        nav_layout.addWidget(self.pan_left_btn)
+    
+        self.pan_right_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-right', color='black'), "")
+        self.pan_right_btn.setStyleSheet(btn_style)
+        self.pan_right_btn.clicked.connect(lambda: self._pan_view(50, 0))
+        nav_layout.addWidget(self.pan_right_btn)
+    
+        toolbar_layout.addWidget(nav_widget)
+    
+        right_layout.addWidget(toolbar_widget)
+    
+        # CHECKBOXES
         checkbox_layout = QtWidgets.QHBoxLayout()
         checkbox_layout.setSpacing(15)
         checkbox_layout.setContentsMargins(0, 5, 0, 5)
     
-       # ✅ CHECKBOX 1 : Relations internes
-        self.show_internal_relations_cb = QtWidgets.QCheckBox("Appels et dépendances")
-        self.show_internal_relations_cb.setToolTip(
-            "Afficher les appels entre fonctions/méthodes\n"
-            "au sein du même fichier :\n"
-            "• Fonction → Fonction\n"
-            "• Méthode → Méthode\n"
-            "• Classe → Méthode\n\n"
-            "⚠️ Nécessite que les relations aient été\n"
-            "analysées avec intraFile=true dans Dgraph"
-        )
-        self.show_internal_relations_cb.setStyleSheet("""
-            QCheckBox {
-                font-size: 10px;
-                font-weight: 600;
-                color: #333333;
-                spacing: 8px;
-            }
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                border: 2px solid #CCCCCC;
-                border-radius: 3px;
-                background: #FFFFFF;
-            }
-            QCheckBox::indicator:hover {
-                border-color: #999999;
-            }
-            QCheckBox::indicator:checked {
-                border: 2px solid #A23B2D;
-                background-color: #A23B2D;
-                image: url(:/qt-project.org/styles/commonstyle/images/checkbox_checked.png);
-            }
-            QCheckBox::indicator:unchecked {
-                image: none;
-            }
-        """)
+        self.show_internal_relations_cb = QtWidgets.QCheckBox(tr("relation_import.interdependence"))
+        self.show_internal_relations_cb.setStyleSheet(self._get_checkbox_style())
         self.show_internal_relations_cb.setChecked(False)
         self.show_internal_relations_cb.stateChanged.connect(self._on_internal_relations_changed)
         checkbox_layout.addWidget(self.show_internal_relations_cb)
-        
-        # ✅ CHECKBOX 2 : Origines des nœuds
-        self.show_node_origins_cb = QtWidgets.QCheckBox("Afficher origines nœuds")
-        self.show_node_origins_cb.setToolTip(
-            "Afficher le chemin source des nœuds\n"
-            "(path ou nom de fichier parent)\n"
-            "en bas à droite du graphe"
-        )
-        self.show_node_origins_cb.setStyleSheet("""
+    
+        self.show_node_origins_cb = QtWidgets.QCheckBox(tr("relation_import.show_node_origins"))
+        self.show_node_origins_cb.setStyleSheet(self._get_checkbox_style())
+        self.show_node_origins_cb.setChecked(False)
+        self.show_node_origins_cb.stateChanged.connect(self._on_node_origins_changed)
+        checkbox_layout.addWidget(self.show_node_origins_cb)
+    
+        checkbox_layout.addStretch()
+        right_layout.addLayout(checkbox_layout)
+    
+        # CANVAS
+        self.figure = Figure(figsize=(10, 8), facecolor='white', tight_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.setStyleSheet("background: white; border: 1px solid #E0E0E0; border-radius: 4px;")
+        self.canvas.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        self.canvas.setMinimumSize(400, 400)
+        right_layout.addWidget(self.canvas)
+    
+        splitter.addWidget(right_widget)
+    
+        # Tailles proportionnelles
+        splitter.setSizes([250, 800])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+    
+        main_layout.addWidget(splitter)
+    
+        # Initialisation
+        self.current_zoom = 1.0
+        self.zoom_step = 0.2
+
+    def resizeEvent(self, event):
+        """Gère le redimensionnement de la fenêtre."""
+        super().resizeEvent(event)
+
+        # Ajuster l'affichage selon la largeur
+        width = self.width()
+
+        if width < 1024:  # Petit écran
+            # Masquer certains éléments non essentiels
+            if hasattr(self, 'cache_info_label'):
+                self.cache_info_label.setVisible(False)
+        else:
+            if hasattr(self, 'cache_info_label'):
+                self.cache_info_label.setVisible(True)
+
+        # Redessiner le graphe si nécessaire
+        if hasattr(self, 'canvas') and hasattr(self, 'current_graph'):
+            if self.current_graph and len(self.current_graph.nodes()) > 0:
+                self.canvas.draw_idle()
+
+    def _adjust_ui_for_size(self):
+        """Ajuste l'UI selon la taille de la fenêtre."""
+        width = self.width()
+        height = self.height()
+
+        # Adapter les tailles de police
+        if width < 1024:
+            font_scale = 0.9
+        elif width < 1280:
+            font_scale = 1.0
+        else:
+            font_scale = 1.1
+
+        # Adapter le graphe si nécessaire
+        if hasattr(self, 'graph_data') and self.graph_data:
+            # Recalculer les dimensions de texte
+            num_nodes = self.graph_data.get('num_nodes', 0)
+
+            if width < 1024:
+                self.graph_data['text_width'] = 4.5
+                self.graph_data['text_height'] = 1.2
+                self.graph_data['font_size'] = 7
+            elif width < 1440:
+                self.graph_data['text_width'] = 5.0
+                self.graph_data['text_height'] = 1.3
+                self.graph_data['font_size'] = 8
+            else:
+                self.graph_data['text_width'] = 5.5
+                self.graph_data['text_height'] = 1.4
+                self.graph_data['font_size'] = 9
+
+    def _get_checkbox_style(self):
+        """Style responsive pour les checkboxes."""
+        return """
             QCheckBox {
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: 600;
                 color: #333333;
                 spacing: 8px;
+                padding: 4px 8px;
             }
             QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
+                width: 18px;
+                height: 18px;
                 border: 2px solid #CCCCCC;
                 border-radius: 3px;
                 background: #FFFFFF;
             }
             QCheckBox::indicator:hover {
                 border-color: #999999;
+                background: #F8F8F8;
             }
             QCheckBox::indicator:checked {
                 border: 2px solid #A23B2D;
                 background-color: #A23B2D;
-                image: url(:/qt-project.org/styles/commonstyle/images/checkbox_checked.png);
             }
-            QCheckBox::indicator:unchecked {
-                image: none;
+            QCheckBox::indicator:checked:hover {
+                background-color: #8B2E1F;
             }
-        """)
-        self.show_node_origins_cb.setChecked(False)
-        self.show_node_origins_cb.stateChanged.connect(self._on_node_origins_changed)
-        checkbox_layout.addWidget(self.show_node_origins_cb)
-
-    
-        checkbox_layout.addStretch()
-    
-        right_layout.addLayout(checkbox_layout)
-    
-        self.figure = Figure(figsize=(10, 8), facecolor='white', tight_layout=True)
-        self.canvas = FigureCanvas(self.figure)
-        self.canvas.setStyleSheet("background: white; border: 1px solid #E0E0E0; border-radius: 4px;")
-    
-        right_layout.addWidget(self.canvas)
-    
-        splitter.addWidget(right_widget)
-        splitter.setSizes([250, 800])
-    
-        main_layout.addWidget(splitter)
-    
-        self.current_zoom = 1.0
-        self.zoom_step = 0.2
+        """
 
     def _format_node_display_name(self, node_name: str, node_type: str = None) -> str:
 
@@ -4430,6 +4646,12 @@ class RelationImportWidget(QtWidgets.QWidget):
         filename = os.path.basename(path)
         
         return filename if filename else ""
+    
+    def _show_error(self, title_key: str, message_key: str, **kwargs):
+        """Affiche une erreur avec messages traduits"""
+        title = tr(f"relation_import.{title_key}")
+        message = tr(f"relation_import.errors.{message_key}", **kwargs)
+        QtWidgets.QMessageBox.critical(self, title, message)
 
     def _add_intra_file_relations(self):
         """✅ CORRIGÉ : Ajoute TOUTES les relations d'appels + CRÉE les nœuds manquants."""
@@ -4766,7 +4988,7 @@ class RelationImportWidget(QtWidgets.QWidget):
                 message += f"🆕 {nodes_created_count} nouveaux nœuds créés\n"
 
             message += f"\nExemples :\n" + "\n".join(examples) + "\n\n"
-            message += f"💜 INTRA = violet | 🟦 INTER = bleu cyan"
+            message += f" INTRA = violet | 🟦 INTER = bleu cyan"
 
             QtWidgets.QMessageBox.information(
                 self,
@@ -4860,42 +5082,45 @@ class RelationImportWidget(QtWidgets.QWidget):
         return None
 
     def _on_internal_relations_changed(self, state):
-        """✅ Gère l'affichage/masquage des relations internes du code."""
+        """✅ CORRIGÉ : Gère l'affichage/masquage des relations internes du code."""
         is_checked = (state == Qt.Checked)
-
+    
         logger.info(f"🔄 Relations internes: {'ACTIVÉES' if is_checked else 'DÉSACTIVÉES'}")
-
-        if not self.current_graph or not self.current_relations:
+    
+        if not self.current_graph:
             logger.warning("⚠️ Aucun graphe actif")
             return
-
+    
         if is_checked:
-            # ✅ AJOUTER les relations intra-fichier aux relations existantes
+            # ✅ AJOUTER les relations intra-fichier
             self._add_intra_file_relations()
         else:
-            # ❌ RETIRER les relations intra-fichier
-            self._remove_intra_file_relations()
-
-        # ✅ CORRECTION : Redessiner COMPLÈTEMENT le graphe (pour afficher les nouveaux nœuds)
-        logger.info(f"🎨 Reconstruction complète du graphe avec {len(self.current_relations)} relations")
-
+            # ✅ FILTRER TEMPORAIREMENT sans modifier current_relations
+            # (pour permettre le re-cochage)
+            relations_filtered = [
+                rel for rel in self.current_relations
+                if rel.get('category') != 'intra_file' and not rel.get('intraFile', False)
+            ]
+    
+            logger.info(f"🗑️ {len(self.current_relations) - len(relations_filtered)} relations intra-fichier masquées")
+    
+            # ✅ Redessiner avec relations filtrées (SANS modifier current_relations)
+            self.figure.clear()
+            G = self._build_clean_graph(relations_filtered)
+            self.current_graph = G
+            self._draw_graph(G)
+    
+            self._update_status(
+                f"Relations internes: Masquées ({len(relations_filtered)} relations affichées)"
+            )
+            return
+    
+        # ✅ Si cochage : redessiner avec TOUTES les relations
         self.figure.clear()
-
-        # ✅ IMPORTANT : Reconstruire le graphe depuis TOUTES les relations
-        # (y compris celles avec les nouveaux nœuds)
         G = self._build_clean_graph(self.current_relations)
         self.current_graph = G
-
-        # ✅ Vérifier que les nouveaux nœuds sont bien dans le graphe
-        logger.info(f"📊 Graphe reconstruit : {len(G.nodes())} nœuds, {len(G.edges())} arêtes")
-
-        # ✅ Afficher les nœuds pour debug
-        for node in G.nodes():
-            node_type = G.nodes[node].get('node_type', 'unknown')
-            logger.debug(f"   • {node} (type={node_type})")
-
         self._draw_graph(G)
-
+    
         self._update_status(
             f"Relations internes: {'Affichées' if is_checked else 'Masquées'} "
             f"({len(self.current_relations)} relations totales)"
@@ -5191,8 +5416,9 @@ class RelationImportWidget(QtWidgets.QWidget):
         """Met à jour l'affichage des infos du cache."""
         self.cache_info_label.setText(self.query_cache.get_stats())
 
-    def _update_status(self, message):
-        """Met à jour le statut (logs uniquement)."""
+    def _update_status(self, message_key: str, **kwargs):
+        """Met à jour le statut avec message traduit"""
+        message = tr(f"relation_import.status.{message_key}", **kwargs)
         logger.info(message)
         QtWidgets.QApplication.processEvents()
     
@@ -8601,13 +8827,32 @@ class RelationImportWidget(QtWidgets.QWidget):
         """
 
         def get_node_dimensions(node_name):
-            """Calcule dimensions basées sur le texte réel"""
-            max_chars = self.graph_data.get('max_chars', 22)
+            """Calcule largeur réelle basée sur longueur du texte avec marge"""
+            # ✅ 1. Vérifier cache d'abord
+            if hasattr(self, 'graph_data') and self.graph_data and 'node_dimensions' in self.graph_data:
+                if node_name in self.graph_data['node_dimensions']:
+                    return self.graph_data['node_dimensions'][node_name]
+            
+            # ✅ 2. Fallback avec valeurs AUGMENTÉES
+            if num_nodes <= 15:
+                max_chars = 35        # ✅ Augmenté de 30 à 35
+                base_width = 10.0     # ✅ Augmenté de 8.0 à 10.0
+                height = 2.8          # ✅ Augmenté de 2.5 à 2.8
+            elif num_nodes <= 30:
+                max_chars = 32        # ✅ Augmenté de 28 à 32
+                base_width = 9.0      # ✅ Augmenté de 7.5 à 9.0
+                height = 2.5          # ✅ Augmenté de 2.2 à 2.5
+            else:
+                max_chars = 28        # ✅ Augmenté de 25 à 28
+                base_width = 8.0      # ✅ Augmenté de 7.0 à 8.0
+                height = 2.2          # ✅ Augmenté de 2.0 à 2.2
+            
             display_name = node_name[:max_chars] + '..' if len(node_name) > max_chars else node_name
-
-            # Largeur proportionnelle au texte (approximation)
-            width = len(display_name) * 0.17 + 1.0
-            height = 1.0
+            
+            # ✅ 3. Calcul avec facteur de sécurité
+            char_width = base_width / max_chars
+            width = len(display_name) * char_width * 1.2 + 1.5  # ✅ +20% + padding augmenté
+            
             return width, height
 
         # ✅ Distance minimale VARIABLE selon densité

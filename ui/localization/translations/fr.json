@@ -164,8 +164,8 @@
   "context_label": "Contexte (Fonctionnalité souhaitée)",
   "perimeter_scope": "Périmètre d'implémentation",
   "generated_code": "Code Généré",
-  "select_project": "Sélectionnez un projet...",
-  "select_platform": "Sélectionnez une plateforme IA",
+  "select_project": "Projet",
+  "select_platform": "Sélectionnez",
   "elements_selected": "élément(s) sélectionné(s)",
   "level": "Niveau",
   "selected_elements": "Éléments sélectionnés:",
@@ -753,5 +753,177 @@
     "tab_config_label": "Configuration",
     "tab_relations_number": "2",
     "tab_relations_label": "Relations des Importations"
+  },
+  "relation_import": {
+    "title": "Relations et Imports",
+    "project_label": "Projet:",
+    "select_project": "Sélectionnez un projet...",
+    "clear_cache": "Vider Cache",
+    "back": "Retour",
+    "level_label": "Niveau:",
+    "view_clusters": "Vue Clusters (Navigation)",
+    "direct_relations": "Relations directes",
+    "zoom": "Zoom:",
+    "navigation": "Navigation:",
+    "interdependence": "Interdépendance",
+    "show_node_origins": "Afficher origines nœuds",
+    "structure_label": "Structure du Projet",
+    "elements": "Éléments",
+    "isolated_files": "📦 Fichiers isolés",
+    
+    "tooltips": {
+      "interdependence": "Afficher les appels entre fonctions/méthodes\nau sein du même fichier :\n• Fonction → Fonction\n• Méthode → Méthode\n• Classe → Méthode\n\n⚠️ Nécessite que les relations aient été\nanalysées avec intraFile=true dans Dgraph",
+      "show_origins": "Afficher le chemin source des nœuds\n(path ou nom de fichier parent)\nen bas à droite du graphe",
+      "zoom_in": "Zoom avant",
+      "zoom_out": "Zoom arrière",
+      "reset_zoom": "Réinitialiser zoom",
+      "move_up": "Déplacer vers le haut",
+      "move_down": "Déplacer vers le bas",
+      "move_left": "Déplacer vers la gauche",
+      "move_right": "Déplacer vers la droite"
+    },
+    
+    "messages": {
+      "no_project": "Sélectionnez un projet",
+      "no_data": "(Aucune donnée disponible)",
+      "select_node": "Sélectionnez un nœud dans l'arbre",
+      "no_relations": "Aucune relation à afficher",
+      "single_node": "Un seul nœud - Aucune relation",
+      "loading_relations": "Chargement des relations\nde '{name}'...",
+      "no_relations_found": "Aucune relation trouvée\npour '{name}'",
+      "empty_cluster": "Cluster vide\n'{name}'",
+      "no_files": "Aucun fichier dans le cluster\n'{name}'",
+      "cluster_not_found": "Cluster '{name}' introuvable",
+      "navigation_error": "Erreur de navigation",
+      "previous_state_empty": "État précédent sans relations",
+      "click_instruction": "💡 Double-cliquez sur un nœud pour explorer les nœuds",
+      "click_file": "💡 Double-cliquez sur un fichier pour voir ses dépendances externes",
+      "code_unavailable": "Code source non disponible",
+      "cache_cleared": "Le cache a été vidé avec succès!",
+      "cache": "Cache"
+    },
+    
+    "progress": {
+      "loading_projects": "Chargement des projets...",
+      "loading_mappings": "Chargement des mappings...",
+      "loading_hierarchy": "Chargement de la hiérarchie...",
+      "building_tree": "Construction de l'arbre...",
+      "loading_global": "Chargement des relations globales...",
+      "processing_custom": "Traitement des relations custom...",
+      "processing_hierarchy": "Traitement des relations hiérarchiques...",
+      "loading_level1": "Chargement relations niveau 1...",
+      "outgoing": "Relations sortantes...",
+      "parsed": "Relations parsées...",
+      "incoming": "Relations entrantes...",
+      "hierarchy": "Hiérarchie...",
+      "additional": "Relations additionnelles...",
+      "finalizing": "Finalisation...",
+      "retrieving_code": "Récupération du code de '{name}'...",
+      "analyzing_code": "Analyse du code...",
+      "preparing_display": "Préparation de l'affichage...",
+      "opening_popup": "Ouverture du popup..."
+    },
+    
+    "status": {
+      "project_selected": "Projet sélectionné: {name}",
+      "projects_available": "{count} projet(s) disponible(s)",
+      "error": "Erreur: {message}",
+      "cache_cleared": "Cache vidé",
+      "relations_displayed": "Relations directes : {count} relations affichées",
+      "cluster_view": "Vue clusters : {count} clusters affichés",
+      "cluster_files": "Cluster '{name}' : {count} fichiers",
+      "file_dependencies": "Fichier '{name}' : {count} dépendances",
+      "internal_shown": "Relations internes: Affichées ({count} relations totales)",
+      "internal_hidden": "Relations internes: Masquées ({count} relations totales)",
+      "origins_shown": "Origines nœuds: Affichées",
+      "origins_hidden": "Origines nœuds: Masquées",
+      "navigation": "Navigation : {name} - {count} relations",
+      "back_to": "Retour à : {name}",
+      "back_to_clusters": "Retour à la vue clusters"
+    },
+    
+    "errors": {
+      "no_dgraph": "Erreur: Connexion Dgraph non disponible",
+      "no_projects": "Aucun projet trouvé",
+      "loading_error": "Erreur chargement projets: {error}",
+      "node_uid_missing": "UID du nœud sélectionné est None/vide!",
+      "node_name_invalid": "Nom du nœud normalisé est None/vide!",
+      "uid_missing": "Erreur: UID manquant pour {name}",
+      "invalid_name": "Erreur: Nom invalide",
+      "node_not_found": "Nœud introuvable",
+      "uid_not_found": "Impossible de trouver l'UID pour '{name}'.\nSélectionnez le nœud dans l'arbre à gauche pour l'explorer.",
+      "loading_relations_error": "Erreur lors du chargement des relations :\n{error}",
+      "code_retrieval_error": "Impossible de récupérer l'UID de la fonction '{name}'",
+      "code_empty": "Le code de '{name}' est vide ou non disponible.\n\nFichier : {file}\nLigne : {line}\n\nVérifiez que le parsing du code source a bien été effectué.",
+      "code_display_error": "Erreur lors de l'affichage du code :\n{error}\n\nConsultez les logs pour plus de détails.",
+      "origins_error": "Erreur: {error}"
+    },
+    
+    "dialogs": {
+      "cluster_details": "Détails du cluster",
+      "cluster_empty": "Cluster vide",
+      "cluster_empty_message": "Le cluster '{name}' ne contient aucun fichier.",
+      "no_relations": "Aucune relation",
+      "no_calls_detected": "Aucun appel détecté pour les nœuds affichés.",
+      "relations_loaded": "Relations chargées",
+      "calls_added": "✅ {count} appels ajoutés !\n\n📄 {name}\n📊 Total : {total} relations\n🔹 INTRA : {intra} | INTER : {inter}\n\nExemples :\n{examples}\n\n🟣 INTRA = violet | 🟦 INTER = bleu cyan",
+      "code_title": "Code : {name}",
+      "code_copied": "Code copié",
+      "code_copied_message": "Le code a été copié dans le presse-papiers !",
+      "close": "Fermer",
+      "copy": "Copier",
+      "copied": "Copié !",
+      "node_details": "Détails",
+      "code_unavailable": "Code non disponible",
+      "code_unavailable_message": "Impossible de récupérer le code de '{name}'\n\nCauses possibles :\n• La fonction n'existe pas dans Dgraph\n• Le champ 'codeContent' ou 'fileContents' est vide\n• Les relations sourcePath/targetPath sont manquantes\n\nUID recherché : {uid}",
+      "code_empty_title": "Code vide"
+    },
+    
+    "legends": {
+      "relation_types": "Types de relations",
+      "more_types": "... +{count} types",
+      "project": "Projet : {name} ({count} clusters)",
+      "cluster": "🗂️ Cluster : {name} ({count} fichiers)",
+      "stats": "{files} fichiers  -  {elements} éléments"
+    },
+    
+    "node_types": {
+      "class": "Classe",
+      "function": "Fonction",
+      "method": "Méthode",
+      "variable": "Variable",
+      "file": "Fichier",
+      "folder": "Dossier",
+      "cluster": "Cluster",
+      "project": "Projet",
+      "external": "Externe",
+      "unknown": "Inconnu"
+    },
+    
+    "relation_types": {
+      "parent": "Parent",
+      "child": "Enfant",
+      "contains": "Contient",
+      "belongs_to": "Appartient à",
+      "calls": "Appelle",
+      "called_by": "Appelé par",
+      "uses": "Utilise",
+      "used_by": "Utilisé par",
+      "imports": "Importe",
+      "imported_by": "Importé par",
+      "implements": "Implémente",
+      "extends": "Étend",
+      "inherits": "Hérite",
+      "relation": "Relation"
+    },
+    
+    "code_popup": {
+      "title": "Code : {name}",
+      "line": "Ligne {line}",
+      "stats": "{lines} lignes · {chars} caractères",
+      "copy": "Copier",
+      "close": "Fermer",
+      "copied": "Copié !"
+    }
   }
 }

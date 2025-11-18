@@ -9,6 +9,10 @@ from utils.logger import logger
 from utils.multi_language_parser import (
     normalize_node_name
 )
+from ui.styles.responsive_relations import (
+    apply_responsive_to_graph_widget,
+    ResponsiveLayoutManager
+)
 
 class RelationsGraphWidget(QtWidgets.QWidget):
     """Widget optimisé pour afficher le graphe des relations du nœud sélectionné"""
@@ -20,6 +24,11 @@ class RelationsGraphWidget(QtWidgets.QWidget):
         self.figure = None
         self.canvas = None
         self._init_ui()
+        apply_responsive_to_graph_widget(self)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        ResponsiveLayoutManager.handle_resize_graph_widget(self, event)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)

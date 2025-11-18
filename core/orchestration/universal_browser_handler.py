@@ -1136,6 +1136,7 @@ class UniversalBrowserHandler:
     3. ✅ TOUJOURS fournir TARGET exact pour ACTION: MODIFIER
     4. ✅ Générer le code COMPLET (pas de "..." ou "# reste du code")
     5. ✅ Utiliser des noms de fonctions/classes EXACTS (copier depuis le contexte fourni)
+    6. Tous le fonction et methode doit etre separer dans des snippet differente pour faciliter
 
     ================================================================================
     Maintenant, génère le code selon le contexte fourni :
@@ -1231,7 +1232,7 @@ class UniversalBrowserHandler:
 
                         return {
                             isGenerating: isGenerating,
-                            indicator: activeIndicator,
+                            indicator: activeIndicator,y
                             timestamp: Date.now()
                         };
                     })();

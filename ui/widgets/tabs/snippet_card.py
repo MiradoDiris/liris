@@ -1,12 +1,13 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import Qt, pyqtSignal
 import qtawesome as qta
+import re
 import os
 from pathlib import Path
 
 
 class SnippetCard(QtWidgets.QWidget):
-    """Widget compact sans scroll horizontal - Layout optimisé"""
+    """Widget compact pour affichage de snippet de code avec historique"""
     
     copy_requested = pyqtSignal(str)
     expand_requested = pyqtSignal(dict)
@@ -15,6 +16,7 @@ class SnippetCard(QtWidgets.QWidget):
     def __init__(self, snippet_data, parent=None):
         super().__init__(parent)
         self.snippet_data = snippet_data
+        self.is_expanded = False
         self._init_ui()
     
     def _init_ui(self):
@@ -45,26 +47,28 @@ class SnippetCard(QtWidgets.QWidget):
         content_layout.setSpacing(8)
         
         # ===== LIGNE 1 : TITRE + ACTION =====
-        title_row = QtWidgets.QVBoxLayout()
-        title_row.setSpacing(2)
+        title_row = QtWidgets.QHBoxLayout()
+        title_row.setSpacing(8)
         
-        # Extraire le titre
+        # Container vertical pour titre + action
+        title_info_layout = QtWidgets.QVBoxLayout()
+        title_info_layout.setSpacing(2)
+        
+        # Extraire le titre (supprimer le numéro de snippet)
         title = self.snippet_data.get('title', 'Sans titre')
         action = self.snippet_data.get('action', 'MODIFIER').upper()
         
-        # Extraire le numéro si présent
-        snippet_number = ""
-        if title.lower().startswith('snippet') and ':' in title:
-            parts = title.split(':', 1)
-            snippet_number = parts[0].strip()
-            title = parts[1].strip()
+        # Supprimer TOUS les patterns de numéro de snippet possibles
+        title = re.sub(r'^snippet\s*\d+\s*:\s*', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'^\d+\s*[:-]\s*', '', title)
+        title = re.sub(r'^\[\d+\]\s*', '', title)
+        title = title.strip()
         
         # Formater l'action
         action_text = "[A remplacer]" if action in ["MODIFIER", "REPLACE", "REMPLACER"] else "[A ajouter]"
         
         # Label titre avec ellipsis
-        snippet_title = f"{snippet_number}: {title}" if snippet_number else title
-        title_label = QtWidgets.QLabel(snippet_title)
+        title_label = QtWidgets.QLabel(title)
         title_label.setStyleSheet("""
             font-weight: 600;
             font-size: 12px;
@@ -76,12 +80,12 @@ class SnippetCard(QtWidgets.QWidget):
         
         # Ellipsis automatique
         font_metrics = title_label.fontMetrics()
-        max_width = self.parent().width() - 100 if self.parent() else 500
-        elided_text = font_metrics.elidedText(snippet_title, Qt.ElideRight, max_width)
+        max_width = self.parent().width() - 150 if self.parent() else 400
+        elided_text = font_metrics.elidedText(title, Qt.ElideRight, max_width)
         title_label.setText(elided_text)
-        title_label.setToolTip(snippet_title)
+        title_label.setToolTip(title)
         
-        title_row.addWidget(title_label)
+        title_info_layout.addWidget(title_label)
         
         # Label action
         action_label = QtWidgets.QLabel(action_text)
@@ -90,11 +94,15 @@ class SnippetCard(QtWidgets.QWidget):
             color: #888;
             font-weight: 500;
         """)
-        title_row.addWidget(action_label)
+        title_info_layout.addWidget(action_label)
+        
+        # Ajouter le container titre/action
+        title_row.addLayout(title_info_layout, 1)
+        title_row.addStretch()
         
         content_layout.addLayout(title_row)
         
-        # ===== LIGNE 2 : FICHIER + CLASSE/FONCTION + BOUTONS (même niveau) =====
+        # ===== LIGNE 2 : FICHIER + CLASSE/FONCTION + BOUTONS =====
         info_row = QtWidgets.QHBoxLayout()
         info_row.setSpacing(8)
         
@@ -158,10 +166,10 @@ class SnippetCard(QtWidgets.QWidget):
             class_container.addWidget(class_label)
             info_container.addLayout(class_container)
         
-        info_row.addLayout(info_container, 1)  # Stretch pour prendre l'espace disponible
-        info_row.addStretch()  # Push les boutons à droite
+        info_row.addLayout(info_container, 1)
+        info_row.addStretch()
         
-        # ===== BOUTONS MINIATURES (même niveau que les paths) =====
+        # ===== BOUTONS MINIATURES =====
         actions_container = QtWidgets.QWidget()
         actions_container.setStyleSheet("background: transparent; border: none;")
         actions_layout = QtWidgets.QHBoxLayout(actions_container)
@@ -257,10 +265,25 @@ class SnippetCard(QtWidgets.QWidget):
         
         main_layout.addWidget(content_widget)
         
-        # ===== CONFIGURATION IMPORTANTE =====
-        # Empêcher le scroll horizontal
+        # ===== CONFIGURATION =====
         self.setMinimumWidth(0)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+    
+    def get_conversation_history(self):
+        """Retourne l'historique conversationnel s'il existe"""
+        return self.snippet_data.get('conversation_history', [])
+    
+    def get_session_info(self):
+        """Retourne les informations de session"""
+        return self.snippet_data.get('session_info', {})
+    
+    def get_snippet_index(self):
+        """Retourne l'index du snippet dans la session"""
+        return self.snippet_data.get('index', 0)
+    
+    def get_generation_timestamp(self):
+        """Retourne le timestamp de génération"""
+        return self.snippet_data.get('timestamp', '')
     
     def resizeEvent(self, event):
         """Ajuste le contenu lors du redimensionnement"""
@@ -271,12 +294,11 @@ class SnippetCard(QtWidgets.QWidget):
         """Met à jour les ellipsis en fonction de la largeur disponible"""
         width = self.width()
         
-        # Ajuster les textes trop longs
         for label in self.findChildren(QtWidgets.QLabel):
-            if label.toolTip():  # Seulement les labels avec tooltip (texte complet)
+            if label.toolTip():
                 original_text = label.toolTip()
                 font_metrics = label.fontMetrics()
-                available_width = max(100, width // 3)  # Largeur adaptative
+                available_width = max(100, width // 3)
                 
                 elided = font_metrics.elidedText(original_text, Qt.ElideMiddle, available_width)
                 label.setText(elided)

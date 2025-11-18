@@ -614,5 +614,177 @@
     "tab_config_label": "Configuration",
     "tab_relations_number": "2",
     "tab_relations_label": "Import Relations"
+  },
+  "relation_import": {
+    "title": "Relations and Imports",
+    "project_label": "Project:",
+    "select_project": "Select a project...",
+    "clear_cache": "Clear Cache",
+    "back": "Back",
+    "level_label": "Level:",
+    "view_clusters": "Cluster View (Navigation)",
+    "direct_relations": "Direct relations",
+    "zoom": "Zoom:",
+    "navigation": "Navigation:",
+    "interdependence": "Interdependence",
+    "show_node_origins": "Show node origins",
+    "structure_label": "Project Structure",
+    "elements": "Elements",
+    "isolated_files": "📦 Isolated files",
+    
+    "tooltips": {
+      "interdependence": "Show calls between functions/methods\nwithin the same file:\n• Function → Function\n• Method → Method\n• Class → Method\n\n⚠️ Requires relations to have been\nanalyzed with intraFile=true in Dgraph",
+      "show_origins": "Show source path of nodes\n(path or parent file name)\nat bottom right of graph",
+      "zoom_in": "Zoom in",
+      "zoom_out": "Zoom out",
+      "reset_zoom": "Reset zoom",
+      "move_up": "Move up",
+      "move_down": "Move down",
+      "move_left": "Move left",
+      "move_right": "Move right"
+    },
+    
+    "messages": {
+      "no_project": "Select a project",
+      "no_data": "(No data available)",
+      "select_node": "Select a node in the tree",
+      "no_relations": "No relations to display",
+      "single_node": "Single node - No relations",
+      "loading_relations": "Loading relations\nfor '{name}'...",
+      "no_relations_found": "No relations found\nfor '{name}'",
+      "empty_cluster": "Empty cluster\n'{name}'",
+      "no_files": "No files in cluster\n'{name}'",
+      "cluster_not_found": "Cluster '{name}' not found",
+      "navigation_error": "Navigation error",
+      "previous_state_empty": "Previous state without relations",
+      "click_instruction": "💡 Double-click on a node to explore nodes",
+      "click_file": "💡 Double-click on a file to see its external dependencies",
+      "code_unavailable": "Source code not available",
+      "cache_cleared": "Cache has been cleared successfully!",
+      "cache": "Cache"
+    },
+    
+    "progress": {
+      "loading_projects": "Loading projects...",
+      "loading_mappings": "Loading mappings...",
+      "loading_hierarchy": "Loading hierarchy...",
+      "building_tree": "Building tree...",
+      "loading_global": "Loading global relations...",
+      "processing_custom": "Processing custom relations...",
+      "processing_hierarchy": "Processing hierarchical relations...",
+      "loading_level1": "Loading level 1 relations...",
+      "outgoing": "Outgoing relations...",
+      "parsed": "Parsed relations...",
+      "incoming": "Incoming relations...",
+      "hierarchy": "Hierarchy...",
+      "additional": "Additional relations...",
+      "finalizing": "Finalizing...",
+      "retrieving_code": "Retrieving code for '{name}'...",
+      "analyzing_code": "Analyzing code...",
+      "preparing_display": "Preparing display...",
+      "opening_popup": "Opening popup..."
+    },
+    
+    "status": {
+      "project_selected": "Project selected: {name}",
+      "projects_available": "{count} project(s) available",
+      "error": "Error: {message}",
+      "cache_cleared": "Cache cleared",
+      "relations_displayed": "Direct relations: {count} relations displayed",
+      "cluster_view": "Cluster view: {count} clusters displayed",
+      "cluster_files": "Cluster '{name}': {count} files",
+      "file_dependencies": "File '{name}': {count} dependencies",
+      "internal_shown": "Internal relations: Shown ({count} total relations)",
+      "internal_hidden": "Internal relations: Hidden ({count} total relations)",
+      "origins_shown": "Node origins: Shown",
+      "origins_hidden": "Node origins: Hidden",
+      "navigation": "Navigation: {name} - {count} relations",
+      "back_to": "Back to: {name}",
+      "back_to_clusters": "Back to cluster view"
+    },
+    
+    "errors": {
+      "no_dgraph": "Error: Dgraph connection not available",
+      "no_projects": "No projects found",
+      "loading_error": "Error loading projects: {error}",
+      "node_uid_missing": "Selected node UID is None/empty!",
+      "node_name_invalid": "Normalized node name is None/empty!",
+      "uid_missing": "Error: Missing UID for {name}",
+      "invalid_name": "Error: Invalid name",
+      "node_not_found": "Node not found",
+      "uid_not_found": "Unable to find UID for '{name}'.\nSelect the node in the left tree to explore it.",
+      "loading_relations_error": "Error loading relations:\n{error}",
+      "code_retrieval_error": "Unable to retrieve function UID '{name}'",
+      "code_empty": "Code for '{name}' is empty or not available.\n\nFile: {file}\nLine: {line}\n\nVerify that source code parsing has been performed.",
+      "code_display_error": "Error displaying code:\n{error}\n\nCheck logs for more details.",
+      "origins_error": "Error: {error}"
+    },
+    
+    "dialogs": {
+      "cluster_details": "Cluster details",
+      "cluster_empty": "Empty cluster",
+      "cluster_empty_message": "Cluster '{name}' contains no files.",
+      "no_relations": "No relations",
+      "no_calls_detected": "No calls detected for displayed nodes.",
+      "relations_loaded": "Relations loaded",
+      "calls_added": "✅ {count} calls added!\n\n📄 {name}\n📊 Total: {total} relations\n🔹 INTRA: {intra} | INTER: {inter}\n\nExamples:\n{examples}\n\n🟣 INTRA = purple | 🟦 INTER = cyan blue",
+      "code_title": "Code: {name}",
+      "code_copied": "Code copied",
+      "code_copied_message": "Code has been copied to clipboard!",
+      "close": "Close",
+      "copy": "Copy",
+      "copied": "Copied!",
+      "node_details": "Details",
+      "code_unavailable": "Code unavailable",
+      "code_unavailable_message": "Unable to retrieve code for '{name}'\n\nPossible causes:\n• Function does not exist in Dgraph\n• Field 'codeContent' or 'fileContents' is empty\n• Relations sourcePath/targetPath are missing\n\nSearched UID: {uid}",
+      "code_empty_title": "Empty code"
+    },
+    
+    "legends": {
+      "relation_types": "Relation types",
+      "more_types": "... +{count} types",
+      "project": "Project: {name} ({count} clusters)",
+      "cluster": "🗂️ Cluster: {name} ({count} files)",
+      "stats": "{files} files  -  {elements} elements"
+    },
+    
+    "node_types": {
+      "class": "Class",
+      "function": "Function",
+      "method": "Method",
+      "variable": "Variable",
+      "file": "File",
+      "folder": "Folder",
+      "cluster": "Cluster",
+      "project": "Project",
+      "external": "External",
+      "unknown": "Unknown"
+    },
+    
+    "relation_types": {
+      "parent": "Parent",
+      "child": "Child",
+      "contains": "Contains",
+      "belongs_to": "Belongs to",
+      "calls": "Calls",
+      "called_by": "Called by",
+      "uses": "Uses",
+      "used_by": "Used by",
+      "imports": "Imports",
+      "imported_by": "Imported by",
+      "implements": "Implements",
+      "extends": "Extends",
+      "inherits": "Inherits",
+      "relation": "Relation"
+    },
+    
+    "code_popup": {
+      "title": "Code: {name}",
+      "line": "Line {line}",
+      "stats": "{lines} lines · {chars} characters",
+      "copy": "Copy",
+      "close": "Close",
+      "copied": "Copied!"
+    }
   }
 }

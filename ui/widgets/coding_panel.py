@@ -4,14 +4,6 @@ import time
 import pyperclip
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt5.Qsci import (
-    QsciScintilla,
-    QsciLexerPython,
-    QsciLexerCPP,
-    QsciLexerJavaScript,
-    QsciLexerHTML,
-)
-
 import qtawesome as qta
 import requests
 
@@ -57,7 +49,7 @@ class CodingPanel(QtWidgets.QWidget):
         self.selected_taxonomy = []
         self.current_snippets = []
 
-        self.is_browser_mode = False
+        self.is_browser_mode = True
         self.snippets_panel_visible = False
 
         self.vscode_url = "http://127.0.0.1:9000"
@@ -84,6 +76,7 @@ class CodingPanel(QtWidgets.QWidget):
         self._update_ui_texts()
         self._load_projects_list()
         self.setObjectName("CodingPanel")
+        QtCore.QTimer.singleShot(0, lambda: self._switch_mode(True))
 
     def _init_style(self):
         """Style global"""
@@ -133,6 +126,10 @@ class CodingPanel(QtWidgets.QWidget):
         QPushButton:hover {{ background-color: {self.secondary_color}; }}
         QPushButton:disabled {{ background-color: #e0e0e0; color: #424242; }}
 
+        QLabel {{
+            background-color: transparent;
+        }}
+
         QLineEdit, QComboBox, QTextEdit {{
             padding: 8px 12px;
             border: 2px solid #E0E0E0;
@@ -167,6 +164,46 @@ class CodingPanel(QtWidgets.QWidget):
             image: url({svg_path});
             width: 18px;
             height: 18px;
+        }}
+
+        /* ✅ NOUVEAUX STYLES POUR ÉLIMINER LES COCHES ET CERCLES */
+
+        QComboBox QAbstractItemView {{
+            border: 1px solid #D0D0D0;
+            border-radius: 6px;
+            background-color: #FFFFFF;
+            selection-background-color: {self.accent_color};
+            selection-color: {self.text_color};
+            padding: 4px;
+            outline: none;
+        }}
+
+        QComboBox QAbstractItemView::item {{
+            padding: 8px 12px;
+            border: none;
+            margin: 2px 4px;
+            border-radius: 4px;
+        }}
+
+        QComboBox QAbstractItemView::item:selected {{
+            background-color: {self.accent_color};
+            color: {self.text_color};
+        }}
+
+        QComboBox QAbstractItemView::item:hover {{
+            background-color: #F0F0F0;
+        }}
+
+        /* ✅ ÉLIMINER LES INDICATEURS (coches, cercles) */
+        QComboBox QAbstractItemView::indicator {{
+            width: 0px;
+            height: 0px;
+            border: none;
+            background: transparent;
+        }}
+
+        QComboBox QAbstractItemView::indicator:checked {{
+            image: none;
         }}
         """
 
@@ -208,7 +245,7 @@ class CodingPanel(QtWidgets.QWidget):
         title_container.addWidget(title_icon)
 
         self.title_label = QtWidgets.QLabel("Coding")
-        self.title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #333;")
+        self.title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #333; background-color: transparent;")
         self.title_label.setAlignment(Qt.AlignVCenter)
         title_container.addWidget(self.title_label)
 
@@ -235,23 +272,26 @@ class CodingPanel(QtWidgets.QWidget):
             }
         """)
 
-        # ✅ CRÉER LES BOUTONS AVANT DE LES UTILISER
-        self.api_mode_button = QtWidgets.QPushButton("Mode API")
+        # ✅ CRÉER LES BOUTONS (Navigation Auto en premier pour être à gauche)
         self.browser_mode_button = QtWidgets.QPushButton("Navigation Auto")
+        self.api_mode_button = QtWidgets.QPushButton("Mode API")
 
         # ✅ RESPONSIVE : Calculer la largeur après création
         button_width = (switch_width - 10) // 2
-        self.api_mode_button.setFixedSize(button_width, 34)
         self.browser_mode_button.setFixedSize(button_width, 34)
+        self.api_mode_button.setFixedSize(button_width, 34)
 
-        self.api_mode_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.browser_mode_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.api_mode_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
-        self.api_mode_button.clicked.connect(lambda: self._switch_mode(False))
         self.browser_mode_button.clicked.connect(lambda: self._switch_mode(True))
+        self.api_mode_button.clicked.connect(lambda: self._switch_mode(False))
 
-        switch_layout.addWidget(self.api_mode_button)
+        # ✅ Navigation Auto à GAUCHE, Mode API à DROITE
         switch_layout.addWidget(self.browser_mode_button)
+        switch_layout.addWidget(self.api_mode_button)
+
+        self.is_browser_mode = True
 
         # Appliquer le style initial
         self._update_switch_style()
@@ -274,14 +314,14 @@ class CodingPanel(QtWidgets.QWidget):
 
         # 📁 Projet
         project_label = QtWidgets.QLabel(f"📁 {tr('project')}")
-        project_label.setStyleSheet("font-weight: 600; font-size: 12px;")
-        
+        project_label.setStyleSheet("font-weight: 600; font-size: 12px; background-color: transparent;")
+
         self.project_combo = QtWidgets.QComboBox()
         # ✅ RESPONSIVE : Largeur dynamique selon la taille d'écran
         min_width = 180  # Minimum garanti
         preferred_width = max(200, int(self.base_width * 0.12))  # 12% de la largeur écran
         max_width = 400  # Maximum pour éviter d'être trop large
-        
+
         self.project_combo.setMinimumWidth(min_width)
         self.project_combo.setMaximumWidth(max_width)
         self.project_combo.setSizePolicy(
@@ -292,8 +332,8 @@ class CodingPanel(QtWidgets.QWidget):
 
         # 🤖 Plateforme IA
         platform_label = QtWidgets.QLabel(tr('ai_platform'))
-        platform_label.setStyleSheet("font-weight: 600; font-size: 12px; margin-left: 20px;")
-        
+        platform_label.setStyleSheet("font-weight: 600; font-size: 12px; margin-left: 20px; background-color: transparent;")
+
         self.platforms_combo = QtWidgets.QComboBox()
         # ✅ RESPONSIVE : Même logique pour la plateforme
         self.platforms_combo.setMinimumWidth(min_width)
@@ -312,7 +352,7 @@ class CodingPanel(QtWidgets.QWidget):
 
         # Contexte
         context_label = QtWidgets.QLabel(f"💡 {tr('context_label')}")
-        context_label.setStyleSheet("font-weight: 600; font-size: 12px;")
+        context_label.setStyleSheet("font-weight: 600; font-size: 12px; background-color: transparent;")
         session_layout.addWidget(context_label)
 
         self.context_edit = QtWidgets.QTextEdit()
@@ -333,7 +373,7 @@ class CodingPanel(QtWidgets.QWidget):
 
         perimeter_header = QtWidgets.QHBoxLayout()
         perimeter_label_title = QtWidgets.QLabel(f"🎯 {tr('implementation_perimeter')}")
-        perimeter_label_title.setStyleSheet("font-weight: 600; font-size: 12px;")
+        perimeter_label_title.setStyleSheet("font-weight: 600; font-size: 12px; background-color: transparent;")
         perimeter_header.addWidget(perimeter_label_title)
         perimeter_header.addStretch()
 
@@ -350,11 +390,12 @@ class CodingPanel(QtWidgets.QWidget):
 
         perimeter_display_layout = QtWidgets.QVBoxLayout()
         self.perimeter_status_label = QtWidgets.QLabel("Aucun périmètre défini")
-        self.perimeter_status_label.setStyleSheet("font-size: 13px; color: #888888; font-style: italic;")
+        self.perimeter_status_label.setStyleSheet("font-size: 13px; color: #888888; font-style: italic; background-color: transparent;")
         perimeter_display_layout.addWidget(self.perimeter_status_label)
 
         self.perimeter_details_label = QtWidgets.QLabel()
         self.perimeter_details_label.setWordWrap(True)
+        self.perimeter_details_label.setStyleSheet("background-color: transparent;")
         self.perimeter_details_label.setVisible(False)
         perimeter_display_layout.addWidget(self.perimeter_details_label)
 
@@ -386,7 +427,7 @@ class CodingPanel(QtWidgets.QWidget):
         status_header.addWidget(status_icon)
 
         self.status_label = QtWidgets.QLabel("Prêt")
-        self.status_label.setStyleSheet("color: #333; font-weight: bold; font-size: 11px;")
+        self.status_label.setStyleSheet("color: #333; font-weight: bold; font-size: 11px; background-color: transparent;")
         status_header.addWidget(self.status_label)
         status_header.addStretch()
         status_container.addLayout(status_header)
@@ -499,12 +540,40 @@ class CodingPanel(QtWidgets.QWidget):
         snippets_panel_layout.setContentsMargins(15, 15, 15, 15)
         snippets_panel_layout.setSpacing(10)
 
-        # En-tête du panneau
+        # En-tête du panneau avec ICÔNE HISTORIQUE
         snippets_header = QtWidgets.QHBoxLayout()
         snippets_title = QtWidgets.QLabel(f"💻 {tr('generated_code')}")
-        snippets_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        snippets_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333; background-color: transparent;")
         snippets_header.addWidget(snippets_title)
         snippets_header.addStretch()
+
+        # ✅ BOUTON HISTORIQUE GLOBAL (une seule icône pour tous les snippets)
+        self.global_history_button = QtWidgets.QPushButton()
+        self.global_history_button.setIcon(qta.icon('fa5s.history', color='#4CAF50'))
+        self.global_history_button.setToolTip("Voir l'historique conversationnel de la session")
+        self.global_history_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.global_history_button.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                padding: 6px;
+                min-width: 32px;
+                max-width: 32px;
+                min-height: 32px;
+                max-height: 32px;
+            }
+            QPushButton:hover:enabled {
+                background: #f0f0f0;
+                border-radius: 4px;
+            }
+            QPushButton:disabled {
+                opacity: 0.3;
+            }
+        """)
+        self.global_history_button.setIconSize(QtCore.QSize(20, 20))
+        self.global_history_button.clicked.connect(self._toggle_global_history)
+        self.global_history_button.setEnabled(True)  # Désactivé par défaut
+        snippets_header.addWidget(self.global_history_button)
 
         # Badge compteur de snippets
         self.snippets_count_badge = QtWidgets.QLabel("0")
@@ -519,6 +588,53 @@ class CodingPanel(QtWidgets.QWidget):
         snippets_header.addWidget(self.snippets_count_badge)
 
         snippets_panel_layout.addLayout(snippets_header)
+
+        # ===== ACCORDÉON HISTORIQUE GLOBAL (masqué par défaut) =====
+        self.global_history_accordion = QtWidgets.QWidget()
+        self.global_history_accordion.setVisible(False)
+        self.global_history_accordion.setStyleSheet("""
+            QWidget {
+                background-color: #f8f9fa;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+            }
+        """)
+        
+        global_history_layout = QtWidgets.QVBoxLayout(self.global_history_accordion)
+        global_history_layout.setContentsMargins(10, 10, 10, 10)
+        global_history_layout.setSpacing(8)
+        
+        # Titre historique
+        history_title = QtWidgets.QLabel("📜 Historique conversationnel")
+        history_title.setStyleSheet("""
+            font-size: 12px;
+            font-weight: bold;
+            color: #333;
+            background: transparent;
+        """)
+        global_history_layout.addWidget(history_title)
+        
+        # Zone scrollable pour l'historique
+        history_scroll = QtWidgets.QScrollArea()
+        history_scroll.setWidgetResizable(True)
+        history_scroll.setMaximumHeight(300)
+        history_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        history_scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+        """)
+        
+        self.global_history_content = QtWidgets.QWidget()
+        self.global_history_layout = QtWidgets.QVBoxLayout(self.global_history_content)
+        self.global_history_layout.setSpacing(6)
+        self.global_history_layout.setContentsMargins(0, 0, 0, 0)
+        
+        history_scroll.setWidget(self.global_history_content)
+        global_history_layout.addWidget(history_scroll)
+        
+        snippets_panel_layout.addWidget(self.global_history_accordion)
 
         # Zone scrollable pour les snippets
         scroll_area = QtWidgets.QScrollArea()
@@ -549,6 +665,7 @@ class CodingPanel(QtWidgets.QWidget):
             color: #999;
             font-style: italic;
             padding: 60px 20px;
+            background-color: transparent;
         """)
         self.snippets_layout.insertWidget(0, self.no_snippets_label)
 
@@ -566,6 +683,179 @@ class CodingPanel(QtWidgets.QWidget):
         # Connecter le resize
         graph_container.resizeEvent = self._on_graph_container_resize
 
+    def _toggle_global_history(self):
+        """Affiche/cache l'accordéon d'historique global"""
+        if self.global_history_accordion.isVisible():
+            self.global_history_accordion.setVisible(False)
+            self.global_history_button.setIcon(qta.icon('fa5s.history', color='#4CAF50'))
+        else:
+            self._populate_global_history()
+            self.global_history_accordion.setVisible(True)
+            self.global_history_button.setIcon(qta.icon('fa5s.chevron-up', color='#4CAF50'))
+
+    def _populate_global_history(self):
+        """Remplit l'historique global - VERSION TOUJOURS ACCESSIBLE"""
+        # Nettoyer le contenu existant
+        while self.global_history_layout.count():
+            item = self.global_history_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # ✅ NOUVEAU : Afficher même si vide
+        if not hasattr(self, 'conversation_history') or not self.conversation_history:
+            no_history = QtWidgets.QLabel("Aucune session démarrée")
+            no_history.setStyleSheet("""
+                font-size: 11px;
+                color: #999;
+                font-style: italic;
+                padding: 20px;
+                background: transparent;
+            """)
+            no_history.setAlignment(Qt.AlignCenter)
+            self.global_history_layout.addWidget(no_history)
+            return
+
+        messages = self.conversation_history.messages
+
+        if not messages:
+            no_history = QtWidgets.QLabel("Aucun message dans cette session\n\nLancez une génération pour commencer")
+            no_history.setStyleSheet("""
+                font-size: 11px;
+                color: #999;
+                font-style: italic;
+                padding: 20px;
+                background: transparent;
+            """)
+            no_history.setAlignment(Qt.AlignCenter)
+            self.global_history_layout.addWidget(no_history)
+            return
+
+        # ✅ AFFICHER TOUS LES MESSAGES AVEC SNIPPETS INTÉGRÉS
+        for idx, message in enumerate(messages, 1):
+            role = message.get('role', 'unknown')
+            content = message.get('content', '')
+            timestamp = message.get('timestamp', '')
+            snippets = message.get('snippets', [])  # ✅ NOUVEAU
+
+            # Conteneur message
+            message_widget = QtWidgets.QWidget()
+            message_widget.setStyleSheet("""
+                QWidget {
+                    background-color: white;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 4px;
+                }
+            """)
+
+            message_layout = QtWidgets.QVBoxLayout(message_widget)
+            message_layout.setContentsMargins(8, 8, 8, 8)
+            message_layout.setSpacing(6)
+
+            # En-tête message
+            header_layout = QtWidgets.QHBoxLayout()
+            header_layout.setSpacing(6)
+
+            # Icône + rôle
+            if role == 'user':
+                role_icon = QtWidgets.QLabel("👤")
+                role_text = "Utilisateur"
+                role_color = "#2196F3"
+            else:
+                role_icon = QtWidgets.QLabel("🤖")
+                role_text = "Assistant IA"
+                role_color = "#4CAF50"
+
+            role_icon.setStyleSheet("font-size: 14px; background: transparent;")
+            header_layout.addWidget(role_icon)
+
+            role_label = QtWidgets.QLabel(f"{role_text} - Message #{idx}")
+            role_label.setStyleSheet(f"""
+                font-size: 11px;
+                font-weight: bold;
+                color: {role_color};
+                background: transparent;
+            """)
+            header_layout.addWidget(role_label)
+            header_layout.addStretch()
+
+            # Timestamp
+            if timestamp:
+                time_label = QtWidgets.QLabel(timestamp)
+                time_label.setStyleSheet("""
+                    font-size: 9px;
+                    color: #999;
+                    background: transparent;
+                """)
+                header_layout.addWidget(time_label)
+
+            message_layout.addLayout(header_layout)
+
+            # Contenu textuel
+            if content:
+                content_preview = content[:300] + "..." if len(content) > 300 else content
+
+                content_label = QtWidgets.QLabel(content_preview)
+                content_label.setStyleSheet("""
+                    font-size: 10px;
+                    color: #333;
+                    background: transparent;
+                    padding: 4px;
+                """)
+                content_label.setWordWrap(True)
+                content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                message_layout.addWidget(content_label)
+
+            # ✅ NOUVEAU : Afficher les snippets liés à ce message
+            if snippets:
+                snippets_header = QtWidgets.QLabel(f"📝 {len(snippets)} snippet(s) généré(s)")
+                snippets_header.setStyleSheet("""
+                    font-size: 10px;
+                    color: #666;
+                    font-weight: bold;
+                    background: #f5f5f5;
+                    padding: 4px 8px;
+                    border-radius: 3px;
+                    margin-top: 4px;
+                """)
+                message_layout.addWidget(snippets_header)
+
+                # Afficher chaque snippet
+                for snippet_idx, snippet in enumerate(snippets, 1):
+                    snippet_title = snippet.get('title', 'Sans titre')
+                    snippet_action = snippet.get('action', 'N/A')
+                    snippet_file = snippet.get('file', 'N/A')
+
+                    snippet_label = QtWidgets.QLabel(
+                        f"  {snippet_idx}. [{snippet_action}] {snippet_title}\n"
+                        f"     📄 {snippet_file}"
+                    )
+                    snippet_label.setStyleSheet("""
+                        font-size: 9px;
+                        color: #555;
+                        background: transparent;
+                        padding: 2px 4px;
+                    """)
+                    snippet_label.setWordWrap(True)
+                    message_layout.addWidget(snippet_label)
+
+            self.global_history_layout.addWidget(message_widget)
+
+        # Spacer final
+        self.global_history_layout.addStretch()
+
+    def _update_history_button_state(self):
+        """✅ TOUJOURS ACTIF maintenant"""
+        # Le bouton est maintenant toujours actif
+        self.global_history_button.setEnabled(True)
+
+        if hasattr(self, 'conversation_history') and self.conversation_history:
+            total = len(self.conversation_history.messages)
+            if total > 0:
+                self.global_history_button.setToolTip(f"Voir l'historique ({total} messages)")
+            else:
+                self.global_history_button.setToolTip("Historique (session vide)")
+        else:
+            self.global_history_button.setToolTip("Historique (aucune session)")
 
     def _switch_mode(self, is_browser_mode):
         """Change le mode avec messages traduits"""
@@ -584,7 +874,7 @@ class CodingPanel(QtWidgets.QWidget):
 
     def _update_switch_style(self):
         """Met à jour le style visuel du switch selon le mode actif"""
-        
+
         # Style actif : Gradient (comme bouton RÉSULTATS)
         active_style = f"""
             QPushButton {{
@@ -604,7 +894,7 @@ class CodingPanel(QtWidgets.QWidget):
                     stop:1 {self.primary_color});
             }}
         """
-        
+
         # Style inactif : Gris clair + texte noir
         inactive_style = """
             QPushButton {
@@ -620,15 +910,14 @@ class CodingPanel(QtWidgets.QWidget):
                 background-color: rgba(200, 200, 200, 0.3);
             }
         """
-        
         if self.is_browser_mode:
-            # Mode Browser actif
-            self.api_mode_button.setStyleSheet(inactive_style)
+            # Navigation Auto actif (par défaut)
             self.browser_mode_button.setStyleSheet(active_style)
+            self.api_mode_button.setStyleSheet(inactive_style)
         else:
-            # Mode API actif (par défaut)
-            self.api_mode_button.setStyleSheet(active_style)
+            # Mode API actif
             self.browser_mode_button.setStyleSheet(inactive_style)
+            self.api_mode_button.setStyleSheet(active_style)
 
     def _on_start_session(self):
         """
@@ -844,11 +1133,11 @@ class CodingPanel(QtWidgets.QWidget):
         """Met à jour le badge compteur de snippets"""
         count = len(self.current_snippets)
         self.snippets_count_badge.setText(str(count))
-
-        # Changer la couleur selon le nombre
+        
+        # ✅ TOUJOURS VISIBLE, juste changer la couleur
         if count == 0:
             self.snippets_count_badge.setStyleSheet("""
-                background-color: #999;
+                background-color: #bbb;
                 color: white;
                 padding: 4px 10px;
                 border-radius: 12px;
@@ -864,7 +1153,7 @@ class CodingPanel(QtWidgets.QWidget):
                 font-size: 12px;
                 font-weight: bold;
             """)
-
+    
     def _clear_snippets(self):
         """Efface tous les snippets affichés"""
         items_to_remove = []
@@ -888,6 +1177,12 @@ class CodingPanel(QtWidgets.QWidget):
 
         self.current_snippets = []
         self._update_snippets_count()
+        
+        # ✅ DÉSACTIVER LE BOUTON HISTORIQUE
+        if hasattr(self, 'global_history_accordion'):
+            self.global_history_accordion.setVisible(False)
+            self.global_history_button.setIcon(qta.icon('fa5s.history', color='#4CAF50'))
+
         logger.info("Snippets cleared")
 
     def _on_graph_container_resize(self, event):
@@ -1040,6 +1335,43 @@ class CodingPanel(QtWidgets.QWidget):
         self.snippets_layout.insertWidget(insert_position, snippet_card)
         self.current_snippets.append(snippet_data)
         self._update_snippets_count()
+        
+        # ✅ ACTIVER LE BOUTON HISTORIQUE
+        if hasattr(self, 'conversation_history') and self.conversation_history:
+        # Ajouter le snippet au dernier message assistant
+            if self.conversation_history.messages:
+                last_message = self.conversation_history.messages[-1]
+                
+                # Si le dernier message est de l'assistant, y ajouter le snippet
+                if last_message.get('role') == 'assistant':
+                    if 'snippets' not in last_message:
+                        last_message['snippets'] = []
+                    
+                    last_message['snippets'].append(snippet_data)
+                    logger.info(f"✅ Snippet enregistré dans l'historique (message #{len(self.conversation_history.messages)})")
+                else:
+                    # Sinon créer un nouveau message assistant avec le snippet
+                    import datetime
+                    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+                    
+                    assistant_message = {
+                        'role': 'assistant',
+                        'content': f"Snippet généré : {snippet_data.get('title', 'Sans titre')}",
+                        'timestamp': timestamp,
+                        'snippets': [snippet_data]
+                    }
+                    
+                    self.conversation_history.add_message(
+                        role='assistant',
+                        content=assistant_message['content']
+                    )
+                    
+                    # Ajouter les snippets au message créé
+                    self.conversation_history.messages[-1]['snippets'] = [snippet_data]
+                    logger.info(f"✅ Nouveau message assistant créé avec snippet")
+        
+        self._update_snippets_count()
+        self._update_history_button_state()
     
         # Ouvrir automatiquement le panneau si c'est le premier snippet
         if len(self.current_snippets) == 1 and not self.snippets_panel_visible:
@@ -1774,7 +2106,7 @@ class CodingPanel(QtWidgets.QWidget):
             traceback.print_exc()
 
     def _update_perimeter_display(self):
-        """Met à jour l'affichage du périmètre défini"""
+        """Met à jour l'affichage du périmètre défini avec boutons de suppression - INLINE"""
         if not self.selected_taxonomy:
             self.perimeter_status_label.setText(f"⚪ {tr('no_perimeter_defined')}")
             self.perimeter_details_label.setVisible(False)
@@ -1790,23 +2122,148 @@ class CodingPanel(QtWidgets.QWidget):
             font-size: 13px;
             color: #2E7D32;
             font-weight: bold;
+            background: transparent;
         """)
 
-        details_html = f"<div style='line-height: 1.8;'><p style='margin: 0 0 12px 0;'>"
-        details_html += f"<span style='color: #A23B2D; font-weight: bold;'>📋 {tr('selected_elements')}</span></p>"
+        # ✅ UTILISER DIRECTEMENT LE HTML DANS perimeter_details_label
+        details_html = "<div style='line-height: 1.6;'>"
 
-        for tax in self.selected_taxonomy:
+        # ✅ Créer une ligne HTML pour chaque élément avec bouton ×
+        for idx, tax in enumerate(self.selected_taxonomy):
             node_name = tax['name']
             node_type = tax.get('type', 'unknown')
             icon = self._get_icon_for_type(node_type)
-            details_html += f"<p style='margin: 2px 0 2px 8px; font-size: 11px;'>"
-            details_html += f"{icon} <span style='color: #333;'>{node_name}</span> "
-            details_html += f"<span style='color: #888;'>({node_type})</span></p>"
+
+            # Ligne avec background hover simulé
+            details_html += f"""
+            <div style='
+                background-color: #f5f5f5;
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+                padding: 6px 8px;
+                margin: 4px 0;
+                display: flex;
+                align-items: center;
+            '>
+                <span style='font-size: 14px; margin-right: 8px;'>{icon}</span>
+                <span style='color: #333; font-weight: bold; font-size: 11px;'>{node_name}</span>
+                <span style='color: #888; font-size: 10px; margin-left: 8px;'>({node_type})</span>
+                <span style='flex: 1;'></span>
+                <a href='remove_{idx}' style='
+                    color: #d32f2f;
+                    text-decoration: none;
+                    font-size: 16px;
+                    font-weight: bold;
+                    padding: 2px 6px;
+                    margin-left: 8px;
+                ' title='Retirer {node_name}'>×</a>
+            </div>
+            """
+
+        # ✅ Bouton "Tout effacer" en bas
+        if len(self.selected_taxonomy) > 1:
+            details_html += f"""
+            <div style='text-align: right; margin-top: 8px;'>
+                <a href='clear_all' style='
+                    color: #d32f2f;
+                    text-decoration: none;
+                    border: 1px solid #d32f2f;
+                    border-radius: 4px;
+                    padding: 4px 12px;
+                    font-size: 11px;
+                    font-weight: bold;
+                    display: inline-block;
+                '>🗑️ Tout effacer</a>
+            </div>
+            """
 
         details_html += "</div>"
+
+        # Appliquer le HTML
         self.perimeter_details_label.setTextFormat(Qt.RichText)
         self.perimeter_details_label.setText(details_html)
         self.perimeter_details_label.setVisible(True)
+
+        # ✅ Connecter les clics sur les liens
+        self.perimeter_details_label.linkActivated.connect(self._handle_perimeter_link_click)
+
+    def _handle_perimeter_link_click(self, link):
+        """Gère les clics sur les liens dans l'affichage du périmètre"""
+        if link.startswith('remove_'):
+            # Extraire l'index
+            try:
+                index = int(link.replace('remove_', ''))
+                self._remove_perimeter_item(index)
+            except ValueError:
+                logger.error(f"Index invalide: {link}")
+        elif link == 'clear_all':
+            self._clear_all_perimeter()
+
+    def _clear_all_perimeter(self):
+        """Efface tous les éléments du périmètre"""
+        if not self.selected_taxonomy:
+            return
+        
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Confirmation",
+            f"Voulez-vous retirer tous les {len(self.selected_taxonomy)} éléments du périmètre ?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            self.selected_taxonomy.clear()
+            logger.info("✅ Tous les éléments du périmètre ont été effacés")
+            
+            self._update_perimeter_display()
+            self.graph_widget._clear_graph()
+            
+            QtWidgets.QMessageBox.information(
+                self,
+                "Périmètre effacé",
+                "Tous les éléments ont été retirés du périmètre."
+            )
+
+    def _remove_perimeter_item(self, index):
+        """Supprime un élément du périmètre sélectionné"""
+        if 0 <= index < len(self.selected_taxonomy):
+            removed_item = self.selected_taxonomy[index]
+            node_name = removed_item.get('name', 'N/A')
+
+            # Confirmation
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Confirmation",
+                f"Voulez-vous retirer '{node_name}' du périmètre ?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+
+            if reply == QtWidgets.QMessageBox.Yes:
+                # Supprimer l'élément
+                self.selected_taxonomy.pop(index)
+                logger.info(f"✅ Élément '{node_name}' retiré du périmètre")
+
+                # Mettre à jour l'affichage
+                self._update_perimeter_display()
+
+                # Mettre à jour le graphe
+                if self.selected_taxonomy:
+                    # Afficher le graphe du dernier élément restant
+                    last_item = self.selected_taxonomy[-1]
+                    central_name = last_item.get('name', 'N/A')
+                    central_uid = last_item['data'].get('uid', '')
+                    related = last_item.get('related', [])
+
+                    if central_uid and related:
+                        self._update_graph_from_taxonomy(
+                            central_name, central_uid, related,
+                            self.current_project_data
+                        )
+                else:
+                    # Plus d'éléments, effacer le graphe
+                    self.graph_widget._clear_graph()
 
     def _get_icon_for_type(self, node_type: str) -> str:
         """Retourne une icône pour un type de nœud"""
@@ -2503,25 +2960,57 @@ class CodingPanel(QtWidgets.QWidget):
             self.graph_widget.conductor = conductor
 
     def set_platforms(self, profiles=None):
-        """Plateformes avec traduction"""
+        """Plateformes SANS icônes - Affiche uniquement celles configurées"""
         self.platforms_combo.clear()
-
+    
+        # Premier item SANS icône
         self.platforms_combo.addItem(
-            qta.icon('fa5s.robot', color='#999999'),
             tr("select_platform"),
             None
         )
-
+    
         platform_data = self.platform_manager.get_platform_for_combo()
-
+        
+        configured_count = 0  # Compteur de plateformes configurées
+    
         for display_name, internal_name, color, icon in platform_data:
+            # ✅ VÉRIFIER SI LA PLATEFORME EST CONFIGURÉE
+            is_valid, _ = self.platform_manager.validate_api_key(internal_name)
+            
+            if is_valid:
+                # Ajouter UNIQUEMENT si configurée
+                self.platforms_combo.addItem(
+                    display_name,
+                    internal_name
+                )
+                configured_count += 1
+                logger.info(f"✅ Plateforme configurée: {display_name}")
+            else:
+                logger.debug(f"⚠️ Plateforme ignorée (non configurée): {display_name}")
+    
+        # ✅ DÉSACTIVER LES CHECKBOXES POUR TOUS LES ITEMS
+        model = self.platforms_combo.model()
+        for i in range(self.platforms_combo.count()):
+            index = model.index(i, 0)
+            model.setData(index, QtCore.QVariant(), Qt.CheckStateRole)
+            
+            item = model.itemFromIndex(index)
+            if item:
+                item.setCheckable(False)
+                item.setFlags(item.flags() & ~Qt.ItemIsUserCheckable)
+    
+        # ✅ MESSAGE SI AUCUNE PLATEFORME CONFIGURÉE
+        if configured_count == 0:
+            logger.warning("⚠️ Aucune plateforme IA configurée")
+            # Ajouter un message informatif
             self.platforms_combo.addItem(
-                qta.icon(icon, color=color),
-                display_name,
-                internal_name
+                "❌ Aucune plateforme configurée",
+                None
             )
-
-        logger.info(f"Loaded {len(platform_data)} AI platforms")
+            self.platforms_combo.setEnabled(False)
+        else:
+            logger.info(f"✅ {configured_count} plateforme(s) configurée(s) chargée(s)")
+            self.platforms_combo.setEnabled(True)
 
     def update_status(self, message, progress=None):
         """Met à jour le statut"""
@@ -3191,6 +3680,9 @@ class CodingPanel(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         """Fermeture propre du panneau"""
+        if hasattr(self, 'perimeter_items_container'):
+            self.perimeter_items_container.deleteLater()
+
         if hasattr(self, 'current_worker') and self.current_worker:
             self.current_worker.quit()
             self.current_worker.wait()

@@ -6,6 +6,7 @@ import qtawesome as qta
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+from PyQt5 import QtWidgets, QtCore, QtGui
 import uuid
 from datetime import datetime
 from PyQt5 import QtWidgets, QtGui
@@ -192,6 +193,10 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         self._init_ui()
         self._setup_child_list_connections()
+        self._setup_minimum_window_size()
+        self._init_responsive_design()
+        self._optimize_for_high_dpi()
+        self._enable_scroll_areas_for_small_screens()
 
         try:
             if self.dgraph_connector.client:
@@ -212,6 +217,17 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         from PyQt5.QtCore import QTimer
         QTimer.singleShot(100, self._delayed_combo_update)
+
+    def _init_responsive_design(self):
+        # Installer le filtre d'événements
+        self.installEventFilter(self)
+
+        # État initial
+        self.last_size = self.size()
+        self.current_scale = 1.0
+
+        # Ajuster immédiatement
+        QtCore.QTimer.singleShot(200, self._adjust_layout_for_resolution)
 
     def _delayed_combo_update(self, force_reload: bool = False):
         """
@@ -310,6 +326,270 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             import traceback
             traceback.print_exc()
 
+    def eventFilter(self, obj, event):
+        """
+        Filtre les événements de redimensionnement avec seuil plus petit.
+        """
+        if obj == self and event.type() == QtCore.QEvent.Resize:
+            new_size = event.size()
+            # Seuil réduit à 100px pour une meilleure réactivité
+            if (abs(new_size.width() - self.last_size.width()) > 100 or 
+                abs(new_size.height() - self.last_size.height()) > 100):
+                self.last_size = new_size
+                # Utiliser un timer pour éviter trop d'appels pendant le resize
+                if not hasattr(self, '_resize_timer'):
+                    self._resize_timer = QtCore.QTimer()
+                    self._resize_timer.setSingleShot(True)
+                    self._resize_timer.timeout.connect(self._adjust_layout_for_resolution)
+                self._resize_timer.start(150)  # Délai de 150ms
+
+        return super().eventFilter(obj, event)
+    
+    def _adjust_layout_for_resolution(self):
+        # Utiliser la taille réelle de la fenêtre au lieu de l'écran complet
+        window_width = self.width()
+        window_height = self.height()
+
+        # Déterminer le facteur d'échelle basé sur la taille de la fenêtre
+        if window_width >= 3840:  # 4K
+            scale = 1.2
+            layout_mode = "4K"
+        elif window_width >= 2560:  # QHD
+            scale = 1.1
+            layout_mode = "QHD"
+        elif window_width >= 1920:  # Full HD
+            scale = 1.0
+            layout_mode = "FullHD"
+        elif window_width >= 1600:  # HD+
+            scale = 0.95
+            layout_mode = "HD+"
+        elif window_width >= 1366:  # HD
+            scale = 0.85
+            layout_mode = "HD"
+        elif window_width >= 1024:  # Tablette
+            scale = 0.75
+            layout_mode = "Tablette"
+        else:  # Très petit
+            scale = 0.65
+            layout_mode = "Mobile"
+
+        self.current_scale = scale
+
+        print(f"🖥️ Mode {layout_mode} - Scale: {scale} (Largeur: {window_width}px)")
+
+        # Appliquer les ajustements
+        self._apply_responsive_scale(scale, layout_mode)
+
+    def _apply_responsive_scale(self, scale, mode):
+        # 1. Ajuster les listes
+        self._adjust_list_widgets_size(scale)
+
+        # 2. Ajuster les colonnes
+        self._adjust_columns_layout(mode)
+
+        # 3. Ajuster les boutons
+        self._adjust_buttons_size(scale)
+
+        # 4. Ajuster les polices
+        self._adjust_fonts(scale)
+
+        # 5. Ajuster les spacings
+        self._adjust_spacings(scale)
+
+    def _adjust_list_widgets_size(self, scale):
+        # Hauteurs minimales et maximales plus flexibles
+        base_heights = {
+            'cluster': (60, 220),
+            'root': (150, 350), 
+            'level1': (150, 350),   
+            'child': (150, 350) 
+        }
+
+        # Ajuster en fonction de la largeur de fenêtre pour éviter les coupures
+        window_height = self.height()
+        max_list_height = max(100, int(window_height * 0.15))  # Max 15% de la hauteur
+
+        # Cluster list
+        if hasattr(self, 'cluster_list_widget'):
+            min_h, max_h = base_heights['cluster']
+            self.cluster_list_widget.setMinimumHeight(int(min_h * scale))
+            self.cluster_list_widget.setMaximumHeight(min(int(max_h * scale), max_list_height))
+
+        # Root list
+        if hasattr(self, 'root_list_widget'):
+            min_h, max_h = base_heights['root']
+            self.root_list_widget.setMinimumHeight(int(min_h * scale))
+            self.root_list_widget.setMaximumHeight(min(int(max_h * scale), max_list_height))
+
+        # Level1 list
+        if hasattr(self, 'level1_list_widget'):
+            min_h, max_h = base_heights['level1']
+            self.level1_list_widget.setMinimumHeight(int(min_h * scale))
+            self.level1_list_widget.setMaximumHeight(min(int(max_h * scale), max_list_height))
+
+        # Child list
+        if hasattr(self, 'child_list_widget'):
+            min_h, max_h = base_heights['child']
+            self.child_list_widget.setMinimumHeight(int(min_h * scale))
+            self.child_list_widget.setMaximumHeight(min(int(max_h * scale), max_list_height))
+
+        # Details text - hauteur adaptative
+        if hasattr(self, 'details_text'):
+            details_max = min(400, int(window_height * 0.25))
+            self.details_text.setMaximumHeight(int(details_max * scale))
+
+    def _adjust_columns_layout(self, mode):
+        # Définir les ratios de colonnes selon le mode avec scroll si nécessaire
+        if mode in ["4K", "QHD", "FullHD"]:
+            # Grands écrans : affichage normal
+            ratios = [4, 4, 5]  # Gauche, Milieu, Droite
+        elif mode in ["HD+", "HD"]:
+            # Écrans moyens : réduire légèrement la colonne droite
+            ratios = [4, 5, 4]
+        elif mode == "Tablette":
+            # Petits écrans : réduire les colonnes latérales
+            ratios = [3, 5, 3]
+        else:
+            # Très petits écrans : privilégier la colonne centrale
+            ratios = [2, 6, 3]
+
+        # Activer le scroll pour les petits écrans
+        if mode in ["Tablette", "Mobile"]:
+            self._enable_scroll_areas_for_small_screens()
+
+    def _adjust_buttons_size(self, scale):
+        base_button_height = 32
+        base_button_width = 120
+
+        buttons = []
+
+        # Collecter tous les boutons
+        if hasattr(self, 'add_project_button'):
+            buttons.append(self.add_project_button)
+        if hasattr(self, 'delete_project_button'):
+            buttons.append(self.delete_project_button)
+        if hasattr(self, 'upload_local_button'):
+            buttons.append(self.upload_local_button)
+        if hasattr(self, 'browse_button'):
+            buttons.append(self.browse_button)
+        if hasattr(self, 'save_button'):
+            buttons.append(self.save_button)
+        if hasattr(self, 'export_profile_button'):
+            buttons.append(self.export_profile_button)
+
+        # Ajuster la taille
+        for button in buttons:
+            if button:
+                button.setMinimumHeight(int(base_button_height * scale))
+                if button.maximumWidth() < 16777215:  # Si une largeur max est définie
+                    button.setMaximumWidth(int(base_button_width * scale))
+
+    def _adjust_fonts(self, scale):
+        base_font_size = 13
+        scaled_font_size = max(10, int(base_font_size * scale))
+
+        # Liste des widgets à ajuster
+        widgets_to_adjust = []
+
+        # Ajouter tous les QListWidget
+        for attr_name in dir(self):
+            if attr_name.endswith('_list_widget'):
+                widget = getattr(self, attr_name, None)
+                if isinstance(widget, QtWidgets.QListWidget):
+                    widgets_to_adjust.append(widget)
+
+        # Ajouter les champs de texte
+        if hasattr(self, 'project_name_edit'):
+            widgets_to_adjust.append(self.project_name_edit)
+        if hasattr(self, 'project_description_edit'):
+            widgets_to_adjust.append(self.project_description_edit)
+        if hasattr(self, 'details_text'):
+            widgets_to_adjust.append(self.details_text)
+
+        # Appliquer la police
+        for widget in widgets_to_adjust:
+            if widget:
+                font = widget.font()
+                font.setPointSize(scaled_font_size)
+                widget.setFont(font)
+
+    def _adjust_spacings(self, scale):
+        base_spacing = 8
+        base_margin = 15
+
+        scaled_spacing = int(base_spacing * scale)
+        scaled_margin = int(base_margin * scale)
+
+        # Ajuster le layout principal si accessible
+        main_layout = self.layout()
+        if main_layout:
+            main_layout.setSpacing(scaled_spacing)
+            main_layout.setContentsMargins(
+                scaled_margin, 
+                5,  # Top reste petit
+                scaled_margin, 
+                scaled_margin
+            )
+
+    def _enable_scroll_areas_for_small_screens(self):
+        """Active les scrollbars pour les petits écrans"""
+        if self.current_scale < 0.95:
+            # Activer scroll horizontal et vertical pour la colonne du milieu
+            if hasattr(self, 'middle_scroll'):
+                self.middle_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+                self.middle_scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+
+            # Forcer le word wrap et l'ellipsis pour les listes
+            for list_widget in [self.cluster_list_widget, self.root_list_widget, 
+                               self.level1_list_widget, self.child_list_widget]:
+                if list_widget:
+                    list_widget.setWordWrap(True)
+                    list_widget.setTextElideMode(QtCore.Qt.ElideRight)
+
+    def _adjust_combo_box_size(self, scale):
+        if hasattr(self, 'project_combo'):
+            base_min_width = 200
+            base_max_width = 350
+
+            self.project_combo.setMinimumWidth(int(base_min_width * scale))
+            self.project_combo.setMaximumWidth(int(base_max_width * scale))
+
+    def _optimize_for_high_dpi(self):
+        screen = QtWidgets.QApplication.primaryScreen()
+        dpi = screen.physicalDotsPerInch()
+
+        # Si DPI > 150, c'est un écran haute résolution
+        if dpi > 150:
+            # Activer le rendu haute qualité
+            QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
+
+            # Ajuster le style des icônes pour qu'elles restent nettes
+            if hasattr(self, 'cluster_list_widget'):
+                self.cluster_list_widget.setIconSize(QtCore.QSize(20, 20))
+            if hasattr(self, 'root_list_widget'):
+                self.root_list_widget.setIconSize(QtCore.QSize(20, 20))
+
+            print(f"🎨 Mode Haute Résolution activé (DPI: {dpi})")
+
+    def _setup_minimum_window_size(self):
+        screen = QtWidgets.QApplication.primaryScreen()
+        screen_width = screen.geometry().width()
+        screen_height = screen.geometry().height()
+
+        # Taille minimale plus flexible
+        min_width = max(800, min(1400, int(screen_width * 0.6)))
+        min_height = max(600, min(900, int(screen_height * 0.6)))
+
+        self.setMinimumSize(min_width, min_height)
+
+        print(f"📐 Taille minimale: {min_width}x{min_height}")
+
+        # Permettre le redimensionnement libre
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding
+        )
+
     def _on_insert_dgraph_clicked(self):
         """
         ✅ CORRECTION: Prépare et lance l'insertion avec synchronisation correcte
@@ -319,7 +599,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             logger.error("❌ Aucun projet sélectionné pour l'insertion.")
             return
 
-        # ✅ Synchroniser TOUTES les données nécessaires
         self.dgraph_manager.current_project_profile_data = self.current_project_profile_data
         self.dgraph_manager.project_storage_manager = self.project_storage_manager
         self.dgraph_manager.project_profiles = self.project_profiles
@@ -331,7 +610,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         logger.info(f"🔍 Insertion Dgraph demandée pour le projet : {self.current_project_name}")
 
-        # Lancer l'insertion avec ce widget comme parent
         self.dgraph_manager._on_insert_dgraph(self)
 
     def showEvent(self, event):
@@ -371,7 +649,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         """
 
     def _init_ui(self):
-    # ==================== LAYOUT PRINCIPAL ====================
+        # ==================== LAYOUT PRINCIPAL ====================
         main_vertical_layout = QtWidgets.QVBoxLayout(self)
         main_vertical_layout.setSpacing(8)
         main_vertical_layout.setContentsMargins(15, 5, 15, 15)
@@ -491,9 +769,13 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.cluster_list_widget.currentItemChanged.connect(self._on_cluster_selected)
         cluster_list_layout.addWidget(self.cluster_list_widget)
     
+        # ✅ ESPACEMENT AVANT LES BOUTONS
+        cluster_list_layout.addSpacing(8)
+    
         # Boutons cluster
         cluster_buttons_layout = QtWidgets.QHBoxLayout()
         cluster_buttons_layout.setSpacing(5)
+        cluster_buttons_layout.setContentsMargins(0, 0, 0, 0)
     
         self.add_cluster_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
@@ -563,14 +845,18 @@ class ProjectConfigWidget(QtWidgets.QWidget):
     
         self.root_list_widget = QtWidgets.QListWidget()
         self.root_list_widget.setStyleSheet(self._get_improved_list_style())
-        self.root_list_widget.setMinimumHeight(100)
-        self.root_list_widget.setMaximumHeight(200)
+        self.root_list_widget.setMinimumHeight(150)
+        self.root_list_widget.setMaximumHeight(350)
         self.root_list_widget.currentItemChanged.connect(self._on_root_label_selected)
         hierarchy_group_layout.addWidget(self.root_list_widget)
+    
+        # ✅ ESPACEMENT AVANT LES BOUTONS
+        hierarchy_group_layout.addSpacing(8)
     
         # Boutons root
         root_buttons_layout = QtWidgets.QHBoxLayout()
         root_buttons_layout.setSpacing(5)
+        root_buttons_layout.setContentsMargins(0, 0, 0, 0)
     
         self.add_root_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
@@ -590,6 +876,9 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         root_buttons_layout.addStretch()
         hierarchy_group_layout.addLayout(root_buttons_layout)
     
+        # ✅ ESPACEMENT APRÈS LES BOUTONS
+        hierarchy_group_layout.addSpacing(12)
+    
         # --- 2. Labels Niveau 1 / Level 1 Labels ---
         level1_label_title = QtWidgets.QLabel(
             tr("project_config.parent_labels_list_for_root_label")
@@ -599,14 +888,18 @@ class ProjectConfigWidget(QtWidgets.QWidget):
     
         self.level1_list_widget = QtWidgets.QListWidget()
         self.level1_list_widget.setStyleSheet(self._get_improved_list_style())
-        self.level1_list_widget.setMinimumHeight(100)
-        self.level1_list_widget.setMaximumHeight(200)
+        self.level1_list_widget.setMinimumHeight(150)
+        self.level1_list_widget.setMaximumHeight(350)
         self.level1_list_widget.currentItemChanged.connect(self._on_level1_label_selected)
         hierarchy_group_layout.addWidget(self.level1_list_widget)
+    
+        # ✅ ESPACEMENT AVANT LES BOUTONS
+        hierarchy_group_layout.addSpacing(8)
     
         # Boutons level1
         level1_buttons_layout = QtWidgets.QHBoxLayout()
         level1_buttons_layout.setSpacing(5)
+        level1_buttons_layout.setContentsMargins(0, 0, 0, 0)
     
         self.add_level1_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_level1_button.setStyleSheet(PlatformConfigStyle.get_button_style())
@@ -626,6 +919,9 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         level1_buttons_layout.addStretch()
         hierarchy_group_layout.addLayout(level1_buttons_layout)
     
+        # ✅ ESPACEMENT APRÈS LES BOUTONS
+        hierarchy_group_layout.addSpacing(12)
+    
         # --- 3. Labels Enfants avec Bouton Retour / Child Labels with Back Button ---
         child_header_layout = self._create_back_button_section()
         hierarchy_group_layout.addLayout(child_header_layout)
@@ -633,14 +929,18 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         # Liste des enfants / Children list
         self.child_list_widget = QtWidgets.QListWidget()
         self.child_list_widget.setStyleSheet(self._get_improved_list_style())
-        self.child_list_widget.setMinimumHeight(100)
-        self.child_list_widget.setMaximumHeight(200)
+        self.child_list_widget.setMinimumHeight(150)
+        self.child_list_widget.setMaximumHeight(400)
         self.child_list_widget.currentItemChanged.connect(self._on_child_label_selected)
         hierarchy_group_layout.addWidget(self.child_list_widget)
+    
+        # ✅ ESPACEMENT AVANT LES BOUTONS
+        hierarchy_group_layout.addSpacing(8)
     
         # Boutons child
         child_buttons_layout = QtWidgets.QHBoxLayout()
         child_buttons_layout.setSpacing(5)
+        child_buttons_layout.setContentsMargins(0, 0, 0, 0)
     
         self.add_child_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())

@@ -1488,8 +1488,8 @@ class GraphWidget(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Canvas graphe uniquement (sans barre d'outils)
         self.figure = Figure(facecolor='white', figsize=(8, 6))
+        self.figure.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
         self.canvas = FigureCanvas(self.figure)
         self.canvas.mpl_connect('button_press_event', self._on_graph_click)
         self.canvas.mpl_connect('motion_notify_event', self._on_graph_motion)
@@ -2569,7 +2569,6 @@ class GraphWidget(QtWidgets.QWidget):
     def _draw_graph(self):
         """Dessine le graphe avec le style unifié (utilise self.current_graph)"""
 
-        # ✅ CORRECTION : Supprimer la vérification de G avant sa définition
         if not self.current_graph:
             logger.warning("⚠️ Aucun graphe à dessiner")
             self.figure.clear()
@@ -2620,23 +2619,58 @@ class GraphWidget(QtWidgets.QWidget):
 
         logger.info(f"🎨 Layout calculé pour {num_nodes} nœuds avec orbites")
 
+        # ✅ PARAMÈTRES ADAPTATIFS SELON LE NOMBRE DE NŒUDS
         if num_nodes <= 15:
-            text_width = 10.0  # ✅ AUGMENTÉ de 8.0 à 10.0
-            text_height = 2.5  # ✅ AUGMENTÉ de 2.0 à 2.5
+            base_char_width = 0.65  # Augmenté significativement
+            text_height = 2.5
             font_size = 11
-            max_chars = 35
+            padding = 3.0  # Augmenté
         elif num_nodes <= 30:
-            text_width = 9.0  # ✅ AUGMENTÉ
-            text_height = 2.3  # ✅ AUGMENTÉ
+            base_char_width = 0.60  # Augmenté significativement
+            text_height = 2.3
             font_size = 10
-            max_chars = 32
+            padding = 2.8  # Augmenté
         else:
-            text_width = 8.0  # ✅ AUGMENTÉ
-            text_height = 2.0  # ✅ AUGMENTÉ
+            base_char_width = 0.55  # Augmenté significativement
+            text_height = 2.0
             font_size = 9
-            max_chars = 28 
+            padding = 2.5  # Augmenté
 
-        # ✅ DESSINER LES ARÊTES
+        # ✅ PREMIÈRE PASSE : CALCULER LA LARGEUR MAXIMALE NÉCESSAIRE
+        max_required_width = 10.0  # Minimum absolu augmenté
+        node_display_names = {}
+        max_text_length = 0
+        longest_name = ""
+
+        for node in G.nodes():
+            node_data = G.nodes[node]
+            node_type = node_data.get('node_type', None)
+
+            # Formater le nom COMPLET (sans troncature)
+            formatted_name = self._format_node_display_name(node, node_type)
+            node_display_names[node] = formatted_name
+
+            text_length = len(formatted_name)
+
+            # ✅ CALCUL GÉNÉREUX de la largeur nécessaire
+            # Multiplier par un facteur plus important pour tenir compte des caractères larges
+            text_width_estimated = text_length * base_char_width * 1.5  # Facteur augmenté de 1.15 à 1.5
+            required_width = text_width_estimated + (padding * 2)
+
+            # Mettre à jour la largeur maximale
+            if required_width > max_required_width:
+                max_required_width = required_width
+                max_text_length = text_length
+                longest_name = formatted_name
+
+        # ✅ UTILISER CETTE LARGEUR POUR TOUS LES NŒUDS
+        node_width = max_required_width
+        node_height = text_height
+
+        logger.info(f"📏 Largeur finale des nœuds : {node_width:.2f}")
+        logger.info(f"📝 Nom le plus long : '{longest_name}' ({max_text_length} caractères)")
+
+        node_dimensions = {}
         curvature = 0.12 if num_nodes <= 20 else 0.08
         edge_width = 2.0 if num_nodes <= 20 else 1.5
         edge_alpha = 0.7
@@ -2666,43 +2700,24 @@ class GraphWidget(QtWidgets.QWidget):
                 connectionstyle=f'arc3,rad={curvature}'
             )
 
+        # ✅ DEUXIÈME PASSE : DESSINER LES NŒUDS AVEC LA LARGEUR UNIFORME
         for node in G.nodes():
             x, y = pos[node]
 
-            node_data = G.nodes[node]
-            node_type = node_data.get('node_type', None)
+            # Récupérer le nom complet (sans troncature)
+            display_name = node_display_names[node]
 
-            # Formater le nom
-            formatted_name = self._format_node_display_name(node, node_type)
-            display_name = formatted_name[:max_chars] + '..' if len(formatted_name) > max_chars else formatted_name
+            node_dimensions[node] = (node_width, node_height)
 
             if node == self.current_central_name:
-                color = '#8B2E1F'  # Rouge central
+                color = '#8B2E1F'
                 edge_color = '#666666'
                 linewidth = 3.0
             else:
-                # 🎯 ÉTAPE 1 : Récupérer l'orbite du nœud
-                node_orbit = node_orbits.get(node, 3)  # Par défaut orbite 3
+                # ✅ Récupérer l'orbite
+                orbit = node_orbits.get(node, 3)
 
-                # 🎯 ÉTAPE 2 : Couleur de base selon l'orbite
-                if node_orbit == 1:
-                    # Orbite 1 : Hiérarchie (Bleu)
-                    color = '#2196F3'
-                    edge_color = '#1565C0'
-                    color_reason = "orbite 1 (hiérarchie)"
-                elif node_orbit == 2:
-                    # Orbite 2 : Code interne (Cyan)
-                    color = '#00ACC1'
-                    edge_color = '#00838F'
-                    color_reason = "orbite 2 (code interne)"
-                else:
-                    # Orbite 3 : Externe (Orange)
-                    color = '#FF8C00'
-                    edge_color = '#E65100'
-                    color_reason = "orbite 3 (externe)"
-
-                # 🎯 ÉTAPE 3 : OVERRIDE pour les CALLS si c'est vraiment dominant
-                # Collecter les types de relations
+                # Collecter les types de relations pour déterminer la catégorie dominante
                 node_relation_types = {}
                 for u, v, data in G.edges(data=True):
                     if u == node or v == node:
@@ -2710,31 +2725,61 @@ class GraphWidget(QtWidgets.QWidget):
                         if rel_type:
                             node_relation_types[rel_type] = node_relation_types.get(rel_type, 0) + 1
 
-                # Si le nœud a BEAUCOUP de calls (>80% des relations), le marquer en violet
+                # ✅ DÉTERMINER LA CATÉGORIE DOMINANTE
+                dominant_category = 'unknown'
+
                 if node_relation_types:
-                    total_relations = sum(node_relation_types.values())
+                    # Compter par catégorie
+                    hierarchy_count = sum(count for rel, count in node_relation_types.items() 
+                                         if rel in ['parent', 'child', 'contains', 'hierarchy',
+                                                   'contains_class', 'contains_function', 'contains_variable',
+                                                   'has_method', 'has_variable', 'belongs_to'])
+
+                    code_count = sum(count for rel, count in node_relation_types.items() 
+                                    if rel in ['import', 'from_import', 'use', 'uses', 'used_by',
+                                              'implements', 'extends', 'inherits', 'intra_file'])
+
                     call_count = sum(count for rel, count in node_relation_types.items() 
-                                    if rel in ['call', 'calls', 'method_call', 'function_call'])
+                                    if rel in ['call', 'calls', 'method_call', 'function_call', 'called_by'])
 
-                    call_percentage = (call_count / total_relations * 100) if total_relations > 0 else 0
+                    external_count = sum(count for rel, count in node_relation_types.items() 
+                                        if rel in ['require', 'dependency', 'external', 'inter_file', 'include'])
 
-                    # 🟣 OVERRIDE : Si >80% de calls, marquer en violet
-                    if call_percentage > 80 and call_count >= 2:
-                        color = '#9C27B0'  # Violet
-                        edge_color = '#7B1FA2'
-                        color_reason = f"calls dominant ({call_percentage:.0f}%)"
+                    # Déterminer la catégorie dominante
+                    category_counts = {
+                        'hierarchy': hierarchy_count,
+                        'code': code_count,
+                        'call': call_count,
+                        'external': external_count
+                    }
 
-                    logger.debug(f"🎨 {node}: {color_reason}")
-                    if call_percentage > 50:
-                        logger.debug(f"   Calls: {call_count}/{total_relations} ({call_percentage:.0f}%)")
+                    if any(category_counts.values()):
+                        dominant_category = max(category_counts, key=category_counts.get)
+
+                # ✅ APPLIQUER LES COULEURS SELON LA CATÉGORIE
+                if dominant_category == 'hierarchy':
+                    color = '#2196F3'
+                    edge_color = '#1565C0'
+                elif dominant_category == 'code':
+                    color = '#00ACC1'
+                    edge_color = '#00838F'
+                elif dominant_category == 'call':
+                    color = '#9C27B0'
+                    edge_color = '#7B1FA2'
+                elif dominant_category == 'external':
+                    color = '#FF8C00'
+                    edge_color = '#E65100'
+                else:
+                    color = '#999999'
+                    edge_color = '#666666'
 
                 linewidth = 2.5
 
-            # Dessiner le rectangle du nœud
+            # ✅ Dessiner le rectangle avec la largeur uniforme LARGE
             rect = FancyBboxPatch(
-                (x - text_width/2, y - text_height/2),
-                text_width, text_height,
-                boxstyle="round,pad=0.15",
+                (x - node_width/2, y - node_height/2),
+                node_width, node_height,
+                boxstyle="round,pad=0.35",  # Padding interne du box
                 edgecolor=edge_color,
                 facecolor=color,
                 alpha=0.95,
@@ -2743,34 +2788,39 @@ class GraphWidget(QtWidgets.QWidget):
             )
             ax.add_patch(rect)
 
-            # Texte
+            # ✅ Texte centré dans le conteneur (AUCUNE TRONCATURE)
             ax.text(
                 x, y, display_name,
                 ha='center', va='center',
                 fontsize=font_size,
                 fontweight='bold',
                 color='white',
-                zorder=3
+                zorder=3,
+                wrap=False
             )
 
-        # ✅ DESSINER LA LÉGENDE AVEC STATISTIQUES
         self._draw_orbit_legend(ax, edges, node_orbits)
 
         ax.axis('off')
 
-        # ✅ LIMITES
         x_coords = [pos[node][0] for node in G.nodes()]
         y_coords = [pos[node][1] for node in G.nodes()]
 
         x_min, x_max = min(x_coords), max(x_coords)
         y_min, y_max = min(y_coords), max(y_coords)
 
-        margin = 5.0 if num_nodes <= 15 else 4.0 if num_nodes <= 30 else 3.0
+        # ✅ Utiliser la largeur réelle calculée pour les marges (GÉNÉREUSES)
+        margin_x = max(node_width * 0.8, 4.0)  # Encore augmenté
+        margin_y = max(node_height * 0.8, 2.5)  # Encore augmenté
 
-        ax.set_xlim(x_min - margin, x_max + margin)
-        ax.set_ylim(y_min - margin, y_max + margin)
+        ax.set_xlim(x_min - margin_x, x_max + margin_x)
+        ax.set_ylim(y_min - margin_y, y_max + margin_y)
 
-        # ✅ SAUVEGARDE DONNÉES
+        ax.margins(0)
+        ax.set_aspect('equal', adjustable='datalim')
+
+        self.figure.tight_layout(pad=0.1)
+
         self.graph_data = {
             'pos': {node: list(coord) for node, coord in pos.items()},
             'G': G,
@@ -2779,14 +2829,15 @@ class GraphWidget(QtWidgets.QWidget):
             'edge_colors': edge_colors,
             'num_nodes': num_nodes,
             'node_orbits': node_orbits,
-            'text_width': text_width,
-            'text_height': text_height,
+            'text_width': node_width,
+            'text_height': node_height,
             'font_size': font_size,
-            'max_chars': max_chars,
             'x_min': x_min,
             'x_max': x_max,
             'y_min': y_min,
-            'y_max': y_max
+            'y_max': y_max,
+            'node_dimensions': node_dimensions,
+            'padding': padding
         }
 
         self.canvas.draw()
@@ -3288,7 +3339,8 @@ class GraphWidget(QtWidgets.QWidget):
             self._show_node_details_in_graph(self.selected_node, G)
 
         ax.axis('off')
-        ax.margins(0.12 if num_nodes <= 50 else 0.08)
+        ax.margins(0)  # ✅ CORRECTION : Pas de marges automatiques
+        self.figure.tight_layout(pad=0.1)  # ✅ NOUVEAU
         self.canvas.draw_idle()
 
     def _on_graph_motion(self, event):
@@ -3577,24 +3629,31 @@ class GraphWidget(QtWidgets.QWidget):
             pos[center_node] = np.array([0.0, 0.0])
 
         def compute_radius(base, count):
-            """Rayon adaptatif selon densité"""
+            """Rayon adaptatif selon densité avec marge de sécurité"""
             if count == 0:
                 return base
-            # Calculer la circonférence nécessaire
-            node_width = 5.0  # ✅ AUGMENTÉ de 4.0 à 5.0
-            min_spacing = 2.5  # ✅ AUGMENTÉ de 1.5 à 2.5
-            required_circumference = (node_width + min_spacing) * count
+
+            if num_nodes <= 15:
+                avg_node_width = 8.0
+                min_spacing = 3.5
+            elif num_nodes <= 30:
+                avg_node_width = 7.0
+                min_spacing = 3.0
+            else:
+                avg_node_width = 6.0
+                min_spacing = 2.5
+
+            required_circumference = (avg_node_width + min_spacing) * count * 1.25  # +25% de marge
             min_required_radius = required_circumference / (2 * math.pi)
             return max(base, min_required_radius)
         
-        base_gap = 10.0  # ✅ AUGMENTÉ de 8.0 à 10.0
-        radius_inner = compute_radius(base_gap * 1.5, len(hierarchical_nodes))  # ✅ 1.2 → 1.5
-        radius_middle = compute_radius(base_gap * 2.5, len(internal_code_nodes))  # ✅ 2.0 → 2.5
-        radius_outer = compute_radius(base_gap * 3.5, len(external_nodes))
+        base_gap = 12.0
+        radius_inner = compute_radius(base_gap * 1.8, len(hierarchical_nodes))
+        radius_middle = compute_radius(base_gap * 3.0, len(internal_code_nodes))
+        radius_outer = compute_radius(base_gap * 4.5, len(external_nodes))     # 6.5 au lieu de 4.5
 
         logger.info(f"🔍 Rayons calculés : inner={radius_inner:.1f}, middle={radius_middle:.1f}, outer={radius_outer:.1f}")
 
-        # 🔄 DISTRIBUTION CIRCULAIRE avec décalages angulaires
         def distribute(nodes, radius, angular_offset=0.0):
             n = len(nodes)
             if n == 0:
@@ -3640,20 +3699,26 @@ class GraphWidget(QtWidgets.QWidget):
         """
         def get_node_dimensions(node_name):
             """Calcule largeur réelle basée sur longueur du texte"""
+            # ✅ CORRECTION : Utiliser les dimensions réelles du graphe
+            if hasattr(self, 'graph_data') and self.graph_data and 'node_dimensions' in self.graph_data:
+                if node_name in self.graph_data['node_dimensions']:
+                    return self.graph_data['node_dimensions'][node_name]
+
+            # Fallback si pas encore calculé
             if num_nodes <= 15:
                 max_chars = 30
-                base_width = 8.0  # ✅ AUGMENTÉ de 6.0 à 8.0
+                base_width = 8.0
             elif num_nodes <= 30:
                 max_chars = 28
-                base_width = 7.5  # ✅ AUGMENTÉ de 5.5 à 7.5
+                base_width = 7.5
             else:
                 max_chars = 25
-                base_width = 7.0  # ✅ AUGMENTÉ de 5.0 à 7.0
+                base_width = 7.0
 
             display_name = node_name[:max_chars] + '..' if len(node_name) > max_chars else node_name
             char_width = base_width / max_chars
-            width = len(display_name) * char_width + 1.0  # ✅ AUGMENTÉ padding de 0.5 à 1.0
-            height = 2.5 if num_nodes <= 15 else 2.2 if num_nodes <= 30 else 2.0  # ✅ AUGMENTÉ
+            width = len(display_name) * char_width + 1.0
+            height = 2.5 if num_nodes <= 15 else 2.2 if num_nodes <= 30 else 2.0
 
             return width, height
 
@@ -3664,29 +3729,28 @@ class GraphWidget(QtWidgets.QWidget):
 
         # ✅ PARAMÈTRES ADAPTATIFS
         if num_nodes <= 10:
-            base_min_distance = 3.0  # ✅ AUGMENTÉ de 2.5 à 3.0
+            base_min_distance = 4.0
             iterations = 150
-            orbit_tolerance = 2.5  # ✅ AUGMENTÉ de 2.0 à 2.5
+            orbit_tolerance = 3.0
         elif num_nodes <= 20:
-            base_min_distance = 2.5  # ✅ AUGMENTÉ de 2.0 à 2.5
+            base_min_distance = 3.5
             iterations = 120
-            orbit_tolerance = 3.0  # ✅ AUGMENTÉ de 2.5 à 3.0
+            orbit_tolerance = 3.5
         elif num_nodes <= 40:
-            base_min_distance = 2.2  # ✅ AUGMENTÉ de 1.8 à 2.2
+            base_min_distance = 3.0
             iterations = 100
-            orbit_tolerance = 3.5  # ✅ AUGMENTÉ de 3.0 à 3.5
+            orbit_tolerance = 4.0 
         else:
-            base_min_distance = 2.0  # ✅ AUGMENTÉ de 1.5 à 2.0
+            base_min_distance = 2.5
             iterations = 80
-            orbit_tolerance = 4.0  # ✅ AUGMENTÉ de 3.5 à 4.0
+            orbit_tolerance = 4.5
 
-        # ✅ CALCULER LES DISTANCES INITIALES (ORBITES DE RÉFÉRENCE)
         node_distances = {}
-        initial_distances = {}  # ✅ NOUVEAU : Sauvegarder les distances initiales
+        initial_distances = {}
         for node in G.nodes():
             dist = get_node_distance_from_center(node)
             node_distances[node] = dist
-            initial_distances[node] = dist  # ✅ Référence à ne pas dépasser
+            initial_distances[node] = dist
 
         # ✅ RÉCUPÉRER LES ORBITES
         node_orbits = {}
