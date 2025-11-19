@@ -18,6 +18,7 @@ from utils.conversation_history import ConversationHistory
 from ui.widgets.tabs.code_popup_dialog import CodePopupDialog
 from ui.widgets.tabs.snippet_card import SnippetCard
 from utils.vscode_integration import VSCodeIntegration
+from ui.widgets.tabs.session_history_manager import SessionHistoryDialog, load_session_into_history
 
 class CodingPanel(QtWidgets.QWidget):   
     """Widget pour les sessions du coding multi-IA avec panneau de snippets rétractable"""
@@ -570,9 +571,26 @@ class CodingPanel(QtWidgets.QWidget):
                 opacity: 0.3;
             }
         """)
-        self.global_history_button.setIconSize(QtCore.QSize(20, 20))
-        self.global_history_button.clicked.connect(self._toggle_global_history)
-        self.global_history_button.setEnabled(True)  # Désactivé par défaut
+
+        history_menu = QtWidgets.QMenu(self)
+
+        # Action 1: Voir l'historique actuel
+        view_current_action = QtWidgets.QAction("📜 Historique de la session", self)
+        view_current_action.triggered.connect(self._toggle_global_history)
+        history_menu.addAction(view_current_action)
+        
+        history_menu.addSeparator()
+        
+        # Action 2: Charger une ancienne session
+        load_session_action = QtWidgets.QAction("📂 Charger une session sauvegardée...", self)
+        load_session_action.triggered.connect(self._open_sessions_history)
+        history_menu.addAction(load_session_action)
+        
+        # Associer le menu au bouton
+        self.global_history_button.setMenu(history_menu)
+
+        # Associer le menu au bouton
+        self.global_history_button.setMenu(history_menu)  # Désactivé par défaut
         snippets_header.addWidget(self.global_history_button)
 
         # Badge compteur de snippets
@@ -3677,6 +3695,17 @@ class CodingPanel(QtWidgets.QWidget):
         # TOOLTIPS
         tooltip = tr("show_snippets") if not self.snippets_panel_visible else tr("hide_snippets")
         self.toggle_snippets_button.setToolTip(tooltip)
+
+    def _open_sessions_history(self):
+        """Ouvre le dialogue de sélection de session"""
+        dialog = SessionHistoryDialog(sessions_folder="sessions", parent=self)
+
+        # Connexion du signal
+        dialog.session_selected.connect(
+            lambda path: load_session_into_history(self, path)
+        )
+    
+        dialog.exec_()
 
     def closeEvent(self, event):
         """Fermeture propre du panneau"""

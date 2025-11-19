@@ -446,49 +446,67 @@ class UniversalBrowserHandler:
         if not syntax_valid:
             logger.error(f"      🚨 SYNTAXE INVALIDE après réparation!")
 
-    def _extract_code_after_metadata_clean(self, response: str, start_pos: int, snippet_idx: int) -> str:
+    def _extract_code_after_metadata(self, response: str, start_pos: int, snippet_idx: int) -> str:
         """
-        🔧 VERSION SIMPLIFIÉE : Le code est déjà propre grâce à la reconstruction préalable
+        🆕 Extraction du code après les métadonnées (VERSION FIXÉE)
         """
         remaining_text = response[start_pos:]
 
-        logger.debug(f"   🔍 Analyse snippet {snippet_idx} (position {start_pos})")
+        logger.debug(f"   🔍 Extraction snippet {snippet_idx}")
 
-        # Trouver le prochain bloc ACTION
-        next_action_pos = remaining_text.find('# ACTION:')
-        if next_action_pos == -1:
-            next_action_pos = remaining_text.find('#ACTION:')
+        # Trouver la fin des métadonnées et le code
+        lines = remaining_text.split('\n')
 
-        end_pos = len(remaining_text)
+        # Phase 1 : Sauter les métadonnées
+        code_start_idx = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
 
-        if next_action_pos > 0:
-            end_pos = next_action_pos
-            logger.debug(f"      Délimiteur: '# ACTION:' à {next_action_pos}")
-
-        # Extraire le code (déjà propre)
-        code = remaining_text[:end_pos].strip()
-
-        # Nettoyer uniquement les métadonnées (le code est déjà reconstruit)
-        lines = code.split('\n')
-        clean_lines = []
-
-        for line in lines:
-            # Ignorer les métadonnées et junk évidents
-            if re.match(r'^\s*#\s*(ACTION|FILE|TARGET|DESCRIPTION):', line, re.IGNORECASE):
+            # Ligne de métadonnée
+            if re.match(r'^#\s*(ACTION|FILE|TARGET|POSITION|DESCRIPTION):', stripped, re.IGNORECASE):
+                code_start_idx = i + 1
                 continue
-            if line.strip() in ['python', '```python', '```', 'Copier', 'Regenerate']:
+            
+            # Ligne vide
+            if not stripped:
                 continue
+            
+            # Début du code trouvé
+            break
+        
+        # Phase 2 : Extraire le code jusqu'au prochain ACTION ou fin
+        code_lines = []
+        for i in range(code_start_idx, len(lines)):
+            line = lines[i]
+            stripped = line.strip()
 
-            if line.strip():
-                clean_lines.append(line)
+            # Arrêter au prochain ACTION
+            if re.match(r'^#\s*ACTION\s*:', stripped, re.IGNORECASE):
+                break
+            
+            # Ignorer artefacts UI
+            if stripped in ['Comment puis-je vous aider ?', 'Sonnet 4.5', 
+                           'Copier', 'Regenerate', 'Réessayer', 'python', 
+                           '```python', '```']:
+                continue
+            
+            # Arrêter aux caractères de fin
+            if 'characters total' in stripped:
+                break
+            
+            # Ajouter la ligne
+            code_lines.append(line)
 
-        code = '\n'.join(clean_lines).strip()
+        code = '\n'.join(code_lines).strip()
 
-        logger.debug(f"      ✅ Code final: {len(code)} chars")
+        # Nettoyer espaces multiples
+        code = re.sub(r'\n{3,}', '\n\n', code)
+
+        logger.debug(f"      ✅ Code extrait: {len(code)} chars")
 
         return code
     
-    def _extract_code_after_metadata(self, response: str, start_pos: int, snippet_idx: int) -> str:
+    def _extract_code_after(self, response: str, start_pos: int, snippet_idx: int) -> str:
         """
         🔧 VERSION CORRIGÉE v3 : Extrait le code + reconstruction tokens immédiate
         """
@@ -588,6 +606,289 @@ class UniversalBrowserHandler:
         logger.debug(f"      ✅ Code final: {len(code)} chars")
 
         return code
+    
+    def _extract_content_universal_robust(self) -> str:
+        logger.info("📄 Extraction universelle ROBUSTE...")
+
+        # ============================================================
+        # ÉTAPE 0 : DIAGNOSTIC DE LA TAILLE
+        # ============================================================
+        size_check = self.client.execute_javascript("""
+            (() => {
+                const body = document.body;
+                if (!body) return { size: 0, complexity: 'empty' };
+
+                const text = body.innerText || '';
+                const codeBlocks = document.querySelectorAll('pre code, pre').length;
+                const totalElements = document.querySelectorAll('*').length;
+
+                let complexity = 'small';
+                if (text.length > 50000 || totalElements > 5000) {
+                    complexity = 'huge';
+                } else if (text.length > 20000 || totalElements > 2000) {
+                    complexity = 'large';
+                } else if (text.length > 5000) {
+                    complexity = 'medium';
+                }
+
+                return {
+                    size: text.length,
+                    codeBlocks: codeBlocks,
+                    totalElements: totalElements,
+                    complexity: complexity
+                };
+            })();
+        """)
+
+        if isinstance(size_check, dict) and "result" in size_check:
+            info = size_check["result"]
+            logger.info(f"   📊 Taille détectée: {info.get('size')} chars")
+            logger.info(f"   🏗️  Complexité: {info.get('complexity')}")
+            logger.info(f"   📦 Blocs de code: {info.get('codeBlocks')}")
+
+            complexity = info.get('complexity', 'medium')
+        else:
+            complexity = 'medium'
+            logger.warning("   ⚠️  Impossible de détecter la taille, mode medium")
+
+        # ============================================================
+        # ÉTAPE 1 : EXTRACTION ADAPTATIVE
+        # ============================================================
+
+        if complexity == 'huge':
+            logger.info("   🔄 Mode HUGE : Extraction par chunks...")
+            return self._extract_huge_content_by_chunks()
+
+        elif complexity == 'large':
+            logger.info("   📦 Mode LARGE : Extraction sélective...")
+            return self._extract_large_content_selective()
+
+        else:
+            logger.info("   ⚡ Mode STANDARD : Extraction directe...")
+            return self._extract_standard_content()
+        
+    def _extract_large_content_selective(self) -> str:
+        logger.info("   📦 Extraction sélective des zones de code...")
+
+        content = self.client.execute_javascript("""
+            (() => {
+                // Chercher le conteneur principal de conversation
+                const mainSelectors = [
+                    'main',
+                    '[role="main"]',
+                    'article',
+                    '.conversation',
+                    '[class*="conversation"]',
+                    '[class*="messages"]'
+                ];
+
+                let mainContainer = null;
+                for (let selector of mainSelectors) {
+                    mainContainer = document.querySelector(selector);
+                    if (mainContainer) break;
+                }
+
+                if (!mainContainer) {
+                    mainContainer = document.body;
+                }
+
+                // Stratégie : Extraire SEULEMENT les zones avec code
+                let extractedParts = [];
+
+                // 1. Trouver tous les blocs de code
+                const codeBlocks = mainContainer.querySelectorAll('pre code, pre, [class*="code-block"]');
+
+                codeBlocks.forEach((codeBlock, idx) => {
+                    // Récupérer le contexte autour du code (300 chars avant/après)
+                    let parent = codeBlock.closest('div, article, section') || codeBlock.parentElement;
+
+                    if (parent) {
+                        let contextText = parent.innerText || parent.textContent || '';
+
+                        // Chercher métadonnées ACTION/FILE autour
+                        let beforeText = '';
+                        let prev = parent.previousElementSibling;
+                        let attempts = 0;
+
+                        while (prev && attempts < 3) {
+                            let prevText = prev.innerText || prev.textContent || '';
+                            if (prevText.includes('ACTION:') || prevText.includes('FILE:')) {
+                                beforeText = prevText + '\\n' + beforeText;
+                                break;
+                            }
+                            if (prevText.length < 200) {
+                                beforeText = prevText + '\\n' + beforeText;
+                            }
+                            prev = prev.previousElementSibling;
+                            attempts++;
+                        }
+
+                        extractedParts.push(beforeText + contextText);
+                    }
+                });
+
+                // 2. Si pas de blocs de code, prendre le texte principal
+                if (extractedParts.length === 0) {
+                    return mainContainer.innerText || mainContainer.textContent || '';
+                }
+
+                // Joindre avec séparateurs
+                return extractedParts.join('\\n\\n=== BLOC_SUIVANT ===\\n\\n');
+            })();
+        """)
+
+        if isinstance(content, dict):
+            content = content.get("result", "")
+
+        logger.info(f"   ✅ Extraction sélective: {len(content)} chars")
+
+        return content
+    
+    def _extract_huge_content_by_chunks(self) -> str:
+        logger.info("   🔄 Extraction par chunks (contenu énorme)...")
+
+        chunks = []
+        chunk_idx = 0
+        max_chunks = 20  # Sécurité
+
+        while chunk_idx < max_chunks:
+            chunk_content = self.client.execute_javascript(f"""
+                (() => {{
+                    const chunkSize = 50;  // Nombre d'éléments par chunk
+                    const startIdx = {chunk_idx * 50};
+
+                    // Trouver tous les éléments avec du texte
+                    const allElements = Array.from(document.querySelectorAll('pre, code, p, div'));
+
+                    // Filtrer ceux avec du contenu substantiel
+                    const contentElements = allElements.filter(el => {{
+                        const text = el.innerText || el.textContent || '';
+                        return text.trim().length > 50;
+                    }});
+
+                    // Prendre le chunk actuel
+                    const chunk = contentElements.slice(startIdx, startIdx + chunkSize);
+
+                    if (chunk.length === 0) {{
+                        return {{ done: true, content: '' }};
+                    }}
+
+                    // Extraire le texte du chunk
+                    const chunkText = chunk.map(el => el.innerText || el.textContent || '').join('\\n\\n');
+
+                    return {{
+                        done: chunk.length < chunkSize,
+                        content: chunkText,
+                        processed: startIdx + chunk.length
+                    }};
+                }})();
+            """)
+
+            if isinstance(chunk_content, dict):
+                result = chunk_content.get("result", {})
+
+                if result.get('done'):
+                    if result.get('content'):
+                        chunks.append(result['content'])
+                    logger.info(f"   ✅ Extraction terminée après {chunk_idx + 1} chunks")
+                    break
+                
+                if result.get('content'):
+                    chunks.append(result['content'])
+                    logger.info(f"   📦 Chunk {chunk_idx + 1}: {len(result['content'])} chars")
+
+                chunk_idx += 1
+            else:
+                logger.warning(f"   ⚠️  Erreur chunk {chunk_idx}")
+                break
+            
+            # Petite pause pour éviter surcharge
+            time.sleep(0.1)
+
+        full_content = '\n\n'.join(chunks)
+        logger.info(f"   ✅ Total extrait: {len(full_content)} chars en {len(chunks)} chunks")
+
+        return full_content
+    
+    def _extract_content_with_fallback(self) -> str:
+        """
+        Point d'entrée principal : Extraction avec fallback automatique
+        """
+        logger.info("📄 Extraction du contenu avec fallback...")
+
+        try:
+            # Essayer méthode robuste
+            content = self._extract_content_universal_robust()
+
+            if content and len(content) > 100:
+                logger.info(f"   ✅ Extraction robuste réussie: {len(content)} chars")
+                return content
+
+            logger.warning("   ⚠️  Extraction robuste insuffisante, fallback...")
+
+        except Exception as e:
+            logger.error(f"   ❌ Erreur extraction robuste: {e}")
+
+        # Fallback 1 : Méthode standard
+        try:
+            logger.info("   🔄 Fallback 1: Méthode standard...")
+            content = self._extract_content_universal()
+
+            if content and len(content) > 100:
+                logger.info(f"   ✅ Fallback 1 réussi: {len(content)} chars")
+                return content
+
+        except Exception as e:
+            logger.error(f"   ❌ Erreur fallback 1: {e}")
+
+        # Fallback 2 : get_page_content
+        try:
+            logger.info("   🔄 Fallback 2: get_page_content...")
+            response = self.client.get_page_content(content_type="text")
+
+            if "error" not in response:
+                content_data = response.get("result", {}).get("content", [])
+                if isinstance(content_data, list) and len(content_data) > 0:
+                    text = content_data[0].get("text", "") if isinstance(content_data[0], dict) else str(content_data[0])
+                    if text and len(text) > 100:
+                        logger.info(f"   ✅ Fallback 2 réussi: {len(text)} chars")
+                        return text
+
+        except Exception as e:
+            logger.error(f"   ❌ Erreur fallback 2: {e}")
+
+        logger.error("❌ Tous les fallbacks ont échoué")
+        return ""
+        
+    def _extract_standard_content(self) -> str:
+        """Extraction standard (< 20K chars)"""
+        content = self.client.execute_javascript("""
+            (() => {
+                const body = document.body;
+                if (!body) return '';
+
+                const clone = body.cloneNode(true);
+
+                // Supprimer éléments parasites
+                const toRemove = clone.querySelectorAll(`
+                    script, style, noscript,
+                    button, [role="button"],
+                    nav, header, footer,
+                    [aria-hidden="true"],
+                    [style*="display: none"],
+                    [style*="visibility: hidden"]
+                `);
+
+                toRemove.forEach(el => el.remove());
+
+                return clone.innerText || clone.textContent || '';
+            })();
+        """)
+
+        if isinstance(content, dict):
+            content = content.get("result", "")
+
+        return content
 
     def _clean_broken_lines(self, text: str) -> str:
         """
@@ -630,31 +931,44 @@ class UniversalBrowserHandler:
     
     def _extract_snippets(self, response: str) -> List[Dict]:
         """
-        🔧 VERSION CORRIGÉE : Extraction avec TARGET + POSITION
+        🔍 Extraction des snippets - VERSION CORRIGÉE
+        Gère correctement les multiples snippets en découpant par segments
         """
         snippets = []
 
         logger.info(f"\n{'='*80}")
         logger.info("🔍 EXTRACTION DES SNIPPETS")
         logger.info(f"{'='*80}")
-
         logger.info(f"📄 Taille réponse: {len(response)} chars")
 
-        # ✅ PHASE 0.1 : RECONSTRUCTION TOKENS ÉCLATÉS
+        # ================================================================
+        # PHASE 0 : PRÉPARATION
+        # ================================================================
         logger.info("⚡ PHASE 0.1 : Reconstruction tokens éclatés (PRIORITAIRE)")
 
         try:
-            from core.orchestration.advanced_code_recovery import DomExtractionFixer, RepairStats
+            from core.orchestration.advanced_code_recovery import DomExtractionFixer
 
-            stats_temp = RepairStats()
-            response = DomExtractionFixer._reconstruct_split_tokens(response, stats_temp, verbose=True)
+            class SimpleRepairStats:
+                def __init__(self):
+                    self.operators_fixed = 0
+                    self.imports_fixed = 0
+                    self.indents_fixed = 0
 
-            if stats_temp.operators_fixed > 0:
-                logger.info(f"   ✅ {stats_temp.operators_fixed} token(s) éclatés reconstruits")
+            try:
+                stats_temp = DomExtractionFixer.RepairStats()
+            except AttributeError:
+                stats_temp = SimpleRepairStats()
+
+            if hasattr(DomExtractionFixer, '_reconstruct_split_tokens'):
+                response = DomExtractionFixer._reconstruct_split_tokens(response, stats_temp, verbose=False)
+
+                if stats_temp.operators_fixed > 0:
+                    logger.info(f"   ✅ {stats_temp.operators_fixed} token(s) éclatés reconstruits")
+
         except Exception as e:
-            logger.warning(f"⚠️ Erreur reconstruction tokens globale: {e}")
+            logger.warning(f"⚠️ Erreur reconstruction tokens: {e}")
 
-        # ✅ PHASE 0.2 : FUSION LIGNES ÉCLATÉES
         logger.info("🔗 PHASE 0.2 : Fusion intelligente des lignes éclatées")
 
         try:
@@ -668,95 +982,119 @@ class UniversalBrowserHandler:
         except Exception as e:
             logger.warning(f"⚠️ Erreur fusion lignes: {e}")
 
-        # 🔧 PHASE 0.3 : Nettoyer les lignes cassées
         cleaned_response = self._clean_broken_lines(response)
         logger.info(f"🔧 Après reconstruction lignes: {len(cleaned_response)} chars")
 
-        # PHASE 0.4 : Nettoyer la pollution DOM
         cleaned_response = self._clean_dom_pollution(cleaned_response)
         logger.info(f"🧹 Après nettoyage pollution: {len(cleaned_response)} chars")
 
-        # ✅ NOUVEAU : Pattern étendu avec TARGET + POSITION
-        metadata_pattern = r'''
-            \#\s*ACTION\s*:\s*(\w+)\s*[\r\n]+
-            \s*\#\s*FILE\s*:\s*([^\r\n]+?)[\r\n]+
-            (?:\s*\#\s*TARGET\s*:\s*([^\r\n]+?)[\r\n]+)?
-            (?:\s*\#\s*POSITION\s*:\s*([^\r\n]+?)[\r\n]+)?
-            (?:\s*\#\s*DESCRIPTION\s*:\s*([^\r\n]+?)[\r\n]+)?
-        '''
+        # ================================================================
+        # PHASE 1 : DÉTECTION DE TOUS LES BLOCS ACTION
+        # ================================================================
+        action_pattern = r'#\s*ACTION\s*:\s*(\w+)'
+        action_matches = list(re.finditer(action_pattern, cleaned_response, re.IGNORECASE))
 
-        metadata_matches = list(re.finditer(
-            metadata_pattern, 
-            cleaned_response, 
-            re.IGNORECASE | re.MULTILINE | re.VERBOSE
-        ))
+        logger.info(f"🎯 Blocs détectés: {len(action_matches)}")
 
-        logger.info(f"🎯 Blocs détectés: {len(metadata_matches)}")
+        if not action_matches:
+            logger.warning("📄 Aucun bloc ACTION détecté, activation fallback")
+            return self._extract_fallback_snippets(cleaned_response)
 
-        if metadata_matches:
-            for idx, meta_match in enumerate(metadata_matches, 1):
-                try:
-                    action = meta_match.group(1).strip().upper()
-                    file_path = meta_match.group(2).strip()
-                    target = meta_match.group(3).strip() if meta_match.group(3) else ""
-                    position = meta_match.group(4).strip().lower() if meta_match.group(4) else ""
-                    description = meta_match.group(5).strip() if meta_match.group(5) else ""
+        # ================================================================
+        # PHASE 2 : EXTRACTION PAR SEGMENTS (CORRECTION PRINCIPALE)
+        # ================================================================
+        for idx, action_match in enumerate(action_matches, 1):
+            try:
+                action = action_match.group(1).strip().upper()
 
-                    meta_end_pos = meta_match.end()
+                # ✅ CORRECTION : Calculer les limites du segment
+                segment_start = action_match.start()
 
-                    logger.info(f"\n📦 Snippet {idx}: {action} -> {file_path}")
+                # Trouver la fin du segment (= début du prochain ACTION ou fin du texte)
+                if idx < len(action_matches):
+                    segment_end = action_matches[idx].start()  # Prochain ACTION
+                else:
+                    segment_end = len(cleaned_response)  # Fin du texte
 
-                    # ✅ LOGS DÉTAILLÉS
-                    if target:
-                        logger.info(f"   📍 TARGET: {target}")
-                    if position:
-                        logger.info(f"   🎯 POSITION: {position}")
+                # Extraire le segment complet
+                segment_text = cleaned_response[segment_start:segment_end]
 
-                    # ✅ Extraction simplifiée (le code est déjà propre)
-                    code = self._extract_code_after_metadata_clean(cleaned_response, meta_end_pos, idx)
+                logger.info(f"\n📦 Snippet {idx}/{len(action_matches)}: {action}")
+                logger.info(f"   📏 Segment: {len(segment_text)} chars")
 
-                    if not code or len(code.strip()) < 10:
-                        logger.warning(f"   ⚠️ Code trop court ({len(code)} chars)")
-                        continue
+                # ================================================================
+                # PHASE 3 : EXTRACTION DES MÉTADONNÉES DU SEGMENT
+                # ================================================================
+                file_match = re.search(r'#\s*FILE\s*:\s*([^\n\r]+)', segment_text, re.IGNORECASE)
+                target_match = re.search(r'#\s*TARGET\s*:\s*([^\n\r]+)', segment_text, re.IGNORECASE)
+                position_match = re.search(r'#\s*POSITION\s*:\s*([^\n\r]+)', segment_text, re.IGNORECASE)
+                desc_match = re.search(r'#\s*DESCRIPTION\s*:\s*([^\n\r]+)', segment_text, re.IGNORECASE)
 
-                    action_map = {
-                        'ADD': 'AJOUTER', 'MODIFY': 'MODIFIER',
-                        'REPLACE': 'REMPLACER', 'AJOUTER': 'AJOUTER',
-                        'MODIFIER': 'MODIFIER', 'REMPLACER': 'REMPLACER'
-                    }
-                    action = action_map.get(action, 'AJOUTER')
-
-                    # ✅ VALIDATION POSITION
-                    if position and position not in ['before', 'after', 'inside']:
-                        logger.warning(f"   ⚠️ Position invalide '{position}', utilisation 'after'")
-                        position = 'after'
-
-                    snippet = {
-                        'action': action,
-                        'title': self._generate_title(action, file_path, target),
-                        'file': file_path,
-                        'code': code,
-                        'language': 'python',
-                        'description': description or f"Code généré par {self.config['name']}",
-                        'lineNumber': 0,
-                        'target': target,  # ✅ NOUVEAU
-                        'position': position,  # ✅ NOUVEAU
-                        'platform': self.config['name']
-                    }
-
-                    snippets.append(snippet)
-                    logger.info(f"   ✅ Extrait: {len(code)} chars")
-
-                    # ✅ LOG TARGET + POSITION
-                    if target:
-                        logger.info(f"   ✅ TARGET capturé: {target}")
-                    if position:
-                        logger.info(f"   ✅ POSITION capturée: {position}")
-
-                except Exception as e:
-                    logger.error(f"❌ Erreur snippet {idx}: {e}")
+                if not file_match:
+                    logger.warning(f"   ⚠️ Pas de FILE détecté, snippet ignoré")
                     continue
 
+                file_path = file_match.group(1).strip()
+                target = target_match.group(1).strip() if target_match else ""
+                position = position_match.group(1).strip().lower() if position_match else ""
+                description = desc_match.group(1).strip() if desc_match else ""
+
+                logger.info(f"   📁 FILE: {file_path}")
+                if target:
+                    logger.info(f"   🎯 TARGET: {target}")
+                if position:
+                    logger.info(f"   📍 POSITION: {position}")
+
+                # ================================================================
+                # PHASE 4 : EXTRACTION DU CODE DU SEGMENT
+                # ================================================================
+                code = self._extract_code_from_segment(segment_text, idx)
+
+                if not code or len(code.strip()) < 10:
+                    logger.warning(f"   ⚠️ Code trop court ({len(code)} chars)")
+                    continue
+
+                # Validation action
+                action_map = {
+                    'ADD': 'AJOUTER', 'MODIFY': 'MODIFIER',
+                    'REPLACE': 'REMPLACER', 'AJOUTER': 'AJOUTER',
+                    'MODIFIER': 'MODIFIER', 'REMPLACER': 'REMPLACER'
+                }
+                action = action_map.get(action, 'AJOUTER')
+
+                # Validation position
+                if position and position not in ['before', 'after', 'inside']:
+                    logger.warning(f"   ⚠️ Position invalide '{position}', utilisation 'after'")
+                    position = 'after'
+
+                # ================================================================
+                # PHASE 5 : CRÉATION DU SNIPPET
+                # ================================================================
+                snippet = {
+                    'action': action,
+                    'title': self._generate_title(action, file_path, target),
+                    'file': file_path,
+                    'code': code,
+                    'language': 'python',
+                    'description': description or f"Code généré par {self.config['name']}",
+                    'lineNumber': 0,
+                    'target': target,
+                    'position': position,
+                    'platform': self.config['name']
+                }
+
+                snippets.append(snippet)
+                logger.info(f"   ✅ Extrait: {len(code)} chars")
+
+            except Exception as e:
+                logger.error(f"❌ Erreur snippet {idx}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+
+        # ================================================================
+        # FALLBACK SI AUCUN SNIPPET EXTRAIT
+        # ================================================================
         if not snippets:
             logger.warning("📄 Activation fallback")
             snippets = self._extract_fallback_snippets(cleaned_response)
@@ -767,55 +1105,297 @@ class UniversalBrowserHandler:
 
         return snippets
     
-    def _extract_content_universal(self) -> str:
-        logger.info("📄 Extraction universelle du contenu...")
+    def _extract_code_from_segment(self, segment_text: str, snippet_idx: int) -> str:
+        logger.debug(f"   🔍 Extraction code du segment {snippet_idx}")
 
-        # ✅ MÉTHODE 1 : body.innerText (le plus simple et robuste)
+        python_block_match = re.search(r'```python\s*\n(.*?)```', segment_text, re.DOTALL | re.IGNORECASE)
+
+        if python_block_match:
+            code = python_block_match.group(1).strip()
+            logger.debug(f"      ✅ Code extrait via ```python : {len(code)} chars")
+            return self._clean_code_artifacts(code)
+
+        # ================================================================
+        # MÉTHODE 2 : Extraire tout après les métadonnées
+        # ================================================================
+        lines = segment_text.split('\n')
+
+        # Trouver la fin des métadonnées
+        code_start_idx = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+
+            # Ligne de métadonnée
+            if re.match(r'^#\s*(ACTION|FILE|TARGET|POSITION|DESCRIPTION):', stripped, re.IGNORECASE):
+                code_start_idx = i + 1
+                continue
+            
+            # Ligne vide après métadonnées
+            if not stripped:
+                continue
+            
+            # Début du code trouvé
+            break
+        
+        # Extraire le code
+        code_lines = []
+        for i in range(code_start_idx, len(lines)):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Ignorer artefacts UI
+            if stripped in ['Comment puis-je vous aider ?', 'Sonnet 4.5', 
+                           'Copier', 'Regenerate', 'Réessayer', 'python', 
+                           '```python', '```']:
+                continue
+            
+            # Arrêter aux caractères de fin
+            if 'characters total' in stripped:
+                break
+            
+            code_lines.append(line)
+
+        code = '\n'.join(code_lines).strip()
+
+        # Nettoyer
+        code = self._clean_code_artifacts(code)
+        code = re.sub(r'\n{3,}', '\n\n', code)
+
+        logger.debug(f"      ✅ Code extrait après métadonnées: {len(code)} chars")
+
+        return code
+
+    def _extract_content_universal(self) -> str:
+        logger.info("📄 Extraction du contenu...")
+
         content = self.client.execute_javascript("""
             (() => {
+                // Stratégie : Ignorer tout avant "# ACTION: AJOUTER"
                 const body = document.body;
                 if (!body) return '';
 
-                // Cloner pour nettoyer
-                const clone = body.cloneNode(true);
+                let fullText = body.innerText || body.textContent || '';
 
-                // Supprimer éléments parasites
-                const toRemove = clone.querySelectorAll(`
-                    script, style, noscript,
-                    button, [role="button"],
-                    nav, header, footer,
-                    [aria-hidden="true"],
-                    [style*="display: none"],
-                    [style*="visibility: hidden"]
-                `);
+                // Chercher le premier # ACTION: (début de la réponse Claude)
+                const actionIndex = fullText.indexOf('# ACTION:');
 
-                toRemove.forEach(el => el.remove());
+                if (actionIndex > 0) {
+                    // Prendre seulement à partir du premier ACTION
+                    fullText = fullText.substring(actionIndex);
+                    console.log('✅ Prompt utilisateur supprimé');
+                }
 
-                return clone.innerText || clone.textContent || '';
+                // Nettoyer les artefacts UI à la fin
+                const endMarkers = [
+                    'Comment puis-je vous aider ?',
+                    'Sonnet 4.5',
+                    '(caractères total)'
+                ];
+
+                for (let marker of endMarkers) {
+                    const markerIndex = fullText.indexOf(marker);
+                    if (markerIndex > 0) {
+                        fullText = fullText.substring(0, markerIndex);
+                    }
+                }
+
+                return fullText.trim();
             })();
         """)
 
         if isinstance(content, dict):
             content = content.get("result", "")
 
-        if content and len(content) > 1000:
-            logger.info(f"   ✅ Extraction universelle : {len(content)} chars")
+        if content and len(content) > 100:
+            logger.info(f"   ✅ Extraction réussie: {len(content)} chars")
             return content
 
-        # ✅ MÉTHODE 2 : Fallback get_page_content
-        logger.info("   🔄 Fallback get_page_content...")
+        # Fallback
+        logger.warning("   ⚠️ Extraction JavaScript échouée, fallback...")
 
         response = self.client.get_page_content(content_type="text")
-
         if "error" not in response:
             content_data = response.get("result", {}).get("content", [])
             if isinstance(content_data, list) and len(content_data) > 0:
                 text = content_data[0].get("text", "") if isinstance(content_data[0], dict) else str(content_data[0])
-                if text and len(text) > 1000:
-                    logger.info(f"   ✅ Fallback réussi : {len(text)} chars")
-                    return text
 
-        logger.error("❌ Échec extraction contenu")
+                # Nettoyer le prompt
+                if "# ACTION:" in text:
+                    text = text[text.index("# ACTION:"):]
+
+                return text
+
+        logger.error("❌ Échec extraction")
+        return ""
+    
+    def _extract_claude_response_only(self) -> str:
+        logger.info("📄 Extraction de la réponse de Claude uniquement...")
+
+        result = self.client.execute_javascript("""
+            (() => {
+                // ============================================================
+                // STRATÉGIE : Trouver les messages de l'ASSISTANT (Claude)
+                // ============================================================
+
+                // Sélecteurs pour les messages de Claude (assistant)
+                const assistantSelectors = [
+                    // Sélecteurs spécifiques Claude.ai
+                    '[data-test-render-count]',  // Messages de Claude
+                    '[class*="font-claude"]',    // Texte de Claude
+                    'div[class*="prose"]',       // Contenu formaté
+
+                    // Sélecteurs génériques assistant
+                    '[role="assistant"]',
+                    '[data-role="assistant"]',
+                    '[class*="assistant"]',
+                    '[class*="ai-message"]',
+                    '[class*="bot-message"]'
+                ];
+
+                let assistantMessages = [];
+
+                // Essayer chaque sélecteur
+                for (let selector of assistantSelectors) {
+                    const elements = document.querySelectorAll(selector);
+
+                    if (elements.length > 0) {
+                        console.log(`✅ Trouvé ${elements.length} éléments avec ${selector}`);
+
+                        elements.forEach(el => {
+                            // Vérifier que ce n'est pas un message utilisateur
+                            const text = el.innerText || el.textContent || '';
+
+                            // Ignorer si contient le prompt utilisateur
+                            if (text.includes('Tu es un assistant de développement Python expert')) {
+                                console.log('⏭️ Message utilisateur ignoré');
+                                return;
+                            }
+
+                            // Ajouter si contient du code ou des mots-clés Python
+                            if (text.includes('# ACTION:') || 
+                                text.includes('def ') || 
+                                text.includes('import ') ||
+                                text.includes('```python')) {
+                                assistantMessages.push(text);
+                            }
+                        });
+
+                        // Si trouvé des messages, arrêter
+                        if (assistantMessages.length > 0) {
+                            break;
+                        }
+                    }
+                }
+
+                // ============================================================
+                // FALLBACK 1 : Chercher tous les <pre> et <code>
+                // ============================================================
+                if (assistantMessages.length === 0) {
+                    console.log('🔄 Fallback 1: Extraction <pre> et <code>');
+
+                    const codeBlocks = document.querySelectorAll('pre, code');
+                    const codeTexts = [];
+
+                    codeBlocks.forEach(block => {
+                        const text = block.innerText || block.textContent || '';
+                        if (text.trim().length > 50) {
+                            codeTexts.push(text);
+                        }
+                    });
+
+                    if (codeTexts.length > 0) {
+                        return {
+                            success: true,
+                            content: codeTexts.join('\\n\\n'),
+                            method: 'code_blocks',
+                            blocks: codeTexts.length
+                        };
+                    }
+                }
+
+                // ============================================================
+                // FALLBACK 2 : Chercher le dernier grand bloc de texte
+                // ============================================================
+                if (assistantMessages.length === 0) {
+                    console.log('🔄 Fallback 2: Dernier grand bloc');
+
+                    // Trouver tous les éléments avec beaucoup de texte
+                    const allElements = document.querySelectorAll('div, article, section');
+                    let largestText = '';
+                    let largestLength = 0;
+
+                    allElements.forEach(el => {
+                        const text = el.innerText || '';
+
+                        // Ignorer si contient le prompt
+                        if (text.includes('Tu es un assistant')) {
+                            return;
+                        }
+
+                        // Garder le plus grand
+                        if (text.length > largestLength && text.length > 1000) {
+                            largestLength = text.length;
+                            largestText = text;
+                        }
+                    });
+
+                    if (largestText) {
+                        return {
+                            success: true,
+                            content: largestText,
+                            method: 'largest_block',
+                            length: largestLength
+                        };
+                    }
+                }
+
+                // ============================================================
+                // RETOUR
+                // ============================================================
+                if (assistantMessages.length > 0) {
+                    return {
+                        success: true,
+                        content: assistantMessages.join('\\n\\n'),
+                        method: 'assistant_messages',
+                        messages: assistantMessages.length
+                    };
+                }
+
+                return {
+                    success: false,
+                    error: 'Aucun message assistant trouvé'
+                };
+            })();
+        """)
+
+        if isinstance(result, dict) and "result" in result:
+            data = result["result"]
+
+            if data.get("success"):
+                content = data.get("content", "")
+                method = data.get("method", 'unknown')
+
+                logger.info(f"   ✅ Extraction réussie via {method}")
+                logger.info(f"   📊 Contenu: {len(content)} chars")
+
+                # Vérification que ce n'est pas le prompt
+                if "Tu es un assistant de développement Python expert" in content:
+                    logger.warning("   ⚠️ Contenu contient le prompt, nettoyage...")
+
+                    # Essayer de séparer
+                    parts = content.split("=" * 20)  # Split sur les séparateurs
+
+                    for part in reversed(parts):  # Partir de la fin
+                        if "# ACTION:" in part or "def " in part:
+                            logger.info("   ✅ Partie réponse détectée")
+                            return part.strip()
+
+                return content
+
+            else:
+                logger.error(f"   ❌ Erreur: {data.get('error')}")
+
+        logger.error("❌ Échec extraction réponse Claude")
         return ""
 
     def _extract_fallback_snippets(self, response: str) -> List[Dict]:
@@ -1556,6 +2136,377 @@ class UniversalBrowserHandler:
         
         return {}
     
+    def _force_render_all_content(self) -> bool:
+        logger.info("🔄 Forçage du rendu complet...")
+
+        result = self.client.execute_javascript("""
+            (async () => {
+                try {
+                    // 1. Trouver le conteneur scrollable
+                    const scrollableSelectors = [
+                        'main',
+                        '[role="main"]',
+                        '.overflow-auto',
+                        '.overflow-y-auto',
+                        '[class*="scroll"]'
+                    ];
+
+                    let scrollContainer = null;
+                    for (let selector of scrollableSelectors) {
+                        const el = document.querySelector(selector);
+                        if (el && (el.scrollHeight > el.clientHeight || el.scrollTop !== undefined)) {
+                            scrollContainer = el;
+                            break;
+                        }
+                    }
+
+                    if (!scrollContainer) {
+                        scrollContainer = document.documentElement;
+                    }
+
+                    // 2. Scroller progressivement jusqu'en bas
+                    const scrollStep = 500;  // Scroll de 500px à la fois
+                    const scrollDelay = 100; // Attendre 100ms entre chaque scroll
+
+                    let currentScroll = 0;
+                    const maxScroll = scrollContainer.scrollHeight;
+
+                    while (currentScroll < maxScroll) {
+                        scrollContainer.scrollTo(0, currentScroll);
+                        await new Promise(resolve => setTimeout(resolve, scrollDelay));
+                        currentScroll += scrollStep;
+
+                        // Sécurité : ne pas boucler infiniment
+                        if (currentScroll > maxScroll * 2) break;
+                    }
+
+                    // 3. Scroller tout en haut pour repartir
+                    scrollContainer.scrollTo(0, 0);
+                    await new Promise(resolve => setTimeout(resolve, 200));
+
+                    // 4. Re-scroller jusqu'en bas (au cas où du contenu s'est ajouté)
+                    scrollContainer.scrollTo(0, maxScroll);
+                    await new Promise(resolve => setTimeout(resolve, 300));
+
+                    return {
+                        success: true,
+                        scrolledHeight: maxScroll,
+                        message: 'Contenu forcé'
+                    };
+
+                } catch (error) {
+                    return {
+                        success: false,
+                        error: error.toString()
+                    };
+                }
+            })();
+        """)
+
+        if isinstance(result, dict) and result.get("result", {}).get("success"):
+            logger.info(f"   ✅ Rendu forcé sur {result['result'].get('scrolledHeight', 0)}px")
+            return True
+        else:
+            logger.warning("   ⚠️ Impossible de forcer le rendu complet")
+            return False
+        
+    def _extract_all_code_blocks_directly(self) -> List[Dict]:
+        """
+        🆕 MÉTHODE DIRECTE : Extraire TOUS les blocs de code directement du DOM
+
+        Bypasse innerText qui peut tronquer → Extraction élément par élément
+        """
+        logger.info("📦 Extraction DIRECTE de tous les blocs de code...")
+
+        result = self.client.execute_javascript("""
+            (() => {
+                const codeBlocks = [];
+
+                // 1. Chercher TOUS les blocs <pre> et <code>
+                const preElements = document.querySelectorAll('pre');
+
+                preElements.forEach((pre, index) => {
+                    try {
+                        // Récupérer le contenu BRUT
+                        let code = '';
+
+                        // Vérifier s'il y a un <code> dedans
+                        const codeEl = pre.querySelector('code');
+                        if (codeEl) {
+                            code = codeEl.textContent || codeEl.innerText || '';
+                        } else {
+                            code = pre.textContent || pre.innerText || '';
+                        }
+
+                        if (!code || code.trim().length < 10) return;
+
+                        // Chercher les métadonnées AUTOUR du bloc
+                        let metadata = {
+                            action: '',
+                            file: '',
+                            target: '',
+                            position: '',
+                            description: ''
+                        };
+
+                        // Chercher dans le code lui-même
+                        const lines = code.split('\\n');
+                        const metadataLines = [];
+                        const codeLines = [];
+
+                        for (let line of lines) {
+                            const trimmed = line.trim();
+
+                            if (trimmed.match(/^#\\s*ACTION\\s*:/i)) {
+                                const match = trimmed.match(/^#\\s*ACTION\\s*:\\s*(.+)/i);
+                                if (match) metadata.action = match[1].trim();
+                                metadataLines.push(line);
+                            } else if (trimmed.match(/^#\\s*FILE\\s*:/i)) {
+                                const match = trimmed.match(/^#\\s*FILE\\s*:\\s*(.+)/i);
+                                if (match) metadata.file = match[1].trim();
+                                metadataLines.push(line);
+                            } else if (trimmed.match(/^#\\s*TARGET\\s*:/i)) {
+                                const match = trimmed.match(/^#\\s*TARGET\\s*:\\s*(.+)/i);
+                                if (match) metadata.target = match[1].trim();
+                                metadataLines.push(line);
+                            } else if (trimmed.match(/^#\\s*POSITION\\s*:/i)) {
+                                const match = trimmed.match(/^#\\s*POSITION\\s*:\\s*(.+)/i);
+                                if (match) metadata.position = match[1].trim();
+                                metadataLines.push(line);
+                            } else if (trimmed.match(/^#\\s*DESCRIPTION\\s*:/i)) {
+                                const match = trimmed.match(/^#\\s*DESCRIPTION\\s*:\\s*(.+)/i);
+                                if (match) metadata.description = match[1].trim();
+                                metadataLines.push(line);
+                            } else {
+                                codeLines.push(line);
+                            }
+                        }
+
+                        // Si métadonnées trouvées, c'est un snippet valide
+                        if (metadata.action && metadata.file) {
+                            codeBlocks.push({
+                                index: index,
+                                metadata: metadata,
+                                code: codeLines.join('\\n').trim(),
+                                rawCode: code,
+                                hasMetadata: true
+                            });
+                        } else {
+                            // Bloc sans métadonnées → garder quand même
+                            codeBlocks.push({
+                                index: index,
+                                metadata: metadata,
+                                code: code.trim(),
+                                rawCode: code,
+                                hasMetadata: false
+                            });
+                        }
+
+                    } catch (error) {
+                        console.error('Erreur extraction bloc', index, error);
+                    }
+                });
+
+                return {
+                    success: true,
+                    totalBlocks: codeBlocks.length,
+                    withMetadata: codeBlocks.filter(b => b.hasMetadata).length,
+                    blocks: codeBlocks
+                };
+            })();
+        """)
+
+        if isinstance(result, dict) and "result" in result:
+            data = result["result"]
+
+            if data.get("success"):
+                total = data.get("totalBlocks", 0)
+                with_meta = data.get("withMetadata", 0)
+
+                logger.info(f"   ✅ {total} blocs extraits ({with_meta} avec métadonnées)")
+
+                return data.get("blocks", [])
+
+        logger.warning("   ⚠️ Extraction directe échouée")
+        return []
+    
+    def _convert_blocks_to_snippets(self, blocks: List[Dict]) -> List[Dict]:
+        """
+        🆕 Convertir les blocs extraits en snippets formatés
+        """
+        snippets = []
+
+        for idx, block in enumerate(blocks, 1):
+            try:
+                metadata = block.get("metadata", {})
+                code = block.get("code", "")
+
+                if not code or len(code.strip()) < 10:
+                    continue
+                
+                # Si pas de métadonnées, tenter de les déduire
+                if not block.get("hasMetadata"):
+                    # Chercher des indices dans le code
+                    if "def " in code or "class " in code:
+                        action = "AJOUTER"
+                        file = f"generated_code_{idx}.py"
+                    else:
+                        logger.debug(f"   ⏭️  Bloc {idx} sans métadonnées ignoré")
+                        continue
+                else:
+                    action = metadata.get("action", "AJOUTER")
+                    file = metadata.get("file", f"code_{idx}.py")
+
+                snippet = {
+                    'action': action.upper(),
+                    'title': self._generate_title(action, file, metadata.get("target", "")),
+                    'file': file,
+                    'code': code,
+                    'language': 'python',
+                    'description': metadata.get("description", f"Code du bloc {idx}"),
+                    'lineNumber': 0,
+                    'target': metadata.get("target", ""),
+                    'position': metadata.get("position", ""),
+                    'platform': self.config['name']
+                }
+
+                snippets.append(snippet)
+                logger.info(f"   ✅ Snippet {idx}: {file}")
+
+            except Exception as e:
+                logger.error(f"   ❌ Erreur conversion bloc {idx}: {e}")
+                continue
+            
+        return snippets
+    
+    def _extract_with_progressive_methods(self) -> Dict:
+        """
+        🎯 MÉTHODE ULTIME : Extraction avec méthodes progressives
+
+        Essaie 3 méthodes dans l'ordre, garde la meilleure
+        """
+        logger.info("\n" + "="*80)
+        logger.info("🚀 EXTRACTION PROGRESSIVE AVEC 3 MÉTHODES")
+        logger.info("="*80)
+
+        results = {
+            'method1_direct': None,
+            'method2_universal': None,
+            'method3_fallback': None,
+            'best_method': None,
+            'best_content': '',
+            'best_snippets': []
+        }
+
+        # ============================================================
+        # ÉTAPE 0 : FORCER LE RENDU COMPLET
+        # ============================================================
+        logger.info("\n🔄 ÉTAPE 0/3 : Forçage rendu complet...")
+        self._force_render_all_content()
+        time.sleep(2)  # Laisser le temps au DOM de se stabiliser
+
+        # ============================================================
+        # MÉTHODE 1 : EXTRACTION DIRECTE DES BLOCS (LA PLUS FIABLE)
+        # ============================================================
+        logger.info("\n📦 MÉTHODE 1/3 : Extraction DIRECTE des blocs de code...")
+        try:
+            blocks = self._extract_all_code_blocks_directly()
+
+            if blocks and len(blocks) > 0:
+                snippets = self._convert_blocks_to_snippets(blocks)
+
+                if snippets and len(snippets) > 0:
+                    results['method1_direct'] = {
+                        'blocks': len(blocks),
+                        'snippets': len(snippets),
+                        'success': True
+                    }
+                    results['best_method'] = 'method1_direct'
+                    results['best_snippets'] = snippets
+
+                    # Reconstruire le contenu brut
+                    full_code = '\n\n'.join([b.get('rawCode', '') for b in blocks])
+                    results['best_content'] = full_code
+
+                    logger.info(f"   ✅ MÉTHODE 1 : {len(snippets)} snippets extraits")
+                    logger.info(f"   📊 Contenu total: {len(full_code)} chars")
+
+                    # Si on a des snippets, c'est gagné !
+                    return results
+
+        except Exception as e:
+            logger.error(f"   ❌ MÉTHODE 1 échouée: {e}")
+
+        # ============================================================
+        # MÉTHODE 2 : EXTRACTION UNIVERSELLE ROBUSTE
+        # ============================================================
+        logger.info("\n📄 MÉTHODE 2/3 : Extraction universelle robuste...")
+        try:
+            content = self._extract_content_universal_robust()
+
+            if content and len(content) > 1000:
+                # Extraire snippets du contenu
+                snippets = self._extract_snippets(content)
+
+                if snippets and len(snippets) > 0:
+                    results['method2_universal'] = {
+                        'content_length': len(content),
+                        'snippets': len(snippets),
+                        'success': True
+                    }
+
+                    # Si pas de meilleure méthode avant
+                    if not results['best_method']:
+                        results['best_method'] = 'method2_universal'
+                        results['best_content'] = content
+                        results['best_snippets'] = snippets
+
+                    logger.info(f"   ✅ MÉTHODE 2 : {len(snippets)} snippets extraits")
+                    logger.info(f"   📊 Contenu: {len(content)} chars")
+
+        except Exception as e:
+            logger.error(f"   ❌ MÉTHODE 2 échouée: {e}")
+
+        # ============================================================
+        # MÉTHODE 3 : FALLBACK CLASSIQUE
+        # ============================================================
+        logger.info("\n🔄 MÉTHODE 3/3 : Fallback classique...")
+        try:
+            content = self._extract_content_universal()
+
+            if content and len(content) > 500:
+                snippets = self._extract_snippets(content)
+
+                results['method3_fallback'] = {
+                    'content_length': len(content),
+                    'snippets': len(snippets) if snippets else 0,
+                    'success': True
+                }
+
+                # Si toujours pas de meilleure méthode
+                if not results['best_method']:
+                    results['best_method'] = 'method3_fallback'
+                    results['best_content'] = content
+                    results['best_snippets'] = snippets or []
+
+                logger.info(f"   ✅ MÉTHODE 3 : {len(snippets or [])} snippets extraits")
+
+        except Exception as e:
+            logger.error(f"   ❌ MÉTHODE 3 échouée: {e}")
+
+        # ============================================================
+        # RAPPORT FINAL
+        # ============================================================
+        logger.info("\n" + "="*80)
+        logger.info("📊 RAPPORT D'EXTRACTION")
+        logger.info("="*80)
+        logger.info(f"Méthode gagnante: {results.get('best_method', 'AUCUNE')}")
+        logger.info(f"Snippets extraits: {len(results.get('best_snippets', []))}")
+        logger.info(f"Contenu total: {len(results.get('best_content', ''))} chars")
+        logger.info("="*80 + "\n")
+
+        return results
+
     def send_to_platform(self, context: str, perimeter_data: List[Dict], 
                     status_callback: Optional[Callable] = None) -> Dict:
         try:
@@ -1619,10 +2570,14 @@ class UniversalBrowserHandler:
             if status_callback:
                 status_callback("Récupération du contenu", 88)
 
-            # ✅ CORRECTION 2 : Extraction universelle robuste
-            logger.info("📄 Récupération du contenu...")
+            logger.info("🎯 Extraction PROGRESSIVE du contenu...")
 
-            self.current_response = self._extract_content_universal()
+            # 🆕 NOUVELLE MÉTHODE
+            extraction_results = self._extract_with_progressive_methods()
+
+            self.current_response = extraction_results.get('best_content', '')
+            snippets = extraction_results.get('best_snippets', [])
+            extraction_method = extraction_results.get('best_method', 'unknown')
 
             if not self.current_response or len(self.current_response) < 100:
                 logger.error("❌ Contenu vide ou insuffisant")
@@ -1635,6 +2590,12 @@ class UniversalBrowserHandler:
                 }
 
             logger.info(f"✅ Contenu récupéré: {len(self.current_response)} chars")
+            logger.info(f"📦 Méthode utilisée: {extraction_method}")
+
+            # Si pas de snippets de la méthode directe, essayer extraction classique
+            if not snippets or len(snippets) == 0:
+                logger.info("🔄 Extraction classique des snippets...")
+                snippets = self._extract_snippets(self.current_response)
 
             # ✅ CORRECTION 3 : Debug structure
             if len(self.current_response) > 0:
@@ -1806,7 +2767,7 @@ class UniversalBrowserHandler:
                 'message': f"✅ {len(snippets)} snippets validés",
                 'snippets': snippets,
                 'raw_response': self.current_response,
-                'extraction_method': 'universal'
+                'extraction_method': extraction_method
             }
 
         except Exception as e:
@@ -1820,6 +2781,212 @@ class UniversalBrowserHandler:
                 'raw_response': '',
                 'extraction_method': 'error'
             }
+        
+    def _extract_snippets_robust(self, response: str) -> List[Dict]:
+        """
+        🆕 EXTRACTION ULTRA-ROBUSTE : Gère tous les cas de figure
+
+        Stratégie :
+        1. Trouver TOUS les # ACTION: (même sans format strict)
+        2. Découper le texte en segments entre chaque ACTION
+        3. Extraire métadonnées + code de chaque segment
+        4. Gérer les blocs ```python et les blocs sans délimiteurs
+        """
+        snippets = []
+
+        logger.info(f"\n{'='*80}")
+        logger.info("🔍 EXTRACTION ROBUSTE DES SNIPPETS")
+        logger.info(f"{'='*80}")
+        logger.info(f"📄 Taille réponse: {len(response)} chars")
+
+        # ================================================================
+        # PHASE 0 : PRÉPARATION (identique à votre code)
+        # ================================================================
+        logger.info("⚡ PHASE 0.1 : Reconstruction tokens éclatés")
+        try:
+            from core.orchestration.advanced_code_recovery import DomExtractionFixer, RepairStats
+            stats_temp = RepairStats()
+            response = DomExtractionFixer._reconstruct_split_tokens(response, stats_temp, verbose=True)
+            if stats_temp.operators_fixed > 0:
+                logger.info(f"   ✅ {stats_temp.operators_fixed} token(s) reconstruits")
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur reconstruction: {e}")
+
+        logger.info("🔗 PHASE 0.2 : Fusion lignes éclatées")
+        try:
+            from core.orchestration.advanced_code_recovery import UltimateLineMerger
+            lines = response.split('\n')
+            merged_lines = UltimateLineMerger.merge_lines(lines)
+            response = '\n'.join(merged_lines)
+            logger.info(f"   ✅ {len(lines) - len(merged_lines)} lignes fusionnées")
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur fusion: {e}")
+
+        cleaned_response = self._clean_broken_lines(response)
+        cleaned_response = self._clean_dom_pollution(cleaned_response)
+        logger.info(f"🧹 Après nettoyage: {len(cleaned_response)} chars")
+
+        # ================================================================
+        # 🆕 PHASE 1 : TROUVER TOUS LES # ACTION: (ULTRA-FLEXIBLE)
+        # ================================================================
+        logger.info("🎯 PHASE 1 : Détection de TOUS les blocs ACTION")
+
+        # Pattern ultra-flexible pour ACTION
+        action_pattern = r'#\s*ACTION\s*:\s*(\w+)'
+        action_matches = list(re.finditer(action_pattern, cleaned_response, re.IGNORECASE))
+
+        logger.info(f"   🔍 {len(action_matches)} bloc(s) ACTION détectés")
+
+        if not action_matches:
+            logger.warning("⚠️ Aucun bloc ACTION détecté, tentative fallback...")
+            return self._extract_fallback_snippets(cleaned_response)
+
+        # ================================================================
+        # 🆕 PHASE 2 : DÉCOUPER EN SEGMENTS ENTRE CHAQUE ACTION
+        # ================================================================
+        logger.info("✂️ PHASE 2 : Découpage en segments")
+
+        segments = []
+
+        for idx, action_match in enumerate(action_matches):
+            try:
+                action = action_match.group(1).strip().upper()
+                segment_start = action_match.start()
+
+                # Trouver la fin du segment (= début du prochain ACTION ou fin du texte)
+                if idx + 1 < len(action_matches):
+                    segment_end = action_matches[idx + 1].start()
+                else:
+                    segment_end = len(cleaned_response)
+
+                # Extraire le segment complet
+                segment_text = cleaned_response[segment_start:segment_end]
+
+                logger.info(f"\n   📦 Segment {idx + 1}/{len(action_matches)}: {len(segment_text)} chars")
+
+                # Extraire métadonnées du segment
+                file_match = re.search(r'#\s*FILE\s*:\s*([^\n\r]+)', segment_text, re.IGNORECASE)
+                target_match = re.search(r'#\s*TARGET\s*:\s*([^\n\r]+)', segment_text, re.IGNORECASE)
+                position_match = re.search(r'#\s*POSITION\s*:\s*([^\n\r]+)', segment_text, re.IGNORECASE)
+                desc_match = re.search(r'#\s*DESCRIPTION\s*:\s*([^\n\r]+)', segment_text, re.IGNORECASE)
+
+                file_path = file_match.group(1).strip() if file_match else f"code_{idx + 1}.py"
+                target = target_match.group(1).strip() if target_match else ""
+                position = position_match.group(1).strip().lower() if position_match else ""
+                description = desc_match.group(1).strip() if desc_match else ""
+
+                logger.info(f"      📁 FILE: {file_path}")
+                if target:
+                    logger.info(f"      🎯 TARGET: {target[:50]}...")
+                if position:
+                    logger.info(f"      📍 POSITION: {position}")
+
+                # ============================================================
+                # 🆕 EXTRACTION DU CODE (MULTI-MÉTHODES)
+                # ============================================================
+                code = ""
+
+                # Méthode 1 : Chercher bloc ```python ... ```
+                python_block_match = re.search(r'```python\s*\n(.*?)```', segment_text, re.DOTALL | re.IGNORECASE)
+
+                if python_block_match:
+                    code = python_block_match.group(1).strip()
+                    logger.info(f"      ✅ Code extrait via ```python : {len(code)} chars")
+
+                # Méthode 2 : Sinon, prendre tout après les métadonnées
+                else:
+                    # Trouver la dernière ligne de métadonnée
+                    last_metadata_pos = 0
+
+                    for pattern in [r'#\s*ACTION\s*:', r'#\s*FILE\s*:', r'#\s*TARGET\s*:', 
+                                   r'#\s*POSITION\s*:', r'#\s*DESCRIPTION\s*:']:
+                        matches = list(re.finditer(pattern, segment_text, re.IGNORECASE))
+                        if matches:
+                            last_match = matches[-1]
+                            # Trouver la fin de la ligne
+                            end_of_line = segment_text.find('\n', last_match.end())
+                            if end_of_line != -1:
+                                last_metadata_pos = max(last_metadata_pos, end_of_line + 1)
+
+                    # Prendre tout après les métadonnées
+                    if last_metadata_pos > 0:
+                        code = segment_text[last_metadata_pos:].strip()
+                        logger.info(f"      ✅ Code extrait après métadonnées : {len(code)} chars")
+                    else:
+                        logger.warning(f"      ⚠️ Impossible d'extraire le code du segment {idx + 1}")
+                        continue
+                    
+                # Nettoyer le code des artefacts
+                code = self._clean_code_artifacts(code)
+
+                # Validation minimale
+                if not code or len(code.strip()) < 20:
+                    logger.warning(f"      ⚠️ Code trop court ({len(code)} chars), ignoré")
+                    continue
+                
+                # Créer le snippet
+                snippet = {
+                    'action': action,
+                    'title': self._generate_title(action, file_path, target),
+                    'file': file_path,
+                    'code': code,
+                    'language': 'python',
+                    'description': description or f"Code généré par {self.config['name']}",
+                    'lineNumber': 0,
+                    'target': target,
+                    'position': position,
+                    'platform': self.config['name']
+                }
+
+                snippets.append(snippet)
+                logger.info(f"      ✅ Snippet {idx + 1} créé avec succès")
+
+            except Exception as e:
+                logger.error(f"      ❌ Erreur segment {idx + 1}: {e}")
+                continue
+
+        # ================================================================
+        # RAPPORT FINAL
+        # ================================================================
+        logger.info(f"\n{'='*80}")
+        logger.info(f"✅ {len(snippets)} snippet(s) extraits sur {len(action_matches)} détectés")
+        logger.info(f"{'='*80}\n")
+
+        return snippets
+    
+    def _clean_code_artifacts(self, code: str) -> str:
+        # Supprimer les délimiteurs ```
+        code = re.sub(r'^```python\s*\n?', '', code, flags=re.MULTILINE | re.IGNORECASE)
+        code = re.sub(r'\n?```\s*$', '', code, flags=re.MULTILINE)
+
+        # Supprimer les lignes de métadonnées résiduelles
+        lines = code.split('\n')
+        cleaned_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Ignorer les métadonnées
+            if re.match(r'^#\s*(ACTION|FILE|TARGET|POSITION|DESCRIPTION)\s*:', stripped, re.IGNORECASE):
+                continue
+            
+            # Ignorer les artefacts UI
+            if stripped in ['python', 'Copier', 'Regenerate', 'Réessayer', 
+                           'Comment puis-je vous aider ?', 'Sonnet 4.5']:
+                continue
+            
+            # Ignorer les lignes courtes suspectes
+            if len(stripped) < 3 and stripped not in ['', 'if', 'or', 'is']:
+                continue
+            
+            cleaned_lines.append(line)
+
+        code = '\n'.join(cleaned_lines)
+
+        # Nettoyer les espaces multiples
+        code = re.sub(r'\n{3,}', '\n\n', code)
+
+        return code.strip()
         
     def _debug_response_structure(self, response: str):
         """🔍 DIAGNOSTIC COMPLET de la structure de la réponse"""

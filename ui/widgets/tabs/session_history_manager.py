@@ -39,23 +39,16 @@ def load_session_into_history(coding_panel, session_file_path: str):
         if coding_panel.conversation_history:
             coding_panel.conversation_history.clear()
             
-            # ✅ CORRECTION : Ajouter directement les messages dans la liste
-            coding_panel.conversation_history.messages = []
-            
+            # Charger tous les messages
             for msg in messages:
                 role = msg.get('role')
                 content = msg.get('content', '')
-                timestamp = msg.get('timestamp', '')
                 
-                # Créer un objet message compatible
-                message_obj = {
-                    'role': role,
-                    'content': content,
-                    'timestamp': timestamp
-                }
-                
-                # Ajouter à la liste des messages
-                coding_panel.conversation_history.messages.append(message_obj)
+                # Ajouter le message à l'historique
+                coding_panel.conversation_history.add_message(
+                    role=role,
+                    content=content
+                )
             
             logger.info(f"✅ Session chargée: {len(messages)} messages")
             

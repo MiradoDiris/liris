@@ -30,6 +30,10 @@ wheels/
 *.egg
 MANIFEST
 
+data/*.json
+sessions/*.json
+data/liris.db*
+
 # Base de donn�es
 *.db
 *.sqlite
