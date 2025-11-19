@@ -1,4 +1,4 @@
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal,  QMutex
 import time
 from utils.logger import logger
 
@@ -31,6 +31,9 @@ class BrowserNavigationWorker(QThread):
         self.perimeter_data = perimeter_data
         self.start_time = None
         self.handler = None
+
+        self._stop_requested = False
+        self._mutex = QMutex()
         
         # Configuration d'extraction
         self.try_clipboard = try_clipboard
@@ -47,12 +50,42 @@ class BrowserNavigationWorker(QThread):
             'fallback_used': False,
             'repair_triggered': False
         }
+
+    def is_stop_requested(self) -> bool:
+        """Vérifie si l'arrêt a été demandé (thread-safe)"""
+        self._mutex.lock()
+        stop = self._stop_requested
+        self._mutex.unlock()
+        return stop
+    
+    def stop(self):
+        """Demande l'arrêt du worker (thread-safe)"""
+        logger.info("🛑 Arrêt demandé au worker")
+        
+        self._mutex.lock()
+        self._stop_requested = True
+        self._mutex.unlock()
+        
+        if self.handler:
+            try:
+                logger.info("🔌 Fermeture du handler browser...")
+                self.handler.close()
+            except Exception as e:
+                logger.error(f"⚠️ Erreur fermeture handler: {e}")
+        
+        self.quit()
     
     def run(self):
         """Exécute la navigation et récupération multi-stratégies"""
         self.start_time = time.time()
         
         try:
+            # ✅ CHECK 1: Avant initialisation
+            if self.is_stop_requested():
+                logger.info("🛑 Arrêt avant initialisation")
+                self._emit_stopped()
+                return
+            
             self._emit_step(
                 "Initialisation", 
                 f"🌐 Préparation connexion à {self.platform_name}"
@@ -61,44 +94,91 @@ class BrowserNavigationWorker(QThread):
             # Importer le handler
             from core.orchestration.universal_browser_handler import UniversalBrowserHandler
             
-            # ✅ AFFICHER LA CONFIGURATION
             config_msg = self._build_config_message()
             self.debug_info.emit(config_msg)
             
-            # ✅ CRÉER LE HANDLER AVEC CONFIGURATION OPTIMALE
+            # ✅ CHECK 2: Avant création handler
+            if self.is_stop_requested():
+                logger.info("🛑 Arrêt avant création handler")
+                self._emit_stopped()
+                return
+            
+            # Créer le handler avec configuration optimale
             self.handler = UniversalBrowserHandler(
                 platform_name=self.platform_name.lower(),
-                try_clipboard=self.try_clipboard,       # ✅ PRIORITÉ 1
-                use_playwright=self.use_playwright,     # ✅ PRIORITÉ 2
-                repair_code=self.repair_code,           # ✅ PRIORITÉ 3
+                try_clipboard=self.try_clipboard,
+                use_playwright=self.use_playwright,
+                repair_code=self.repair_code,
                 aggressive_repair=self.aggressive_repair,
                 auto_format=self.auto_format
             )
+            
+            # ✅ CHECK 3: Avant navigation
+            if self.is_stop_requested():
+                logger.info("🛑 Arrêt avant navigation")
+                self._emit_stopped()
+                return
             
             self._emit_step(
                 "Navigation", 
                 f"🚀 Ouverture de {self.platform_name}"
             )
             
-            # Callback de statut amélioré
+            # Callback de statut avec vérification stop
             def status_callback(message, progress):
+                if self.is_stop_requested():
+                    logger.info("🛑 Stop détecté pendant callback")
+                    raise InterruptedError("Génération arrêtée par l'utilisateur")
                 self._handle_status_update(message, progress)
             
-            # ✅ ENVOYER LE PROMPT (extraction automatique multi-stratégies)
+            # ✅ CHECK 4: Avant envoi prompt
+            if self.is_stop_requested():
+                logger.info("🛑 Arrêt avant envoi prompt")
+                self._emit_stopped()
+                return
+            
+            # Envoyer le prompt (extraction automatique multi-stratégies)
             result = self.handler.send_to_platform(
                 context=self.context,
                 perimeter_data=self.perimeter_data,
                 status_callback=status_callback
             )
             
-            # ✅ ANALYSER LES RÉSULTATS
+            # ✅ CHECK 5: Après récupération résultats
+            if self.is_stop_requested():
+                logger.info("🛑 Arrêt après récupération résultats")
+                self._emit_stopped()
+                return
+            
+            # Analyser les résultats
             self._process_results(result)
+            
+        except InterruptedError as e:
+            logger.info(f"🛑 Génération interrompue: {e}")
+            self._emit_stopped()
             
         except ImportError as e:
             self._handle_import_error(e)
             
         except Exception as e:
-            self._handle_error(e)
+            if self.is_stop_requested():
+                logger.info("🛑 Exception pendant arrêt (normal)")
+                self._emit_stopped()
+            else:
+                self._handle_error(e)
+
+    def _emit_stopped(self):
+        """Émet le signal d'arrêt"""
+        duration = time.time() - self.start_time if self.start_time else 0
+        self.test_completed.emit(
+            False, 
+            "🛑 Génération arrêtée par l'utilisateur", 
+            duration, 
+            {
+                'stopped': True,
+                'stats': self.extraction_stats
+            }
+        )
     
     def _build_config_message(self) -> str:
         """Construit le message de configuration"""
@@ -127,6 +207,10 @@ class BrowserNavigationWorker(QThread):
     
     def _handle_status_update(self, message: str, progress: int):
         """Gère les mises à jour de statut avec détection de méthode"""
+        
+        # ✅ Vérifier stop à chaque update
+        if self.is_stop_requested():
+            raise InterruptedError("Stop requested")
         
         # Détecter la méthode d'extraction utilisée
         if "CLIPBOARD" in message.upper():
@@ -158,26 +242,32 @@ class BrowserNavigationWorker(QThread):
         snippets = result.get('snippets', [])
         extraction_method = result.get('extraction_method', 'unknown')
         
-        # ✅ METTRE À JOUR LES STATS
+        # Mettre à jour les stats
         self.extraction_stats['method_used'] = extraction_method
         if extraction_method == 'clipboard':
             self.extraction_stats['clipboard_success'] = True
         
-        # ✅ LOGGER LES RÉSULTATS
+        # Logger les résultats
         if snippets:
             self._log_snippets_success(snippets, extraction_method)
             
             # Émettre chaque snippet individuellement
             for idx, snippet in enumerate(snippets, 1):
+                # ✅ Vérifier stop entre chaque snippet
+                if self.is_stop_requested():
+                    logger.info("🛑 Arrêt pendant émission snippets")
+                    self._emit_stopped()
+                    return
+                
                 self._emit_snippet_info(snippet, idx, len(snippets))
                 self.snippet_generated.emit(snippet)
-                time.sleep(0.2)  # UX delay
+                time.sleep(0.2)
         else:
             self._log_snippets_failure()
         
         duration = time.time() - self.start_time
         
-        # ✅ RÉPONSE ENRICHIE
+        # Réponse enrichie
         response = {
             'snippets': snippets,
             'platform': self.platform_name,
@@ -207,7 +297,6 @@ class BrowserNavigationWorker(QThread):
         self.debug_info.emit(f"{'='*60}")
         self.debug_info.emit(f"✅ {len(snippets)} snippet(s) récupéré(s)")
         
-        # Afficher la qualité selon la méthode
         if method == 'clipboard':
             self.debug_info.emit("🏆 QUALITÉ OPTIMALE (code intact, aucune pollution DOM)")
         elif method == 'playwright':

@@ -50,7 +50,7 @@ def load_session_into_history(coding_panel, session_file_path: str):
                     content=content
                 )
             
-            logger.info(f"✅ Session chargée: {len(messages)} messages")
+            logger.info(f"Session chargée: {len(messages)} messages")
             
             # Mettre à jour l'interface
             coding_panel._update_history_button_state()
@@ -69,7 +69,7 @@ def load_session_into_history(coding_panel, session_file_path: str):
             QtWidgets.QMessageBox.information(
                 coding_panel,
                 "Session chargée",
-                f"✅ {len(messages)} messages chargés\n\n"
+                f"{len(messages)} messages chargés\n\n"
                 f"Session: {session_id}\n"
                 f"Plateforme: {platform.upper()}"
             )
@@ -79,7 +79,7 @@ def load_session_into_history(coding_panel, session_file_path: str):
         return False
         
     except json.JSONDecodeError as e:
-        logger.error(f"❌ Erreur JSON: {e}")
+        logger.error(f"Erreur JSON: {e}")
         QtWidgets.QMessageBox.critical(
             coding_panel,
             "Erreur de format",
@@ -88,7 +88,7 @@ def load_session_into_history(coding_panel, session_file_path: str):
         return False
         
     except Exception as e:
-        logger.error(f"❌ Erreur chargement session: {e}")
+        logger.error(f"Erreur chargement session: {e}")
         QtWidgets.QMessageBox.critical(
             coding_panel,
             "Erreur",
@@ -110,7 +110,7 @@ class SessionHistoryDialog(QtWidgets.QDialog):
         self.sessions_folder = Path(sessions_folder)
         self.sessions_folder.mkdir(exist_ok=True)
         
-        self.setWindowTitle("📂 Charger une session")
+        self.setWindowTitle("Charger une session")
         self.setMinimumSize(700, 500)
         self.resize(800, 600)
         
@@ -126,7 +126,7 @@ class SessionHistoryDialog(QtWidgets.QDialog):
         # En-tête
         header_layout = QtWidgets.QHBoxLayout()
         
-        title_label = QtWidgets.QLabel("📚 Sessions sauvegardées")
+        title_label = QtWidgets.QLabel("Sessions sauvegardées")
         title_label.setStyleSheet("""
             font-size: 18px;
             font-weight: bold;
@@ -158,10 +158,6 @@ class SessionHistoryDialog(QtWidgets.QDialog):
         layout.addLayout(header_layout)
         
         # Recherche
-        search_layout = QtWidgets.QHBoxLayout()
-        search_icon = QtWidgets.QLabel("🔍")
-        search_layout.addWidget(search_icon)
-        
         self.search_input = QtWidgets.QLineEdit()
         self.search_input.setPlaceholderText("Rechercher...")
         self.search_input.textChanged.connect(self._filter_sessions)
@@ -176,8 +172,7 @@ class SessionHistoryDialog(QtWidgets.QDialog):
                 border: 2px solid #A23B2D;
             }
         """)
-        search_layout.addWidget(self.search_input)
-        layout.addLayout(search_layout)
+        layout.addWidget(self.search_input)
         
         # Liste des sessions
         scroll_area = QtWidgets.QScrollArea()
@@ -231,7 +226,7 @@ class SessionHistoryDialog(QtWidgets.QDialog):
         )
         
         if not session_files:
-            no_sessions_label = QtWidgets.QLabel("📭 Aucune session trouvée")
+            no_sessions_label = QtWidgets.QLabel("Aucune session trouvée")
             no_sessions_label.setAlignment(Qt.AlignCenter)
             no_sessions_label.setStyleSheet("""
                 font-size: 14px;
@@ -241,7 +236,7 @@ class SessionHistoryDialog(QtWidgets.QDialog):
             self.sessions_layout.insertWidget(0, no_sessions_label)
             return
         
-        logger.info(f"📚 {len(session_files)} session(s) trouvée(s)")
+        logger.info(f"{len(session_files)} session(s) trouvée(s)")
         
         for session_file in session_files:
             try:
@@ -257,7 +252,7 @@ class SessionHistoryDialog(QtWidgets.QDialog):
                 )
             
             except Exception as e:
-                logger.error(f"❌ Erreur: {e}")
+                logger.error(f"Erreur: {e}")
     
     def _filter_sessions(self, search_text: str):
         """Filtre les sessions"""
@@ -325,10 +320,10 @@ class SessionCard(QtWidgets.QWidget):
             date_str = "Date inconnue"
         
         # ID Session
-        id_label = QtWidgets.QLabel(f"🆔 {session_id}")
+        id_label = QtWidgets.QLabel(session_id)
         id_label.setStyleSheet("""
             font-weight: bold;
-            font-size: 12px;
+            font-size: 13px;
             color: #333;
         """)
         header_layout.addWidget(id_label)
@@ -336,18 +331,19 @@ class SessionCard(QtWidgets.QWidget):
         header_layout.addStretch()
         
         # Plateforme
-        platform_label = QtWidgets.QLabel(f"🤖 {platform.upper()}")
+        platform_label = QtWidgets.QLabel(platform.upper())
         platform_label.setStyleSheet("""
             font-size: 11px;
             color: #666;
             background-color: #f0f0f0;
             padding: 4px 10px;
             border-radius: 4px;
+            font-weight: 500;
         """)
         header_layout.addWidget(platform_label)
         
         # Date
-        date_label = QtWidgets.QLabel(f"📅 {date_str}")
+        date_label = QtWidgets.QLabel(date_str)
         date_label.setStyleSheet("""
             font-size: 11px;
             color: #888;
@@ -370,7 +366,7 @@ class SessionCard(QtWidgets.QWidget):
         )
         
         stats_label = QtWidgets.QLabel(
-            f"💬 {total_messages} messages | 📝 {total_snippets} snippets"
+            f"{total_messages} messages · {total_snippets} snippets"
         )
         stats_label.setStyleSheet("""
             font-size: 11px;
@@ -392,14 +388,14 @@ class SessionCard(QtWidgets.QWidget):
             if len(first_user_msg.get('content', '')) > 100:
                 preview_text += "..."
             
-            preview_label = QtWidgets.QLabel(f"💭 {preview_text}")
+            preview_label = QtWidgets.QLabel(preview_text)
             preview_label.setWordWrap(True)
             preview_label.setStyleSheet("""
                 font-size: 11px;
                 color: #555;
                 font-style: italic;
                 background-color: #f9f9f9;
-                padding: 6px;
+                padding: 8px 10px;
                 border-radius: 4px;
                 border-left: 3px solid #A23B2D;
             """)
@@ -410,7 +406,7 @@ class SessionCard(QtWidgets.QWidget):
         actions_layout.addStretch()
         
         # Bouton Charger
-        load_button = QtWidgets.QPushButton("📂 Charger cette session")
+        load_button = QtWidgets.QPushButton("Charger")
         load_button.setStyleSheet("""
             QPushButton {
                 background-color: #A23B2D;

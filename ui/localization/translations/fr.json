@@ -252,6 +252,14 @@
   "cleaning_project": "🧹 Nettoyage du projet",
   "cleaning_question": "Voulez-vous nettoyer le projet maintenant?\n\nCette opération supprimera:\n  • Les dossiers (.git, node_modules, etc.)\n  • Les fichiers de config (.env, .gitignore, etc.)\n  • Les images et icônes\n  • Les logs et bases de données\n\n⚠️ Opération irréversible!",
   "cleaning_complete": "✅ Nettoyage réussi! {} fichiers supprimés",
+
+  "stop_generation": "Arrêter la génération",
+  "confirm_stop": "Confirmer l'arrêt",
+  "confirm_stop_message": "Voulez-vous vraiment arrêter la génération en cours ?\n\nLes résultats partiels seront perdus.",
+  "generation_stopped": "Génération arrêtée",
+  "generation_stopped_title": "Génération interrompue",
+  "generation_stopped_message": "La génération a été arrêtée avec succès.\n\nVous pouvez démarrer une nouvelle session.",
+  "stop_error": "Impossible d'arrêter la génération",
   
   "level_indicator": "Niveau {}",
   "messages": {

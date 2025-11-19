@@ -433,12 +433,54 @@ class CodingPanel(QtWidgets.QWidget):
         status_header.addStretch()
         status_container.addLayout(status_header)
 
+        progress_container = QtWidgets.QHBoxLayout()
+        progress_container.setSpacing(8)
+        progress_container.setContentsMargins(0, 0, 0, 0)
+
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
         self.progress_bar.setMaximumHeight(18)
-        status_container.addWidget(self.progress_bar)
+        progress_container.addWidget(self.progress_bar, stretch=1)
+
+        self.stop_button = QtWidgets.QPushButton()
+        self.stop_button.setIcon(qta.icon('fa5s.stop', color='white', scale_factor=0.8))
+        self.stop_button.setToolTip(tr('stop_generation'))
+        self.stop_button.setVisible(False)
+        self.stop_button.setFixedSize(40, 40)  # Bouton carré compact
+
+        self.stop_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.primary_color};
+                color: white;
+                border: 1px solid rgba(0, 0, 0, 0.1);
+                padding: 0px;
+                margin: 0px;
+                border-radius: 20px;
+                min-width: 40px;
+                max-width: 40px;
+                min-height: 40px;
+                max-height: 40px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.secondary_color};
+                border: 1px solid rgba(0, 0, 0, 0.15);
+            }}
+            QPushButton:pressed {{
+                background-color: {self.primary_color};
+            }}
+            QPushButton:disabled {{
+                background-color: #e0e0e0;
+                color: #9e9e9e;
+                border: 1px solid #d0d0d0;
+            }}
+        """)
+
+        self.stop_button.clicked.connect(self._on_stop_generation)
+        progress_container.addWidget(self.stop_button, stretch=0)
+
+        status_container.addLayout(progress_container)
         left_column.addLayout(status_container)
 
         if self.base_width < 1200:
@@ -687,7 +729,6 @@ class CodingPanel(QtWidgets.QWidget):
         """)
         self.snippets_layout.insertWidget(0, self.no_snippets_label)
 
-        # Positionner le panneau snippets par-dessus le graphe
         self.snippets_panel.setParent(graph_container)
         self.snippets_panel.raise_()
 
@@ -698,8 +739,57 @@ class CodingPanel(QtWidgets.QWidget):
 
         main_layout.addWidget(main_content)
 
-        # Connecter le resize
         graph_container.resizeEvent = self._on_graph_container_resize
+
+
+    def _on_stop_generation(self):
+        """Arrête la génération en cours - SANS DIALOGUE"""
+        if not hasattr(self, 'current_worker') or not self.current_worker:
+            logger.warning("⚠️ Aucun worker actif à arrêter")
+            return
+
+        logger.info("🛑 Arrêt de la génération demandé par l'utilisateur")
+
+        try:
+            if hasattr(self.current_worker, 'stop'):
+                logger.info("📢 Envoi signal stop() au worker")
+                self.current_worker.stop()
+
+            self.stop_button.setEnabled(False)
+            self.update_status("🛑 Arrêt de la génération...", None)
+
+            # ✅ ÉTAPE 3: Attendre la fin propre (timeout 5s)
+            if self.current_worker.isRunning():
+                logger.info("⏳ Attente arrêt propre du worker (5s max)...")
+                self.current_worker.quit()
+
+                if not self.current_worker.wait(5000):
+                    # ✅ ÉTAPE 4: Forcer la terminaison si timeout
+                    logger.warning("⚠️ Timeout dépassé, terminaison forcée")
+                    self.current_worker.terminate()
+                    self.current_worker.wait(2000)
+
+            self._reset_generation_ui()
+
+            logger.info("✅ Génération arrêtée avec succès")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'arrêt : {e}")
+            import traceback
+            traceback.print_exc()
+
+            # Réinitialiser l'UI même en cas d'erreur
+            self._reset_generation_ui()
+
+    def _reset_generation_ui(self):
+        """Réinitialise l'interface après arrêt/fin de génération"""
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setValue(0)
+        self.stop_button.setVisible(False)
+        self.stop_button.setEnabled(True)
+        self.stop_button.setText(f"  {tr('stop')}")
+        self.start_button.setEnabled(True)
+        self.update_status(tr('ready'), None)
 
     def _toggle_global_history(self):
         """Affiche/cache l'accordéon d'historique global"""
@@ -977,6 +1067,7 @@ class CodingPanel(QtWidgets.QWidget):
             self.export_button.setEnabled(False)
             self.progress_bar.setMaximum(100)
             self.progress_bar.setValue(0)
+            self.stop_button.setVisible(True)
             self.progress_bar.setVisible(True)
 
             # Utiliser le nouveau worker amélioré
@@ -1435,6 +1526,14 @@ class CodingPanel(QtWidgets.QWidget):
         sender_worker = self.sender()
         platform_name = getattr(sender_worker, "platform_name", "Unknown Platform")
 
+        # ✅ Réinitialiser l'UI dans tous les cas
+        self._reset_generation_ui()
+
+        # ✅ Détecter si arrêt manuel
+        if isinstance(response, dict) and response.get('stopped'):
+            logger.info("🛑 Worker arrêté manuellement")
+            return  # Ne pas afficher de message d'erreur
+
         logger.info(f"{platform_name} completed. Success: {success}, Duration: {duration:.2f}s")
 
         if self.ai_usage_widget and hasattr(sender_worker, 'usage_stats'):
@@ -1446,13 +1545,12 @@ class CodingPanel(QtWidgets.QWidget):
                 success=success,
                 duration=duration
             )
-            logger.info(f"📊 Usage recorded: {usage_stats.get('input_tokens', 0) + usage_stats.get('output_tokens', 0)} tokens")
 
         if success:
             if response and isinstance(response, dict):
                 snippets = response.get('snippets', [])
                 snippet_count = len(snippets)
-                
+
                 self.update_status(
                     tr("snippets_generated").format(snippet_count, platform_name, duration),
                     100
@@ -1469,9 +1567,6 @@ class CodingPanel(QtWidgets.QWidget):
                 f"Erreur {platform_name}",
                 f"Erreur lors de la génération du code:\n{message}"
             )
-            self.progress_bar.setValue(0)
-
-        self.start_button.setEnabled(True)
 
     def _copy_to_clipboard(self, text):
         """Copie le texte dans le presse-papier"""
@@ -2965,6 +3060,7 @@ class CodingPanel(QtWidgets.QWidget):
         sender_worker = self.sender()
         platform_name = getattr(sender_worker, "platform_name", "Unknown")
         logger.info(f"{platform_name} worker finished")
+        self.stop_button.setVisible(False)
 
     def set_ai_usage_widget(self, ai_usage_widget):
         """Définit le widget d'utilisation IA"""

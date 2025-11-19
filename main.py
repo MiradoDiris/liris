@@ -384,7 +384,6 @@ def main():
         # Gérer la sélection de langue
         print("\n4. Gestion de la langue...")
         settings = QSettings("Liris", "IACollaborative")
-        settings.remove("language")
         saved_language = settings.value("language", None)
         
         selected_language = None

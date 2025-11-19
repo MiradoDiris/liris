@@ -151,6 +151,13 @@
   "conversation_export_error": "Unable to export history:\n{0}",
   "file_load_error": "Unable to load file: {0}",
   "coding_panel_refreshed": "Coding panel refreshed",
+  "stop_generation": "Stop generation",
+  "confirm_stop": "Confirm stop",
+  "confirm_stop_message": "Do you really want to stop the ongoing generation?\n\nPartial results will be lost.",
+  "generation_stopped": "Generation stopped",
+  "generation_stopped_title": "Generation interrupted",
+  "generation_stopped_message": "The generation has been stopped successfully.\n\nYou can start a new session.",
+  "stop_error": "Unable to stop generation",
   "messages": {
     "no_platforms": "No platforms",
     "platforms_available": "{count} platforms available"
