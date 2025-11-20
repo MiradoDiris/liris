@@ -17,6 +17,11 @@ class ProjectConfigOnlyWidget(QtWidgets.QWidget):
     """
     project_selected = pyqtSignal(bool)
 
+    project_created = pyqtSignal(str)
+    project_updated = pyqtSignal(str)
+    project_deleted = pyqtSignal(str)
+    project_loaded = pyqtSignal(str)
+
     def __init__(self, config_provider, conductor, parent=None):
         super().__init__(parent)
 
@@ -591,6 +596,43 @@ class ProjectConfigOnlyWidget(QtWidgets.QWidget):
         self._init_responsive_ui()
         self._add_maximize_button()
         self._add_responsive_animations()
+
+        if self.project_config_widget_instance:
+            # Signaux de rafraîchissement
+            self.project_config_widget_instance.project_created.connect(
+                self._on_project_crud_action
+            )
+            self.project_config_widget_instance.project_updated.connect(
+                self._on_project_crud_action
+            )
+            self.project_config_widget_instance.project_deleted.connect(
+                self._on_project_crud_action
+            )
+            self.project_config_widget_instance.project_scanned.connect(
+                self._on_project_crud_action
+            )
+
+            # Propager vers MainWindow
+            self.project_config_widget_instance.project_created.connect(
+                self.project_created.emit
+            )
+            self.project_config_widget_instance.project_updated.connect(
+                self.project_updated.emit
+            )
+            self.project_config_widget_instance.project_deleted.connect(
+                self.project_deleted.emit
+            )
+            self.project_config_widget_instance.project_scanned.connect(
+                lambda name: self.project_updated.emit(name)  # Scan = Update
+            )
+
+    def _on_project_crud_action(self, project_name):
+        print(f"🔄 Action CRUD détectée pour le projet: {project_name}")
+
+        if hasattr(self, 'project_config_widget_instance') and self.project_config_widget_instance:
+            self.project_config_widget_instance._delayed_combo_update(force_reload=True)
+
+        self.refresh()
 
     def _on_tab_changed(self, index):
         """Gère le changement d'onglet et met à jour l'état visuel."""

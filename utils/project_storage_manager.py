@@ -939,9 +939,165 @@ class ProjectStorageManager:
             logger.error(f"Erreur lors de la sauvegarde SQLite : {e}")
             return False
 
-    def _delete_project_from_sqlite(self, workspace_uid):
-        """Supprime un projet entier de SQLite (CRUD Delete pour projet)."""
-        return self._delete_workspace_in_sqlite(workspace_uid)
+    def _delete_project_from_sqlite(self, project_identifier):
+        try:
+            logger.info(f"🗑️ Starting SQLite deletion for: {project_identifier}")
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # ✅ Step 1: Find workspace UID
+            cursor.execute("""
+                SELECT uid, name FROM workspaces 
+                WHERE uid = ? OR name = ?
+            """, (project_identifier, project_identifier))
+            
+            result = cursor.fetchone()
+            if not result:
+                logger.warning(f"⚠️ Project '{project_identifier}' not found in SQLite")
+                conn.close()
+                return False
+            
+            workspace_uid, workspace_name = result
+            logger.info(f"   ✅ Found workspace: {workspace_name} (UID: {workspace_uid})")
+            
+            # ✅ Step 2: Get cluster_management UIDs
+            cursor.execute("""
+                SELECT uid FROM cluster_management 
+                WHERE workspace_uid = ?
+            """, (workspace_uid,))
+            cm_uids = [row[0] for row in cursor.fetchall()]
+            logger.info(f"   📦 Found {len(cm_uids)} cluster management(s)")
+            
+            total_deleted = {
+                'functions': 0,
+                'imports': 0,
+                'relations': 0,
+                'labels': 0,
+                'clusters': 0,
+                'cluster_mgmt': 0
+            }
+            
+            if cm_uids:
+                cm_placeholders = ','.join('?' * len(cm_uids))
+                
+                # ✅ Step 3: Get cluster UIDs
+                cursor.execute(f"""
+                    SELECT uid FROM clusters 
+                    WHERE cluster_management_uid IN ({cm_placeholders})
+                """, cm_uids)
+                cluster_uids = [row[0] for row in cursor.fetchall()]
+                logger.info(f"   📦 Found {len(cluster_uids)} cluster(s)")
+                
+                if cluster_uids:
+                    cluster_placeholders = ','.join('?' * len(cluster_uids))
+                    
+                    # ✅ Step 4: Get label UIDs
+                    cursor.execute(f"""
+                        SELECT uid FROM labels 
+                        WHERE cluster_uid IN ({cluster_placeholders})
+                    """, cluster_uids)
+                    label_uids = [row[0] for row in cursor.fetchall()]
+                    logger.info(f"   🏷️ Found {len(label_uids)} label(s)")
+                    
+                    if label_uids:
+                        label_placeholders = ','.join('?' * len(label_uids))
+                        
+                        # ✅ Step 5: Delete functions
+                        cursor.execute(f"""
+                            DELETE FROM functions 
+                            WHERE label_uid IN ({label_placeholders})
+                        """, label_uids)
+                        total_deleted['functions'] = cursor.rowcount
+                        logger.info(f"      🗑️ Deleted {cursor.rowcount} function(s)")
+                        
+                        # ✅ Step 6: Delete imports
+                        cursor.execute(f"""
+                            DELETE FROM imports 
+                            WHERE source_uid IN ({label_placeholders}) 
+                               OR target_uid IN ({label_placeholders})
+                        """, label_uids + label_uids)
+                        total_deleted['imports'] = cursor.rowcount
+                        logger.info(f"      🗑️ Deleted {cursor.rowcount} import(s)")
+                        
+                        # ✅ Step 7: Delete relations
+                        cursor.execute(f"""
+                            DELETE FROM relations 
+                            WHERE source_uid IN ({label_placeholders}) 
+                               OR target_uid IN ({label_placeholders})
+                        """, label_uids + label_uids)
+                        total_deleted['relations'] = cursor.rowcount
+                        logger.info(f"      🗑️ Deleted {cursor.rowcount} relation(s)")
+                    
+                    # ✅ Step 8: Delete labels
+                    cursor.execute(f"""
+                        DELETE FROM labels 
+                        WHERE cluster_uid IN ({cluster_placeholders})
+                    """, cluster_uids)
+                    total_deleted['labels'] = cursor.rowcount
+                    logger.info(f"      🗑️ Deleted {cursor.rowcount} label(s)")
+                
+                # ✅ Step 9: Delete clusters
+                cursor.execute(f"""
+                    DELETE FROM clusters 
+                    WHERE cluster_management_uid IN ({cm_placeholders})
+                """, cm_uids)
+                total_deleted['clusters'] = cursor.rowcount
+                logger.info(f"      🗑️ Deleted {cursor.rowcount} cluster(s)")
+            
+            # ✅ Step 10: Delete cluster_management
+            cursor.execute("""
+                DELETE FROM cluster_management 
+                WHERE workspace_uid = ?
+            """, (workspace_uid,))
+            total_deleted['cluster_mgmt'] = cursor.rowcount
+            logger.info(f"      🗑️ Deleted {cursor.rowcount} cluster_management")
+            
+            # ✅ Step 11: Delete workspace
+            cursor.execute("""
+                DELETE FROM workspaces 
+                WHERE uid = ?
+            """, (workspace_uid,))
+            workspace_deleted = cursor.rowcount
+            logger.info(f"      🗑️ Deleted workspace")
+            
+            # ✅ Step 12: Commit
+            conn.commit()
+            conn.close()
+            
+            # ✅ Summary
+            logger.info(f"")
+            logger.info(f"✅ SQLite DELETION SUMMARY for '{workspace_name}':")
+            logger.info(f"   • Functions: {total_deleted['functions']}")
+            logger.info(f"   • Imports: {total_deleted['imports']}")
+            logger.info(f"   • Relations: {total_deleted['relations']}")
+            logger.info(f"   • Labels: {total_deleted['labels']}")
+            logger.info(f"   • Clusters: {total_deleted['clusters']}")
+            logger.info(f"   • Cluster Management: {total_deleted['cluster_mgmt']}")
+            logger.info(f"   • Workspace: {workspace_deleted}")
+            logger.info(f"")
+            
+            return True
+            
+        except sqlite3.Error as e:
+            logger.error(f"❌ SQLite error during deletion: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Unexpected error during SQLite deletion: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+     
+        finally:
+            # Ensure connection is closed even if error occurs
+            try:
+                if 'conn' in locals():
+                    conn.close()
+            except:
+                pass
 
     def _save_label_recursive_sqlite(self, cursor, label_data, cluster_uid, parent_uid, level):
         """Sauvegarde récursivement les labels dans SQLite (Upsert)."""

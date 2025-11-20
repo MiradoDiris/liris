@@ -1383,6 +1383,22 @@ class MainWindow(QMainWindow):
                 # Centrer le dialogue
                 self._center_dialog(self.project_config_dialog_instance)
 
+                project_config_widget.project_created.connect(
+                self._on_global_project_refresh
+                )
+                project_config_widget.project_updated.connect(
+                    self._on_global_project_refresh
+                )
+                project_config_widget.project_deleted.connect(
+                    self._on_global_project_refresh
+                )
+                project_config_widget.project_loaded.connect(
+                    self._on_global_project_refresh
+                )
+
+                # Stocker la référence
+                self.project_config_widget_ref = project_config_widget
+
             for child in self.project_config_dialog_instance.findChildren(
                     ProjectConfigOnlyWidget
             ):
@@ -1400,6 +1416,84 @@ class MainWindow(QMainWindow):
                 tr("error"),
                 tr("config_open_error", error=str(e))
             )
+
+    def _on_global_project_refresh(self, project_name):
+        logger.info(f"🔄 Rafraîchissement global suite à une action sur le projet: {project_name}")
+
+        try:
+            self.update_status(f"Projet '{project_name}' mis à jour - Actualisation...")
+            self.show_progress(0, 100)
+
+            if self.conductor:
+                self.show_progress(20)
+                if hasattr(self.conductor, 'refresh_configurations'):
+                    self.conductor.refresh_configurations()
+                self.show_progress(40)
+
+            widgets_to_refresh = [
+                self.coding_panel,
+                self.brainstorming_panel,
+                self.audit_panel,
+                self.dataset_strategy,
+                self.dataset_generation,
+                self.prompt_list,
+                self.dataset_table
+            ]
+
+            progress_step = 40 / len(widgets_to_refresh)
+            current_progress = 40
+
+            for widget in widgets_to_refresh:
+                if widget:
+                    if hasattr(widget, 'refresh'):
+                        widget.refresh()
+                    elif hasattr(widget, 'refresh_list'):
+                        widget.refresh_list()
+                current_progress += progress_step
+                self.show_progress(int(current_progress))
+
+            if self.dashboard_panel and self.dashboard_dialog_instance:
+                if hasattr(self.dashboard_panel, 'refresh'):
+                    self.dashboard_panel.refresh()
+            self.show_progress(90)
+
+            if self.ide_panel and self.ide_dialog_instance:
+                if hasattr(self.ide_panel, 'refresh'):
+                    self.ide_panel.refresh()
+
+            if self.conductor:
+                platforms = self.conductor.get_available_platforms()
+                self._update_platform_info(platforms)
+
+            self.show_progress(100)
+
+            QTimer.singleShot(500, self.hide_progress)
+            self.update_status(f"✅ Application actualisée - Projet: {project_name}")
+
+            logger.info(f"✅ Rafraîchissement global terminé pour le projet: {project_name}")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors du rafraîchissement global: {str(e)}")
+            self.hide_progress()
+            self.update_status("❌ Erreur lors de l'actualisation")
+            QMessageBox.warning(
+                self,
+                "Erreur",
+                f"Une erreur est survenue lors de l'actualisation:\n\n{str(e)}"
+            )
+
+    def _update_platform_info(self, platforms):
+        if platforms:
+            self.platform_label.setText(
+                tr("messages.platforms_available", count=len(platforms))
+            )
+        else:
+            self.platform_label.setText(tr("messages.no_platforms"))
+
+        for panel in [self.coding_panel, self.brainstorming_panel, 
+                      self.dataset_generation, self.audit_panel]:
+            if panel and hasattr(panel, 'set_platforms'):
+                panel.set_platforms(platforms)
 
     def _on_project_config_changed(self, project_name):
         """Gère les changements de configuration des projets"""

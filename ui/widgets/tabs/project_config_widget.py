@@ -117,6 +117,12 @@ class ProjectConfigWidget(QtWidgets.QWidget):
     project_profile_saved = pyqtSignal(str, dict)
     project_profile_deleted = pyqtSignal(str)
 
+    project_created = pyqtSignal(str)
+    project_updated = pyqtSignal(str)
+    project_deleted = pyqtSignal(str)
+    project_loaded = pyqtSignal(str)
+    project_scanned = pyqtSignal(str) 
+
     def __init__(self, config_provider, conductor, parent=None):
         super().__init__(parent)
 
@@ -128,6 +134,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             db_path=self.db_path,
             dgraph_connector=self.dgraph_connector
         )
+
+        self.global_name_to_uid = {}
 
         log_initialization_info()
         
@@ -217,6 +225,50 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         from PyQt5.QtCore import QTimer
         QTimer.singleShot(100, self._delayed_combo_update)
+
+    def _normalize_name(self, name: str, element_type: str = '') -> str:
+        if not name:
+            return ''
+
+        normalized = name.lower().strip().replace(' ', '_').replace('-', '_')
+
+        # Clé composite si type spécifié
+        if element_type:
+            return f"{element_type}:{normalized}"
+
+        return normalized
+    
+    def _get_or_create_uid(self, name: str, element_type: str = 'label', force_new: bool = False) -> str:
+        if not name:
+            return str(uuid.uuid4())
+        key = self._normalize_name(name, element_type)
+
+        if not force_new and key in self.global_name_to_uid:
+            existing_uid = self.global_name_to_uid[key]
+            logger.debug(f"♻ Réutilisation UID pour '{name}': {existing_uid}")
+            return existing_uid
+
+        # Créer nouveau UID
+        new_uid = str(uuid.uuid4())
+        self.global_name_to_uid[key] = new_uid
+
+        logger.debug(f"✚ Nouveau UID pour '{name}' ({element_type}): {new_uid}")
+        return new_uid
+    
+    def _register_uid_mapping(self, name: str, uid: str, element_type: str = 'label'):
+        if not name or not uid:
+            return
+
+        key = self._normalize_name(name, element_type)
+
+        # Si déjà existant, logger warning
+        if key in self.global_name_to_uid and self.global_name_to_uid[key] != uid:
+            logger.warning(
+                f"⚠ Conflit UID pour '{name}': "
+                f"existant={self.global_name_to_uid[key]}, nouveau={uid}"
+            )
+
+        self.global_name_to_uid[key] = uid
 
     def _init_responsive_design(self):
         # Installer le filtre d'événements
@@ -762,47 +814,58 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         cluster_list_title = QtWidgets.QLabel(tr("project_config.cluster_label"))
         cluster_list_title.setStyleSheet("font-weight: bold; color: #2c3e50;")
         cluster_list_layout.addWidget(cluster_list_title)
-    
+
         self.cluster_list_widget = QtWidgets.QListWidget()
         self.cluster_list_widget.setStyleSheet(self._get_improved_list_style())
-        self.cluster_list_widget.setMinimumHeight(60)
+        # ✅ AUGMENTÉ : Plus de hauteur pour les clusters
+        self.cluster_list_widget.setMinimumHeight(200)  # Au lieu de 150
+        self.cluster_list_widget.setMaximumHeight(450)  # Au lieu de 350
         self.cluster_list_widget.currentItemChanged.connect(self._on_cluster_selected)
         cluster_list_layout.addWidget(self.cluster_list_widget)
-    
+
         # ✅ ESPACEMENT AVANT LES BOUTONS
         cluster_list_layout.addSpacing(8)
-    
+
         # Boutons cluster
         cluster_buttons_layout = QtWidgets.QHBoxLayout()
         cluster_buttons_layout.setSpacing(5)
         cluster_buttons_layout.setContentsMargins(0, 0, 0, 0)
-    
+
         self.add_cluster_button = QtWidgets.QPushButton(tr("project_config.button_add"))
         self.add_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.add_cluster_button.clicked.connect(self._add_cluster)
-    
+
         self.edit_cluster_button = QtWidgets.QPushButton(tr("project_config.button_edit"))
         self.edit_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.edit_cluster_button.clicked.connect(self._edit_cluster)
-    
+
         self.remove_cluster_button = QtWidgets.QPushButton(tr("project_config.button_delete"))
         self.remove_cluster_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.remove_cluster_button.clicked.connect(self._remove_cluster)
-    
+
         cluster_buttons_layout.addWidget(self.add_cluster_button)
         cluster_buttons_layout.addWidget(self.edit_cluster_button)
         cluster_buttons_layout.addWidget(self.remove_cluster_button)
         cluster_buttons_layout.addStretch()
+
         cluster_list_layout.addLayout(cluster_buttons_layout)
-    
         details_form_layout.addRow(cluster_list_layout)
+
+        # ✅ AJOUT : Politique de taille pour le groupe "Détails" (qui contient les clusters)
+        details_group_policy = QtWidgets.QSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding
+        )
+        details_group_policy.setVerticalStretch(5)  # ✅ Priorité HAUTE d'expansion
+        details_group.setSizePolicy(details_group_policy)
+
         left_column_layout.addWidget(details_group)
-    
+
         # --- Groupe détails sélectionné / Selected Details Group ---
         details_selected_group = QtWidgets.QGroupBox(tr("project_config.selected_details_group"))
         details_selected_group.setStyleSheet(PlatformConfigStyle.get_group_box_style())
         details_selected_layout = QtWidgets.QVBoxLayout(details_selected_group)
-    
+
         self.details_text = QtWidgets.QTextEdit()
         self.details_text.setReadOnly(True)
         self.details_text.setStyleSheet("""
@@ -810,19 +873,29 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 background-color: white;
                 border: 1px solid #d0d0d0;
                 border-radius: 4px;
-                padding: 8px;
-                font-size: 13px;
+                padding: 6px;
+                font-size: 12px;
                 font-family: 'Courier New', monospace;
             }
         """)
-        self.details_text.setMaximumHeight(400)
+        # ✅ RÉDUIT DRASTIQUEMENT
+        self.details_text.setMinimumHeight(50)   # Minimum absolu
+        self.details_text.setMaximumHeight(80)   # Maximum très réduit
         details_selected_layout.addWidget(self.details_text)
+
+        details_selected_policy = QtWidgets.QSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed
+        )
+        details_selected_policy.setVerticalStretch(0)  # ✅ Priorité ZÉRO
+        details_selected_group.setSizePolicy(details_selected_policy)
+
+        # Maintenant on ajoute au layout
         left_column_layout.addWidget(details_selected_group)
-    
-        left_column_layout.addStretch()
+
+        left_column_layout.addStretch(1)  # Au lieu d'un stretch sans limite
         top_columns_layout.addLayout(left_column_layout, 4)
     
-        # ==================== COLONNE DU MILIEU: HIÉRARCHIE ====================
         middle_scroll = QtWidgets.QScrollArea()
         middle_scroll.setWidgetResizable(True)
         middle_scroll.setStyleSheet("border: none;")
@@ -991,16 +1064,16 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.save_button.clicked.connect(self._on_save_project)
         self.save_button.setEnabled(False)
         self.save_button.setMaximumWidth(120)
-        save_layout.addWidget(self.save_button)
+        #save_layout.addWidget(self.save_button)
     
+        save_layout.addStretch()
+
         self.export_profile_button = QtWidgets.QPushButton(tr("project_config.button_export_profile"))
         self.export_profile_button.setStyleSheet(PlatformConfigStyle.get_button_style())
         self.export_profile_button.clicked.connect(self._on_export_profile)
         self.export_profile_button.setEnabled(False)
         self.export_profile_button.setMaximumWidth(120)
-        save_layout.addWidget(self.export_profile_button)
-    
-        save_layout.addStretch()
+        save_layout.addWidget(self.export_profile_button)       
     
         right_column_layout.addLayout(save_layout)
         right_column_layout.addStretch()
@@ -2528,9 +2601,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.details_text.clear()
 
     def _collect_all_labels(self):
-        """
-        CORRECTION: Collecte avec génération systématique d'UIDs
-        """
         self.label_uid_to_info.clear()
         self.name_to_uid.clear()
 
@@ -2545,64 +2615,79 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             root_labels = cluster.get("root_labels", [])
 
             for root in root_labels:
-                # ✅ Assurer qu'un UID existe
+                # ✅ Assurer qu'un UID unique existe
+                root_name = root.get('label', root.get('name', ''))
+
                 if 'uid' not in root or not root['uid']:
-                    root['uid'] = root.get('id') or str(uuid.uuid4())
+                    root['uid'] = self._get_or_create_uid(root_name, 'label')
+                else:
+                    # ✅ Enregistrer UID existant
+                    self._register_uid_mapping(root_name, root['uid'], 'label')
 
                 uid = root['uid']
 
                 info = {
-                    'name': root.get('label', ''),
+                    'name': root_name,
+                    'label': root_name,
                     'cluster': cluster_name,
-                    'type': 'label'
+                    'type': root.get('type', 'label'),
+                    'file': root.get('files', [None])[0] if root.get('files') else None
                 }
                 self.label_uid_to_info[uid] = info
-                self.name_to_uid[root.get('label', '')] = uid
+                self.name_to_uid[root_name] = uid
 
                 # Collecter récursivement
                 self._collect_labels_recursive(root, cluster_name)
 
     def _collect_labels_recursive(self, node, cluster_name=''):
-        """
-         CORRECTION: Collecte récursive avec génération d'UIDs
-        """
         children = node.get('children', [])
 
         for child in children:
-            # Assurer qu'un UID existe
+            child_name = child.get('label', child.get('name', ''))
+            child_type = child.get('type', 'label')
+
+            # ✅ Assurer qu'un UID unique existe
             if 'uid' not in child or not child['uid']:
-                child['uid'] = child.get('id') or str(uuid.uuid4())
+                child['uid'] = self._get_or_create_uid(child_name, child_type)
+            else:
+                # ✅ Enregistrer UID existant
+                self._register_uid_mapping(child_name, child['uid'], child_type)
 
             uid = child['uid']
 
-            # Récupérer cluster du parent
+            # RĂ©cupĂ©rer cluster du parent
             parent_uid = node.get('uid')
             parent_cluster = self.label_uid_to_info.get(parent_uid, {}).get('cluster', cluster_name)
 
             info = {
-                'name': child.get('label', child.get('name', '')),
+                'name': child_name,
+                'label': child_name,
                 'cluster': parent_cluster,
-                'type': child.get('type', 'label')
+                'type': child_type,
+                'file': child.get('file', child.get('files', [None])[0] if child.get('files') else None)
             }
             self.label_uid_to_info[uid] = info
 
-            label_name = child.get('label', child.get('name', ''))
-            if label_name:
-                self.name_to_uid[label_name] = uid
+            if child_name:
+                self.name_to_uid[child_name] = uid
 
             # Appel récursif
             self._collect_labels_recursive(child, parent_cluster)
 
-        # Collecter les classes
+        # ✅ Collecter les classes
         for cls in node.get('classes', []):
+            cls_name = cls.get('name', '')
+
             if 'uid' not in cls or not cls['uid']:
-                cls['uid'] = f"cls_{cls.get('name', '')}_{str(uuid.uuid4())[:8]}"
+                cls['uid'] = self._get_or_create_uid(cls_name, 'class')
+            else:
+                self._register_uid_mapping(cls_name, cls['uid'], 'class')
 
             cls_uid = cls['uid']
 
             info = {
-                'name': cls.get('name', ''),
-                'label': cls.get('name', ''),
+                'name': cls_name,
+                'label': cls_name,
                 'cluster': cluster_name,
                 'type': 'class',
                 'parent_label': node.get('label', ''),
@@ -2610,20 +2695,23 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             }
             self.label_uid_to_info[cls_uid] = info
 
-            cls_name = cls.get('name', '')
             if cls_name:
                 self.name_to_uid[cls_name] = cls_uid
 
-        # Collecter les fonctions
+        # ✅ Collecter les fonctions
         for func in node.get('functions', []):
+            func_name = func.get('name', '')
+
             if 'uid' not in func or not func['uid']:
-                func['uid'] = f"func_{func.get('name', '')}_{str(uuid.uuid4())[:8]}"
+                func['uid'] = self._get_or_create_uid(func_name, 'function')
+            else:
+                self._register_uid_mapping(func_name, func['uid'], 'function')
 
             func_uid = func['uid']
 
             info = {
-                'name': func.get('name', ''),
-                'label': func.get('name', ''),
+                'name': func_name,
+                'label': func_name,
                 'cluster': cluster_name,
                 'type': func.get('type', 'function'),
                 'parent_label': node.get('label', ''),
@@ -2631,20 +2719,23 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             }
             self.label_uid_to_info[func_uid] = info
 
-            func_name = func.get('name', '')
             if func_name:
                 self.name_to_uid[func_name] = func_uid
 
-        # Collecter les variables
+        # ✅ Collecter les variables
         for var in node.get('variables', []):
+            var_name = var.get('name', '')
+
             if 'uid' not in var or not var['uid']:
-                var['uid'] = f"var_{var.get('name', '')}_{str(uuid.uuid4())[:8]}"
+                var['uid'] = self._get_or_create_uid(var_name, 'variable')
+            else:
+                self._register_uid_mapping(var_name, var['uid'], 'variable')
 
             var_uid = var['uid']
 
             info = {
-                'name': var.get('name', ''),
-                'label': var.get('name', ''),
+                'name': var_name,
+                'label': var_name,
                 'cluster': cluster_name,
                 'type': 'variable',
                 'parent_label': node.get('label', ''),
@@ -2652,7 +2743,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             }
             self.label_uid_to_info[var_uid] = info
 
-            var_name = var.get('name', '')
             if var_name:
                 self.name_to_uid[var_name] = var_uid
 
@@ -2956,9 +3046,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     self._add_all_files_from_dir(item_path, base_dir, new_label, profile)
 
     def _scan_project_directory(self, directory):
-        """
-        ✅ VERSION CORRIGÉE : Merge avec clusters existants au lieu de dupliquer
-        """
         project_name = os.path.basename(directory)
 
         # ✅ RÉCUPÉRER LE PROFIL EXISTANT (si présent)
@@ -3022,7 +3109,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             elif os.path.isdir(item_path):
                 cluster['is_file_cluster'] = False
 
-                # ✅ SCANNER RÉCURSIF (sans dupliquer les labels)
+                # ✅ SCANNER RÉCURSIF (avec déduplication intégrée)
                 self._scan_directory_recursive(
                     item_path,
                     directory,
@@ -3036,40 +3123,79 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         return profile
     
     def _scan_directory_recursive(self, dir_path, base_dir, cluster, profile, 
-                          parent_label=None, level=0):
-        """
-        ✅ CORRIGÉ : Évite les doublons de labels dans les scans successifs
-        """
+                      parent_label=None, level=0):
+        existing_labels_by_path = {}
+        existing_labels_by_name = {}  # ✅ AJOUT
+
+        search_list = cluster['root_labels'] if parent_label is None else parent_label['children']
+
+        for existing in search_list:
+            existing_files = existing.get('files', [])
+            if existing_files:
+                # Indexer par le premier fichier (fichiers)
+                existing_labels_by_path[existing_files[0]] = existing
+
+            # ✅ AJOUT : Indexer aussi par nom
+            existing_name = existing.get('label', existing.get('name', ''))
+            if existing_name:
+                existing_labels_by_name[existing_name] = existing
+
         for item in sorted(os.listdir(dir_path)):
             item_path = os.path.join(dir_path, item)
             rel_path = os.path.relpath(item_path, base_dir)
-    
+
             # === FICHIER ===
             if os.path.isfile(item_path):
                 content = self._read_file_safe(item_path)
-    
-                # ✅ VÉRIFIER SI DÉJÀ EXISTANT (éviter doublon)
-                existing_label = None
-                search_list = cluster['root_labels'] if parent_label is None else parent_label['children']
-                
-                for existing in search_list:
-                    if existing.get('label') == item or rel_path in existing.get('files', []):
-                        existing_label = existing
-                        logger.debug(f"🔄 Label existant trouvé : {item}")
-                        break
-                    
+
+                # ✅ VÉRIFIER SI DÉJÀ EXISTANT (par chemin OU nom)
+                existing_label = existing_labels_by_path.get(rel_path)
+
+                if not existing_label:
+                    # ✅ Vérifier aussi par nom
+                    existing_label = existing_labels_by_name.get(item)
+
                 if existing_label:
                     # ✅ MISE À JOUR DU LABEL EXISTANT
                     if rel_path not in existing_label['files']:
                         existing_label['files'].append(rel_path)
                     existing_label['file_contents'][rel_path] = content
-                    continue  # ⚠️ NE PAS CRÉER DE DOUBLON
+
+                    logger.debug(f"📄 Mis à jour: {item} (existant)")
+
+                    # ✅ RÉEXTRAIRE LES ÉLÉMENTS DE CODE (pour refresh)
+                    classes = self.dependency_parser.extract_classes(content, rel_path)
+                    functions = self.dependency_parser.extract_functions(content, rel_path)
+                    variables = self.dependency_parser.extract_variables(content, rel_path)
+
+                    # ✅ ASSIGNER UIDs UNIQUES
+                    for cls in classes:
+                        cls['uid'] = self._get_or_create_uid(cls['name'], 'class')
+                        cls['file'] = rel_path
+
+                    for func in functions:
+                        func['uid'] = self._get_or_create_uid(func['name'], 'function')
+                        func['file'] = rel_path
+
+                    for var in variables:
+                        var['uid'] = self._get_or_create_uid(var['name'], 'variable')
+                        var['file'] = rel_path
+
+                    # Remplacer les éléments (pas append pour éviter doublons)
+                    existing_label['classes'] = classes
+                    existing_label['functions'] = functions
+                    existing_label['variables'] = variables
+
+                    continue  # ⚠ NE PAS CRÉER DE DOUBLON
                 
-                # Créer le label fichier (nouveau)
+                # ✅ CRÉER NOUVEAU LABEL (premiÚre fois)
+                # ✅ UTILISER UID UNIQUE
+                file_uid = self._get_or_create_uid(item, 'file')
+
                 file_label = {
                     'label': item,
                     'id': str(uuid.uuid4()),
-                    'uid': str(uuid.uuid4()),
+                    'uid': file_uid,  # ✅ UID unique
                     'description': f"Fichier: {rel_path}",
                     'category': ['file'],
                     'type': 'file',
@@ -3078,35 +3204,56 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     'parents': [],
                     'children': [],
                     'outgoing_relations': [],
-                    'incoming_relations': []
+                    'incoming_relations': [],
+                    'classes': [],
+                    'functions': [],
+                    'variables': []
                 }
-    
+
+                # Extraire éléments de code
+                classes = self.dependency_parser.extract_classes(content, rel_path)
+                functions = self.dependency_parser.extract_functions(content, rel_path)
+                variables = self.dependency_parser.extract_variables(content, rel_path)
+
+                # ✅ ASSIGNER UIDs UNIQUES
+                for cls in classes:
+                    cls['uid'] = self._get_or_create_uid(cls['name'], 'class')
+                    cls['file'] = rel_path
+
+                for func in functions:
+                    func['uid'] = self._get_or_create_uid(func['name'], 'function')
+                    func['file'] = rel_path
+
+                for var in variables:
+                    var['uid'] = self._get_or_create_uid(var['name'], 'variable')
+                    var['file'] = rel_path
+
+                file_label['classes'] = classes
+                file_label['functions'] = functions
+                file_label['variables'] = variables
+
                 # Ajouter au profile global
                 if rel_path not in profile['files']:
                     profile['files'].append(rel_path)
                 profile['file_contents'][rel_path] = content
-    
+
                 # ✅ AJOUT SELON LE NIVEAU (sans doublon)
                 if parent_label is None:
                     cluster['root_labels'].append(file_label)
                 else:
                     parent_label['children'].append(file_label)
                     file_label['parents'] = [parent_label['uid']]
-    
+
+                logger.debug(f"✅ Nouveau: {item}")
+
             # === DOSSIER ===
             elif os.path.isdir(item_path):
-                # ✅ MÊME LOGIQUE : Vérifier existence avant création
-                existing_folder = None
-                search_list = cluster['root_labels'] if parent_label is None else parent_label['children']
-                
-                for existing in search_list:
-                    if existing.get('label') == item:
-                        existing_folder = existing
-                        logger.debug(f"🔄 Dossier existant trouvé : {item}")
-                        break
-                    
+                # ✅ VÉRIFIER EXISTENCE PAR NOM
+                existing_folder = existing_labels_by_name.get(item)
+
                 if existing_folder:
                     # ✅ SCANNER RÉCURSIF DANS LE DOSSIER EXISTANT
+                    logger.debug(f"📄 Dossier existant: {item}")
                     self._scan_directory_recursive(
                         item_path,
                         base_dir,
@@ -3115,13 +3262,16 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                         parent_label=existing_folder,
                         level=level + 1
                     )
-                    continue  # ⚠️ NE PAS CRÉER DE DOUBLON
+                    continue  # ⚠ NE PAS CRÉER DE DOUBLON
                 
-                # Créer le label dossier (nouveau)
+                # ✅ CRÉER NOUVEAU DOSSIER (premiÚre fois)
+                # ✅ UTILISER UID UNIQUE
+                folder_uid = self._get_or_create_uid(item, 'folder')
+
                 folder_label = {
                     'label': item,
                     'id': str(uuid.uuid4()),
-                    'uid': str(uuid.uuid4()),
+                    'uid': folder_uid,  # ✅ UID unique
                     'description': f"Dossier: {rel_path}",
                     'category': ['folder'],
                     'type': 'folder',
@@ -3132,13 +3282,13 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     'outgoing_relations': [],
                     'incoming_relations': []
                 }
-    
+
                 if parent_label is None:
                     cluster['root_labels'].append(folder_label)
                 else:
                     parent_label['children'].append(folder_label)
                     folder_label['parents'] = [parent_label['uid']]
-    
+
                 # ✅ RÉCURSION
                 self._scan_directory_recursive(
                     item_path,
@@ -3148,6 +3298,8 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     parent_label=folder_label,
                     level=level + 1
                 )
+
+                logger.debug(f"✅ Nouveau dossier: {item}")
 
     def _read_file_safe(self, file_path):
         """
@@ -3169,6 +3321,9 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             self._update_project_combo()
             self.project_combo.setCurrentText(project_name)
             self._on_project_selected(self.project_combo.currentIndex())
+
+            self.project_created.emit(project_name)
+
             logger.info(f"Upload local complété pour: {directory}")
 
     def _on_add_new_project(self):
@@ -3191,65 +3346,305 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 self._update_project_combo()
                 self.project_combo.setCurrentText(project_name)
                 self._on_project_selected(self.project_combo.currentIndex())
+
+                self.project_created.emit(project_name)
                 logger.info(f"Nouveau projet créé : {project_name}")
 
     def _on_delete_project(self):
-        """Suppression complète d'un projet depuis l'UI, Dgraph et SQLite."""
         if not self.current_project_name:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Aucun projet sélectionné.")
             return
 
-        project_name = self.project_combo.currentText()
-        uid = self.current_project_profile_data.get('uid') if self.current_project_profile_data else None
+        project_name = self.current_project_name
+        profile = self.current_project_profile_data
 
-        if not uid:
-            logger.warning(f"Aucun UID trouvé pour le projet {project_name}")
-            QtWidgets.QMessageBox.warning(self, "Erreur", f"UID manquant pour '{project_name}'.")
+        if not profile:
+            logger.error(f"❌ Profil manquant pour '{project_name}'")
+            QtWidgets.QMessageBox.warning(self, "Erreur", f"Profil introuvable pour '{project_name}'.")
             return
 
-        # Confirmation utilisateur
         reply = QtWidgets.QMessageBox.question(
             self,
-            "Suppression du projet",
-            f"Voulez-vous vraiment supprimer le projet '{project_name}' ?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+            "⚠️ Suppression du projet",
+            f"Voulez-vous VRAIMENT supprimer le projet '{project_name}' ?\n\n"
+            f"Cette action supprimera :\n"
+            f"  • Les données dans Dgraph\n"
+            f"  • Les données dans SQLite\n"
+            f"  • Les données en mémoire\n\n"
+            f"⚠️ CETTE ACTION EST IRRÉVERSIBLE !",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
         )
+
         if reply != QtWidgets.QMessageBox.Yes:
+            logger.info(f"ℹ️ Suppression annulée par l'utilisateur")
             return
 
+        # ✅ SAUVEGARDER TOUTES LES RÉFÉRENCES EN PREMIER
+        storage_manager = self.project_storage_manager
+        dgraph_connector = self.dgraph_connector
+        dgraph_manager = self.dgraph_manager
+        project_profiles = self.project_profiles  # ✅ AJOUT
+
+        # ✅ VÉRIFIER QUE TOUT EST DISPONIBLE
+        if not storage_manager:
+            logger.error("❌ project_storage_manager est None !")
+            QtWidgets.QMessageBox.critical(self, "Erreur", "Gestionnaire de stockage non disponible.")
+            return
+
+        if not dgraph_connector:
+            logger.error("❌ dgraph_connector est None !")
+            QtWidgets.QMessageBox.critical(self, "Erreur", "Connexion Dgraph non disponible.")
+            return
+
+        # ==================== PROGRESSION ====================
+        progress = ModernProgressDialog(
+            title=f"Suppression du projet : {project_name}",
+            parent=self,
+            show_log=True,
+            cancelable=False
+        )
+        progress.set_title(f"🗑️ Suppression de {project_name}")
+        progress.set_indeterminate(True)
+        progress.show()
+
+        dgraph_deleted = False
+        sqlite_deleted = False
+
         try:
-            uids_to_delete = self._collect_uids_to_delete(uid)
-            if not uids_to_delete:
-                logger.warning("Aucun UID à supprimer.")
-                return
+            # ==================== ÉTAPE 1 : DGRAPH ====================
+            progress.set_status("🔄 Suppression depuis Dgraph...")
+            progress.add_log(f"📡 Connexion à Dgraph...")
 
-            # Supprimer de Dgraph si disponible
-            dgraph_deleted = True
-            if self.dgraph_connector.client:
-                dgraph_deleted = self._collect_and_delete_uids(uids_to_delete, project_name)
+            if dgraph_connector and dgraph_connector.client:
+                progress.add_log(f"🗑️ Suppression du projet '{project_name}'...")
+                dgraph_deleted = dgraph_manager.delete_project_from_dgraph(project_name)
 
-            # Supprimer de SQLite via CRUD
-            sqlite_deleted = self.project_storage_manager._delete_project_from_sqlite(uid)
-
-            if dgraph_deleted and sqlite_deleted:
-                logger.info(f"Supprimé de Dgraph et SQLite : {project_name}")
-
-                # Supprimer du cache local
-                if project_name in self.project_profiles:
-                    del self.project_profiles[project_name]
-                self._update_project_combo()  # Refresh la combo
-
-                # Reset UI
-                self._reset_ui()
-                self.current_project_name = None
-
-                QtWidgets.QMessageBox.information(self, "Succès", f"Projet '{project_name}' supprimé.")
+                if dgraph_deleted:
+                    progress.add_log(f"✅ Suppression Dgraph réussie")
+                else:
+                    progress.add_log(f"⚠️ Échec suppression Dgraph (non bloquant)")
             else:
-                QtWidgets.QMessageBox.warning(self, "Partiel", f"Supprimé de {'Dgraph et ' if dgraph_deleted else ''}SQLite, mais échec sur {'Dgraph' if not dgraph_deleted else 'SQLite'}.")
+                progress.add_log(f"⚠️ Dgraph non disponible, skip")
+                dgraph_deleted = True
+
+            # ==================== ÉTAPE 2 : SQLITE ====================
+            progress.set_status("💾 Suppression depuis SQLite...")
+            progress.add_log(f"💾 Suppression de la base SQLite...")
+
+            # ✅ UTILISER LA RÉFÉRENCE SAUVEGARDÉE
+            sqlite_deleted = storage_manager._delete_project_from_sqlite(project_name)
+
+            if sqlite_deleted:
+                progress.add_log(f"✅ Suppression SQLite réussie")
+            else:
+                progress.add_log(f"❌ Échec suppression SQLite")
+
+            # ==================== ÉTAPE 3 : VÉRIFICATION ====================
+            progress.set_status("🔍 Vérification de la suppression...")
+            progress.add_log(f"🔍 Vérification post-suppression...")
+
+            verification_ok = self._verify_project_deletion_inline(
+                project_name, 
+                dgraph_connector, 
+                storage_manager,
+                progress
+            )
+
+            # ==================== ÉTAPE 4 : MÉMOIRE ====================
+            progress.set_status("🧹 Nettoyage de la mémoire...")
+            progress.add_log(f"🧹 Suppression du cache mémoire...")
+
+            # ✅ SUPPRIMER DU DICT SAUVEGARDÉ (pas self.project_profiles qui peut être modifié)
+            if project_name in project_profiles:
+                del project_profiles[project_name]
+                progress.add_log(f"✅ Profil supprimé du cache")
+
+            # ==================== ÉTAPE 5 : UI ====================
+            progress.set_status("🎨 Mise à jour de l'interface...")
+            progress.add_log(f"🎨 Rafraîchissement de l'UI...")
+
+            # ✅ MAINTENANT safe de nettoyer l'UI
+            self._update_project_combo()
+            self._reset_ui()
+            self.current_project_name = None
+            self.current_project_profile_data = None
+
+            progress.add_log(f"✅ Interface mise à jour")
+
+            # ==================== RÉSULTAT ====================
+            if dgraph_deleted and sqlite_deleted:
+                progress.finish(
+                    success=True,
+                    message=f"✅ Projet '{project_name}' supprimé avec succès !"
+                )
+
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "✅ Succès",
+                    f"Projet '{project_name}' supprimé de Dgraph, SQLite et la mémoire."
+                )
+
+                self.project_deleted.emit(project_name)
+
+            elif dgraph_deleted or sqlite_deleted:
+                progress.finish(
+                    success=False,
+                    message=f"⚠️ Suppression partielle"
+                )
+
+                status = []
+                if dgraph_deleted:
+                    status.append("✅ Dgraph")
+                else:
+                    status.append("❌ Dgraph")
+
+                if sqlite_deleted:
+                    status.append("✅ SQLite")
+                else:
+                    status.append("❌ SQLite")
+
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "⚠️ Suppression partielle",
+                    f"Suppression incomplète :\n" + "\n".join(status)
+                )
+            else:
+                progress.finish(
+                    success=False,
+                    message=f"❌ Échec de la suppression"
+                )
+
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "❌ Erreur",
+                    f"Échec de la suppression du projet '{project_name}'."
+                )
+
+            logger.info(f"{'='*80}")
+            logger.info(f"SUPPRESSION TERMINÉE : {project_name}")
+            logger.info(f"  • Dgraph: {'✅' if dgraph_deleted else '❌'}")
+            logger.info(f"  • SQLite: {'✅' if sqlite_deleted else '❌'}")
+            logger.info(f"{'='*80}")
 
         except Exception as e:
-            logger.error(f"Erreur lors de la suppression : {e}")
-            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur : {str(e)}")
+            logger.error(f"❌ Erreur lors de la suppression : {e}")
+            import traceback
+            traceback.print_exc()
+
+            progress.finish(
+                success=False,
+                message=f"Erreur : {str(e)}"
+            )
+
+            QtWidgets.QMessageBox.critical(
+                self,
+                "❌ Erreur",
+                f"Erreur lors de la suppression :\n{str(e)}"
+            )
+
+    def _verify_project_deletion_inline(self, project_name: str, dgraph_connector, 
+                                    storage_manager, progress) -> bool:
+        logger.info(f"\n🔍 VÉRIFICATION SUPPRESSION : {project_name}")
+
+        issues = []
+
+        # 1️⃣ Vérifier Dgraph
+        if dgraph_connector and dgraph_connector.client:
+            escaped_name = project_name.replace('"', '\\"')
+            query = f"""
+            {{
+              check(func: type(Workspace)) @filter(eq(name, "{escaped_name}")) {{
+                uid
+                name
+              }}
+            }}
+            """
+
+            try:
+                txn = dgraph_connector.client.txn(read_only=True)
+                resp = txn.query(query)
+                data = dgraph_connector._parse_response(resp)
+                txn.discard()
+
+                if data.get('check'):
+                    issue_msg = f"❌ Encore présent dans Dgraph : {len(data['check'])} workspace(s)"
+                    issues.append(issue_msg)
+                    progress.add_log(f"  {issue_msg}")
+                    logger.warning(f"  {issue_msg}")
+                else:
+                    success_msg = "✅ Dgraph : Aucun résidu"
+                    progress.add_log(f"  {success_msg}")
+                    logger.info(f"  {success_msg}")
+            except Exception as e:
+                warning_msg = f"⚠️ Erreur vérification Dgraph : {e}"
+                progress.add_log(f"  {warning_msg}")
+                logger.warning(f"  {warning_msg}")
+
+        # 2️⃣ Vérifier SQLite
+        if storage_manager:
+            try:
+                import sqlite3
+                conn = sqlite3.connect(storage_manager.db_path)
+                cursor = conn.cursor()
+    
+                # ✅ Check by BOTH name AND uid
+                cursor.execute("""
+                    SELECT uid, name FROM workspaces 
+                    WHERE name = ? OR uid = ?
+                """, (project_name, project_name))
+                results = cursor.fetchall()
+    
+                if results:
+                    issue_msg = f"❌ Encore présent dans SQLite : {len(results)} entrée(s)"
+                    for uid, name in results:
+                        issue_msg += f"\n     → {name} (UID: {uid})"
+                    issues.append(issue_msg)
+                    progress.add_log(f"  {issue_msg}")
+                    logger.warning(f"  {issue_msg}")
+                else:
+                    success_msg = "✅ SQLite : Aucun résidu"
+                    progress.add_log(f"  {success_msg}")
+                    logger.info(f"  {success_msg}")
+    
+                conn.close()
+            except Exception as e:
+                warning_msg = f"⚠️ Erreur vérification SQLite : {e}"
+                progress.add_log(f"  {warning_msg}")
+                logger.warning(f"  {warning_msg}")
+
+        else:
+            warning_msg = "⚠️ Storage manager non disponible pour vérification SQLite"
+            progress.add_log(f"  {warning_msg}")
+            logger.warning(f"  {warning_msg}")
+
+        # 3️⃣ Vérifier mémoire
+        try:
+            if hasattr(self, 'project_profiles') and project_name in self.project_profiles:
+                issue_msg = "❌ Encore présent en mémoire"
+                issues.append(issue_msg)
+                progress.add_log(f"  {issue_msg}")
+                logger.warning(f"  {issue_msg}")
+            else:
+                success_msg = "✅ Mémoire : Supprimé"
+                progress.add_log(f"  {success_msg}")
+                logger.info(f"  {success_msg}")
+        except Exception as e:
+            warning_msg = f"⚠️ Erreur vérification mémoire : {e}"
+            progress.add_log(f"  {warning_msg}")
+            logger.warning(f"  {warning_msg}")
+
+        # Résultat
+        if issues:
+            logger.warning(f"\n⚠️ PROBLÈMES DÉTECTÉS :")
+            for issue in issues:
+                logger.warning(f"  {issue}")
+            return False
+        else:
+            success_msg = "\n✅ SUPPRESSION COMPLÈTE VÉRIFIÉE"
+            progress.add_log(success_msg)
+            logger.info(success_msg)
+            return True
 
     def _collect_uids_to_delete(self, uid):
         """
@@ -3483,6 +3878,9 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.current_project_profile_data['pending_relations'] = dict(self.pending_relations)
         self.project_profiles[self.current_project_name] = json.loads(json.dumps(self.current_project_profile_data))
         self.project_profile_saved.emit(self.current_project_name, self.current_project_profile_data)
+
+        self.project_updated.emit(self.current_project_name)
+
         logger.info(f"Profil sauvegardé : {self.current_project_name}")
 
     def _on_export_profile(self):
@@ -3574,7 +3972,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.global_relations_config.remove_button.setEnabled(has_rel_selected)
 
     def _on_browse_project(self):
-        """Version avec résolution complète des appels."""
+        """Version avec résolution complÚte des appels."""
         if not self.current_project_profile_data:
             QtWidgets.QMessageBox.warning(self, "Erreur", "Aucun projet sélectionné")
             return
@@ -3593,7 +3991,6 @@ class ProjectConfigWidget(QtWidgets.QWidget):
 
         logger.info(f"🔍 Analyse du projet '{project_name}'...")
 
-        # Créer dialogue de progression
         progress = ModernProgressDialog(
             title=f"Analyse du projet : {project_name}",
             parent=self,
@@ -3627,7 +4024,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 content = file_contents.get(file_path, "")
 
                 if not content:
-                    progress.add_log(f"   ⚠️ Contenu vide, skip")
+                    progress.add_log(f"   ⚠ Contenu vide, skip")
                     continue
                 
                 # Parser les relations
@@ -3653,7 +4050,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     func['codeContent'] = self._extract_function_code(content, func)
 
                 progress.add_log(
-                    f"   📦 Extraits: {len(classes)} classes, "
+                    f"   📩 Extraits: {len(classes)} classes, "
                     f"{len(functions)} fonctions, {len(variables)} variables"
                 )
 
@@ -3668,38 +4065,36 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     if parsed_rels:
                         self._integrate_parsed_relations_to_label(target_label, parsed_rels, file_path)
 
-                    # Stocker les éléments
+                    # ✅ CORRECTION : Stocker directement (PAS de double ajout)
                     target_label['classes'] = classes
                     target_label['functions'] = functions
                     target_label['variables'] = variables
-
-                    # Créer les enfants
                     for cls in classes:
+                        if 'uid' not in cls or not cls['uid']:
+                            cls['uid'] = self._get_or_create_uid(cls['name'], 'class')
+                        else:
+                            self._register_uid_mapping(cls['name'], cls['uid'], 'class')
                         cls['file'] = file_path
-                        if 'uid' not in cls:
-                            cls['uid'] = str(uuid.uuid4())
-                        child = self._create_child_node_from_extracted(cls, 'class')
-                        target_label.setdefault('children', []).append(child)
 
                     for func in functions:
+                        if 'uid' not in func or not func['uid']:
+                            func['uid'] = self._get_or_create_uid(func['name'], 'function')
+                        else:
+                            self._register_uid_mapping(func['name'], func['uid'], 'function')
                         func['file'] = file_path
-                        if 'uid' not in func:
-                            func['uid'] = str(uuid.uuid4())
-                        child = self._create_child_node_from_extracted(func, 'function')
-                        target_label.setdefault('children', []).append(child)
 
                     for var in variables:
+                        if 'uid' not in var or not var['uid']:
+                            var['uid'] = self._get_or_create_uid(var['name'], 'variable')
+                        else:
+                            self._register_uid_mapping(var['name'], var['uid'], 'variable')
                         var['file'] = file_path
-                        if 'uid' not in var:
-                            var['uid'] = str(uuid.uuid4())
-                        child = self._create_child_node_from_extracted(var, 'variable')
-                        target_label.setdefault('children', []).append(child)
 
                     files_processed += 1
 
             # ✅ ÉTAPE 2 : RÉSOLUTION COMPLÈTE DES APPELS (NOUVEAU)
             progress.set_indeterminate(True)
-            progress.set_status("🔗 Résolution complète des appels...")
+            progress.set_status("🔗 Résolution complÚte des appels...")
             progress.add_log("\n🔗 Initialisation CompleteCallResolver...")
             QtWidgets.QApplication.processEvents()
 
@@ -3728,15 +4123,15 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             progress.add_log("🔍 Validation des relations parsées...")
             validation_stats = self._validate_parsed_relations()
 
-            # Rafraîchir l'UI
-            progress.set_status("♻️ Rafraîchissement de l'interface...")
-            progress.add_log("♻️ Rafraîchissement de l'interface...")
+            # Rafraßchir l'UI
+            progress.set_status("♻ Rafraßchissement de l'interface...")
+            progress.add_log("♻ Rafraßchissement de l'interface...")
             self._collect_all_labels()
             self._refresh_cluster_list()
 
             # Sauvegarde
-            progress.set_status("💾 Sauvegarde dans SQLite et Dgraph...")
-            progress.add_log("\n💾 Démarrage de la sauvegarde...")
+            progress.set_status("💟 Sauvegarde dans SQLite et Dgraph...")
+            progress.add_log("\n💟 Démarrage de la sauvegarde...")
 
             save_success = self._save_scan_results_to_storage()
 
@@ -3747,7 +4142,10 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                             f"{validation_stats['total_parsed_in_dict']} relations détectées, "
                             f"{calls_integrated} appels résolus"
                 )
-                progress.add_log("\n✅ Sauvegarde complète réussie!")
+                progress.add_log("\n✅ Sauvegarde complÚte réussie!")
+
+                self.project_scanned.emit(self.current_project_name)
+
             else:
                 progress.finish(
                     success=False,
@@ -5445,6 +5843,14 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         """
         ✅ CORRIGÉ : Crée un nœud enfant avec relations enrichies
         """
+        logger.warning(
+            "⚠ _create_child_node_from_extracted() est déprécié. "
+            "Les éléments doivent être stockés directement dans classes/functions/variables."
+        )
+        
+        # ✅ Si appelé quand mĂȘme, utiliser UID unique
+        item_name = item.get('name', 'Unknown')
+        uid = self._get_or_create_uid(item_name, item_type)
         uid = item.get('uid', str(uuid.uuid4()))
         
         # Récupérer infos du fichier parent

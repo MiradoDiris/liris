@@ -758,18 +758,29 @@ class DgraphProjectManager:
             return None
 
     def _process_code_elements(self, node_data, parent_uid, mutations, label_uids, seen_uids):
-        """
-        ✅ CORRIGÉ : Transfùre TOUTES les données INCLUANT codeContent
-        """
-
         def get_valid_uid(raw_uid, prefix):
-            if raw_uid and isinstance(raw_uid, str) and raw_uid.startswith("0x"):
-                return raw_uid
+            """✅ Utilise UID existant OU sanitize (pas de nouveau UUID)"""
+            if raw_uid and isinstance(raw_uid, str):
+                if raw_uid.startswith("0x"):
+                    return raw_uid
+                if raw_uid.startswith("_:"):
+                    return raw_uid
+
+            # ✅ Utiliser l'UID existant (déjà généré dans _on_browse_project)
             return self._sanitize_uid(raw_uid or "", prefix)
 
         # ✅ CLASSES AVEC codeContent
         for cls in node_data.get('classes', []):
-            cls_uid = get_valid_uid(cls.get('uid', ''), 'class')
+            # ✅ UTILISER UID EXISTANT (ne pas régénérer)
+            cls_uid = cls.get('uid')
+
+            if not cls_uid:
+                # Fallback si pas d'UID (ne devrait pas arriver)
+                cls_uid = self._sanitize_uid("", 'class')
+                cls['uid'] = cls_uid
+                logger.warning(f"⚠ Classe sans UID, généré: {cls.get('name')} → {cls_uid}")
+            else:
+                cls_uid = get_valid_uid(cls_uid, 'class')
 
             if cls_uid not in seen_uids:
                 cls_mutation = {
@@ -786,7 +797,15 @@ class DgraphProjectManager:
                 # ✅ MÉTHODES avec codeContent
                 methods_refs = []
                 for method in cls.get('methods', []):
-                    method_uid = get_valid_uid(method.get('uid', ''), 'method')
+                    # ✅ UTILISER UID EXISTANT
+                    method_uid = method.get('uid')
+
+                    if not method_uid:
+                        method_uid = self._sanitize_uid("", 'method')
+                        method['uid'] = method_uid
+                        logger.warning(f"⚠ Méthode sans UID, généré: {method.get('name')} → {method_uid}")
+                    else:
+                        method_uid = get_valid_uid(method_uid, 'method')
 
                     if method_uid not in seen_uids:
                         method_mutation = {
@@ -802,6 +821,7 @@ class DgraphProjectManager:
                         mutations.append(method_mutation)
                         seen_uids.add(method_uid)
 
+                        # ✅ Enregistrer le mapping UID
                         if method.get('uid'):
                             label_uids[method['uid']] = method_uid
 
@@ -813,12 +833,21 @@ class DgraphProjectManager:
                 mutations.append(cls_mutation)
                 seen_uids.add(cls_uid)
 
+                # ✅ Enregistrer le mapping UID
                 if cls.get('uid'):
                     label_uids[cls['uid']] = cls_uid
 
         # ✅ FONCTIONS avec codeContent
         for func in node_data.get('functions', []):
-            func_uid = get_valid_uid(func.get('uid', ''), 'func')
+            # ✅ UTILISER UID EXISTANT
+            func_uid = func.get('uid')
+
+            if not func_uid:
+                func_uid = self._sanitize_uid("", 'func')
+                func['uid'] = func_uid
+                logger.warning(f"⚠ Fonction sans UID, généré: {func.get('name')} → {func_uid}")
+            else:
+                func_uid = get_valid_uid(func_uid, 'func')
 
             if func_uid not in seen_uids:
                 func_mutation = {
@@ -849,12 +878,21 @@ class DgraphProjectManager:
                 mutations.append(func_mutation)
                 seen_uids.add(func_uid)
 
+                # ✅ Enregistrer le mapping UID
                 if func.get('uid'):
                     label_uids[func['uid']] = func_uid
 
-            # ✅ VARIABLES GLOBALES
+        # ✅ VARIABLES GLOBALES
         for var in node_data.get('variables', []):
-            var_uid = get_valid_uid(var.get('uid', ''), 'var')
+            # ✅ UTILISER UID EXISTANT
+            var_uid = var.get('uid')
+
+            if not var_uid:
+                var_uid = self._sanitize_uid("", 'var')
+                var['uid'] = var_uid
+                logger.warning(f"⚠ Variable sans UID, généré: {var.get('name')} → {var_uid}")
+            else:
+                var_uid = get_valid_uid(var_uid, 'var')
 
             if var_uid not in seen_uids:
                 var_mutation = {
@@ -872,7 +910,6 @@ class DgraphProjectManager:
 
                 if var.get('uid'):
                     label_uids[var['uid']] = var_uid
-
 
     def _create_label_mutation(self, label_data, level, cluster_uid):
         """
@@ -938,9 +975,7 @@ class DgraphProjectManager:
         return mutation
     
     def _remove_duplicate_clusters_before_insert(self, profile_data):
-        """
-        ✅ NOUVEAU : Nettoie les doublons de clusters AVANT l'insertion Dgraph
-        """
+
         clusters = profile_data.get('turing_ontology', {}).get('clusters_detailed', [])
 
         # Grouper par nom
@@ -965,25 +1000,52 @@ class DgraphProjectManager:
             # Garder le 1er, fusionner les autres
             merged = duplicates[0]
 
+            # ✅ NOUVEAU : Index pour éviter doublons de labels
+            existing_labels_by_name = {
+                label.get('label') or label.get('name', ''): label 
+                for label in merged['root_labels']
+            }
+
             for dup in duplicates[1:]:
-                # Fusionner root_labels (sans doublons)
-                existing_labels = {label['label'] for label in merged['root_labels']}
-
+                # Fusionner root_labels (AVEC MERGE intelligent)
                 for label in dup['root_labels']:
-                    if label['label'] not in existing_labels:
-                        merged['root_labels'].append(label)
-                        existing_labels.add(label['label'])
+                    label_name = label.get('label') or label.get('name', '')
 
-                # Fusionner files
+                    if label_name in existing_labels_by_name:
+                        # ✅ MERGER au lieu d'ajouter
+                        existing_label = existing_labels_by_name[label_name]
+
+                        # Fusionner fichiers
+                        for file in label.get('files', []):
+                            if file not in existing_label['files']:
+                                existing_label['files'].append(file)
+
+                        # Fusionner file_contents
+                        existing_label['file_contents'].update(label.get('file_contents', {}))
+
+                        # Fusionner enfants
+                        existing_label['children'].extend(label.get('children', []))
+
+                        logger.debug(f"  🔄 Label mergé: {label_name}")
+                    else:
+                        # Nouveau label, l'ajouter
+                        merged['root_labels'].append(label)
+                        existing_labels_by_name[label_name] = label
+                        logger.debug(f"  ➕ Nouveau label: {label_name}")
+
+                # Fusionner files du cluster
                 for file in dup.get('files', []):
                     if file not in merged['files']:
                         merged['files'].append(file)
 
-                # Fusionner file_contents
+                # Fusionner file_contents du cluster
                 merged['file_contents'].update(dup.get('file_contents', {}))
 
             cleaned_clusters.append(merged)
-            logger.info(f"✅ Cluster '{cluster_name}' : {len(merged['root_labels'])} labels")
+            logger.info(
+                f"✅ Cluster '{cluster_name}' : {len(merged['root_labels'])} labels "
+                f"({len(existing_labels_by_name)} uniques)"
+            )
 
         # Remplacer
         profile_data['turing_ontology']['clusters_detailed'] = cleaned_clusters
@@ -1305,16 +1367,13 @@ class DgraphProjectManager:
         return all_nodes
 
     def _on_insert_dgraph(self, parent=None):
-        """
-        ✅ AMÉLIORÉ : Avec vérification post-insertion
-        """
         if not self.is_configured():
             from PyQt5 import QtWidgets
             QtWidgets.QMessageBox.warning(
-                parent, "Erreur", "Configuration Dgraph incomplète."
+                parent, "Erreur", "Configuration Dgraph incomplÚte."
             )
             return
-
+    
         if not hasattr(self, 'current_project_profile_data') or not self.current_project_profile_data:
             from PyQt5 import QtWidgets
             QtWidgets.QMessageBox.warning(
@@ -1322,13 +1381,13 @@ class DgraphProjectManager:
             )
             logger.error("❌ current_project_profile_data non défini")
             return
-
+    
         project_name = self.current_project_profile_data.get('name', 'Projet inconnu')
         logger.info(f"📄 Insertion Dgraph pour '{project_name}'")
-
+    
         # Sauvegarder SQLite si disponible
         if hasattr(self, 'project_storage_manager'):
-            logger.info("💾 Sauvegarde SQLite...")
+            logger.info("💟 Sauvegarde SQLite...")
             if not self.project_storage_manager._save_project_to_sqlite(self.current_project_profile_data):
                 from PyQt5 import QtWidgets
                 QtWidgets.QMessageBox.critical(
@@ -1336,21 +1395,21 @@ class DgraphProjectManager:
                 )
                 return
             logger.info("✅ SQLite OK")
-
-        logger.info("📤 Génération mutations...")
+    
+        logger.info("📀 Génération mutations...")
         mutations = self._transform_profile_to_dgraph_mutations(
             self.current_project_profile_data
         )
-
+    
         if not mutations:
             from PyQt5 import QtWidgets
             QtWidgets.QMessageBox.warning(
                 parent, "Avertissement", "Aucune mutation générée."
             )
             return
-
+    
         logger.info(f"📊 {len(mutations)} mutations")
-
+    
         logger.info("📄 Insertion Dgraph...")
         if not self.dgraph_connector.insert_mutations(mutations):
             from PyQt5 import QtWidgets
@@ -1358,27 +1417,39 @@ class DgraphProjectManager:
                 parent, "Avertissement", "Échec insertion Dgraph."
             )
             return
-
+    
         logger.info("✅ Dgraph OK")
+        
+        # ✅ NOUVEAU : Déduplication automatique
+        logger.info("\n🧹 Lancement nettoyage des doublons...")
+        deleted_count = self._deduplicate_after_insert(project_name)
+        
+        if deleted_count > 0:
+            logger.info(f"✅ {deleted_count} doublon(s) supprimé(s)")
+        else:
+            logger.info("✅ Aucun doublon détecté")
         
         # ✅ NOUVEAU : Vérification post-insertion
         logger.info("\n🔍 Vérification des relations dans Dgraph...")
         self.verify_relations_in_dgraph(project_name)
         
         self._retrieve_assigned_uids(project_name)
-
+    
         logger.info("="*80)
         logger.info(f"✅ INSERTION COMPLÈTE: '{project_name}'")
+        logger.info(f"  • {len(mutations)} mutations insérées")
+        logger.info(f"  • {deleted_count} doublons nettoyés")
         logger.info("="*80)
-
+    
         from PyQt5 import QtWidgets
         QtWidgets.QMessageBox.information(
-            parent, "Succès", 
+            parent, "SuccÚs", 
             f"✅ Projet '{project_name}' inséré!\n\n"
             f"📊 {len(mutations)} mutations insérées\n"
-            f"🔗 Relations vérifiées avec succès"
+            f"🧹 {deleted_count} doublon(s) nettoyé(s)\n"
+            f"🔗 Relations vérifiées avec succÚs"
         )
-
+    
         self.dgraph_connector.open_ratel()
 
     def _retrieve_assigned_uids(self, project_name):
@@ -1737,6 +1808,343 @@ class DgraphProjectManager:
                 f"--{rel_type}--> {target_info.get('name', '?')}"
             )
 
+    def delete_project_from_dgraph(self, project_name: str) -> bool:
+        if not self.dgraph_connector or not self.dgraph_connector.client:
+            logger.error("❌ Dgraph client non disponible")
+            return False
+
+        escaped_name = project_name.replace('"', '\\"')
+
+        # 1️⃣ Requête EXHAUSTIVE pour tous les types d'entités
+        query = f"""
+        {{
+          workspace(func: type(Workspace)) @filter(eq(name, "{escaped_name}")) {{
+            uid
+            name
+
+            clusterManagement {{
+              uid
+
+              clusters {{
+                uid
+                name
+
+                # ✅ Labels TOUS niveaux (pas seulement level 0)
+                all_labels: ~clusters {{
+                  uid
+                  level
+
+                  # Classes et méthodes
+                  classes {{
+                    uid
+                    methods {{
+                      uid
+                    }}
+                  }}
+
+                  # Fonctions
+                  functions {{
+                    uid
+                  }}
+
+                  # Variables
+                  variables {{
+                    uid
+                  }}
+
+                  # ✅ Relations sortantes (source = ce label)
+                  outgoing_rels: ~source @filter(type(Relation)) {{
+                    uid
+                  }}
+
+                  # ✅ Relations entrantes (target = ce label)
+                  incoming_rels: ~target @filter(type(Relation)) {{
+                    uid
+                  }}
+                }}
+              }}
+            }}
+          }}
+
+          # ✅ Relations orphelines liées au projet (par nom)
+          orphan_relations(func: type(Relation)) @filter(
+            regexp(sourceName, /.*{escaped_name}.*/i) OR 
+            regexp(targetName, /.*{escaped_name}.*/i)
+          ) {{
+            uid
+          }}
+        }}
+        """
+
+        try:
+            # Récupérer les UIDs
+            txn = self.dgraph_connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            data = self.dgraph_connector._parse_response(resp)
+            txn.discard()
+
+            workspaces = data.get('workspace', [])
+
+            if not workspaces:
+                logger.warning(f"⚠️ Projet '{project_name}' introuvable")
+                return False
+
+            ws = workspaces[0]
+
+            # Collecter tous les UIDs à supprimer (avec Set pour éviter doublons)
+            uids_to_delete = set()
+            uids_to_delete.add(ws['uid'])
+
+            # ClusterManagement
+            cm = ws.get('clusterManagement', {})
+            if cm and cm.get('uid'):
+                uids_to_delete.add(cm['uid'])
+
+                # Clusters
+                for cluster in cm.get('clusters', []):
+                    uids_to_delete.add(cluster['uid'])
+
+                    # ✅ TOUS les labels (pas de filtre level)
+                    for label in cluster.get('all_labels', []):
+                        uids_to_delete.add(label['uid'])
+
+                        logger.debug(f"  📄 Label: {label.get('uid')} (level {label.get('level')})")
+
+                        # Classes et méthodes
+                        for cls in label.get('classes', []):
+                            uids_to_delete.add(cls['uid'])
+                            for method in cls.get('methods', []):
+                                uids_to_delete.add(method['uid'])
+
+                        # Fonctions
+                        for func in label.get('functions', []):
+                            uids_to_delete.add(func['uid'])
+
+                        # Variables
+                        for var in label.get('variables', []):
+                            uids_to_delete.add(var['uid'])
+
+                        # ✅ Relations sortantes
+                        for rel in label.get('outgoing_rels', []):
+                            uids_to_delete.add(rel['uid'])
+
+                        # ✅ Relations entrantes
+                        for rel in label.get('incoming_rels', []):
+                            uids_to_delete.add(rel['uid'])
+
+            # ✅ Relations orphelines
+            for rel in data.get('orphan_relations', []):
+                uids_to_delete.add(rel['uid'])
+
+            logger.info(f"🗑️ Suppression de {len(uids_to_delete)} entités du projet...")
+
+            # 2️⃣ Suppression en batch
+            txn = self.dgraph_connector.client.txn()
+            try:
+                del_objs = [{"uid": uid} for uid in uids_to_delete]
+                txn.mutate(del_obj=del_objs)
+                txn.commit()
+
+                logger.info(f"✅ Projet '{project_name}' supprimé ({len(uids_to_delete)} entités)")
+
+            except Exception as e:
+                logger.error(f"❌ Erreur suppression projet : {e}")
+                txn.discard()
+                return False
+
+            # 3️⃣ ✅ NETTOYAGE DES ORPHELINS
+            logger.info("🧹 Nettoyage des entités orphelines...")
+            orphans_deleted = self._delete_orphaned_entities()
+
+            if orphans_deleted:
+                logger.info(f"✅ {orphans_deleted} entités orphelines supprimées")
+
+            # 4️⃣ ✅ VÉRIFICATION FINALE
+            self._verify_project_deletion(project_name)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Erreur : {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _delete_orphaned_entities(self) -> int:
+        if not self.dgraph_connector or not self.dgraph_connector.client:
+            logger.error("❌ Dgraph client non disponible")
+            return 0
+    
+        query = """
+        {
+          # Labels orphelins (sans cluster ET sans parent)
+          orphan_labels(func: type(Label)) @filter(
+            NOT has(clusters) AND NOT has(parents)
+          ) {
+            uid
+          }
+          
+          # Classes orphelines
+          orphan_classes(func: type(Class)) @filter(NOT has(~classes)) {
+            uid
+          }
+          
+          # Fonctions orphelines
+          orphan_functions(func: type(Function)) @filter(
+            NOT has(~functions) AND NOT has(~methods)
+          ) {
+            uid
+          }
+          
+          # Variables orphelines
+          orphan_variables(func: type(Variable)) @filter(NOT has(~variables)) {
+            uid
+          }
+          
+          # ✅ Relations orphelines (source OU target manquant)
+          orphan_relations(func: type(Relation)) @filter(
+            NOT has(source) OR NOT has(target)
+          ) {
+            uid
+          }
+          
+          # Clusters orphelins
+          orphan_clusters(func: type(Cluster)) @filter(NOT has(~clusters)) {
+            uid
+          }
+          
+          # ClusterManagement orphelins
+          orphan_cm(func: type(ClusterManagement)) @filter(
+            NOT has(~clusterManagement)
+          ) {
+            uid
+          }
+        }
+        """
+    
+        try:
+            txn = self.dgraph_connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            data = self.dgraph_connector._parse_response(resp)
+            txn.discard()
+    
+            uids_to_delete = set()
+            stats = {}
+    
+            for key in ['orphan_labels', 'orphan_classes', 'orphan_functions', 
+                        'orphan_variables', 'orphan_relations', 'orphan_clusters', 
+                        'orphan_cm']:
+                entities = data.get(key, [])
+                count = len(entities)
+                if count > 0:
+                    stats[key] = count
+                    uids_to_delete.update([e['uid'] for e in entities])
+                    logger.info(f"  🗑️ {key}: {count}")
+    
+            if not uids_to_delete:
+                logger.info("  ✅ Aucune entité orpheline")
+                return 0
+    
+            # Supprimer
+            txn = self.dgraph_connector.client.txn()
+            try:
+                del_objs = [{"uid": uid} for uid in uids_to_delete]
+                txn.mutate(del_obj=del_objs)
+                txn.commit()
+                
+                logger.info(f"\n📊 RÉSUMÉ NETTOYAGE:")
+                for key, count in stats.items():
+                    logger.info(f"  • {key.replace('orphan_', '').title()}: {count}")
+                
+                return len(uids_to_delete)
+                
+            except Exception as e:
+                logger.error(f"❌ Erreur suppression orphelins: {e}")
+                txn.discard()
+                return 0
+    
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche orphelins: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
+        
+    def _verify_project_deletion(self, project_name: str):
+        """
+        ✅ Vérifie qu'un projet a été complètement supprimé
+        """
+        logger.info(f"\n🔍 VÉRIFICATION SUPPRESSION : {project_name}")
+        
+        issues = []
+        
+        # 1️⃣ Vérifier Dgraph
+        if self.dgraph_connector and self.dgraph_connector.client:
+            escaped_name = project_name.replace('"', '\\"')
+            query = f"""
+            {{
+              check(func: type(Workspace)) @filter(eq(name, "{escaped_name}")) {{
+                uid
+                name
+              }}
+            }}
+            """
+            
+            try:
+                txn = self.dgraph_connector.client.txn(read_only=True)
+                resp = txn.query(query)
+                data = self.dgraph_connector._parse_response(resp)
+                txn.discard()
+                
+                if data.get('check'):
+                    issues.append(f"❌ Encore présent dans Dgraph : {len(data['check'])} workspace(s)")
+                else:
+                    logger.info("  ✅ Dgraph : Aucun résidu")
+            except Exception as e:
+                logger.warning(f"  ⚠️ Erreur vérification Dgraph : {e}")
+        
+        # 2️⃣ Vérifier SQLite
+        if hasattr(self, 'project_storage_manager') and self.project_storage_manager:
+            try:
+                import sqlite3
+                conn = sqlite3.connect(self.project_storage_manager.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT COUNT(*) FROM workspaces WHERE name = ?", (project_name,))
+                count = cursor.fetchone()[0]
+                
+                if count > 0:
+                    issues.append(f"❌ Encore présent dans SQLite : {count} entrée(s)")
+                else:
+                    logger.info("  ✅ SQLite : Aucun résidu")
+                
+                conn.close()
+            except Exception as e:
+                logger.warning(f"  ⚠️ Erreur vérification SQLite : {e}")
+        else:
+            logger.warning("  ⚠️ project_storage_manager non disponible, vérification SQLite ignorée")
+        
+        # 3️⃣ Vérifier mémoire (utiliser parent.project_profiles)
+        try:
+            if hasattr(self, 'parent') and hasattr(self.parent, 'project_profiles'):
+                if project_name in self.parent.project_profiles:
+                    issues.append(f"❌ Encore présent en mémoire")
+                else:
+                    logger.info("  ✅ Mémoire : Supprimé")
+            else:
+                logger.warning("  ⚠️ Vérification mémoire impossible (parent.project_profiles non accessible)")
+        except Exception as e:
+            logger.warning(f"  ⚠️ Erreur vérification mémoire : {e}")
+        
+        # Résultat
+        if issues:
+            logger.warning(f"\n⚠️ PROBLÈMES DÉTECTÉS :")
+            for issue in issues:
+                logger.warning(f"  {issue}")
+            return False
+        else:
+            logger.info(f"\n✅ SUPPRESSION COMPLÈTE VÉRIFIÉE")
+            return True
+
     def _test_relations_loading(self, profile_data=None):
         """
         ✅ AJOUTÉ : Méthode de diagnostic pour vérifier les relations
@@ -1822,3 +2230,106 @@ class DgraphProjectManager:
         logger.info("="*80 + "\n")
 
         return stats
+    
+    def _deduplicate_after_insert(self, project_name: str) -> int:
+        if not self.dgraph_connector or not self.dgraph_connector.client:
+            logger.error("❌ Dgraph client non disponible")
+            return 0
+
+        logger.info(f"\n🧹 NETTOYAGE DOUBLONS pour '{project_name}'...")
+
+        escaped_name = project_name.replace('"', '\\"')
+
+        query = f"""
+        {{
+          workspace(func: type(Workspace)) @filter(eq(name, "{escaped_name}")) {{
+            uid
+            clusterManagement {{
+              clusters {{
+                uid
+
+                all_labels: ~clusters {{
+                  uid
+                  name
+                  nodeType
+                  createdAt
+                }}
+              }}
+            }}
+          }}
+        }}
+        """
+
+        try:
+            txn = self.dgraph_connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            data = self.dgraph_connector._parse_response(resp)
+            txn.discard()
+
+            from collections import defaultdict
+            by_name_type = defaultdict(list)
+
+            # Grouper par (nom, type)
+            for ws in data.get('workspace', []):
+                cm = ws.get('clusterManagement', {})
+                for cluster in cm.get('clusters', []):
+                    for label in cluster.get('all_labels', []):
+                        name = label.get('name', '')
+                        node_type = label.get('nodeType', 'label')
+
+                        if name:
+                            key = f"{node_type}:{name}"
+                            by_name_type[key].append(label)
+
+            # Identifier doublons
+            uids_to_delete = []
+            stats = {'total': 0, 'by_type': defaultdict(int)}
+
+            for key, labels in by_name_type.items():
+                if len(labels) > 1:
+                    node_type = key.split(':')[0]
+                    name = key.split(':', 1)[1]
+
+                    # Trier par date (garder le plus récent)
+                    labels.sort(key=lambda x: x.get('createdAt', ''), reverse=True)
+
+                    # Supprimer les anciens
+                    for old_label in labels[1:]:
+                        uids_to_delete.append(old_label['uid'])
+                        stats['by_type'][node_type] += 1
+                        stats['total'] += 1
+                        logger.debug(
+                        f"  🗑 Doublon: {name} ({node_type}) - "
+                        f"Garde {labels[0]['uid']}, supprime {len(labels)-1}"
+                    )
+
+            # Supprimer les doublons
+            if uids_to_delete:
+                logger.info(f"🗑 Suppression de {len(uids_to_delete)} doublons...")
+
+                txn = self.dgraph_connector.client.txn()
+                try:
+                    del_objs = [{"uid": uid} for uid in uids_to_delete]
+                    txn.mutate(del_obj=del_objs)
+                    txn.commit()
+
+                    logger.info(f"\n📊 RÉSUMÉ NETTOYAGE:")
+                    logger.info(f"  ✅ Total supprimé: {stats['total']}")
+                    for node_type, count in stats['by_type'].items():
+                        logger.info(f"    • {node_type}: {count}")
+
+                    return stats['total']
+
+                except Exception as e:
+                    logger.error(f"❌ Erreur suppression: {e}")
+                    txn.discard()
+                    return 0
+            else:
+                logger.info("  ✅ Aucun doublon trouvé")
+                return 0
+
+        except Exception as e:
+            logger.error(f"❌ Erreur déduplication: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0

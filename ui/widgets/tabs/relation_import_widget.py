@@ -82,7 +82,6 @@ class TaxonomyItem(QtWidgets.QTreeWidgetItem):
         icon_name, icon_color = icon_map.get(item_type, ('fa5s.question-circle', strong_gray))
         self.setIcon(0, qta.icon(icon_name, color=icon_color))
 
-
 class RelationImportWidget(QtWidgets.QWidget):
     """Widget pour gérer les relations et imports du projet"""
     
@@ -3907,143 +3906,225 @@ class RelationImportWidget(QtWidgets.QWidget):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(8)
-    
+
         # ===== HEADER FIXE =====
         header_widget = QtWidgets.QWidget()
-        header_widget.setFixedHeight(50)  # HAUTEUR FIXE
+        header_widget.setFixedHeight(70)
+        header_widget.setStyleSheet("background-color: transparent;")  # Fond transparent
         header_layout = QtWidgets.QHBoxLayout(header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
-    
+
         # Label Projet (largeur fixe)
         proj_label = QtWidgets.QLabel(tr("relation_import.project_label"))
-        proj_label.setStyleSheet("font-weight: 600; font-size: 13px;")
+        proj_label.setStyleSheet("font-weight: 600; font-size: 13px; background-color: transparent;")
         proj_label.setFixedWidth(50)
+        proj_label.setAlignment(Qt.AlignVCenter)
         header_layout.addWidget(proj_label)
-    
+
         # ComboBox Projet
         self.project_combo = QtWidgets.QComboBox()
         self.project_combo.setFixedWidth(200)
         self.project_combo.setFixedHeight(32)
+        self.project_combo.setStyleSheet("""
+            QComboBox {
+                background-color: white;
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QComboBox:hover {
+                border: 1px solid #999999;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+        """)
         self.project_combo.currentIndexChanged.connect(self._on_project_selected)
-        header_layout.addWidget(self.project_combo)
-    
+        header_layout.addWidget(self.project_combo, 0, Qt.AlignVCenter)
+
         # Bouton Clear Cache
         self.clear_cache_btn = QtWidgets.QPushButton(
-            qta.icon('fa5s.trash', color='white'), 
+            qta.icon('fa5s.trash', color='#B71C1C'), 
             " " + tr("relation_import.clear_cache")
         )
         self.clear_cache_btn.setFixedWidth(120)
         self.clear_cache_btn.setFixedHeight(32)
+        self.clear_cache_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+                padding: 5px;
+                color: #333333;
+            }
+            QPushButton:hover {
+                background-color: #F5F5F5;
+                border: 1px solid #999999;
+            }
+        """)
         self.clear_cache_btn.clicked.connect(self._clear_cache)
-        header_layout.addWidget(self.clear_cache_btn)
-    
+        header_layout.addWidget(self.clear_cache_btn, 0, Qt.AlignVCenter)
+
         # Bouton Back
         self.back_btn = QtWidgets.QPushButton(
-            qta.icon('fa5s.arrow-left', color='white'), 
+            qta.icon('fa5s.arrow-left', color='black'), 
             " " + tr("relation_import.back")
         )
         self.back_btn.setFixedWidth(100)
         self.back_btn.setFixedHeight(32)
+        self.back_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+                padding: 5px;
+                color: #333333;
+            }
+            QPushButton:hover {
+                background-color: #F5F5F5;
+                border: 1px solid #999999;
+            }
+            QPushButton:disabled {
+                background-color: #F5F5F5;
+                color: #CCCCCC;
+                border: 1px solid #E0E0E0;
+            }
+        """)
         self.back_btn.clicked.connect(self._navigate_back)
         self.back_btn.setEnabled(False)
-        header_layout.addWidget(self.back_btn)
-    
+        header_layout.addWidget(self.back_btn, 0, Qt.AlignVCenter)
+
         # Container fixe pour info + progress
         info_progress_widget = QtWidgets.QWidget()
         info_progress_widget.setFixedWidth(300)
+        info_progress_widget.setStyleSheet("background-color: transparent;")  # Fond transparent
         info_progress_layout = QtWidgets.QVBoxLayout(info_progress_widget)
         info_progress_layout.setContentsMargins(0, 0, 0, 0)
         info_progress_layout.setSpacing(4)
-    
+
         self.cache_info_label = QtWidgets.QLabel(self.query_cache.get_stats())
-        self.cache_info_label.setStyleSheet("font-size: 10px; color: #666666;")
+        self.cache_info_label.setStyleSheet("font-size: 10px; color: #666666; background-color: transparent;")
         self.cache_info_label.setFixedHeight(16)
         self.cache_info_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         info_progress_layout.addWidget(self.cache_info_label)
-    
+
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setFixedHeight(20)
         self.progress_bar.setVisible(False)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                background-color: #F5F5F5;
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #999999;
+                border-radius: 3px;
+            }
+        """)
         info_progress_layout.addWidget(self.progress_bar)
-    
-        header_layout.addWidget(info_progress_widget)
+
+        header_layout.addWidget(info_progress_widget, 0, Qt.AlignVCenter)
         header_layout.addStretch()
-    
+
         main_layout.addWidget(header_widget)
-    
-        # 👇👇 margin-bottom du header
-        main_layout.addSpacing(6)
-    
+
+        # margin-bottom du header augmenté
+        main_layout.addSpacing(20)
+
         # ===== SPLITTER =====
         splitter = QtWidgets.QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(3)
         splitter.setChildrenCollapsible(True)
-    
+
         # LEFT PANEL
         left_widget = QtWidgets.QWidget()
         left_widget.setMinimumWidth(200)
         left_widget.setMaximumWidth(400)
+        left_widget.setStyleSheet("background-color: transparent;")  # Fond transparent
         left_layout = QtWidgets.QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
-    
+
         tree_label = QtWidgets.QLabel(tr("relation_import.structure_label"))
-        tree_label.setStyleSheet("font-weight: 600; font-size: 12px;")
+        tree_label.setStyleSheet("font-weight: 600; font-size: 12px; background-color: transparent;")
         left_layout.addWidget(tree_label)
-    
+
         self.tree_widget = QtWidgets.QTreeWidget()
         self.tree_widget.setHeaderLabel(tr("relation_import.elements"))
         self.tree_widget.itemSelectionChanged.connect(self._on_tree_selection)
         self.tree_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        self.tree_widget.setStyleSheet("""
+            QTreeWidget {
+                background-color: white;
+                border: 1px solid #E0E0E0;
+                border-radius: 4px;
+            }
+        """)
         left_layout.addWidget(self.tree_widget)
-    
+
         splitter.addWidget(left_widget)
-    
+
         # RIGHT PANEL
         right_widget = QtWidgets.QWidget()
         right_widget.setMinimumWidth(400)
+        right_widget.setStyleSheet("background-color: transparent;")  # Fond transparent
         right_layout = QtWidgets.QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
-    
+
         # ===== TOOLBAR =====
         toolbar_widget = QtWidgets.QWidget()
+        toolbar_widget.setStyleSheet("background-color: transparent;")  # Fond transparent
         toolbar_layout = QtWidgets.QHBoxLayout(toolbar_widget)
         toolbar_layout.setSpacing(8)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
-    
+
         # Level combo
         level_label = QtWidgets.QLabel(tr("relation_import.level_label"))
-        level_label.setStyleSheet("font-weight: 600; font-size: 11px;")
+        level_label.setStyleSheet("font-weight: 600; font-size: 11px; background-color: transparent;")
         toolbar_layout.addWidget(level_label)
-    
+
         self.level_combo = QtWidgets.QComboBox()
         self.level_combo.setMinimumWidth(160)
         self.level_combo.setMaximumWidth(240)
         self.level_combo.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
+        self.level_combo.setStyleSheet("""
+            QComboBox {
+                background-color: white;
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QComboBox:hover {
+                border: 1px solid #999999;
+            }
+        """)
         self.level_combo.addItem(qta.icon('fa5s.th', color=self.primary_color), tr("relation_import.view_clusters"), 0)
         self.level_combo.addItem(qta.icon('fa5s.project-diagram', color=self.primary_color), tr("relation_import.direct_relations"), 1)
         self.level_combo.setCurrentIndex(0)
         self.level_combo.currentIndexChanged.connect(self._on_level_changed)
         toolbar_layout.addWidget(self.level_combo)
-    
+
         toolbar_layout.addSpacing(10)
-    
-        # 👇👇 stretch déplacé ici → zoom et navigation vont complètement à droite
+
+        # stretch déplacé ici → zoom et navigation vont complètement à droite
         toolbar_layout.addStretch()
-    
+
         # Zoom controls
         zoom_widget = QtWidgets.QWidget()
+        zoom_widget.setStyleSheet("background-color: transparent;")  # Fond transparent
         zoom_layout = QtWidgets.QHBoxLayout(zoom_widget)
         zoom_layout.setSpacing(4)
         zoom_layout.setContentsMargins(0, 0, 0, 0)
-    
+
         zoom_label = QtWidgets.QLabel(tr("relation_import.zoom"))
-        zoom_label.setStyleSheet("font-weight: 600; font-size: 11px;")
+        zoom_label.setStyleSheet("font-weight: 600; font-size: 11px; background-color: transparent;")
         zoom_layout.addWidget(zoom_label)
-    
+
         btn_style = """
             QPushButton {
-                background-color: #E6E6E6; 
+                background-color: white; 
                 border: 1px solid #CCCCCC; 
                 border-radius: 4px;
                 min-width: 32px;
@@ -4052,81 +4133,83 @@ class RelationImportWidget(QtWidgets.QWidget):
                 padding: 4px;
             }
             QPushButton:hover {
-                background-color: #D0D0D0;
+                background-color: #F5F5F5;
+                border: 1px solid #999999;
             }
         """
-    
+
         self.zoom_in_btn = QtWidgets.QPushButton(qta.icon('fa5s.search-plus', color='black'), "")
         self.zoom_in_btn.setStyleSheet(btn_style)
         self.zoom_in_btn.clicked.connect(self._zoom_in)
         zoom_layout.addWidget(self.zoom_in_btn)
-    
+
         self.zoom_out_btn = QtWidgets.QPushButton(qta.icon('fa5s.search-minus', color='black'), "")
         self.zoom_out_btn.setStyleSheet(btn_style)
         self.zoom_out_btn.clicked.connect(self._zoom_out)
         zoom_layout.addWidget(self.zoom_out_btn)
-    
+
         self.zoom_reset_btn = QtWidgets.QPushButton(qta.icon('fa5s.sync', color='black'), "")
         self.zoom_reset_btn.setStyleSheet(btn_style)
         self.zoom_reset_btn.clicked.connect(self._zoom_reset)
         zoom_layout.addWidget(self.zoom_reset_btn)
-    
+
         toolbar_layout.addWidget(zoom_widget)
-    
+
         # Navigation controls
         nav_widget = QtWidgets.QWidget()
+        nav_widget.setStyleSheet("background-color: transparent;")  # Fond transparent
         nav_layout = QtWidgets.QHBoxLayout(nav_widget)
         nav_layout.setSpacing(4)
         nav_layout.setContentsMargins(0, 0, 0, 0)
-    
+
         nav_label = QtWidgets.QLabel(tr("relation_import.navigation"))
-        nav_label.setStyleSheet("font-weight: 600; font-size: 11px;")
+        nav_label.setStyleSheet("font-weight: 600; font-size: 11px; background-color: transparent;")
         nav_layout.addWidget(nav_label)
-    
+
         self.pan_up_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-up', color='black'), "")
         self.pan_up_btn.setStyleSheet(btn_style)
         self.pan_up_btn.clicked.connect(lambda: self._pan_view(0, 50))
         nav_layout.addWidget(self.pan_up_btn)
-    
+
         self.pan_down_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-down', color='black'), "")
         self.pan_down_btn.setStyleSheet(btn_style)
         self.pan_down_btn.clicked.connect(lambda: self._pan_view(0, -50))
         nav_layout.addWidget(self.pan_down_btn)
-    
+
         self.pan_left_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-left', color='black'), "")
         self.pan_left_btn.setStyleSheet(btn_style)
         self.pan_left_btn.clicked.connect(lambda: self._pan_view(-50, 0))
         nav_layout.addWidget(self.pan_left_btn)
-    
+
         self.pan_right_btn = QtWidgets.QPushButton(qta.icon('fa5s.arrow-right', color='black'), "")
         self.pan_right_btn.setStyleSheet(btn_style)
         self.pan_right_btn.clicked.connect(lambda: self._pan_view(50, 0))
         nav_layout.addWidget(self.pan_right_btn)
-    
+
         toolbar_layout.addWidget(nav_widget)
-    
+
         right_layout.addWidget(toolbar_widget)
-    
+
         # CHECKBOXES
         checkbox_layout = QtWidgets.QHBoxLayout()
         checkbox_layout.setSpacing(15)
         checkbox_layout.setContentsMargins(0, 5, 0, 5)
-    
+
         self.show_internal_relations_cb = QtWidgets.QCheckBox(tr("relation_import.interdependence"))
         self.show_internal_relations_cb.setStyleSheet(self._get_checkbox_style())
         self.show_internal_relations_cb.setChecked(False)
         self.show_internal_relations_cb.stateChanged.connect(self._on_internal_relations_changed)
         checkbox_layout.addWidget(self.show_internal_relations_cb)
-    
+
         self.show_node_origins_cb = QtWidgets.QCheckBox(tr("relation_import.show_node_origins"))
         self.show_node_origins_cb.setStyleSheet(self._get_checkbox_style())
         self.show_node_origins_cb.setChecked(False)
         self.show_node_origins_cb.stateChanged.connect(self._on_node_origins_changed)
         checkbox_layout.addWidget(self.show_node_origins_cb)
-    
+
         checkbox_layout.addStretch()
         right_layout.addLayout(checkbox_layout)
-    
+
         # CANVAS
         self.figure = Figure(figsize=(10, 8), facecolor='white', tight_layout=True)
         self.canvas = FigureCanvas(self.figure)
@@ -4134,16 +4217,16 @@ class RelationImportWidget(QtWidgets.QWidget):
         self.canvas.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.canvas.setMinimumSize(400, 400)
         right_layout.addWidget(self.canvas)
-    
+
         splitter.addWidget(right_widget)
-    
+
         # Tailles proportionnelles
         splitter.setSizes([250, 800])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-    
+
         main_layout.addWidget(splitter)
-    
+
         # Initialisation
         self.current_zoom = 1.0
         self.zoom_step = 0.2
@@ -6110,19 +6193,25 @@ class RelationImportWidget(QtWidgets.QWidget):
             self.project_combo.clear()
             self.project_combo.addItem("Sélectionnez un projet...", None)
             
+            # ✅ CORRECTION : Dédupliquer par UID ET par nom
             seen_uids = set()
+            seen_names = set()  # ✅ NOUVEAU : Suivre aussi les noms
+            
             for ws in result['q']:
                 uid = ws.get('uid')
-                if uid and uid not in seen_uids:
+                name = ws.get('name', 'Projet')
+                
+                # ✅ CORRECTION : Ignorer si UID déjà vu OU nom déjà vu
+                if uid and uid not in seen_uids and name not in seen_names:
                     seen_uids.add(uid)
-                    name = ws.get('name', 'Projet')
+                    seen_names.add(name)  # ✅ NOUVEAU : Enregistrer le nom
                     self.project_combo.addItem(f"{name}", ws)
             
             self.project_combo.blockSignals(False)
             
             self._hide_progress()
             self._update_status(f"{self.project_combo.count() - 1} projet(s) disponible(s)")
-
+    
         
         except Exception as e:
             logger.error(f"Erreur chargement projets: {e}")
