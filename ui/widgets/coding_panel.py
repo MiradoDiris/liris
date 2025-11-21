@@ -88,7 +88,7 @@ class CodingPanel(QtWidgets.QWidget):
             svg_path = os.path.normpath(svg_path)
             return svg_path
 
-        svg_path = get_dropdown_svg_path()
+        svg_path = get_dropdown_svg_path()                                          
         svg_path = svg_path.replace('\\', '/')
 
         stylesheet = f"""
@@ -741,7 +741,6 @@ class CodingPanel(QtWidgets.QWidget):
 
         graph_container.resizeEvent = self._on_graph_container_resize
 
-
     def _on_stop_generation(self):
         """Arrête la génération en cours - SANS DIALOGUE"""
         if not hasattr(self, 'current_worker') or not self.current_worker:
@@ -1029,12 +1028,8 @@ class CodingPanel(QtWidgets.QWidget):
 
     def _on_start_session(self):
         """
-        Lance une session de coding avec support Navigation Automatique amélioré
-        VERSION AVEC EXTRACTION RÉELLE DE SNIPPETS
+        ✅ VERSION CORRIGÉE : Périmètre IDENTIQUE pour API et Navigation Auto
         """
-        selected_platform_name = self.platforms_combo.currentData()
-
-        """Démarrage avec messages traduits"""
         selected_platform_name = self.platforms_combo.currentData()
 
         if not selected_platform_name:
@@ -1056,9 +1051,17 @@ class CodingPanel(QtWidgets.QWidget):
             )
             return
 
+        # ✅ CONSTRUCTION UNIFIÉE DU PÉRIMÈTRE (UNIQUE POUR LES DEUX MODES)
+        logger.info(f"\n{'='*80}")
+        logger.info(f"🔨 CONSTRUCTION PÉRIMÈTRE UNIFIÉ")
+        logger.info(f"{'='*80}")
+
         perimeter_data = self._build_perimeter_data()
         self._clear_snippets()
 
+        # ============================================================================
+        # MODE 1 : NAVIGATION AUTOMATIQUE (BROWSER MODE)
+        # ============================================================================
         if self.is_browser_mode:
             logger.info(f"🌐 Mode Navigation Automatique activé pour {selected_platform_name}")
 
@@ -1070,14 +1073,14 @@ class CodingPanel(QtWidgets.QWidget):
             self.stop_button.setVisible(True)
             self.progress_bar.setVisible(True)
 
-            # Utiliser le nouveau worker amélioré
             try:
                 from core.orchestration.browser_navigation_worker import BrowserNavigationWorker
 
+                # ✅ PASSER LE MÊME perimeter_data
                 self.current_worker = BrowserNavigationWorker(
                     platform_name=selected_platform_name,
                     context=test_message,
-                    perimeter_data=perimeter_data,
+                    perimeter_data=perimeter_data,  # ✅ IDENTIQUE À L'API
                     parent=self
                 )
 
@@ -1086,10 +1089,10 @@ class CodingPanel(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.critical(
                     self,
                     "Module manquant",
-                    "Le module 'improved_browser_navigation_worker.py' est introuvable.\n\n"
+                    "Le module 'browser_navigation_worker.py' est introuvable.\n\n"
                     "Fichiers requis:\n"
                     "• universal_browser_handler.py\n"
-                    "• improved_browser_navigation_worker.py\n"
+                    "• browser_navigation_worker.py\n"
                     "• browser_helpers.py\n"
                     "• browserOs_conductor.py"
                 )
@@ -1112,8 +1115,10 @@ class CodingPanel(QtWidgets.QWidget):
             self.current_worker.start()
             self.session_started.emit(1)
 
+        # ============================================================================
+        # MODE 2 : MODE API (API MODE)
+        # ============================================================================
         else:
-            # Mode API (code existant inchangé)
             logger.info(f"🔑 Mode API activé pour {selected_platform_name}")
 
             platform = self.platform_manager.get_platform(selected_platform_name)
@@ -1137,6 +1142,7 @@ class CodingPanel(QtWidgets.QWidget):
             self.progress_bar.setValue(0)
             self.progress_bar.setVisible(True)
 
+            # ✅ PASSER LE MÊME perimeter_data
             self.current_worker = self._create_worker_for_platform(
                 platform, test_message, perimeter_data
             )
@@ -1156,7 +1162,7 @@ class CodingPanel(QtWidgets.QWidget):
 
             self.current_worker.finished.connect(self._on_worker_finished_generic)
 
-            logger.info(f"🚀 Démarrage de {platform.name} avec {len(perimeter_data)} éléments")
+            logger.info(f"🚀 Démarrage de {platform.name} avec {len(perimeter_data)} élément(s)")
             self.current_worker.start()
             self.session_started.emit(1)
 
@@ -1660,8 +1666,6 @@ class CodingPanel(QtWidgets.QWidget):
                 "Erreur d'export",
                 f"Impossible d'exporter les snippets:\n{str(e)}"
             )
-
-    # ===== MÉTHODES EXISTANTES (inchangées) =====
     
     def _create_worker_for_platform(self, platform, context, perimeter_data):
         """Crée le worker approprié selon la plateforme sélectionnée"""
@@ -2144,7 +2148,6 @@ class CodingPanel(QtWidgets.QWidget):
                     central_name, central_uid, related, 
                     self.current_project_data
                 )
-
 
     def _update_graph_from_taxonomy(self, central_name, central_uid, related_items, project_data):
         """✅ CORRIGÉ : Route vers le bon mode avec validation"""

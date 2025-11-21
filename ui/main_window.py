@@ -414,11 +414,11 @@ class MainWindow(QMainWindow):
             elif widget == self.audit_panel:
                 self.tab_widget.setTabText(i, "Audit")
             elif widget == self.dataset_strategy:
-                self.tab_widget.setTabText(i, "📊 Stratégie")
+                self.tab_widget.setTabText(i, "Stratégie")
             elif widget == self.dataset_generation:
-                self.tab_widget.setTabText(i, "🚀 Génération")
+                self.tab_widget.setTabText(i, "Génération")
             elif widget == self.prompt_list:
-                self.tab_widget.setTabText(i, "📜 Historique")
+                self.tab_widget.setTabText(i, "Historique")
 
     def set_conductor(self, conductor):
         """Set the conductor for all relevant widgets"""

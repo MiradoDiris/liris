@@ -708,36 +708,6 @@ class OntologyConfigWidget(QtWidgets.QWidget):
         else:
             logger.debug("No current cluster data to load root labels.")
 
-
-    def _add_root_label(self):
-        if not self.current_cluster_data:
-            QtWidgets.QMessageBox.warning(self, tr("project_config.error_title"), tr("project_config.no_cluster_selected_root"))
-            return
-
-        label_name, ok = QtWidgets.QInputDialog.getText(self, 
-                                                        tr("project_config.add_root_label_title"),
-                                                        tr("project_config.add_root_label_text"))
-        if ok and label_name:
-            label_name = label_name.strip()
-            if not label_name:
-                QtWidgets.QMessageBox.warning(self, tr("project_config.error_title"), tr("project_config.empty_name_error"))
-                return
-            
-            existing_labels = [l.get('label') for l in self.current_cluster_data.get('root_labels', [])]
-            if label_name in existing_labels:
-                QtWidgets.QMessageBox.warning(self, tr("project_config.duplicate_title"), tr("project_config.duplicate_label_error").format(name=label_name))
-                return
-            
-            new_label_data = {"label": label_name, "category": None, "parents": []}
-            self.current_cluster_data.setdefault('root_labels', []).append(new_label_data)
-            
-            item = QtWidgets.QListWidgetItem(label_name)
-            item.setData(Qt.UserRole, new_label_data)
-            self.root_list_widget.addItem(item)
-            self.root_list_widget.setCurrentRow(self.root_list_widget.count() - 1)
-            logger.info(f"Label racine '{label_name}' ajouté au cluster '{self.current_cluster_data['name']}'")
-            self._update_ui_state()
-
     def _edit_root_label(self):
         current_item = self.root_list_widget.currentItem()
         if not current_item: return

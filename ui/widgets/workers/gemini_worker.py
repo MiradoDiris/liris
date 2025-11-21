@@ -11,7 +11,6 @@ except ImportError:
 
 from PyQt5.QtCore import QThread, pyqtSignal
 from utils.logger import logger
-from utils.conversation_history import ConversationHistory
 
 
 class GeminiWorker(QThread):
@@ -596,82 +595,224 @@ class GeminiWorker(QThread):
             return None
 
     def _build_snippets_prompt(self, enriched_perimeter):
-        """Construit un prompt optimisé pour la génération de snippets ciblés"""
+        """Construit un prompt ULTRA-STRICT identique à universal_browser_handler"""
+        
         prompt_parts = []
-        prompt_parts.append("# GÉNÉRATION DE SNIPPETS DE CODE - MODIFICATIONS CIBLÉES\n" + "=" * 80)
-        prompt_parts.append("\n## CONTEXTE DE LA FONCTIONNALITÉ\n" + self.context.strip())
-        prompt_parts.append("\n" + "-" * 80 + "\n")
-
-        if enriched_perimeter:
-            prompt_parts.append("## PÉRIMÈTRE D'IMPLÉMENTATION (code existant)\n")
-
+        
+        # ============================================================================
+        # EN-TÊTE
+        # ============================================================================
+        prompt_parts.append("Tu es un assistant de développement Python expert.\n")
+        prompt_parts.append(f"**CONTEXTE:**\n{self.context.strip()}\n")
+        
+        # ============================================================================
+        # PÉRIMÈTRE AVEC CODE COMPLET
+        # ============================================================================
+        if enriched_perimeter and len(enriched_perimeter) > 0:
+            prompt_parts.append("\n**📦 FICHIERS DU PROJET AVEC LEUR CODE:**\n")
+            
             for idx, item in enumerate(enriched_perimeter, 1):
                 name = item.get('name', 'N/A')
-                node_type = item.get('type', 'unknown')
-                prompt_parts.append(f"\n### {idx}. 📁 FICHIER: {name} ({node_type})")
-
                 data = item.get('data', {})
+                
+                # 🔧 CORRECTION: Récupération robuste du path
+                path = (
+                    data.get('path') or 
+                    data.get('sourcePath') or 
+                    data.get('full_path') or
+                    item.get('path') or
+                    item.get('sourcePath') or
+                    item.get('full_path') or
+                    name  # Fallback sur le nom si pas de path
+                )
+                
                 description = data.get('description', '')
-                file_path = data.get('path', '')
-                file_content = data.get('fileContents', '') or data.get('codeContent', '')
-
+                code_content = data.get('fileContents', '') or data.get('codeContent', '')
+                
+                prompt_parts.append(f"\n### {idx}. Fichier: `{path}`\n")
+                
                 if description:
-                    prompt_parts.append(f"- 📝 Description: {description}")
-                if file_path:
-                    prompt_parts.append(f"- 📂 Chemin: {file_path}")
-
-                if file_content:
-                    prompt_parts.append(f"\n#### 📄 CODE EXISTANT ({len(file_content)} caractères):")
-                    prompt_parts.append("```code\n" + file_content.strip() + "\n```\n")
-
-                related = item.get('related', [])
-                if related:
-                    prompt_parts.append(f"\n#### 🔗 FICHIERS LIÉS ({len(related)}):")
-                    for rel_idx, rel_item in enumerate(related, 1):
-                        rel_name = rel_item.get('name', 'N/A')
-                        rel_data = rel_item.get('data', {})
-                        rel_content = rel_data.get('fileContents', '') or rel_data.get('codeContent', '')
-                        if rel_content:
-                            prompt_parts.append(f"\n##### {rel_idx}. {rel_name}")
-                            prompt_parts.append("```code\n" + rel_content.strip() + "\n```\n")
-
-        prompt_parts.append("\n" + "=" * 80)
+                    prompt_parts.append(f"**Description:** {description}\n\n")
+                
+                if code_content:
+                    # Tronquer si trop long pour éviter dépassement tokens
+                    if len(code_content) > 3000:
+                        code_preview = code_content[:3000] + "\n... (code tronqué)"
+                        prompt_parts.append(f"**Code actuel (extrait):**\n```python\n{code_preview}\n```\n\n")
+                    else:
+                        prompt_parts.append(f"**Code actuel complet:**\n```python\n{code_content}\n```\n\n")
+        
+        # ============================================================================
+        # 🔥 FORMAT DE RÉPONSE OBLIGATOIRE (IDENTIQUE À UNIVERSAL_BROWSER_HANDLER)
+        # ============================================================================
         prompt_parts.append("""
-## INSTRUCTIONS DE GÉNÉRATION - SNIPPETS CIBLÉS
-
-⚠️ RÈGLES CRITIQUES:
-1. **GÉNÈRE DES SNIPPETS DISTINCTS** - Un snippet par modification/ajout
-2. **FORMAT OBLIGATOIRE** - Utilise le format ci-dessous pour CHAQUE snippet
-3. **SOIS PRÉCIS** - Indique exactement où placer le code (fichier, classe, fonction)
-4. **CODE COMPLET** - Chaque snippet doit être fonctionnel et complet
-5. **ORDRE LOGIQUE** - Numéote les snippets dans l'ordre d'implémentation
-
-📋 FORMAT OBLIGATOIRE POUR CHAQUE SNIPPET:
-
-### SNIPPET [ACTION]: [TITRE DESCRIPTIF]
-**Fichier**: `chemin/vers/fichier.py`
-**Classe/Fonction**: `NomClasse.methode()` ou `nom_fonction()` (optionnel si nouveau fichier)
-**Action**: AJOUTER | MODIFIER | REMPLACER
-**Description**: Explication claire de ce que fait ce snippet et pourquoi
-
-```python
-# Code complet et fonctionnel ici
-# Avec commentaires explicatifs
-def exemple():
-    pass
-```
-
----
-
-🎯 TYPES D'ACTIONS:
-- **AJOUTER**: Nouveau code à insérer (nouvelle fonction, classe, méthode, fichier)
-- **MODIFIER**: Code existant à mettre à jour (garder la structure, changer le contenu)
-- **REMPLACER**: Code existant à remplacer complètement
-
-🎯 OBJECTIF: Génère des snippets clairs, précis et directement applicables.
-Chaque snippet doit pouvoir être copié-collé à l'emplacement indiqué.
-""")
-
+    ================================================================================
+    ⚠️ FORMAT DE RÉPONSE OBLIGATOIRE - AUCUNE EXCEPTION
+    ================================================================================
+    
+    Tu DOIS répondre UNIQUEMENT avec des blocs de code formatés EXACTEMENT comme suit :
+    
+    **🆕 POUR AJOUTER DU NOUVEAU CODE (ACTION: AJOUTER) :**
+    
+    ```python
+    # ACTION: AJOUTER
+    # FILE: core/orchestration/advanced_code_recovery.py
+    # TARGET: def detect_corruption_v5()
+    # POSITION: after
+    # DESCRIPTION: Nouvelle méthode de détection améliorée
+    
+    def detect_corruption_v6(code: str) -> int:
+        # Votre code ici
+        score = 0
+        # ... implémentation
+        return score
+    ```
+    
+    **🚨 RÈGLES ABSOLUES POUR ACTION: AJOUTER :**
+    
+    1. ✅ Si vous ajoutez du code DANS UN CONTEXTE EXISTANT :
+       - Vous DEVEZ fournir # TARGET: (fonction/classe de référence)
+       - Vous DEVEZ fournir # POSITION: (before/after/inside)
+    
+    2. ✅ Si vous créez un NOUVEAU FICHIER ou ajoutez au DÉBUT :
+       - Omettez TARGET et POSITION
+       - Le code sera inséré à la ligne 0
+    
+    **❌ CAS INVALIDES (seront rejetés) :**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: utils.py
+    # ❌ MANQUE TARGET + POSITION
+    
+    def new_function():
+        pass
+    ```
+    
+    **✅ CAS VALIDES :**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: utils.py
+    # TARGET: def existing_function()
+    # POSITION: after
+    
+    def new_function():
+        pass
+    ```
+    
+    OU (pour début de fichier) :
+    ```python
+    # ACTION: AJOUTER
+    # FILE: new_module.py
+    # DESCRIPTION: Nouveau module
+    
+    # Imports
+    import os
+    
+    def main():
+        pass
+    ```
+    
+    **⚡ POUR MODIFIER/REMPLACER DU CODE EXISTANT :**
+    
+    ```python
+    # ACTION: MODIFIER
+    # FILE: core/main.py
+    # TARGET: def process_data()
+    # DESCRIPTION: Ajout validation des données
+    
+    def process_data(input_data):
+        # ✅ NOUVEAU CODE COMPLET de la fonction
+        if not input_data:
+            raise ValueError("Data cannot be empty")
+        
+        # Traitement...
+        return processed_data
+    ```
+    
+    **RÈGLES POUR ACTION: MODIFIER :**
+    1. ✅ # ACTION: MODIFIER ou REMPLACER
+    2. ✅ # FILE: [chemin/fichier.py] (OBLIGATOIRE)
+    3. ✅ # TARGET: [signature de la fonction/classe À REMPLACER] (OBLIGATOIRE)
+       - Doit être la signature EXACTE : def ma_fonction(arg1, arg2):
+    4. ✅ Fournir le code COMPLET de remplacement (pas de "...")
+    
+    ================================================================================
+    ⚠️ EXEMPLES COMPLETS
+    ================================================================================
+    
+    **Exemple 1 : AJOUTER une fonction APRÈS une fonction existante**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: utils/helpers.py
+    # TARGET: def calculate_score(data)
+    # POSITION: after
+    # DESCRIPTION: Nouvelle fonction de validation
+    
+    def validate_score(score: float) -> bool:
+        return 0 <= score <= 100
+    ```
+    
+    **Exemple 2 : AJOUTER une méthode DANS une classe**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: core/models.py
+    # TARGET: class DataProcessor
+    # POSITION: inside
+    # DESCRIPTION: Nouvelle méthode de nettoyage
+    
+        def clean_data(self, data: dict) -> dict:
+            cleaned = {k: v for k, v in data.items() if v is not None}
+            return cleaned
+    ```
+    
+    **Exemple 3 : AJOUTER une fonction au DÉBUT du fichier**
+    ```python
+    # ACTION: AJOUTER
+    # FILE: utils/constants.py
+    # DESCRIPTION: Nouvelles constantes
+    
+    MAX_RETRIES = 3
+    TIMEOUT_SECONDS = 30
+    ```
+    
+    **Exemple 4 : MODIFIER une fonction existante**
+    ```python
+    # ACTION: MODIFIER
+    # FILE: core/processor.py
+    # TARGET: def process_data(input_data)
+    # DESCRIPTION: Ajout validation et logging
+    
+    def process_data(input_data):
+        # Validation
+        if not input_data:
+            raise ValueError("Input cannot be empty")
+        
+        # Logging
+        logger.info(f"Processing {len(input_data)} items")
+        
+        # Traitement
+        result = [item.upper() for item in input_data]
+        return result
+    ```
+    
+    ================================================================================
+    ⚠️ RAPPELS CRITIQUES
+    ================================================================================
+    
+    1. ❌ NE PAS écrire de texte explicatif en dehors des blocs de code
+    2. ✅ TOUJOURS fournir TARGET + POSITION pour ACTION: AJOUTER (sauf ajout début fichier)
+    3. ✅ TOUJOURS fournir TARGET exact pour ACTION: MODIFIER
+    4. ✅ Générer le code COMPLET (pas de "..." ou "# reste du code")
+    5. ✅ Utiliser des noms de fonctions/classes EXACTS (copier depuis le contexte fourni)
+    6. ✅ Séparer chaque fonction/méthode dans des snippets différents pour faciliter l'application
+    7. ✅ Utiliser les CHEMINS EXACTS fournis dans le contexte (copier-coller depuis les fichiers ci-dessus)
+    
+    ================================================================================
+    Maintenant, génère le code selon le contexte fourni :
+    """)
+        
         full_prompt = "\n".join(prompt_parts)
+        
         logger.info(f"📊 Taille totale du prompt: {len(full_prompt)} caractères ({len(full_prompt) // 4} tokens estimés)")
+        
         return full_prompt

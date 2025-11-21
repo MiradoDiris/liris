@@ -1,5 +1,5 @@
-# -*- mode: python ; coding: utf-8 -*-
-
+# -*- mode: utf-8 -*-
+import os
 block_cipher = None
 
 # Collecter tous les fichiers de données nécessaires
@@ -58,32 +58,29 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# MODE ONEFILE : Tout dans un seul .exe
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,      # Ajouté
+    a.zipfiles,      # Ajouté
+    a.datas,         # Ajouté
     [],
-    exclude_binaries=True,
     name='Liris',
-    debug=True,
+    debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,  # Pas de console pour une application GUI
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon='ui/resources/icons/logo.ico' if os.path.exists('ui/resources/icons/logo.ico') else None,
+    version='file_version.txt' if os.path.exists('file_version.txt') else None,
 )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='Liris',
-)
+# SUPPRIMEZ le bloc COLLECT pour le mode onefile

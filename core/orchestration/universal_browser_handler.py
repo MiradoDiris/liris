@@ -932,19 +932,28 @@ class UniversalBrowserHandler:
     def _extract_snippets(self, response: str) -> List[Dict]:
         """
         🔍 Extraction des snippets - VERSION CORRIGÉE
-        Gère correctement les multiples snippets en découpant par segments
+        Filtre le contenu du prompt avant extraction
         """
         snippets = []
 
         logger.info(f"\n{'='*80}")
         logger.info("🔍 EXTRACTION DES SNIPPETS")
         logger.info(f"{'='*80}")
-        logger.info(f"📄 Taille réponse: {len(response)} chars")
+        logger.info(f"📄 Taille réponse initiale: {len(response)} chars")
 
         # ================================================================
-        # PHASE 0 : PRÉPARATION
+        # PHASE 0.0 : FILTRAGE DU PROMPT (NOUVELLE ÉTAPE CRITIQUE)
         # ================================================================
-        logger.info("⚡ PHASE 0.1 : Reconstruction tokens éclatés (PRIORITAIRE)")
+        logger.info("🧹 PHASE 0.0 : Filtrage du contenu du prompt")
+
+        response = self._filter_prompt_content(response)
+
+        logger.info(f"📄 Taille après filtrage: {len(response)} chars")
+
+        # ================================================================
+        # PHASE 0.1 : PRÉPARATION (identique)
+        # ================================================================
+        logger.info("⚡ PHASE 0.1 : Reconstruction tokens éclatés")
 
         try:
             from core.orchestration.advanced_code_recovery import DomExtractionFixer
@@ -1001,22 +1010,19 @@ class UniversalBrowserHandler:
             return self._extract_fallback_snippets(cleaned_response)
 
         # ================================================================
-        # PHASE 2 : EXTRACTION PAR SEGMENTS (CORRECTION PRINCIPALE)
+        # PHASE 2 : EXTRACTION PAR SEGMENTS
         # ================================================================
         for idx, action_match in enumerate(action_matches, 1):
             try:
                 action = action_match.group(1).strip().upper()
 
-                # ✅ CORRECTION : Calculer les limites du segment
                 segment_start = action_match.start()
 
-                # Trouver la fin du segment (= début du prochain ACTION ou fin du texte)
                 if idx < len(action_matches):
-                    segment_end = action_matches[idx].start()  # Prochain ACTION
+                    segment_end = action_matches[idx].start()
                 else:
-                    segment_end = len(cleaned_response)  # Fin du texte
+                    segment_end = len(cleaned_response)
 
-                # Extraire le segment complet
                 segment_text = cleaned_response[segment_start:segment_end]
 
                 logger.info(f"\n📦 Snippet {idx}/{len(action_matches)}: {action}")
@@ -1052,6 +1058,13 @@ class UniversalBrowserHandler:
 
                 if not code or len(code.strip()) < 10:
                     logger.warning(f"   ⚠️ Code trop court ({len(code)} chars)")
+                    continue
+
+                # ================================================================
+                # VALIDATION: Vérifier que le snippet n'est pas pollué
+                # ================================================================
+                if not self._validate_snippet_not_polluted(code):
+                    logger.warning(f"   ⚠️ Snippet pollué par le prompt, ignoré")
                     continue
 
                 # Validation action
@@ -1105,26 +1118,141 @@ class UniversalBrowserHandler:
 
         return snippets
     
+    def _validate_snippet_not_polluted(self, code: str) -> bool:
+        # Indicateurs de pollution par le prompt
+        pollution_indicators = [
+            'RAPPELS CRITIQUES',
+            'NE PAS écrire de texte explicatif',
+            'TOUJOURS fournir TARGET',
+            'TOUJOURS fournir TARGET exact',
+            'Utiliser des noms de fonctions/classes EXACTS',
+            'Générer le code COMPLET',
+            'Maintenant, génère le code',
+            'FORMAT DE RÉPONSE OBLIGATOIRE',
+            'EXEMPLES COMPLETS',
+            '== == == == ==',
+            '================',
+            'Afficher plus',
+            'dans classes EXACTS',
+            'fonction et methode doit etre separer',
+            'copier depuis le contexte fourni',
+        ]
+
+        for indicator in pollution_indicators:
+            if indicator in code:
+                logger.debug(f"   🚫 Pollution détectée: '{indicator[:40]}...'")
+                return False
+
+        # Vérifier que c'est du vrai code Python (pas juste du texte)
+        python_indicators = ['def ', 'class ', 'import ', 'from ', 'if ', 'for ', 'return ', 'self.']
+        has_python = any(ind in code for ind in python_indicators)
+
+        # Si le code fait plus de 100 chars mais n'a pas de Python, c'est suspect
+        if not has_python and len(code) > 100:
+            # Vérifier s'il y a des assignations ou des appels de fonction
+            has_assignments = '=' in code and not '==' in code.replace('==', '')
+            has_calls = '(' in code and ')' in code
+
+            if not has_assignments and not has_calls:
+                logger.debug("   🚫 Pas de code Python valide détecté")
+                return False
+
+        return True
+    
+    def _filter_prompt_content(self, response: str) -> str:
+        """
+        🧹 Filtre le contenu du prompt de la réponse
+        Supprime tout ce qui précède la vraie réponse de Claude
+        """
+        original_length = len(response)
+
+        # ================================================================
+        # ÉTAPE 1: Trouver la fin du prompt
+        # ================================================================
+        prompt_end_markers = [
+            'Maintenant, génère le code selon le contexte fourni:',
+            'Maintenant, génère le code selon le contexte fourni',
+            'génère le code selon le contexte fourni:',
+            'génère le code selon le contexte fourni',
+        ]
+
+        prompt_end_idx = -1
+        for marker in prompt_end_markers:
+            idx = response.rfind(marker)
+            if idx > prompt_end_idx:
+                prompt_end_idx = idx + len(marker)
+
+        # Si trouvé, couper après
+        if prompt_end_idx > 0 and prompt_end_idx < len(response) - 50:
+            response = response[prompt_end_idx:].strip()
+            logger.info(f"   ✅ Prompt filtré: {original_length} → {len(response)} chars")
+
+        # ================================================================
+        # ÉTAPE 2: Supprimer les patterns de pollution restants
+        # ================================================================
+        pollution_patterns = [
+            # Sections du prompt
+            r'Tu es un assistant de développement Python expert[^\n]*',
+            r'\*\*CONTEXTE:\*\*[^\n]*',
+            r'\*\*FICHIERS DU PROJET[^\n]*',
+            r'FORMAT DE RÉPONSE OBLIGATOIRE[^\n]*',
+            r'EXEMPLES COMPLETS[^\n]*',
+            r'RAPPELS CRITIQUES[^\n]*',
+
+            # Patterns de formatage cassé
+            r'==\s*==\s*==\s*==[^=]*==\s*==\s*==\s*==',
+            r'={10,}',
+
+            # Texte explicatif du prompt
+            r'❌\s*NE PAS écrire de texte explicatif[^\n]*',
+            r'✅\s*TOUJOURS fournir TARGET[^\n]*',
+            r'✅\s*TOUJOURS fournir TARGET exact[^\n]*',
+            r'✅\s*Générer le code COMPLET[^\n]*',
+            r'✅\s*Utiliser des noms de fonctions[^\n]*',
+            r'Tous le fonction et methode doit etre separer[^\n]*',
+
+            # Artefacts UI
+            r'Afficher\s+plus.*$',
+            r'dans\s+classes\s+EXACTS[^\n]*',
+
+            # Numérotation du prompt
+            r'^\d+\.\s*❌[^\n]*$',
+            r'^\d+\.\s*✅[^\n]*$',
+        ]
+
+        for pattern in pollution_patterns:
+            response = re.sub(pattern, '', response, flags=re.IGNORECASE | re.MULTILINE)
+
+        # ================================================================
+        # ÉTAPE 3: Nettoyer les lignes vides multiples
+        # ================================================================
+        response = re.sub(r'\n{4,}', '\n\n', response)
+        response = response.strip()
+
+        return response
+    
     def _extract_code_from_segment(self, segment_text: str, snippet_idx: int) -> str:
+        """Extraction du code d'un segment - VERSION AMÉLIORÉE"""
         logger.debug(f"   🔍 Extraction code du segment {snippet_idx}")
-
+    
+        # Méthode 1: Bloc ```python
         python_block_match = re.search(r'```python\s*\n(.*?)```', segment_text, re.DOTALL | re.IGNORECASE)
-
+    
         if python_block_match:
             code = python_block_match.group(1).strip()
             logger.debug(f"      ✅ Code extrait via ```python : {len(code)} chars")
             return self._clean_code_artifacts(code)
-
+    
         # ================================================================
-        # MÉTHODE 2 : Extraire tout après les métadonnées
+        # Méthode 2 : Extraire tout après les métadonnées
         # ================================================================
         lines = segment_text.split('\n')
-
+    
         # Trouver la fin des métadonnées
         code_start_idx = 0
         for i, line in enumerate(lines):
             stripped = line.strip()
-
+    
             # Ligne de métadonnée
             if re.match(r'^#\s*(ACTION|FILE|TARGET|POSITION|DESCRIPTION):', stripped, re.IGNORECASE):
                 code_start_idx = i + 1
@@ -1142,59 +1270,116 @@ class UniversalBrowserHandler:
         for i in range(code_start_idx, len(lines)):
             line = lines[i]
             stripped = line.strip()
-
+    
             # Ignorer artefacts UI
             if stripped in ['Comment puis-je vous aider ?', 'Sonnet 4.5', 
                            'Copier', 'Regenerate', 'Réessayer', 'python', 
-                           '```python', '```']:
+                           '```python', '```', 'Afficher plus']:
                 continue
             
             # Arrêter aux caractères de fin
             if 'characters total' in stripped:
                 break
             
+            # NOUVEAU: Arrêter si on détecte du contenu de prompt
+            if any(pol in stripped for pol in ['RAPPELS CRITIQUES', 'Maintenant, génère', '== == == ==']):
+                logger.debug(f"      ⚠️ Pollution prompt détectée, arrêt extraction")
+                break
+            
             code_lines.append(line)
-
+    
         code = '\n'.join(code_lines).strip()
-
+    
         # Nettoyer
         code = self._clean_code_artifacts(code)
         code = re.sub(r'\n{3,}', '\n\n', code)
-
+    
         logger.debug(f"      ✅ Code extrait après métadonnées: {len(code)} chars")
-
+    
         return code
 
     def _extract_content_universal(self) -> str:
+        """Extraction du contenu - VERSION CORRIGÉE pour filtrer le prompt"""
         logger.info("📄 Extraction du contenu...")
 
         content = self.client.execute_javascript("""
             (() => {
-                // Stratégie : Ignorer tout avant "# ACTION: AJOUTER"
                 const body = document.body;
                 if (!body) return '';
 
                 let fullText = body.innerText || body.textContent || '';
 
-                // Chercher le premier # ACTION: (début de la réponse Claude)
-                const actionIndex = fullText.indexOf('# ACTION:');
+                // ============================================================
+                // CORRECTION PRINCIPALE: Filtrer le prompt utilisateur
+                // ============================================================
 
-                if (actionIndex > 0) {
-                    // Prendre seulement à partir du premier ACTION
-                    fullText = fullText.substring(actionIndex);
-                    console.log('✅ Prompt utilisateur supprimé');
+                // Marqueurs de fin du prompt (après ces lignes = réponse Claude)
+                const promptEndMarkers = [
+                    'Maintenant, génère le code selon le contexte fourni',
+                    'Maintenant, génère le code selon le contexte fourni:',
+                    'génère le code selon le contexte fourni'
+                ];
+
+                let promptEndIndex = -1;
+                for (let marker of promptEndMarkers) {
+                    let idx = fullText.lastIndexOf(marker);
+                    if (idx > promptEndIndex) {
+                        promptEndIndex = idx + marker.length;
+                    }
                 }
 
+                // Si trouvé, prendre APRÈS le prompt
+                if (promptEndIndex > 0 && promptEndIndex < fullText.length - 100) {
+                    fullText = fullText.substring(promptEndIndex);
+                    console.log('✅ Prompt utilisateur filtré');
+                }
+
+                // ============================================================
+                // FALLBACK: Chercher le premier # ACTION: réel (pas dans exemple)
+                // ============================================================
+                if (fullText.includes('# ACTION:')) {
+                    // Trouver tous les # ACTION:
+                    let actionPositions = [];
+                    let searchStart = 0;
+                    while (true) {
+                        let pos = fullText.indexOf('# ACTION:', searchStart);
+                        if (pos === -1) break;
+                        actionPositions.push(pos);
+                        searchStart = pos + 1;
+                    }
+
+                    // Prendre le premier qui n'est pas précédé par "Exemple" ou "```python"
+                    for (let pos of actionPositions) {
+                        let contextBefore = fullText.substring(Math.max(0, pos - 200), pos);
+
+                        // Ignorer si c'est un exemple du prompt
+                        if (contextBefore.includes('Exemple') || 
+                            contextBefore.includes('exemple') ||
+                            contextBefore.includes('**Pour') ||
+                            contextBefore.includes('FORMAT DE RÉPONSE')) {
+                            continue;
+                        }
+
+                        // C'est probablement le vrai code
+                        fullText = fullText.substring(pos);
+                        console.log('✅ Vrai code trouvé à position ' + pos);
+                        break;
+                    }
+                }
+
+                // ============================================================
                 // Nettoyer les artefacts UI à la fin
+                // ============================================================
                 const endMarkers = [
                     'Comment puis-je vous aider ?',
                     'Sonnet 4.5',
-                    '(caractères total)'
+                    '(caractères total)',
+                    'Afficher plus'
                 ];
 
                 for (let marker of endMarkers) {
-                    const markerIndex = fullText.indexOf(marker);
-                    if (markerIndex > 0) {
+                    const markerIndex = fullText.lastIndexOf(marker);
+                    if (markerIndex > 0 && markerIndex > fullText.length * 0.7) {
                         fullText = fullText.substring(0, markerIndex);
                     }
                 }
@@ -1210,7 +1395,7 @@ class UniversalBrowserHandler:
             logger.info(f"   ✅ Extraction réussie: {len(content)} chars")
             return content
 
-        # Fallback
+        # Fallback existant
         logger.warning("   ⚠️ Extraction JavaScript échouée, fallback...")
 
         response = self.client.get_page_content(content_type="text")
@@ -1219,15 +1404,16 @@ class UniversalBrowserHandler:
             if isinstance(content_data, list) and len(content_data) > 0:
                 text = content_data[0].get("text", "") if isinstance(content_data[0], dict) else str(content_data[0])
 
-                # Nettoyer le prompt
-                if "# ACTION:" in text:
-                    text = text[text.index("# ACTION:"):]
+                # Appliquer le même filtrage
+                if "Maintenant, génère le code" in text:
+                    idx = text.rfind("Maintenant, génère le code")
+                    text = text[idx + len("Maintenant, génère le code"):]
 
                 return text
 
         logger.error("❌ Échec extraction")
         return ""
-    
+
     def _extract_claude_response_only(self) -> str:
         logger.info("📄 Extraction de la réponse de Claude uniquement...")
 
@@ -2955,9 +3141,12 @@ class UniversalBrowserHandler:
         return snippets
     
     def _clean_code_artifacts(self, code: str) -> str:
+        """Nettoie les artefacts du code - VERSION AMÉLIORÉE"""
+
         # Supprimer les délimiteurs ```
         code = re.sub(r'^```python\s*\n?', '', code, flags=re.MULTILINE | re.IGNORECASE)
         code = re.sub(r'\n?```\s*$', '', code, flags=re.MULTILINE)
+        code = re.sub(r'```', '', code)
 
         # Supprimer les lignes de métadonnées résiduelles
         lines = code.split('\n')
@@ -2971,12 +3160,30 @@ class UniversalBrowserHandler:
                 continue
             
             # Ignorer les artefacts UI
-            if stripped in ['python', 'Copier', 'Regenerate', 'Réessayer', 
-                           'Comment puis-je vous aider ?', 'Sonnet 4.5']:
+            ui_artifacts = [
+                'python', 'Copier', 'Regenerate', 'Réessayer', 
+                'Comment puis-je vous aider ?', 'Sonnet 4.5',
+                'Afficher plus'
+            ]
+            if stripped in ui_artifacts:
                 continue
             
-            # Ignorer les lignes courtes suspectes
-            if len(stripped) < 3 and stripped not in ['', 'if', 'or', 'is']:
+            # NOUVEAU: Ignorer les lignes de pollution du prompt
+            prompt_pollution = [
+                'RAPPELS CRITIQUES',
+                'NE PAS écrire de texte',
+                'TOUJOURS fournir TARGET',
+                'Générer le code COMPLET',
+                'Utiliser des noms de fonctions',
+                'Maintenant, génère',
+                '== == == ==',
+            ]
+            if any(pol in stripped for pol in prompt_pollution):
+                continue
+            
+            # Ignorer les lignes courtes suspectes (sauf mots-clés Python)
+            python_short_keywords = ['', 'if', 'or', 'is', 'in', 'as', 'not', 'and', 'for', 'try', 'def', 'else', 'elif', 'pass', 'None', 'True', 'False']
+            if len(stripped) < 3 and stripped not in python_short_keywords:
                 continue
             
             cleaned_lines.append(line)
