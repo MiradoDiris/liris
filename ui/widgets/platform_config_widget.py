@@ -1349,12 +1349,6 @@ class PlatformConfigWidget(QtWidgets.QWidget):
             print(f"DEBUG: Erreur globale chargement: {str(e)}")
             print(traceback.format_exc())
 
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Erreur de chargement",
-                f"Impossible de charger les plateformes: {str(e)}"
-            )
-
     def _set_details_enabled(self, enabled):
         """Active ou désactive le panneau de détails - MODIFIÉ pour garantir l'activation"""
         # Toujours forcer l'activation des widgets lors de l'initialisation

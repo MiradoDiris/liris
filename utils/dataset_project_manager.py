@@ -1,9 +1,10 @@
 import logging
 from PyQt5.QtWidgets import QMessageBox
+import traceback
 
 from ui.localization.translator import tr
 
-logger = logging.getLogger(__name__)
+from utils.logger import logger
 
 
 class DatasetProjectManager:
@@ -23,6 +24,7 @@ class DatasetProjectManager:
 
     def __init__(self, database):
         self.database = database
+        self.db = database
         self.current_project_name = None
         self.current_project_data = None
         
@@ -110,12 +112,17 @@ class DatasetProjectManager:
     # ======== NAVIGATION ========
     
     def _reset_navigation(self):
-        """Réinitialise la navigation"""
+        """Réinitialise uniquement les indices de navigation du manager
+
+        Note: Cette méthode ne gère que la logique métier.
+        La réinitialisation de l'UI doit être faite dans le widget correspondant.
+        """
         self.current_typologie_index = -1
         self.current_taxonomy_index = -1
         self.current_root_index = -1
         self.current_parent_index = -1
         self.children_path = []
+        logger.debug("Navigation du project manager réinitialisée")
 
     def set_current_typologie_index(self, index):
         """Définit l'index de la typologie courante"""
@@ -176,6 +183,63 @@ class DatasetProjectManager:
     def get_current_hierarchy_path(self):
         """Retourne le chemin complet des enfants"""
         return self.children_path.copy()
+    
+    def save_batch(self, batch_number, total_batches, batch_data):
+        """Sauvegarde un batch pour le projet actuel"""
+        if not self.current_project_name:
+            logger.error("Aucun projet actuel")
+            return False
+
+        return self.database.save_batch(
+            self.current_project_name,
+            batch_number,
+            total_batches,
+            batch_data
+        )
+    
+    def get_batch(self, batch_number):
+        """Récupère un batch du projet actuel"""
+        if not self.current_project_name:
+            logger.error("Aucun projet actuel")
+            return None
+
+        return self.database.get_batch(self.current_project_name, batch_number)
+    
+    def get_all_batches(self):
+        """Récupère tous les batches du projet actuel"""
+        if not self.current_project_name:
+            logger.error("Aucun projet actuel")
+            return []
+
+        return self.database.get_all_batches(self.current_project_name)
+    
+    def update_batch_status(self, batch_number, status):
+        """Met à jour le statut d'un batch"""
+        if not self.current_project_name:
+            logger.error("Aucun projet actuel")
+            return False
+
+        return self.database.update_batch_status(
+            self.current_project_name,
+            batch_number,
+            status
+        )
+    
+    def clear_all_batches(self):
+        """Supprime tous les batches du projet actuel"""
+        if not self.current_project_name:
+            logger.error("Aucun projet actuel")
+            return False
+        
+        return self.database.delete_all_batches(self.current_project_name)
+    
+    def delete_batch(self, batch_number):
+        """Supprime un batch"""
+        if not self.current_project_name:
+            logger.error("Aucun projet actuel")
+            return False
+
+        return self.database.delete_batch(self.current_project_name, batch_number)
 
     def get_breadcrumb_path(self):
         """Retourne le chemin complet pour l'affichage breadcrumb"""
@@ -648,6 +712,7 @@ class DatasetProjectManager:
         # À adapter selon la structure exacte de votre cache
         # Cette méthode devrait transformer les données du cache en structure de projet
         return []
+    
 
     # ======== EXPORT ========
     

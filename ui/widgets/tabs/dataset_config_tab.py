@@ -3,6 +3,7 @@
 
 import logging
 import os
+import traceback
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt, pyqtSignal
 
@@ -10,7 +11,7 @@ from ui.localization.translator import tr
 from ui.styles.theme import Theme
 from utils.hierarchy_cache import HierarchyCache
 
-logger = logging.getLogger(__name__)
+from utils.logger import logger
 
 
 class DatasetConfigTab(QtWidgets.QWidget):
@@ -29,13 +30,6 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
         # État de navigation pour les enfants (au-delà du parent)
         self._child_navigation_path: list = []
-
-        # NOUVEAU: Initialiser les anciens caches pour compatibilité
-        self.temp_taxonomy_cache = {}
-        self.temp_hierarchy_cache = {}
-        self.temp_root_cache = {}
-        self.temp_parent_cache = {}
-        self.temp_child_cache = {}
 
         self._init_ui()
         self._load_initial_data()
@@ -144,119 +138,25 @@ class DatasetConfigTab(QtWidgets.QWidget):
         parent_name = parent_item.text()
         
         return (typologie_name, taxonomy_name, root_name, parent_name)
-    
-    def _save_current_level_to_cache(self):
-        """
-        Sauvegarder automatiquement le niveau actuel dans le cache
-        À appeler avant toute navigation ou changement de contexte
-        """
-        cache_path = self._get_current_cache_path()
-        if not cache_path:
-            return
-        
-        typologie, taxonomy, root, parent = cache_path
-        
-        # Sauvegarder les taxonomies
-        if typologie and taxonomy is None:
-            if hasattr(self, 'taxonomy_list'):
-                taxonomies = [self.taxonomy_list.item(i).text() 
-                             for i in range(self.taxonomy_list.count())]
-                self.temp_taxonomy_cache[typologie] = taxonomies
-                logger.debug(f"Sauvegarde taxonomies pour '{typologie}': {taxonomies}")
-        
-        # Sauvegarder les roots
-        elif typologie and taxonomy and root is None:
-            cache_node = self._get_or_create_cache_structure(typologie, taxonomy)
-            roots = [self.root_list.item(i).text() 
-                    for i in range(self.root_list.count())]
-            # Stocker les roots comme clés du dictionnaire
-            for r in roots:
-                if r not in cache_node:
-                    cache_node[r] = {}
-            logger.debug(f"Sauvegarde roots pour '{typologie}/{taxonomy}': {roots}")
-        
-        # Sauvegarder les parents
-        elif typologie and taxonomy and root and parent is None:
-            cache_node = self._get_or_create_cache_structure(typologie, taxonomy, root)
-            parents = [self.parent_list.item(i).text() 
-                      for i in range(self.parent_list.count())]
-            # Stocker les parents comme clés du dictionnaire
-            for p in parents:
-                if p not in cache_node:
-                    cache_node[p] = {'_children': [], '_sublevels': {}}
-            logger.debug(f"Sauvegarde parents pour '{typologie}/{taxonomy}/{root}': {parents}")
-        
-        # Sauvegarder les enfants au niveau actuel
-        elif typologie and taxonomy and root and parent:
-            self._save_children_recursive_to_cache()
-
-    def _save_children_recursive_to_cache(self):
-        """
-        Sauvegarder les enfants du niveau actuel avec support récursif complet
-        """
-        cache_path = self._get_current_cache_path()
-        if not cache_path or cache_path[3] is None:  # Pas de parent sélectionné
-            return
-        
-        typologie, taxonomy, root, parent = cache_path
-        
-        # Obtenir le chemin hiérarchique actuel depuis le project_manager
-        hierarchy_path = []
-        if hasattr(self.project_manager, 'get_current_hierarchy_path'):
-            hierarchy_path = self.project_manager.get_current_hierarchy_path()
-        
-        # Naviguer dans le cache jusqu'au bon niveau
-        cache_node = self._get_or_create_cache_structure(typologie, taxonomy, root, parent)
-        
-        # Descendre dans la hiérarchie selon le chemin
-        for child_name in hierarchy_path:
-            if child_name not in cache_node['_sublevels']:
-                cache_node['_sublevels'][child_name] = {
-                    '_children': [],
-                    '_sublevels': {}
-                }
-            cache_node = cache_node['_sublevels'][child_name]
-        
-        # Sauvegarder les enfants actuels
-        children = [self.child_list.item(i).text() 
-                   for i in range(self.child_list.count())]
-        cache_node['_children'] = children
-        
-        depth = len(hierarchy_path)
-        logger.debug(f"Sauvegarde enfants niveau {depth} pour '{typologie}/{taxonomy}/{root}/{parent}': {children}")
 
     def _load_children_from_cache(self):
-        """Charger les enfants au niveau actuel de navigation"""
+        """
+        Charge les enfants au niveau actuel depuis le cache - VERSION CORRIGÉE
+        """
         self.child_list.clear()
-        
+
         path = self._get_full_path()
         if len(path) < 4:  # Besoin au minimum jusqu'au parent
+            logger.debug("Chemin incomplet pour charger les enfants")
             return
-        
+
         children = self.hierarchy_cache.get_children_at_path(path)
         for name in children:
             item = QtWidgets.QListWidgetItem(name)
             self.child_list.addItem(item)
-        
+
         depth = len(self._child_navigation_path)
         logger.debug(f"Enfants chargés (niveau {depth}): {len(children)}")
-
-    def _load_children_from_db(self):
-        """
-        Charger les enfants depuis la base de données et les mettre en cache
-        """
-        try:
-            child_labels = self.project_manager.get_children_at_current_level()
-            for label in child_labels:
-                item = QtWidgets.QListWidgetItem(label.get('name', ''))
-                self.child_list.addItem(item)
-            
-            # Mettre en cache
-            self._save_children_recursive_to_cache()
-            
-            logger.debug(f"Enfants chargés depuis DB: {len(child_labels)}")
-        except Exception as e:
-            logger.error(f"Erreur chargement enfants depuis DB: {e}")
 
     def _get_or_create_cache_structure(self, typologie_name, taxonomy_name=None, 
                                        root_name=None, parent_name=None):
@@ -404,56 +304,6 @@ class DatasetConfigTab(QtWidgets.QWidget):
         layout.addWidget(btn_container)
 
         return container
-    
-    def _persist_caches_to_manager(self):
-        """
-        Persiste tous les caches dans le project_manager
-        Fallback si update_from_caches n'existe pas
-        """
-        logger.info("Persistence manuelle des caches dans project_manager")
-
-        # Pour chaque typologie dans le cache
-        for typologie_name, taxonomy_clusters in self.temp_taxonomy_cache.items():
-            logger.debug(f"Persisting taxonomy for {typologie_name}: {taxonomy_clusters}")
-            # Vous devrez adapter selon votre structure de données dans project_manager
-
-        for cache_key, root_labels in self.temp_root_cache.items():
-            typologie_name, taxonomy_name = cache_key
-            logger.debug(f"Persisting roots for {cache_key}: {root_labels}")
-
-        for cache_key, parent_labels in self.temp_parent_cache.items():
-            typologie_name, taxonomy_name, root_name = cache_key
-            logger.debug(f"Persisting parents for {cache_key}: {parent_labels}")
-
-        for cache_key, child_labels in self.temp_child_cache.items():
-            typologie_name, taxonomy_name, root_name, parent_name, hierarchy_path = cache_key
-            logger.debug(f"Persisting children for {cache_key}: {child_labels}")
-
-    def _get_child_cache_key(self):
-        """
-        Génère une clé de cache pour les enfants en utilisant la profondeur
-        au lieu du chemin complet pour éviter les problèmes de correspondance
-        """
-        typologie_item = self.typologie_list.currentItem()
-        taxonomy_item = self.taxonomy_list.currentItem() if hasattr(self, 'taxonomy_list') else None
-        root_item = self.root_list.currentItem()
-        parent_item = self.parent_list.currentItem()
-
-        if not all([typologie_item, taxonomy_item, root_item, parent_item]):
-            return None
-
-        typologie_name = typologie_item.text()
-        taxonomy_name = taxonomy_item.text()
-        root_name = root_item.text()
-        parent_name = parent_item.text()
-
-        # Utiliser la profondeur au lieu du chemin complet
-        depth = self.project_manager.get_current_depth() if hasattr(self.project_manager, 'get_current_depth') else 0
-
-        # Ajouter le chemin seulement si nécessaire pour l'unicité
-        hierarchy_path = self.project_manager.get_current_hierarchy_path() if hasattr(self.project_manager, 'get_current_hierarchy_path') else []
-
-        return (typologie_name, taxonomy_name, root_name, parent_name, depth, tuple(hierarchy_path))
 
     
     def _load_initial_data(self):
@@ -810,70 +660,71 @@ class DatasetConfigTab(QtWidgets.QWidget):
     # ========== EVENT HANDLERS ==========
 
     def _on_project_selected(self, index):
-        """Handle project selection"""
+        """
+        Gestion de la sélection de projet - VERSION CORRIGÉE
+        """
         if index < 0:
             return
-        
-        # Sauvegarder le cache actuel avant de changer
-        self._save_all_to_cache()
-        
+
         project_name = self.project_combo.currentText()
-        if self.project_manager.load_project(project_name):
-            # Réinitialiser le cache
-            self.hierarchy_cache.clear()
-            self._child_navigation_path.clear()
-            
-            # Charger le projet dans le cache
-            self._load_project_to_cache()
-            self._load_project_ui()
-            self._export_strategy()
-        
-    def _load_project_to_cache(self):
-        """Charger un projet depuis la DB vers le cache"""
-        self.hierarchy_cache.clear()
 
         try:
-            # Charger les typologies
-            typologies = self.project_manager.get_typologies()
-            for typ in typologies:
-                typ_name = typ.get('name', '')
-                if typ_name:
-                    self.hierarchy_cache.add_typologie(typ_name)
+            # 1. Charger le projet depuis la DB
+            if self.project_manager.load_project(project_name):
 
-            logger.info(f"Projet chargé dans le cache: {len(typologies)} typologie(s)")
+                # 2. Vider le cache et réinitialiser la navigation
+                self.hierarchy_cache.clear()
+                self._child_navigation_path.clear()
+
+                # 3. Charger le projet dans le cache
+                self._load_project_from_db_to_cache()
+
+                # 4. Charger l'UI
+                self._load_project_ui()
+
+                # 5. Exporter la stratégie
+                self._export_strategy()
+
+                logger.info(f"Projet '{project_name}' chargé et affiché")
+            else:
+                QtWidgets.QMessageBox.warning(self, "Erreur",
+                    f"Impossible de charger le projet '{project_name}'")
+
         except Exception as e:
-            logger.error(f"Erreur chargement projet vers cache: {e}")
-
-    def _save_all_to_cache(self):
-        """Sauvegarder tout l'état actuel dans le cache"""
-        # Déjà synchronisé en temps réel
-        pass
-
-    def _on_typologie_selected(self, current, previous):
-        """Handle typologie selection"""
-        # Sauvegarder l'état actuel
-        if previous:
-            self._sync_current_level_to_cache()
+            logger.error(f"Erreur lors du rafraîchissement des projets: {str(e)}\n{traceback.format_exc()}")
+            QtWidgets.QMessageBox.critical(self, "Erreur",
+                f"Erreur lors du chargement: {e}")
         
+    def _on_typologie_selected(self, current, previous):
+        """
+        Gestion de la sélection de typologie - VERSION CORRIGÉE
+        """
+        # Sauvegarder l'état précédent dans le cache (déjà fait en temps réel)
+
         if not current:
             self._clear_hierarchy()
             self._update_button_states()
             return
-        
+
         typologie_name = current.text()
         index = self.typologie_list.currentRow()
+
+        # Mettre à jour le project_manager
         self.project_manager.set_current_typologie_index(index)
-        
-        # Charger les clusters depuis le cache
-        self._load_list_from_cache(self.taxonomy_list, [typologie_name])
-        
+
+        # Charger les clusters de taxonomie depuis le cache
+        path = [typologie_name]
+        self._load_list_from_cache(self.taxonomy_list, path)
+
         # Effacer les niveaux inférieurs
         self.root_list.clear()
         self.parent_list.clear()
         self.child_list.clear()
         self._child_navigation_path.clear()
-        
+
         self._update_button_states()
+        logger.debug(f"Typologie sélectionnée: '{typologie_name}'")
+
 
     def _save_full_hierarchy_to_cache(self, typologie_name):
         """Sauvegarder toute la hiérarchie d'une typologie dans le cache"""
@@ -892,273 +743,138 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
         logger.debug(f"Hiérarchie complète sauvegardée pour typologie '{typologie_name}'")
 
-    def _save_root_to_cache(self, typologie_name, taxonomy_name):
-        """Sauvegarder les labels racines dans le cache"""
-        if not hasattr(self, 'root_list') or not typologie_name or not taxonomy_name:
-            return
-
-        cache_key = (typologie_name, taxonomy_name)
-        root_labels = []
-
-        for i in range(self.root_list.count()):
-            item = self.root_list.item(i)
-            root_labels.append(item.text())
-
-        self.temp_root_cache[cache_key] = root_labels
-        logger.debug(f"Cache root sauvegardé pour ({typologie_name}, {taxonomy_name}): {root_labels}")
-
-    def _save_taxonomy_to_cache(self, typologie_name):
-        """Sauvegarder les clusters de taxonomie actuels dans le cache"""
-        if not hasattr(self, 'taxonomy_list') or not typologie_name:
-            return
-        
-        clusters = []
-        for i in range(self.taxonomy_list.count()):
-            item = self.taxonomy_list.item(i)
-            clusters.append(item.text())
-        
-        self.temp_taxonomy_cache[typologie_name] = clusters
-        logger.debug(f"Cache sauvegardé pour typologie '{typologie_name}': {clusters}")
-
-    def _save_current_taxonomy_to_cache(self):
-        """Sauvegarder la taxonomie de la typologie actuellement sélectionnée"""
-        current_item = self.typologie_list.currentItem()
-        if current_item:
-            typologie_name = current_item.text()
-            self._save_taxonomy_to_cache(typologie_name)
-
-    def _load_taxonomy_from_cache(self, typologie_name):
-        """Charger les clusters de taxonomie depuis le cache"""
-        if not hasattr(self, 'taxonomy_list'):
-            return
-        
-        self.taxonomy_list.clear()
-        
-        if typologie_name in self.temp_taxonomy_cache:
-            clusters = self.temp_taxonomy_cache[typologie_name]
-            for cluster_name in clusters:
-                item = QtWidgets.QListWidgetItem(cluster_name)
-                self.taxonomy_list.addItem(item)
-            logger.debug(f"Taxonomies chargées depuis cache: {clusters}")
-        else:
-            logger.debug(f"Pas de cache taxonomie pour '{typologie_name}'")
-
-    def _load_roots_from_cache(self):
-        """Charger les roots depuis le cache"""
-        self.root_list.clear()
-        
-        cache_path = self._get_current_cache_path()
-        if not cache_path or cache_path[1] is None:
-            return
-        
-        typologie, taxonomy, _, _ = cache_path
-        
-        try:
-            cache_node = self._get_or_create_cache_structure(typologie, taxonomy)
-            roots = list(cache_node.keys())
-            
-            for root_name in roots:
-                item = QtWidgets.QListWidgetItem(root_name)
-                self.root_list.addItem(item)
-            
-            logger.debug(f"Roots chargés depuis cache: {roots}")
-        except (KeyError, TypeError):
-            logger.debug("Pas de cache roots, chargement depuis DB")
-            # Charger depuis DB si pas de cache
-            root_labels = self.project_manager.get_root_labels()
-            for label in root_labels:
-                item = QtWidgets.QListWidgetItem(label.get('name', ''))
-                self.root_list.addItem(item)
-
-    def _load_parents_from_cache(self):
-        """Charger les parents depuis le cache"""
-        self.parent_list.clear()
-        self.child_list.clear()
-        
-        cache_path = self._get_current_cache_path()
-        if not cache_path or cache_path[2] is None:
-            return
-        
-        typologie, taxonomy, root, _ = cache_path
-        
-        try:
-            cache_node = self._get_or_create_cache_structure(typologie, taxonomy, root)
-            parents = list(cache_node.keys())
-            
-            for parent_name in parents:
-                item = QtWidgets.QListWidgetItem(parent_name)
-                self.parent_list.addItem(item)
-            
-            logger.debug(f"Parents chargés depuis cache: {parents}")
-        except (KeyError, TypeError):
-            logger.debug("Pas de cache parents, chargement depuis DB")
-            parent_labels = self.project_manager.get_parent_labels()
-            for label in parent_labels:
-                item = QtWidgets.QListWidgetItem(label.get('name', ''))
-                self.parent_list.addItem(item)
-
     def _on_taxonomy_selected(self, current, previous):
-        """Handle taxonomy cluster selection"""
-        if previous:
-            self._sync_current_level_to_cache()
-        
+        """
+        Gestion de la sélection de taxonomie - VERSION COMPLÈTEMENT CORRIGÉE
+        """
         if not current:
             self.root_list.clear()
             self.parent_list.clear()
             self.child_list.clear()
             self._update_button_states()
             return
-        
+
         typ_item = self.typologie_list.currentItem()
         if not typ_item:
+            logger.warning("Typologie non sélectionnée")
             return
-        
-        path = [typ_item.text(), current.text()]
-        
-        if hasattr(self.project_manager, 'set_current_taxonomy_cluster'):
-            self.project_manager.set_current_taxonomy_cluster(current.text())
-        
+
+        taxonomy_name = current.text()
+        typologie_name = typ_item.text()
+
+        logger.debug(f"Sélection taxonomy: '{taxonomy_name}' dans typologie '{typologie_name}'")
+
+        # === PARTIE CRITIQUE: SYNCHRONISER LE PROJECT_MANAGER ===
+
+        # 1. Trouver l'index du taxonomy dans le project_manager
+        typologie = self.project_manager.get_current_typologie()
+        if not typologie:
+            logger.error(f"Typologie '{typologie_name}' non trouvée dans project_manager!")
+            return
+
+        taxonomy_clusters = typologie.get('taxonomy_clusters', [])
+        taxonomy_index = -1
+
+        for idx, cluster in enumerate(taxonomy_clusters):
+            if cluster.get('name') == taxonomy_name:
+                taxonomy_index = idx
+                break
+            
+        if taxonomy_index == -1:
+            # Le cluster n'existe pas encore dans le manager, le créer
+            logger.warning(f"Taxonomy '{taxonomy_name}' pas dans manager, ajout automatique")
+            new_cluster = {
+                'name': taxonomy_name,
+                'description': '',
+                'root_labels': []
+            }
+            taxonomy_clusters.append(new_cluster)
+            taxonomy_index = len(taxonomy_clusters) - 1
+
+        # 2. Définir l'index dans le project_manager
+        self.project_manager.current_taxonomy_index = taxonomy_index
+
+        logger.info(f"✓ Taxonomy index synchronisé: {taxonomy_index} pour '{taxonomy_name}'")
+
+        # Vérification: S'assurer que get_current_taxonomy() fonctionne
+        current_tax = self.project_manager.get_current_taxonomy()
+        if current_tax:
+            logger.debug(f"✓ get_current_taxonomy() retourne: '{current_tax.get('name')}'")
+        else:
+            logger.error("✗ get_current_taxonomy() retourne None!")
+            return
+
+        # === FIN PARTIE CRITIQUE ===
+
         # Charger les roots depuis le cache
+        path = [typologie_name, taxonomy_name]
         self._load_list_from_cache(self.root_list, path)
-        
+
+        # Effacer les niveaux inférieurs
         self.parent_list.clear()
         self.child_list.clear()
         self._child_navigation_path.clear()
-        
+
         self._update_button_states()
-
-    def _save_parent_to_cache(self, typologie_name, taxonomy_name, root_name):
-        """Sauvegarder les labels parents dans le cache"""
-        if not hasattr(self, 'parent_list'):
-            return
-
-        cache_key = (typologie_name, taxonomy_name, root_name)
-        parent_labels = []
-
-        for i in range(self.parent_list.count()):
-            item = self.parent_list.item(i)
-            parent_labels.append(item.text())
-
-        self.temp_parent_cache[cache_key] = parent_labels
-        logger.debug(f"Cache parent sauvegardé pour {cache_key}: {parent_labels}")
-
-    def _load_root_from_cache(self):
-        """Charger les labels racines depuis le cache"""
-        self.root_list.clear()
-
-        typologie_item = self.typologie_list.currentItem()
-        taxonomy_item = self.taxonomy_list.currentItem() if hasattr(self, 'taxonomy_list') else None
-
-        if not typologie_item or not taxonomy_item:
-            logger.debug("Typologie ou taxonomie non sélectionnée")
-            return
-
-        typologie_name = typologie_item.text()
-        taxonomy_name = taxonomy_item.text()
-        cache_key = (typologie_name, taxonomy_name)
-
-        if cache_key in self.temp_root_cache:
-            # Charger depuis le cache
-            root_labels = self.temp_root_cache[cache_key]
-            for label_name in root_labels:
-                item = QtWidgets.QListWidgetItem(label_name)
-                self.root_list.addItem(item)
-            logger.debug(f"Cache root chargé pour {cache_key}: {root_labels}")
-        else:
-            # Pas de cache, charger depuis la DB
-            root_labels = self.project_manager.get_root_labels()
-            for label in root_labels:
-                item = QtWidgets.QListWidgetItem(label.get('name', ''))
-                self.root_list.addItem(item)
-
-            # Sauvegarder dans le cache pour la prochaine fois
-            if root_labels:
-                self.temp_root_cache[cache_key] = [label.get('name', '') for label in root_labels]
-            logger.debug(f"Cache root initialisé depuis DB pour {cache_key}")
+        logger.debug(f"Taxonomie '{taxonomy_name}' sélectionnée et synchronisée")
 
     def _on_root_selected(self, current, previous):
-        """Handle root selection"""
-        if previous:
-            self._sync_current_level_to_cache()
-        
+        """
+        Gestion de la sélection de root - VERSION CORRIGÉE
+        """
         if not current:
             self.parent_list.clear()
             self.child_list.clear()
             self._update_button_states()
             return
-        
+
+        root_name = current.text()
         index = self.root_list.currentRow()
+
+        # Mettre à jour le project_manager
         self.project_manager.set_current_root_index(index)
-        
+
         # Construire le chemin
         typ_item = self.typologie_list.currentItem()
         tax_item = self.taxonomy_list.currentItem()
+
         if typ_item and tax_item:
-            path = [typ_item.text(), tax_item.text(), current.text()]
+            path = [typ_item.text(), tax_item.text(), root_name]
             self._load_list_from_cache(self.parent_list, path)
-        
+
+        # Effacer les enfants
         self.child_list.clear()
         self._child_navigation_path.clear()
-        
+
         self._update_button_states()
-
-    def _load_parent_from_cache(self):
-        """Charger les labels parents depuis le cache"""
-        self.parent_list.clear()
-        self.child_list.clear()
-
-        typologie_item = self.typologie_list.currentItem()
-        taxonomy_item = self.taxonomy_list.currentItem() if hasattr(self, 'taxonomy_list') else None
-        root_item = self.root_list.currentItem()
-
-        if not typologie_item or not taxonomy_item or not root_item:
-            logger.debug("Typologie, taxonomie ou root non sélectionné")
-            return
-
-        typologie_name = typologie_item.text()
-        taxonomy_name = taxonomy_item.text()
-        root_name = root_item.text()
-        cache_key = (typologie_name, taxonomy_name, root_name)
-
-        if cache_key in self.temp_parent_cache:
-            # Charger depuis le cache
-            parent_labels = self.temp_parent_cache[cache_key]
-            for label_name in parent_labels:
-                item = QtWidgets.QListWidgetItem(label_name)
-                self.parent_list.addItem(item)
-            logger.debug(f"Cache parent chargé pour {cache_key}: {parent_labels}")
-        else:
-            # Pas de cache, charger depuis la DB
-            parent_labels = self.project_manager.get_parent_labels()
-            for label in parent_labels:
-                item = QtWidgets.QListWidgetItem(label.get('name', ''))
-                self.parent_list.addItem(item)
-
-            # Sauvegarder dans le cache pour la prochaine fois
-            if parent_labels:
-                self.temp_parent_cache[cache_key] = [label.get('name', '') for label in parent_labels]
-            logger.debug(f"Cache parent initialisé depuis DB pour {cache_key}")
+        logger.debug(f"Root sélectionné: '{root_name}'")
 
     def _on_parent_selected(self, current, previous):
-        """Handle parent selection"""
-        if previous:
-            self._sync_current_level_to_cache()
-        
+        """
+        Gestion de la sélection de parent - VERSION CORRIGÉE
+        """
         if not current:
             self.child_list.clear()
             self._update_button_states()
             return
-        
+
+        parent_name = current.text()
         index = self.parent_list.currentRow()
+
+        # Mettre à jour le project_manager
         self.project_manager.set_current_parent_index(index)
-        
+
         # Réinitialiser la navigation enfants
         self._child_navigation_path.clear()
-        
-        # Charger les enfants directs
+
+        # Charger les enfants directs depuis le cache
         self._load_children_from_cache()
+
+        # Mettre à jour le breadcrumb
         self._update_breadcrumb()
+
         self._update_button_states()
+        logger.debug(f"Parent sélectionné: '{parent_name}'")
 
     def _on_child_selected(self, current, previous):
         """Handle child selection"""
@@ -1169,7 +885,6 @@ class DatasetConfigTab(QtWidgets.QWidget):
         self.dive_btn.setEnabled(current is not None)
 
     def _navigate_into_child(self):
-        """Naviguer dans un enfant sélectionné"""
         current_item = self.child_list.currentItem()
         if not current_item:
             QtWidgets.QMessageBox.warning(self, "Sélection requise",
@@ -1178,52 +893,51 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
         child_name = current_item.text()
 
-        # Sauvegarder l'état actuel
         current_path = self._get_full_path()
         self._sync_list_to_cache(self.child_list, current_path)
 
-        # Ajouter au chemin de navigation
         self._child_navigation_path.append(child_name)
 
-        # CORRECTION : Synchroniser avec le project_manager
-        if hasattr(self.project_manager, 'navigate_into_child'):
-            self.project_manager.navigate_into_child(child_name)
-        elif hasattr(self.project_manager, 'set_current_depth'):
-            self.project_manager.set_current_depth(len(self._child_navigation_path))
+        self.project_manager.navigate_into_child(child_name)
 
-        # Recharger les enfants du nouveau niveau
         self._load_children_from_cache()
+
+        # Mettre à jour l'affichage
         self._update_breadcrumb()
         self._update_button_states()
 
-        logger.debug(f"Navigation into '{child_name}': niveau {len(self._child_navigation_path)}")
+        depth = len(self._child_navigation_path)
+        logger.debug(f"Navigation dans '{child_name}': niveau {depth}")
 
 
     def _navigate_up(self):
-        """Remonter d'un niveau dans les enfants"""
+        """
+        Remonte d'un niveau - VERSION CORRIGÉE
+        Synchronise avec le project_manager
+        """
         if not self._child_navigation_path:
             logger.warning("Impossible de remonter: chemin vide")
             return
 
-        # Sauvegarder l'état actuel avant de remonter
+        # Sauvegarder l'état actuel
         current_path = self._get_full_path()
         self._sync_list_to_cache(self.child_list, current_path)
 
         # Remonter d'un niveau
         removed_child = self._child_navigation_path.pop()
 
-        # CORRECTION : Synchroniser avec le project_manager
-        if hasattr(self.project_manager, 'navigate_up'):
-            self.project_manager.navigate_up()
-        elif hasattr(self.project_manager, 'set_current_depth'):
-            self.project_manager.set_current_depth(len(self._child_navigation_path))
+        # Synchroniser avec le project_manager
+        self.project_manager.navigate_up()
 
-        # Recharger les enfants du nouveau niveau
+        # Recharger les enfants du niveau parent
         self._load_children_from_cache()
+
+        # Mettre à jour l'affichage
         self._update_breadcrumb()
         self._update_button_states()
 
-        logger.debug(f"Navigation up from '{removed_child}': niveau {len(self._child_navigation_path)}")
+        depth = len(self._child_navigation_path)
+        logger.debug(f"Remonté depuis '{removed_child}': niveau {depth}")
 
     def _update_breadcrumb(self):
         """Mettre à jour l'affichage du fil d'Ariane"""
@@ -1290,49 +1004,118 @@ class DatasetConfigTab(QtWidgets.QWidget):
                 logger.info(f"Project '{project_name}' deleted")
 
     def _save_project(self):
-        """Sauvegarder le projet"""
+        """
+        Sauvegarde le projet - VERSION COMPLÈTE CORRIGÉE
+        Synchronise le cache vers le manager puis sauvegarde en DB
+        """
+        # DEBUG: Afficher l'état actuel pour diagnostic
+        logger.debug(f"=== DÉBUT SAUVEGARDE ===")
+        logger.debug(f"  - current_project_name: {self.project_manager.current_project_name}")
+        logger.debug(f"  - current_project_data exists: {self.project_manager.current_project_data is not None}")
+        logger.debug(f"  - combo index: {self.project_combo.currentIndex()}")
+        logger.debug(f"  - combo text: {self.project_combo.currentText()}")
+        self._debug_print_cache()
+
+        # CORRECTION: Récupérer le nom du projet depuis plusieurs sources
+        project_name = self.project_manager.current_project_name
+
+        # Fallback 1: Utiliser le combo si current_project_name est vide
+        if not project_name:
+            combo_text = self.project_combo.currentText()
+            if combo_text:
+                logger.info(f"Fallback: chargement du projet depuis combo '{combo_text}'")
+                if self.project_manager.load_project(combo_text):
+                    project_name = combo_text
+                else:
+                    logger.warning(f"Échec du chargement du projet '{combo_text}'")
+
+        # Fallback 2: Utiliser le champ texte pour créer un nouveau projet
+        if not project_name:
+            new_name = self.project_name_edit.text().strip()
+            if new_name:
+                logger.info(f"Fallback: création d'un nouveau projet '{new_name}'")
+                if self.project_manager.create_new_project(new_name, ""):
+                    project_name = new_name
+                else:
+                    QtWidgets.QMessageBox.warning(self, tr("dataset.error"),
+                        f"Impossible de créer le projet '{new_name}'. Il existe peut-être déjà.")
+                    return
+
+        # Vérification finale
         if not self.project_manager.current_project_name:
             QtWidgets.QMessageBox.warning(self, tr("dataset.error"),
-                tr("dataset.no_project_selected"))
+                "Aucun projet sélectionné.\n\n"
+                "Veuillez d'abord:\n"
+                "1. Sélectionner un projet existant dans la liste, ou\n"
+                "2. Cliquer sur 'Nouveau projet' pour en créer un")
             return
 
+        if not self.project_manager.current_project_data:
+            QtWidgets.QMessageBox.warning(self, tr("dataset.error"),
+                "Données du projet non initialisées.\n"
+                "Veuillez recharger le projet.")
+            return
+
+        # Récupérer le nouveau nom depuis le champ texte
         new_name = self.project_name_edit.text().strip()
         if not new_name:
             QtWidgets.QMessageBox.warning(self, tr("dataset.error"),
-                tr("dataset.project_name_empty"))
+                "Le nom du projet ne peut pas être vide")
             return
 
         try:
-            # Synchroniser le cache vers le project_manager
-            cache_data = self.hierarchy_cache.to_dict()
+            # 1. Synchroniser le cache vers le project_manager
+            logger.info("Synchronisation du cache vers le project_manager...")
+            logger.info("AVANT SYNC:")
+            self._debug_print_cache()
+            if not self._sync_cache_to_project_manager():
+                QtWidgets.QMessageBox.critical(self, "Erreur",
+                    "Échec de la synchronisation du cache.\n"
+                    "Les modifications n'ont pas pu être préparées pour la sauvegarde.")
+                return
+            
+            logger.info("APRÈS SYNC:")
+            self._debug_print_project_data()
 
-            # Si le manager supporte la mise à jour depuis le cache
-            if hasattr(self.project_manager, 'update_from_hierarchy_cache'):
-                self.project_manager.update_from_hierarchy_cache(cache_data)
-            else:
-                logger.warning("project_manager ne supporte pas update_from_hierarchy_cache")
+            # 2. Mettre à jour le nom du projet si modifié
+            old_name = self.project_manager.current_project_name
+            self.project_manager.current_project_data['nom'] = new_name
 
-            # Mettre à jour le nom du projet
-            if self.project_manager.current_project_data:
-                self.project_manager.current_project_data['nom'] = new_name
+            # Si le nom a changé, mettre à jour current_project_name
+            if new_name != old_name:
+                self.project_manager.current_project_name = new_name
+                logger.info(f"Nom du projet changé: '{old_name}' -> '{new_name}'")
 
-            # Sauvegarder
+            # 3. Sauvegarder en base de données
+            logger.info(f"Sauvegarde du projet '{new_name}' en base de données...")
             if self.project_manager.save_project():
+                # Marquer le cache comme propre
                 self.hierarchy_cache.mark_clean()
+
+                # Rafraîchir la liste des projets
                 self._refresh_project_combos()
+
+                # Resélectionner le projet dans le combo
+                index = self.project_combo.findText(new_name)
+                if index >= 0:
+                    self.project_combo.setCurrentIndex(index)
+
+                # Émettre le signal de sauvegarde
                 self.project_saved.emit()
 
                 QtWidgets.QMessageBox.information(self, "Succès",
-                    f"Projet '{new_name}' sauvegardé")
-                logger.info(f"Projet '{new_name}' sauvegardé avec succès")
+                    f"Projet '{new_name}' sauvegardé avec succès!")
+                logger.info(f"✓ Projet '{new_name}' sauvegardé avec succès")
             else:
                 QtWidgets.QMessageBox.critical(self, tr("dataset.error"),
-                    tr("dataset.save_failed"))
+                    "Échec de la sauvegarde en base de données.\n"
+                    "Vérifiez les logs pour plus de détails.")
+                logger.error(f"✗ Échec de la sauvegarde du projet '{new_name}'")
 
         except Exception as e:
-            logger.error(f"Erreur sauvegarde: {e}", exc_info=True)
+            logger.error(f"Erreur lors de la sauvegarde: {e}\n{traceback.format_exc()}")
             QtWidgets.QMessageBox.critical(self, "Erreur",
-                f"Impossible de sauvegarder: {e}")
+                f"Impossible de sauvegarder le projet:\n{str(e)}")
 
     def _add_typologie(self):
         """Add typologie"""
@@ -1393,37 +1176,126 @@ class DatasetConfigTab(QtWidgets.QWidget):
                 logger.info(f"Typologie '{name}' deleted")
 
     def _add_label(self, level):
-        """Ajouter un label à un niveau"""
+        """
+        Ajoute un label à un niveau - VERSION AVEC VALIDATION COMPLÈTE
+        """
         name, ok = QtWidgets.QInputDialog.getText(
-            self, f"{tr('dataset.new')} {level}", tr("dataset.name") + ":"
+            self, f"Nouveau {level}", "Nom :"
         )
         if not ok or not name.strip():
             return
-        
+
         name = name.strip()
+
+        # === VALIDATION PRÉALABLE ===
+
+        if level == "root":
+            # Vérifier que le taxonomy est bien sélectionné
+            taxonomy = self.project_manager.get_current_taxonomy()
+            if not taxonomy:
+                logger.error("ÉCHEC: get_current_taxonomy() retourne None")
+                logger.error(f"État manager: typologie_idx={self.project_manager.current_typologie_index}, "
+                            f"taxonomy_idx={self.project_manager.current_taxonomy_index}")
+
+                QtWidgets.QMessageBox.critical(
+                    self, 
+                    "Erreur de synchronisation",
+                    "Le cluster de taxonomie n'est pas correctement sélectionné.\n\n"
+                    "Veuillez:\n"
+                    "1. Resélectionner la typologie\n"
+                    "2. Resélectionner le cluster de taxonomie\n"
+                    "3. Réessayer d'ajouter le root"
+                )
+                return
+
+            logger.debug(f"✓ Taxonomy validé: '{taxonomy.get('name')}'")
+
+        elif level == "parent":
+            # Vérifier que le root est bien sélectionné
+            root = self.project_manager.get_current_root()
+            if not root:
+                logger.error("ÉCHEC: get_current_root() retourne None")
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Erreur de synchronisation",
+                    "Le root label n'est pas correctement sélectionné."
+                )
+                return
+
+            logger.debug(f"✓ Root validé: '{root.get('name')}'")
+
+        # === OBTENIR LE CHEMIN ===
+
         path = self._get_path_for_level(level)
-        
         if path is None:
             QtWidgets.QMessageBox.warning(self, "Erreur", 
                 "Veuillez d'abord sélectionner le niveau parent")
             return
-        
-        # Vérifier doublon
+
+        logger.debug(f"Chemin pour {level}: {' > '.join(path)}")
+
+        # === VÉRIFIER DOUBLON ===
+
         existing = self.hierarchy_cache.get_children_at_path(path)
         if name in existing:
             QtWidgets.QMessageBox.warning(self, "Doublon", 
                 f"'{name}' existe déjà à ce niveau")
             return
-        
-        # Ajouter au cache
-        self.hierarchy_cache.add_child_at_path(path, name)
-        
-        # Mettre à jour l'UI
-        list_widget = self._get_list_for_level(level)
-        item = QtWidgets.QListWidgetItem(name)
-        list_widget.addItem(item)
-        
-        logger.info(f"{level.capitalize()} '{name}' ajouté")
+
+        # === AJOUTER AU CACHE ===
+
+        if not self.hierarchy_cache.add_child_at_path(path, name):
+            QtWidgets.QMessageBox.warning(self, "Erreur",
+                f"Impossible d'ajouter '{name}' au cache")
+            return
+
+        logger.info(f"✓ '{name}' ajouté au cache")
+
+        # === AJOUTER AU PROJECT_MANAGER ===
+
+        success = False
+
+        if level == "taxonomy":
+            # Pas besoin d'ajouter au manager, sera synchronisé à la sauvegarde
+            success = True
+
+        elif level == "root":
+            logger.debug(f"Appel add_root_label('{name}')")
+            success = self.project_manager.add_root_label(name, self)
+
+            if not success:
+                logger.error(f"✗ Échec add_root_label pour '{name}'")
+                # Diagnostic
+                taxonomy = self.project_manager.get_current_taxonomy()
+                logger.error(f"Taxonomy actuel: {taxonomy}")
+            else:
+                logger.info(f"✓ '{name}' ajouté au project_manager")
+
+        elif level == "parent":
+            logger.debug(f"Appel add_parent_label('{name}')")
+            success = self.project_manager.add_parent_label(name, self)
+
+            if not success:
+                logger.error(f"✗ Échec add_parent_label pour '{name}'")
+            else:
+                logger.info(f"✓ '{name}' ajouté au project_manager")
+
+        # === METTRE À JOUR L'UI ===
+
+        if success:
+            list_widget = self._get_list_for_level(level)
+            item = QtWidgets.QListWidgetItem(name)
+            list_widget.addItem(item)
+
+            logger.info(f"✓✓✓ {level.capitalize()} '{name}' ajouté avec succès")
+        else:
+            # Retirer du cache en cas d'échec
+            self.hierarchy_cache.remove_child_at_path(path, name)
+            logger.error(f"✗✗✗ Rollback: '{name}' retiré du cache")
+
+            QtWidgets.QMessageBox.warning(self, "Erreur",
+                f"Impossible d'ajouter le {level} dans le gestionnaire de projet.\n\n"
+                f"Vérifiez les logs pour plus de détails.")
 
 
     def _edit_label(self, level):
@@ -1510,53 +1382,56 @@ class DatasetConfigTab(QtWidgets.QWidget):
         return None
 
     def _add_child(self):
-        """Ajouter un enfant au niveau actuel de navigation"""
+        """
+        Ajoute un enfant - VERSION CORRIGÉE
+        """
         parent_item = self.parent_list.currentItem()
         if not parent_item:
             QtWidgets.QMessageBox.warning(self, "Erreur",
                 "Veuillez d'abord sélectionner un parent")
             return
-        
+
         name, ok = QtWidgets.QInputDialog.getText(
-            self, tr("dataset.new_child"), tr("dataset.name") + ":"
+            self, "Nouvel enfant", "Nom :"
         )
         if not ok or not name.strip():
             return
-        
+
         name = name.strip()
         path = self._get_full_path()
-        
-        # Vérifier doublon
+
+        # Vérifier doublon dans le cache
         existing = self.hierarchy_cache.get_children_at_path(path)
         if name in existing:
             QtWidgets.QMessageBox.warning(self, "Doublon",
                 f"'{name}' existe déjà à ce niveau")
             return
-        
-        # Ajouter au cache
-        self.hierarchy_cache.add_child_at_path(path, name)
-        
-        # Mettre à jour l'UI
-        item = QtWidgets.QListWidgetItem(name)
-        self.child_list.addItem(item)
-        
-        depth = len(self._child_navigation_path)
-        logger.info(f"Enfant '{name}' ajouté au niveau {depth}")
 
-    def _save_full_typologie_hierarchy(self, typologie_name):
-        """
-        Sauvegarder récursivement toute la hiérarchie d'une typologie
-        """
-        if not typologie_name:
-            return
-        
-        # Sauvegarder les taxonomies
-        if hasattr(self, 'taxonomy_list'):
-            taxonomies = [self.taxonomy_list.item(i).text() 
-                         for i in range(self.taxonomy_list.count())]
-            self.temp_taxonomy_cache[typologie_name] = taxonomies
-        
-        logger.debug(f"Hiérarchie complète sauvegardée pour '{typologie_name}'")
+        # Ajouter au cache
+        if self.hierarchy_cache.add_child_at_path(path, name):
+            # Ajouter au project_manager
+            if self.project_manager.add_child_label(name, self):
+                # Mettre à jour l'UI
+                item = QtWidgets.QListWidgetItem(name)
+                self.child_list.addItem(item)
+
+                depth = len(self._child_navigation_path)
+                logger.info(f"Enfant '{name}' ajouté au niveau {depth}")
+            else:
+                # Retirer du cache si échec
+                self.hierarchy_cache.remove_child_at_path(path, name)
+                QtWidgets.QMessageBox.warning(self, "Erreur",
+                    "Impossible d'ajouter l'enfant au project_manager")
+        else:
+            QtWidgets.QMessageBox.warning(self, "Erreur",
+                "Impossible d'ajouter l'enfant au cache")
+            
+    def _clear_all_caches(self):
+        """Vide tous les caches"""
+        self.hierarchy_cache.clear()
+        self._child_navigation_path.clear()
+
+        logger.debug("Cache hiérarchique vidé")
 
     def _edit_child(self):
         """Modifier un enfant"""
@@ -1696,15 +1571,24 @@ class DatasetConfigTab(QtWidgets.QWidget):
         return True
 
     def _load_project_ui(self):
-        """Load project data into UI"""
         data = self.project_manager.get_current_project_data()
         if not data:
             return
+
+        # Charger le nom du projet
         self.project_name_edit.setText(data.get('nom', ''))
+
+        # Charger les typologies depuis le cache (déjà peuplé)
         self._refresh_typologie_list()
+
+        # Activer les boutons
         self.save_btn.setEnabled(True)
         self.delete_project_btn.setEnabled(True)
+
+        # Mettre à jour l'état des boutons
         self._update_button_states()
+
+        logger.debug("Interface projet chargée")
 
     def _refresh_typologie_list(self):
         """Refresh typologies list from cache"""
@@ -1795,45 +1679,9 @@ class DatasetConfigTab(QtWidgets.QWidget):
         # Vider le cache unifié
         self.hierarchy_cache.clear()
 
-        # Vider aussi les anciens caches (compatibilité)
-        self.temp_taxonomy_cache.clear()
-        self.temp_hierarchy_cache.clear()
-        self.temp_root_cache.clear()
-        self.temp_parent_cache.clear()
-        self.temp_child_cache.clear()
-
         self.save_btn.setEnabled(False)
         self.delete_project_btn.setEnabled(False)
         self._update_button_states()
-
-    def _save_current_context_to_cache(self):
-        """
-        Sauvegarder automatiquement le contexte actuel dans le cache.
-        À appeler AVANT toute opération qui change le contexte.
-        """
-        # Sauvegarder la typologie actuelle
-        typologie_item = self.typologie_list.currentItem()
-        if not typologie_item:
-            return
-
-        typologie_name = typologie_item.text()
-
-        # Sauvegarder les clusters de taxonomie
-        self._save_taxonomy_to_cache(typologie_name)
-
-        # Sauvegarder les root labels du cluster actuel
-        taxonomy_item = self.taxonomy_list.currentItem() if hasattr(self, 'taxonomy_list') else None
-        if taxonomy_item:
-            taxonomy_name = taxonomy_item.text()
-            self._save_root_to_cache(typologie_name, taxonomy_name)
-
-            # Sauvegarder les parent labels du root actuel
-            root_item = self.root_list.currentItem()
-            if root_item:
-                root_name = root_item.text()
-                self._save_parent_to_cache(typologie_name, taxonomy_name, root_name)
-
-        logger.debug(f"Contexte sauvegardé pour typologie '{typologie_name}'")
 
     def _clear_hierarchy(self):
         """Clear label hierarchy"""
@@ -1913,10 +1761,22 @@ class DatasetConfigTab(QtWidgets.QWidget):
             else:
                 logger.info("Aucun projet trouvé dans la base de données")
             
-            if current_project in project_names:
-                self.project_combo.setCurrentText(current_project)
-            
             self.project_combo.blockSignals(False)
+            
+            # Resélectionner le projet courant et forcer le chargement
+            if current_project in project_names:
+                index = self.project_combo.findText(current_project)
+                self.project_combo.setCurrentIndex(index)
+                # Forcer le chargement même si l'index n'a pas changé
+                self._on_project_selected(index)
+            elif project_names:
+                # Si le projet courant n'existe plus, sélectionner le premier
+                self.project_combo.setCurrentIndex(0)
+                self._on_project_selected(0)
+            else:
+                # Aucun projet disponible, nettoyer l'interface
+                self._clear_ui()
+            
             self._update_button_states()
             
         except Exception as e:
@@ -1927,67 +1787,263 @@ class DatasetConfigTab(QtWidgets.QWidget):
                 f"Impossible de charger les projets: {str(e)}"
             )
 
-    def _load_child_from_cache(self):
-        """Charger les labels enfants depuis le cache - VERSION CORRIGÉE"""
-        self.child_list.clear()
-
-        cache_key = self._get_child_cache_key()
-        if not cache_key:
-            logger.debug("Impossible de déterminer la clé de cache pour les enfants")
+    def _load_project_from_db_to_cache(self):
+        """
+        Charge un projet depuis la base de données vers le cache hiérarchique
+        VERSION AVEC SYNCHRONISATION DES INDEX
+        """
+        if not self.project_manager.current_project_data:
+            logger.warning("Aucun projet à charger dans le cache")
             return
 
-        if cache_key in self.temp_child_cache:
-            # Charger depuis le cache
-            child_labels = self.temp_child_cache[cache_key]
-            for label_name in child_labels:
-                item = QtWidgets.QListWidgetItem(label_name)
-                self.child_list.addItem(item)
-            logger.debug(f"Cache child chargé: {len(child_labels)} labels à profondeur {cache_key[4]}")
-        else:
-            # Pas de cache, charger depuis la DB
-            try:
-                child_labels = self.project_manager.get_children_at_current_level()
-                for label in child_labels:
-                    item = QtWidgets.QListWidgetItem(label.get('name', ''))
-                    self.child_list.addItem(item)
+        # Vider le cache actuel
+        self.hierarchy_cache.clear()
 
-                # Sauvegarder dans le cache pour la prochaine fois
-                if child_labels:
-                    self.temp_child_cache[cache_key] = [label.get('name', '') for label in child_labels]
-                    logger.debug(f"Cache child initialisé depuis DB: {len(child_labels)} labels")
-            except Exception as e:
-                logger.error(f"Erreur lors du chargement des enfants depuis la DB: {e}")
+        project_data = self.project_manager.current_project_data
+        typologies = project_data.get('typologies', [])
 
-        self._update_breadcrumb()
+        for typ_idx, typologie in enumerate(typologies):
+            typ_name = typologie.get('name', '')
+            if not typ_name:
+                continue
+            
+            # Ajouter la typologie
+            self.hierarchy_cache.add_typologie(typ_name)
 
-    def _save_child_to_cache(self, typologie_name=None, taxonomy_name=None, root_name=None, 
-                         parent_name=None, hierarchy_path=None):
+            # Charger les clusters de taxonomie
+            taxonomy_clusters = typologie.get('taxonomy_clusters', [])
+
+            for tax_idx, cluster in enumerate(taxonomy_clusters):
+                cluster_name = cluster.get('name', '')
+                if not cluster_name:
+                    continue
+                
+                logger.debug(f"Chargement taxonomy '{cluster_name}' (index {tax_idx}) "
+                            f"pour typologie '{typ_name}' (index {typ_idx})")
+
+                # Ajouter le cluster au cache
+                path = [typ_name]
+                self.hierarchy_cache.add_child_at_path(path, cluster_name)
+
+                # Charger les root labels
+                root_labels = cluster.get('root_labels', [])
+                for root in root_labels:
+                    root_name = root.get('name', '')
+                    if not root_name:
+                        continue
+                    
+                    path = [typ_name, cluster_name]
+                    self.hierarchy_cache.add_child_at_path(path, root_name)
+
+                    # Charger les parent labels
+                    parent_labels = root.get('parent_labels', [])
+                    for parent in parent_labels:
+                        parent_name = parent.get('name', '')
+                        if not parent_name:
+                            continue
+                        
+                        path = [typ_name, cluster_name, root_name]
+                        self.hierarchy_cache.add_child_at_path(path, parent_name)
+
+                        # Charger les enfants récursivement
+                        children = parent.get('children', [])
+                        path = [typ_name, cluster_name, root_name, parent_name]
+                        self._load_children_recursive_to_cache(path, children)
+
+        logger.info(f"✓ Projet chargé dans le cache: {len(typologies)} typologie(s)")
+
+    def _has_unsaved_changes(self):
         """
-        Sauvegarder les labels enfants dans le cache
-        Accepte soit les paramètres explicites, soit utilise le contexte actuel
+        Vérifie s'il y a des modifications non sauvegardées
         """
-        if not hasattr(self, 'child_list'):
+        return self.hierarchy_cache.has_changes()
+
+    def _load_children_recursive_to_cache(self, parent_path, children_list):
+        """
+        Charge récursivement les enfants dans le cache
+
+        Args:
+            parent_path: Chemin jusqu'au parent (liste de noms)
+            children_list: Liste des enfants à charger
+        """
+        for child in children_list:
+            child_name = child.get('name', '')
+            if not child_name:
+                continue
+            
+            # Ajouter l'enfant au cache
+            self.hierarchy_cache.add_child_at_path(parent_path, child_name)
+
+            # Charger les sous-enfants récursivement
+            sub_children = child.get('children', [])
+            if sub_children:
+                child_path = parent_path + [child_name]
+                self._load_children_recursive_to_cache(child_path, sub_children)
+
+    def _prompt_save_if_needed(self):
+        """
+        Demande à l'utilisateur s'il veut sauvegarder avant de continuer
+        """
+        if self._has_unsaved_changes():
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Modifications non sauvegardées",
+                "Le projet contient des modifications non sauvegardées. Voulez-vous sauvegarder ?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel
+            )
+
+            if reply == QtWidgets.QMessageBox.Yes:
+                self._save_project()
+                return True
+            elif reply == QtWidgets.QMessageBox.Cancel:
+                return False
+
+        return True
+    
+    def _validate_hierarchy_integrity(self):
+        """
+        Valide l'intégrité de la hiérarchie cache <-> project_manager
+        Utile pour le débogage
+        """
+        try:
+            # Vérifier que toutes les typologies du cache sont dans le manager
+            cache_typologies = set(self.hierarchy_cache.get_typologies())
+            manager_typologies = set(t.get('name', '') for t in self.project_manager.get_typologies())
+
+            if cache_typologies != manager_typologies:
+                logger.warning(f"Incohérence typologies: cache={cache_typologies}, manager={manager_typologies}")
+                return False
+
+            logger.debug("Intégrité de la hiérarchie validée")
+            return True
+
+        except Exception as e:
+            logger.error(f"Erreur validation intégrité: {e}")
+            return False
+
+    def _sync_cache_to_project_manager(self):
+        """
+        Synchronise le cache hiérarchique vers le project_manager
+        À appeler avant save_project()
+        """
+        if not self.project_manager.current_project_data:
+            logger.error("Aucun projet actuel")
+            return False
+
+        # Construire la structure de données depuis le cache
+        typologies = []
+
+        for typ_name in self.hierarchy_cache.get_typologies():
+            typologie = {
+                'name': typ_name,
+                'description': '',
+                'taxonomy_clusters': []
+            }
+
+            # Récupérer les clusters de taxonomie
+            typ_path = [typ_name]
+            clusters = self.hierarchy_cache.get_children_at_path(typ_path)
+
+            for cluster_name in clusters:
+                cluster = {
+                    'name': cluster_name,
+                    'description': '',
+                    'root_labels': []
+                }
+
+                # Récupérer les root labels
+                cluster_path = [typ_name, cluster_name]
+                roots = self.hierarchy_cache.get_children_at_path(cluster_path)
+
+                for root_name in roots:
+                    root = {
+                        'name': root_name,
+                        'description': '',
+                        'category': 'default',
+                        'parent_labels': []
+                    }
+
+                    # Récupérer les parent labels
+                    root_path = [typ_name, cluster_name, root_name]
+                    parents = self.hierarchy_cache.get_children_at_path(root_path)
+
+                    for parent_name in parents:
+                        parent = {
+                            'name': parent_name,
+                            'description': '',
+                            'category': 'default',
+                            'children': []
+                        }
+
+                        # Récupérer les enfants récursivement
+                        parent_path = [typ_name, cluster_name, root_name, parent_name]
+                        parent['children'] = self._build_children_from_cache(parent_path)
+
+                        root['parent_labels'].append(parent)
+
+                    cluster['root_labels'].append(root)
+
+                typologie['taxonomy_clusters'].append(cluster)
+
+            typologies.append(typologie)
+
+        # Mettre à jour le project_manager
+        self.project_manager.current_project_data['typologies'] = typologies
+
+        logger.info(f"Cache synchronisé: {len(typologies)} typologie(s)")
+        return True
+    def _debug_print_cache(self):
+        """Affiche le contenu du cache pour debug"""
+        logger.info("=== DEBUG CACHE ===")
+        for typ_name in self.hierarchy_cache.get_typologies():
+            logger.info(f"Typologie: {typ_name}")
+            for cluster in self.hierarchy_cache.get_children_at_path([typ_name]):
+                logger.info(f"  Cluster: {cluster}")
+                for root in self.hierarchy_cache.get_children_at_path([typ_name, cluster]):
+                    logger.info(f"    Root: {root}")
+                    for parent in self.hierarchy_cache.get_children_at_path([typ_name, cluster, root]):
+                        logger.info(f"      Parent: {parent}")
+                        self._debug_print_children([typ_name, cluster, root, parent], 8)
+    
+    def _debug_print_children(self, path, indent):
+        """Affiche récursivement les enfants"""
+        children = self.hierarchy_cache.get_children_at_path(path)
+        for child in children:
+            logger.info(f"{' ' * indent}Child: {child}")
+            self._debug_print_children(path + [child], indent + 2)
+    
+    def _debug_print_project_data(self):
+        """Affiche le contenu du project_manager pour debug"""
+        logger.info("=== DEBUG PROJECT DATA ===")
+        data = self.project_manager.current_project_data
+        if not data:
+            logger.info("Aucune donnée de projet")
             return
+        
+        import json
+        logger.info(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+    
+    def _build_children_from_cache(self, parent_path):
+        children = []
+        child_names = self.hierarchy_cache.get_children_at_path(parent_path)
+        
+        for child_name in child_names:
+            child = {
+                'name': child_name,
+                'description': '',
+                'category': 'default',
+                'children': []
+            }
+            
+            # Récupérer les sous-enfants récursivement
+            child_path = parent_path + [child_name]
+            child['children'] = self._build_children_from_cache(child_path)
+            
+            children.append(child)
+        
+        return children
 
-        # Si aucun paramètre fourni, utiliser le contexte actuel
-        if typologie_name is None:
-            cache_key = self._get_child_cache_key()
-            if not cache_key:
-                return
-        else:
-            # Utiliser les paramètres fournis pour construire la clé
-            depth = self.project_manager.get_current_depth() if hasattr(self.project_manager, 'get_current_depth') else 0
-            if hierarchy_path is None:
-                hierarchy_path = self.project_manager.get_current_hierarchy_path() if hasattr(self.project_manager, 'get_current_hierarchy_path') else []
-            cache_key = (typologie_name, taxonomy_name, root_name, parent_name, depth, tuple(hierarchy_path))
 
-        child_labels = []
-        for i in range(self.child_list.count()):
-            item = self.child_list.item(i)
-            child_labels.append(item.text())
-
-        self.temp_child_cache[cache_key] = child_labels
-        logger.debug(f"Cache child sauvegardé: {len(child_labels)} labels à profondeur {cache_key[4]}")
 
     def _export_strategy(self):
         """Automatically export strategy"""

@@ -1,4 +1,5 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
+from utils.logger import logger
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QGroupBox, QLabel, QLineEdit
 from PyQt5.QtWidgets import QPushButton, QComboBox, QSpinBox, QTimeEdit, QCheckBox, QListWidget, QMessageBox
@@ -299,7 +300,7 @@ class SettingsDialog(QDialog):
             self.log_dir_input.setText(log_dir)
 
         except Exception as e:
-            QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des paramètres: {str(e)}")
+            logger.error(f"Erreur lors du chargement des données du projet: {str(e)}")
 
     def _load_platforms(self):
         """Charge la liste des plateformes"""

@@ -6,6 +6,7 @@ from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QSize, QThread, pyqtSlot
 from typing import List, Dict, Optional
 from ui.widgets.tabs.graph_widget import GraphWidget
+from PyQt5.QtGui import QColor, QBrush
 
 from utils.logger import logger
 from ui.localization.translator import tr
@@ -415,7 +416,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
         if not clusters:
             empty = QtWidgets.QTreeWidgetItem(self.tree_widget)
             empty.setText(0, "(Aucune donnée disponible)")
-            empty.setForeground(0, QtGui.QBrush(QtGui.QColor("#999999")))
+            empty.setForeground(0, QBrush(QColor("#999999")))
             return
 
         # ✅ Tracer tous les UIDs déjà affichés dans les clusters
@@ -436,7 +437,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
         logger.info(f"\n✅ Structure complète affichée")
         logger.info(f"📊 Total items: {len(self._node_cache)}")
-        logger.info(f"🔑 UIDs uniques: {len(self._uid_set)}")
+        logger.info(f"🔒 UIDs uniques: {len(self._uid_set)}")
 
     def _load_orphan_labels(self, displayed_uids: set):
         """
@@ -537,21 +538,22 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 orphan,
                 1
             )
-            orphan_item.loaded = False
-            orphan_item.is_expandable = True
+            orphan_item.loaded = True
+            orphan_item.is_expandable = False
+
+            # Ajouter éléments de code
+            self._add_all_code_elements(orphan_item, orphan, 1)
 
             # Cache
             if orphan_uid:
                 self._node_cache[orphan_uid] = orphan_item
                 self._uid_set.add(orphan_uid)
 
-            self._add_loading_placeholder(orphan_item)
-
     def _build_cluster_tree(self, cluster, cluster_idx, total_clusters):
         """
-        ✅ CORRIGÉ : Construction récursive COMPLÈTE
+        Construction récursive COMPLÈTE d'un cluster (une seule définition !)
         """
-        cluster_name = cluster.get('name', f'Cluster {cluster_idx + 1}')
+        cluster_name = cluster.get('name') or cluster.get('id') or "Cluster sans nom"
         cluster_uid = cluster.get('uid', '')
 
         logger.info(f"\n[{cluster_idx + 1}/{total_clusters}] 📦 Cluster: {cluster_name}")
@@ -577,6 +579,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
         cluster_item.is_expandable = False
         cluster_item.loaded = True
 
+        # Cache
         if cluster_uid:
             self._node_cache[cluster_uid] = cluster_item
             self._uid_set.add(cluster_uid)
@@ -600,7 +603,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 'classes': [],
                 'functions': [],
                 'variables': [],
-                'level1': []  # ✅ Ajout
+                'level1': []
             }
 
             self._build_label_tree_recursive(
@@ -614,7 +617,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
             for root_label in root_labels:
                 label_name = root_label.get('name') or root_label.get('label', '')
 
-                # ✅ Forcer type correct
+                # Forcer type correct si extension détectée
                 if self._has_extension(label_name):
                     root_label['nodeType'] = 'file'
 
@@ -626,81 +629,56 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
     def _build_label_tree_recursive(self, parent_item, label_data, level):
         """
-        ✅ NOUVELLE MÉTHODE : Construction récursive COMPLÈTE de la hiérarchie
+        ✅ Construction récursive des labels (fichiers / sous-dossiers)
         """
-        label_name = label_data.get('name') or label_data.get('label', f"Item_level_{level}")
-        label_uid = label_data.get('uid', '')
+        label_name = label_data.get("name") or label_data.get("label") or f"Label_{level}"
+        label_uid = label_data.get("uid", f"label_{uuid.uuid4()}")
 
-        indent = "  " * level
+        # ✅ S'assurer que path est présent dans item_data
+        if 'path' not in label_data and 'sourcePath' not in label_data:
+            # Essayer de construire un path depuis le parent
+            if hasattr(parent_item, 'item_data'):
+                parent_path = parent_item.item_data.get('path') or parent_item.item_data.get('sourcePath', '')
+                if parent_path:
+                    label_data['path'] = os.path.join(parent_path, label_name)
 
-        # Vérification doublon
-        if label_uid and label_uid in self._uid_set:
-            logger.debug(f"{indent}⏭️ '{label_name}' déjà affiché")
-            return None
+        # Déterminer le type de nœud
+        node_type = label_data.get("nodeType", "folder")
+        if label_name.endswith((".py", ".js", ".java", ".cpp")):
+            node_type = "file"
 
-        # Détection type
-        label_type = self._detect_item_type_improved(label_data, label_name)
-
-        if self._has_extension(label_name) and label_type != 'file':
-            logger.info(f"{indent}🔧 Correction: {label_name} -> file")
-            label_type = 'file'
-
-        logger.info(f"{indent}📄 {label_name} (type={label_type}, level={level})")
-
-        # Créer l'item
         label_item = TaxonomyItem(
             parent_item,
             label_name,
-            label_type,
+            node_type,
             label_data,
             level
         )
         label_item.loaded = True
         label_item.is_expandable = False
 
-        # Cache
         if label_uid:
             self._node_cache[label_uid] = label_item
             self._uid_set.add(label_uid)
 
-        cache_key = (label_name, level)
-        self._name_cache[cache_key] = label_item
+        # Ajouter les éléments internes (classes, fonctions, variables)
+        for cls in label_data.get("classes", []):
+            cls_item = TaxonomyItem(label_item, cls.get("name", "Classe"), "class", cls, level + 1)
+            cls_item.loaded = True
 
-        # ✅ AJOUTER ÉLÉMENTS DE CODE
-        code_stats = self._add_all_code_elements(label_item, label_data, level)
+        for func in label_data.get("functions", []):
+            func_item = TaxonomyItem(label_item, func.get("name", "Fonction"), "function", func, level + 1)
+            func_item.loaded = True
 
-        if code_stats['total'] > 0:
-            logger.info(f"{indent}  📊 Classes: {code_stats['classes']}, "
-                       f"Functions: {code_stats['functions']}, "
-                       f"Variables: {code_stats['variables']}")
+        for var in label_data.get("variables", []):
+            var_item = TaxonomyItem(label_item, var.get("name", "Variable"), "variable", var, level + 1)
+            var_item.loaded = True
 
-        # ✅ TRAITER TOUS LES NIVEAUX ENFANTS
-        # Niveau suivant direct
-        next_level_key = f'level{level}'
-        children = label_data.get(next_level_key, [])
-
-        if children:
-            logger.info(f"{indent}  👶 {len(children)} enfants niveau {level}")
+        # Charger récursivement les sous-niveaux
+        for child_level in [f"level{level}", "children", "level1", "level2", "level3"]:
+            children = label_data.get(child_level, [])
             for child in children:
-                self._build_label_tree_recursive(
-                    parent_item=label_item,
-                    label_data=child,
-                    level=level + 1
-                )
-
-        # ✅ FALLBACK : Vérifier 'children' générique
-        if not children:
-            generic_children = label_data.get('children', [])
-            if generic_children:
-                logger.info(f"{indent}  👶 {len(generic_children)} enfants génériques")
-                for child in generic_children:
-                    self._build_label_tree_recursive(
-                        parent_item=label_item,
-                        label_data=child,
-                        level=level + 1
-                    )
-
-        return label_item
+                self._build_label_tree_recursive(label_item, child, level + 1)
 
     def _build_label_tree(self, parent_item, label_data, level, idx, total):
         """
@@ -752,7 +730,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
     
     def _add_all_code_elements(self, parent_item, data, level):
         """
-        ✅ VERSION SANS FALLBACK : Affiche uniquement les éléments avec noms valides
+        ✅ VERSION FINALE CORRIGÉE
+        Affiche TOUS les éléments avec noms RÉELS (classes, fonctions, variables)
         """
         stats = {
             'classes': 0,
@@ -761,23 +740,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
             'total': 0
         }
 
-        def has_valid_name(element):
-            """Vérifie si un élément a un nom RÉEL (non vide, non None)"""
-            name = element.get('name')
-            if not name:
-                return False
-
-            name = name.strip()
-            if not name:
-                return False
-
-            # Rejeter les noms génériques/générés
-            if name.startswith(('Unnamed', 'class-', 'func-', 'var-', 'method-')):
-                return False
-
-            return True
-
-        # ✅ 1. CLASSES
+        # ========== CLASSES ==========
         classes = data.get('classes', [])
         for cls in classes:
             cls_uid = cls.get('uid', '')
@@ -786,16 +749,11 @@ class TaxonomyDialog(QtWidgets.QDialog):
             if cls_uid and cls_uid in self._uid_set:
                 continue
             
-            # ✅ STRICT : Ignorer si pas de nom valide
-            if not has_valid_name(cls):
-                logger.debug(f"   ⏭️ Classe ignorée : pas de nom valide (uid={cls_uid})")
-                continue
-            
-            cls_name = cls.get('name').strip()
+            # ✅ CORRECTION : Utiliser TaxonomyDialog.safe_get_name
+            cls_name = TaxonomyDialog.safe_get_name(cls, 'class', cls_uid)
 
             logger.debug(f"   🗂️ Classe: '{cls_name}' (uid={cls_uid})")
 
-            # Créer l'item classe
             cls_item = TaxonomyItem(
                 parent_item,
                 cls_name,
@@ -812,7 +770,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
             stats['classes'] += 1
             stats['total'] += 1
 
-            # ✅ 1.1 MÉTHODES
+            # ========== MÉTHODES ==========
             methods = cls.get('methods', [])
             for method in methods:
                 method_uid = method.get('uid', '')
@@ -820,12 +778,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 if method_uid and method_uid in self._uid_set:
                     continue
                 
-                # ✅ STRICT : Ignorer si pas de nom valide
-                if not has_valid_name(method):
-                    logger.debug(f"      ⏭️ Méthode ignorée : pas de nom valide")
-                    continue
-                
-                method_name = method.get('name').strip()
+                # ✅ CORRECTION : Utiliser TaxonomyDialog.safe_get_name
+                method_name = TaxonomyDialog.safe_get_name(method, 'method', method_uid)
 
                 logger.debug(f"      ⚙️ Méthode: '{method_name}' (uid={method_uid})")
 
@@ -842,7 +796,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     self._node_cache[method_uid] = method_item
                     self._uid_set.add(method_uid)
 
-            # ✅ 1.2 VARIABLES de la classe
+            # ========== VARIABLES DE CLASSE ==========
             cls_vars = cls.get('variables', [])
             for var in cls_vars:
                 var_uid = var.get('uid', '')
@@ -850,12 +804,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 if var_uid and var_uid in self._uid_set:
                     continue
                 
-                # ✅ STRICT : Ignorer si pas de nom valide
-                if not has_valid_name(var):
-                    logger.debug(f"      ⏭️ Variable ignorée : pas de nom valide")
-                    continue
-                
-                var_name = var.get('name').strip()
+                # ✅ CORRECTION : Utiliser TaxonomyDialog.safe_get_name
+                var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
 
                 logger.debug(f"      📦 Variable: '{var_name}' (uid={var_uid})")
 
@@ -872,7 +822,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     self._node_cache[var_uid] = var_item
                     self._uid_set.add(var_uid)
 
-        # ✅ 2. FONCTIONS
+        # ========== FONCTIONS GLOBALES ==========
         functions = data.get('functions', [])
         for func in functions:
             func_uid = func.get('uid', '')
@@ -880,12 +830,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
             if func_uid and func_uid in self._uid_set:
                 continue
             
-            # ✅ STRICT : Ignorer si pas de nom valide
-            if not has_valid_name(func):
-                logger.debug(f"   ⏭️ Fonction ignorée : pas de nom valide (uid={func_uid})")
-                continue
-            
-            func_name = func.get('name').strip()
+            # ✅ CORRECTION : Utiliser TaxonomyDialog.safe_get_name
+            func_name = TaxonomyDialog.safe_get_name(func, 'function', func_uid)
 
             logger.debug(f"   ⚙️ Fonction: '{func_name}' (uid={func_uid})")
 
@@ -905,7 +851,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
             stats['functions'] += 1
             stats['total'] += 1
 
-            # Variables de la fonction
+            # ========== VARIABLES DE FONCTION ==========
             func_vars = func.get('variables', [])
             for var in func_vars:
                 var_uid = var.get('uid', '')
@@ -913,11 +859,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 if var_uid and var_uid in self._uid_set:
                     continue
                 
-                # ✅ STRICT : Ignorer si pas de nom valide
-                if not has_valid_name(var):
-                    continue
-                
-                var_name = var.get('name').strip()
+                # ✅ CORRECTION : Utiliser TaxonomyDialog.safe_get_name
+                var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
 
                 var_item = TaxonomyItem(
                     func_item,
@@ -932,7 +875,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     self._node_cache[var_uid] = var_item
                     self._uid_set.add(var_uid)
 
-        # ✅ 3. VARIABLES GLOBALES
+        # ========== VARIABLES GLOBALES ==========
         variables = data.get('variables', [])
         for var in variables:
             var_uid = var.get('uid', '')
@@ -940,12 +883,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
             if var_uid and var_uid in self._uid_set:
                 continue
             
-            # ✅ STRICT : Ignorer si pas de nom valide
-            if not has_valid_name(var):
-                logger.debug(f"   ⏭️ Variable globale ignorée : pas de nom valide")
-                continue
-            
-            var_name = var.get('name').strip()
+            # ✅ CORRECTION : Utiliser TaxonomyDialog.safe_get_name
+            var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
 
             logger.debug(f"   📦 Variable globale: '{var_name}' (uid={var_uid})")
 
@@ -968,37 +907,26 @@ class TaxonomyDialog(QtWidgets.QDialog):
         return stats
     
     def _add_classes_to_tree(self, parent_item, data_node):
-        """✅ VERSION SANS FALLBACK"""
-
-        def has_valid_name(element):
-            """Vérifie si un élément a un nom RÉEL"""
-            name = element.get('name')
-            if not name:
-                return False
-
-            name = name.strip()
-            if not name or name.startswith(('Unnamed', 'class-', 'func-', 'var-')):
-                return False
-
-            return True
+        """
+        ✅ VERSION CORRIGÉE COMPLÈTE
+        Ajoute les classes d'un nœud à l'arbre avec leurs méthodes et variables
+        """
 
         classes = data_node.get('classes', [])
 
         for cls in classes:
             cls_uid = cls.get('uid', '')
 
+            # Vérifier doublon
             if cls_uid and cls_uid in self._uid_set:
                 continue
             
-            # ✅ Ignorer si pas de nom valide
-            if not has_valid_name(cls):
-                logger.debug(f"   ⏭️ Classe ignorée (pas de nom)")
-                continue
-            
-            cls_name = cls.get('name').strip()
+            # ✅ CORRECTION : Utiliser TaxonomyDialog.safe_get_name
+            cls_name = TaxonomyDialog.safe_get_name(cls, 'class', cls_uid)
 
             logger.debug(f"   🗂️ Classe: '{cls_name}' (uid={cls_uid})")
 
+            # ✅ Créer l'item classe
             cls_item = TaxonomyItem(parent_item, cls_name, 'class', cls, parent_item.level + 1)
             cls_item.loaded = True
 
@@ -1006,20 +934,19 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 self._node_cache[cls_uid] = cls_item
                 self._uid_set.add(cls_uid)
 
-            # ✅ MÉTHODES
+            # ========== MÉTHODES ==========
             for method in cls.get('methods', []):
                 method_uid = method.get('uid', '')
 
                 if method_uid and method_uid in self._uid_set:
                     continue
                 
-                if not has_valid_name(method):
-                    continue
-                
-                method_name = method.get('name').strip()
+                # ✅ CORRECTION : Utiliser TaxonomyDialog.safe_get_name
+                method_name = TaxonomyDialog.safe_get_name(method, 'method', method_uid)
 
                 logger.debug(f"      ⚙️ Méthode: '{method_name}' (uid={method_uid})")
 
+                # ✅ Créer l'item méthode
                 method_item = TaxonomyItem(cls_item, method_name, 'function', method, cls_item.level + 1)
                 method_item.loaded = True
 
@@ -1027,20 +954,19 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     self._node_cache[method_uid] = method_item
                     self._uid_set.add(method_uid)
 
-            # ✅ VARIABLES DE LA CLASSE
+            # ========== VARIABLES DE LA CLASSE ==========
             for var in cls.get('variables', []):
                 var_uid = var.get('uid', '')
 
                 if var_uid and var_uid in self._uid_set:
                     continue
                 
-                if not has_valid_name(var):
-                    continue
-                
-                var_name = var.get('name').strip()
+                # ✅ CORRECTION : Utiliser TaxonomyDialog.safe_get_name
+                var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
 
                 logger.debug(f"      📦 Variable: '{var_name}' (uid={var_uid})")
 
+                # ✅ Créer l'item variable
                 var_item = TaxonomyItem(cls_item, var_name, 'variable', var, cls_item.level + 1)
                 var_item.loaded = True
 
@@ -1092,8 +1018,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                   line
                   bases
                   uses_vars
-                  codeContent
-                  methods { uid name description line codeContent params returns }
+                  methods { uid name description line params returns }
                   variables { uid name description line var_type scope }
                 }
 
@@ -1104,7 +1029,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
                   line
                   params
                   returns
-                  codeContent
                   variables { uid name description line var_type scope }
                 }
 
@@ -1134,15 +1058,14 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     name
                     description
                     line
-                    methods { uid name description line codeContent}
-                    variables { uid name description line codeContent}
+                    methods { uid name description line }
+                    variables { uid name description line }
                   }
 
                   functions {
                     uid
                     name
                     description
-                    codeContent
                     line
                     variables { uid name description line }
                   }
@@ -1170,16 +1093,14 @@ class TaxonomyDialog(QtWidgets.QDialog):
                       uid
                       name
                       description
-                      codeContent
                       line
-                      methods { uid name description line codeContent }
+                      methods { uid name description line }
                     }
 
                     functions {
                       uid
                       name
                       description
-                      codeContent
                       line
                     }
 
@@ -1202,8 +1123,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
                       files
                       fileContents
 
-                      classes { uid name description line codeContent }
-                      functions { uid name description line  codeContent}
+                      classes { uid name description line }
+                      functions { uid name description line }
                       variables { uid name description line }
 
                       # ✅ NIVEAU 4
@@ -1218,8 +1139,8 @@ class TaxonomyDialog(QtWidgets.QDialog):
                         files
                         fileContents
 
-                        classes { uid name description line codeContent }
-                        functions { uid name description line codeContent }
+                        classes { uid name description line }
+                        functions { uid name description line }
                         variables { uid name description line }
                       }
                     }
@@ -1277,18 +1198,6 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
                 clusters = list(clusters_dict.values())
                 logger.info(f"📦 {len(clusters)} clusters chargés avec hiérarchie complète.")
-
-                # ✅ DEBUG : Afficher structure
-                for cluster in clusters[:3]:  # Premiers 3 clusters
-                    logger.info(f"\n📦 Cluster: {cluster.get('name')}")
-                    for root in cluster.get('root_labels', [])[:5]:
-                        logger.info(f"  📄 Root: {root.get('name')}")
-                        level1 = root.get('level1', [])
-                        logger.info(f"    └─ {len(level1)} enfants niveau 1")
-                        for l1 in level1[:3]:
-                            logger.info(f"      📁 {l1.get('name')}")
-                            level2 = l1.get('level2', [])
-                            logger.info(f"        └─ {len(level2)} enfants niveau 2")
 
                 return clusters
 
@@ -1610,12 +1519,9 @@ class TaxonomyDialog(QtWidgets.QDialog):
     
     def _detect_item_type_improved(self, item_data, item_name):
         """✅ Détection robuste du type d'élément avec priorité aux fichiers"""
-
-        # 1. PRIORITÉ : Vérifier extension de fichier EN PREMIER
         if self._has_extension(item_name):
             return "file"
 
-        # 2. Vérifier nodeType explicite
         node_type = item_data.get('nodeType', '').lower()
         if node_type:
             type_mapping = {
@@ -1632,23 +1538,19 @@ class TaxonomyDialog(QtWidgets.QDialog):
             if node_type in type_mapping:
                 return type_mapping[node_type]
 
-        # 3. Vérifier type explicite
         item_type = item_data.get('type', '').lower()
         if item_type in ['file', 'folder', 'directory', 'function', 'class', 'variable']:
             return item_type if item_type != 'directory' else 'folder'
 
-        # 4. Vérifier category
         categories = item_data.get('category', [])
         if 'file' in categories:
             return "file"
         if 'folder' in categories or 'directory' in categories:
             return "folder"
 
-        # 5. Vérifier présence de 'files' ou 'fileContents' (indique un fichier)
         if item_data.get('files') or item_data.get('fileContents'):
             return "file"
 
-        # 6. Défaut selon présence d'enfants ou code
         has_children = (
             len(item_data.get('children', [])) > 0 or
             len(item_data.get('classes', [])) > 0 or
@@ -1909,31 +1811,26 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     self._build_complete_tree(root_item, {'root_labels': [child]})
 
     def _add_functions_to_tree(self, parent_item, data_node):
-        """✅ VERSION SANS FALLBACK"""
-
-        def has_valid_name(element):
-            name = element.get('name')
-            if not name:
-                return False
-            name = name.strip()
-            return bool(name) and not name.startswith(('Unnamed', 'func-', 'method-'))
+        """
+        ✅ VERSION CORRIGÉE COMPLÈTE
+        Ajoute les fonctions d'un nœud à l'arbre avec leurs variables
+        """
 
         functions = data_node.get('functions', [])
 
         for func in functions:
             func_uid = func.get('uid', '')
 
+            # Vérifier doublon
             if func_uid and func_uid in self._uid_set:
                 continue
             
-            if not has_valid_name(func):
-                logger.debug(f"   ⏭️ Fonction ignorée (pas de nom)")
-                continue
-            
-            func_name = func.get('name').strip()
+            # ✅ Récupérer le nom de la FONCTION (pas de la classe !)
+            func_name = TaxonomyDialog.safe_get_name(func, 'function', func_uid)
 
             logger.debug(f"   ⚙️ Fonction: '{func_name}' (uid={func_uid})")
 
+            # ✅ Créer l'item fonction
             func_item = TaxonomyItem(parent_item, func_name, 'function', func, parent_item.level + 1)
             func_item.loaded = True
 
@@ -1941,20 +1838,19 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 self._node_cache[func_uid] = func_item
                 self._uid_set.add(func_uid)
 
-            # ✅ Variables de la fonction
+            # ========== VARIABLES DE LA FONCTION ==========
             for var in func.get('variables', []):
                 var_uid = var.get('uid', '')
 
                 if var_uid and var_uid in self._uid_set:
                     continue
                 
-                if not has_valid_name(var):
-                    continue
-                
-                var_name = var.get('name').strip()
+                # ✅ Récupérer le nom de la VARIABLE (pas de la classe !)
+                var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
 
                 logger.debug(f"      📦 Variable: '{var_name}' (uid={var_uid})")
 
+                # ✅ Créer l'item variable
                 var_item = TaxonomyItem(func_item, var_name, 'variable', var, func_item.level + 1)
                 var_item.loaded = True
 
@@ -1964,31 +1860,26 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
 
     def _add_variables_to_tree(self, parent_item, data_node):
-        """✅ VERSION SANS FALLBACK"""
-
-        def has_valid_name(element):
-            name = element.get('name')
-            if not name:
-                return False
-            name = name.strip()
-            return bool(name) and not name.startswith(('Unnamed', 'var-'))
+        """
+        ✅ VERSION CORRIGÉE COMPLÈTE
+        Ajoute les variables d'un nœud à l'arbre
+        """
 
         variables = data_node.get('variables', [])
 
         for var in variables:
             var_uid = var.get('uid', '')
 
+            # Vérifier doublon
             if var_uid and var_uid in self._uid_set:
                 continue
             
-            if not has_valid_name(var):
-                logger.debug(f"   ⏭️ Variable ignorée (pas de nom)")
-                continue
-            
-            var_name = var.get('name').strip()
+            # ✅ Récupérer le nom de la VARIABLE (pas de la classe !)
+            var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
 
             logger.debug(f"   📦 Variable: '{var_name}' (uid={var_uid})")
 
+            # ✅ Créer l'item variable
             var_item = TaxonomyItem(parent_item, var_name, 'variable', var, parent_item.level + 1)
             var_item.loaded = True
 
@@ -2352,54 +2243,63 @@ class TaxonomyDialog(QtWidgets.QDialog):
         if not isinstance(item, TaxonomyItem):
             return
 
-        # Si déjà chargé, rien à faire
-        if item.loaded:
-            return
+        # ✅ CORRECTION : Vérifier loaded APRÈS avoir identifié le type
+        # Si déjà chargé ET a des enfants réels, rien à faire
+        if item.loaded and item.childCount() > 0:
+            # Vérifier que ce n'est pas juste un placeholder
+            first_child = item.child(0)
+            if first_child and first_child.text(0) != "⏳ Chargement...":
+                return
 
-        # Marquer comme chargé pour éviter réentrance
+        # Marquer comme chargé
         item.loaded = True
 
         # Retirer le placeholder s'il existe
         self._remove_placeholder(item)
 
         try:
-            # Si c'est un cluster racine (level == 0) : charger tout le contenu du cluster
+            item_type = getattr(item, 'item_type', None)
+            item_name = item.text(0)
+
+            # ✅ CORRECTION : Forcer la détection du type
+            if item_type is None:
+                item_type = 'file' if self._has_extension(item_name) else 'folder'
+
+            logger.info(f"📂 Expansion: {item_name} (type={item_type}, level={item.level})")
+
+            # Si c'est un cluster racine (level == 0)
             if getattr(item, 'level', None) == 0 and item.item_data:
-                logger.info(f"Expansion cluster: {item.text(0)} -> chargement complet")
+                logger.info(f"  → Chargement cluster")
                 self._load_cluster_content(item)
                 return
 
-            # Si c'est un dossier (folder) : charger ses enfants (récursif)
-            typ = getattr(item, 'item_type', None) or getattr(item, 'type', None) or item.data if hasattr(item, 'data') else None
-            # On se base plutôt sur l'item_type stocké dans TaxonomyItem (si impl.).
-            item_type = getattr(item, 'item_type', None)
-            if item_type is None:
-                # fallback : détecter via nom
-                item_type = 'file' if self._has_extension(item.text(0)) else 'folder'
-
-            if item_type == 'folder':
-                logger.info(f"Expansion dossier: {item.text(0)} -> _load_folder_children")
-                self._load_folder_children(item)
-                return
-
-            # Si c'est un fichier : charger son contenu (classes/fonctions/variables)
+            # Si c'est un fichier : charger classes/fonctions/variables
             if item_type == 'file':
-                logger.info(f"Expansion fichier: {item.text(0)} -> _load_file_content")
+                logger.info(f"  → Chargement contenu fichier")
                 self._load_file_content(item)
                 return
 
-            # Par défaut, tenter un chargement détaillé si l'item possède un uid
+            # Si c'est un dossier : charger ses enfants
+            if item_type == 'folder':
+                logger.info(f"  → Chargement enfants dossier")
+                self._load_folder_children(item)
+                return
+
+            # Fallback par UID
             uid = item.item_data.get('uid') if getattr(item, 'item_data', None) else None
             if uid:
-                logger.info(f"Expansion par UID: {item.text(0)} uid={uid}")
+                logger.info(f"  → Chargement par UID: {uid}")
                 self._load_item_detailed_content(item, uid)
+
         except Exception as e:
-            logger.warning(f"Erreur lors de l'expansion de {item.text(0)}: {e}")
+            logger.error(f"❌ Erreur expansion {item.text(0)}: {e}")
+            import traceback
+            traceback.print_exc()
 
 
     def _load_file_content(self, file_item):
         """
-        ✅ VERSION CORRIGÉE : Recharge TOUJOURS depuis Dgraph pour avoir le code
+        ✅ VERSION CORRIGÉE : Recharge TOUJOURS depuis Dgraph + Noms JAMAIS génériques
         """
         file_data = file_item.item_data
         file_name = file_data.get('name') or file_data.get('label', 'Unknown')
@@ -2417,53 +2317,29 @@ class TaxonomyDialog(QtWidgets.QDialog):
             else:
                 logger.warning(f"   ⚠️ Impossible de recharger depuis Dgraph")
 
-        # Validation stricte
-        def has_valid_name(element):
-            name = element.get('name')
-            if not name:
-                return False
-            name = name.strip()
-            return bool(name) and not name.startswith(('Unnamed', 'class-', 'func-', 'var-', 'method-'))
-
         # Récupérer éléments de code
         classes = file_data.get('classes', [])
         functions = file_data.get('functions', [])
         variables = file_data.get('variables', [])
 
-        # ✅ VÉRIFIER que le code est présent
-        for cls in classes:
-            if has_valid_name(cls):
-                code_check = cls.get('codeContent', '')
-                if code_check:
-                    logger.debug(f"   ✓ Classe '{cls['name']}' : {len(code_check)} chars")
-                else:
-                    logger.warning(f"   ⚠️ Classe '{cls['name']}' : AUCUN code")
-
-        for func in functions:
-            if has_valid_name(func):
-                code_check = func.get('codeContent', '')
-                if code_check:
-                    logger.debug(f"   ✓ Fonction '{func['name']}' : {len(code_check)} chars")
-                else:
-                    logger.warning(f"   ⚠️ Fonction '{func['name']}' : AUCUN code")
-
-        # ✅ CLASSES avec méthodes
+        # ========== CLASSES ==========
         for cls in classes:
             cls_uid = cls.get('uid', '')
 
+            # Vérifier doublon
             if cls_uid and cls_uid in self._uid_set:
                 continue
             
-            if not has_valid_name(cls):
-                continue
-            
-            cls_name = cls.get('name').strip()
+            # ✅ UTILISER safe_get_name au lieu de validation stricte
+            cls_name = TaxonomyDialog.safe_get_name(cls, 'class', cls_uid)
+
+            logger.info(f"   🗂️ Classe: '{cls_name}' (uid={cls_uid})")
 
             cls_item = TaxonomyItem(
                 file_item,
-                cls_name,
+                cls_name,  # ✅ Toujours un nom RÉEL
                 'class',
-                cls,  # ✅ Contient maintenant codeContent
+                cls,
                 file_item.level + 1
             )
             cls_item.loaded = True
@@ -2472,23 +2348,23 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 self._node_cache[cls_uid] = cls_item
                 self._uid_set.add(cls_uid)
 
-            # Méthodes
+            # ✅ MÉTHODES
             for method in cls.get('methods', []):
                 method_uid = method.get('uid', '')
 
                 if method_uid and method_uid in self._uid_set:
                     continue
                 
-                if not has_valid_name(method):
-                    continue
-                
-                method_name = method.get('name').strip()
+                # ✅ UTILISER safe_get_name
+                method_name = TaxonomyDialog.safe_get_name(method, 'method', method_uid)
+
+                logger.info(f"      ⚙️ Méthode: '{method_name}' (uid={method_uid})")
 
                 method_item = TaxonomyItem(
                     cls_item,
-                    method_name,
+                    method_name,  # ✅ Toujours un nom RÉEL
                     'function',
-                    method,  # ✅ Contient maintenant codeContent
+                    method,
                     cls_item.level + 1
                 )
                 method_item.loaded = True
@@ -2497,23 +2373,45 @@ class TaxonomyDialog(QtWidgets.QDialog):
                     self._node_cache[method_uid] = method_item
                     self._uid_set.add(method_uid)
 
-        # ✅ FONCTIONS
+                # Variables de la méthode
+                for var in method.get('variables', []):
+                    var_uid = var.get('uid', '')
+
+                    if var_uid and var_uid in self._uid_set:
+                        continue
+                    
+                    var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
+
+                    var_item = TaxonomyItem(
+                        method_item,
+                        var_name,
+                        'variable',
+                        var,
+                        method_item.level + 1
+                    )
+                    var_item.loaded = True
+
+                    if var_uid:
+                        self._node_cache[var_uid] = var_item
+                        self._uid_set.add(var_uid)
+
+        # ========== FONCTIONS ==========
         for func in functions:
             func_uid = func.get('uid', '')
 
             if func_uid and func_uid in self._uid_set:
                 continue
             
-            if not has_valid_name(func):
-                continue
-            
-            func_name = func.get('name').strip()
+            # ✅ UTILISER safe_get_name
+            func_name = TaxonomyDialog.safe_get_name(func, 'function', func_uid)
+
+            logger.info(f"   ⚙️ Fonction: '{func_name}' (uid={func_uid})")
 
             func_item = TaxonomyItem(
                 file_item,
-                func_name,
+                func_name,  # ✅ Toujours un nom RÉEL
                 'function',
-                func,  # ✅ Contient maintenant codeContent
+                func,
                 file_item.level + 1
             )
             func_item.loaded = True
@@ -2522,21 +2420,42 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 self._node_cache[func_uid] = func_item
                 self._uid_set.add(func_uid)
 
-        # ✅ VARIABLES (pas de code pour elles)
+            # Variables de la fonction
+            for var in func.get('variables', []):
+                var_uid = var.get('uid', '')
+
+                if var_uid and var_uid in self._uid_set:
+                    continue
+                
+                var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
+
+                var_item = TaxonomyItem(
+                    func_item,
+                    var_name,
+                    'variable',
+                    var,
+                    func_item.level + 1
+                )
+                var_item.loaded = True
+
+                if var_uid:
+                    self._node_cache[var_uid] = var_item
+                    self._uid_set.add(var_uid)
+
+        # ========== VARIABLES GLOBALES ==========
         for var in variables:
             var_uid = var.get('uid', '')
 
             if var_uid and var_uid in self._uid_set:
                 continue
             
-            if not has_valid_name(var):
-                continue
-            
-            var_name = var.get('name').strip()
+            var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
+
+            logger.info(f"   📦 Variable: '{var_name}' (uid={var_uid})")
 
             var_item = TaxonomyItem(
                 file_item,
-                var_name,
+                var_name,  # ✅ Toujours un nom RÉEL
                 'variable',
                 var,
                 file_item.level + 1
@@ -2548,6 +2467,71 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 self._uid_set.add(var_uid)
 
         logger.info(f"   ✅ {file_item.childCount()} éléments ajoutés")
+
+    @staticmethod
+    def safe_get_name(item_data: dict, item_type: str, uid: str = None) -> str:
+        """
+        ✅ Retourne TOUJOURS un nom valide pour un élément de code.
+
+        Args:
+            item_data: Dictionnaire contenant les données de l'élément
+            item_type: Type d'élément ('class', 'function', 'variable', 'method')
+            uid: UID de l'élément (optionnel)
+
+        Returns:
+            Nom valide (jamais générique comme "Classe" ou "Fonction")
+        """
+        # 1️⃣ Essayer TOUS les champs de nom possibles
+        name_fields = ['name', 'label', 'id', 'functionName', 'className', 'variableName']
+        for field in name_fields:
+            name = item_data.get(field, '').strip()
+            if name and not name.startswith(('Unnamed', 'class-', 'func-', 'var-', 'method-', 'N/A', 'Element')):
+                # Nettoyer les préfixes de type
+                name = name.replace('Function: ', '').replace('Method: ', '').replace('Class: ', '').replace('Variable: ', '').strip()
+                if name:  # Vérifier qu'il reste quelque chose après nettoyage
+                    return name
+
+        # 2️⃣ Essayer description courte
+        description = item_data.get('description', '').strip()
+        if description and len(description) < 50 and '\n' not in description:
+            return description
+
+        # 3️⃣ Utiliser ligne + type (ex: "Func_L42")
+        line = item_data.get('line')
+        if line:
+            type_prefix = {
+                'class': 'Class',
+                'function': 'Func',
+                'method': 'Method',
+                'variable': 'Var'
+            }.get(item_type, 'Element')
+            return f"{type_prefix}_L{line}"
+
+        # 4️⃣ Utiliser UID court
+        if not uid:
+            uid = item_data.get('uid', '')
+
+        if uid and len(uid) > 8:
+            suffix = uid[-8:]
+            type_map = {
+                'class': 'Classe',
+                'function': 'Fonction',
+                'method': 'Méthode',
+                'variable': 'Variable'
+            }
+            prefix = type_map.get(item_type, 'Element')
+            return f"{prefix}_{suffix}"
+
+        # 5️⃣ DERNIER RECOURS : Hash de l'objet
+        suffix = f"{id(item_data) & 0xFFFFFF:06x}"
+        type_map = {
+            'class': 'Classe',
+            'function': 'Fonction',
+            'method': 'Méthode',
+            'variable': 'Variable'
+        }
+        prefix = type_map.get(item_type, 'Element')
+        return f"{prefix}_{suffix}"
 
     def _fetch_file_complete_data(self, file_uid: str) -> Optional[Dict]:
         """
@@ -2927,21 +2911,16 @@ class TaxonomyDialog(QtWidgets.QDialog):
 
         # ✅ CONSTRUCTION DE L'ARBRE avec données rechargées
         def has_valid_name(element):
-            """Validation stricte"""
+            """Validation simple : vérifie juste qu'il y a un nom"""
             name = element.get('name')
-            if not name:
-                return False
-            name = name.strip()
-            if not name or name.startswith(('Unnamed', 'class-', 'func-', 'var-', 'method-')):
-                return False
-            return True
+            return bool(name and name.strip())
 
         # ✅ CLASSES
         classes = [cls for cls in complete_data.get('classes', []) if has_valid_name(cls)]
         if classes:
             logger.info(f"   🗂️ {len(classes)} classes valides")
             for cls in classes:
-                cls_name = cls.get('name').strip()
+                cls_name = TaxonomyDialog.safe_get_name(cls, 'class', cls_uid)
                 cls_uid = cls.get('uid', '')
 
                 if cls_uid and cls_uid in self._uid_set:
@@ -2964,7 +2943,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
                 # ✅ MÉTHODES
                 methods = [m for m in cls.get('methods', []) if has_valid_name(m)]
                 for method in methods:
-                    method_name = method.get('name').strip()
+                    method_name = TaxonomyDialog.safe_get_name(method, 'method', method_uid)
                     method_uid = method.get('uid', '')
 
                     if method_uid and method_uid in self._uid_set:
@@ -2988,7 +2967,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
         if functions:
             logger.info(f"   ⚙️ {len(functions)} fonctions valides")
             for func in functions:
-                func_name = func.get('name').strip()
+                func_name = TaxonomyDialog.safe_get_name(func, 'function', func_uid)
                 func_uid = func.get('uid', '')
 
                 if func_uid and func_uid in self._uid_set:
@@ -3010,7 +2989,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
         # ✅ VARIABLES
         variables = [v for v in complete_data.get('variables', []) if has_valid_name(v)]
         for var in variables:
-            var_name = var.get('name').strip()
+            var_name = TaxonomyDialog.safe_get_name(var, 'variable', var_uid)
             var_uid = var.get('uid', '')
 
             if var_uid and var_uid in self._uid_set:
@@ -5526,6 +5505,38 @@ class TaxonomyDialog(QtWidgets.QDialog):
         details_html += "</div>"
         self.description_text.setHtml(details_html)
 
+    def _build_project_tree(self):
+        """
+        ✅ CORRIGÉ : Construit l'arbre du projet avec tous les clusters
+        """
+        self.tree_widget.clear()
+        if not self.current_project_data:
+            return
+
+        cm = self.current_project_data.get('clusterManagement', {})
+
+        self._node_cache.clear()
+        self._name_cache.clear()
+        self._uid_set.clear()
+
+        seen_uids = set()
+        clusters = cm.get('clusters', [])
+        total_clusters = len(clusters)
+
+        logger.info(f"🗂️ Construction de l'arbre avec {total_clusters} clusters")
+
+        for cluster_idx, cluster in enumerate(clusters):
+            cluster_uid = cluster.get('uid')
+            if cluster_uid in seen_uids:
+                continue
+            seen_uids.add(cluster_uid)
+
+            self._build_cluster_tree(cluster, cluster_idx, total_clusters)
+
+        self.tree_widget.expandAll()
+        self._load_taxonomy_structure()
+        logger.info(f"✅ Arbre construit: {len(self._uid_set)} éléments uniques")
+
     def     get_selected_taxonomy(self):
         """
         ✅ VERSION FINALE : Retourne les taxonomies avec CODE COMPLET + PATH
@@ -6103,7 +6114,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
             codeContent
             docstring
             line
-
+        
             # Classes (directes + inverses)
             classes {{
               uid
@@ -6111,46 +6122,70 @@ class TaxonomyDialog(QtWidgets.QDialog):
               description
               line
               codeContent
-
+        
               methods {{
                 uid
                 name
                 description
                 line
                 codeContent
+                
+                # 🆕 AJOUT : Variables de méthode
+                variables {{
+                  uid
+                  name
+                  description
+                  line
+                  var_type
+                  scope
+                }}
               }}
-
+        
               variables {{
                 uid
                 name
                 description
                 line
+                var_type
+                scope
               }}
             }}
-
+        
             ~classes {{
               uid
               name
               description
               line
               codeContent
-
+        
               methods {{
                 uid
                 name
                 description
                 line
                 codeContent
+                
+                # 🆕 AJOUT : Variables de méthode
+                variables {{
+                  uid
+                  name
+                  description
+                  line
+                  var_type
+                  scope
+                }}
               }}
-
+        
               variables {{
                 uid
                 name
                 description
                 line
+                var_type
+                scope
               }}
             }}
-
+        
             # Fonctions (directes + inverses)
             functions {{
               uid
@@ -6158,16 +6193,36 @@ class TaxonomyDialog(QtWidgets.QDialog):
               description
               line
               codeContent
+              
+              # 🆕 AJOUT : Variables de fonction
+              variables {{
+                uid
+                name
+                description
+                line
+                var_type
+                scope
+              }}
             }}
-
+        
             ~functions {{
               uid
               name
               description
               line
               codeContent
+              
+              # 🆕 AJOUT : Variables de fonction
+              variables {{
+                uid
+                name
+                description
+                line
+                var_type
+                scope
+              }}
             }}
-
+        
             # Variables
             variables {{
               uid
@@ -6175,7 +6230,7 @@ class TaxonomyDialog(QtWidgets.QDialog):
               description
               line
             }}
-
+        
             ~variables {{
               uid
               name

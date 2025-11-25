@@ -233,8 +233,6 @@ class MainWindow(QMainWindow):
         self._init_statusbar()
         self._init_connections()
 
-        self.dataset_generator = DatasetGenerator(self.dataset_strategy, self.dataset_generation)
-        integrate_generation_button(self.dataset_generation, self.dataset_strategy)
 
         self._restore_settings()
 
@@ -256,6 +254,10 @@ class MainWindow(QMainWindow):
     def _init_components(self):
         """Initialise les composants principaux"""
         print("   - Création des widgets principaux...")
+
+        self.last_export_path = ""
+
+        # Panels principaux
         self.coding_panel = CodingPanel()
         self.brainstorming_panel = BrainstormingPanel()
         self.audit_panel = AuditPanel()
@@ -263,12 +265,24 @@ class MainWindow(QMainWindow):
         self.dataset_table = DatasetTable()
         self.prompt_list = PromptList()
 
-        self.dataset_generation = DatasetGeneratorWidget()
-        self.dataset_strategy = DatasetStrategyWidget()
+        # IDE et Dashboard
         self.ide_panel = IDEPanel()
         self.ide_dialog_instance = None
         self.dashboard_panel = None
 
+        # ✅ Widgets Data Science
+        #self.dataset_strategy = DatasetStrategyWidget()
+        #self.dataset_generation = DatasetGeneratorWidget()
+
+        self.dataset_generation = None
+        self.dataset_strategy = DatasetStrategyWidget()
+
+        # ✅ Instances de dialogues
+        self.project_config_dialog_instance = None
+        self.dashboard_dialog_instance = None
+        self.dataset_config_dialog_instance = None  # ← AJOUT IMPORTANT
+
+        # Barre de progression
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setMaximum(100)
@@ -276,6 +290,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
 
+        # Labels de statut
         self.status_label = QtWidgets.QLabel(tr("status.ready"))
         self.status_label.setStyleSheet(
             f"color: {Theme.PRIMARY_COLOR}; font-weight: bold;"
@@ -336,12 +351,12 @@ class MainWindow(QMainWindow):
                 background: white;
                 margin-top: 0px;
             }}
-
+    
             QTabBar {{
                 background: white;
                 border: none;
             }}
-
+    
             QTabBar::tab {{
                 background: #F5F5F5;
                 color: {Theme.TEXT_COLOR};
@@ -353,10 +368,11 @@ class MainWindow(QMainWindow):
                 margin-bottom: 4px;
                 font-weight: 500;
                 font-size: 13px;
-                min-width: 80px;
+                min-width: 120px;  /* Largeur minimale fixe */
+                max-width: 180px;  /* Largeur maximale fixe */
                 min-height: 36px;
             }}
-
+    
             QTabBar::tab:selected {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                              stop:0 {Theme.PRIMARY_COLOR}, 
@@ -364,12 +380,12 @@ class MainWindow(QMainWindow):
                 color: white;
                 font-weight: 600;
             }}
-
+    
             QTabBar::tab:hover:!selected {{
                 background: #EBEBEB;
                 color: {Theme.PRIMARY_COLOR};
             }}
-
+    
             QTabBar::tab:first {{
                 margin-left: 10px;
             }}
@@ -412,13 +428,9 @@ class MainWindow(QMainWindow):
             elif widget == self.brainstorming_panel:
                 self.tab_widget.setTabText(i, tr("brainstorming_tab"))
             elif widget == self.audit_panel:
-                self.tab_widget.setTabText(i, "Audit")
-            elif widget == self.dataset_strategy:
-                self.tab_widget.setTabText(i, "Stratégie")
-            elif widget == self.dataset_generation:
-                self.tab_widget.setTabText(i, "Génération")
+                self.tab_widget.setTabText(i, tr("audit_tab"))
             elif widget == self.prompt_list:
-                self.tab_widget.setTabText(i, "Historique")
+                self.tab_widget.setTabText(i, tr("history_tab"))
 
     def set_conductor(self, conductor):
         """Set the conductor for all relevant widgets"""
@@ -436,13 +448,12 @@ class MainWindow(QMainWindow):
 
         if state == 0:
             self.tab_widget.addTab(self.coding_panel, tr("coding_tab"))
-            self.tab_widget.addTab(self.audit_panel, "Audit")
+            self.tab_widget.addTab(self.audit_panel, tr("audit_tab"))
             self.tab_widget.setCurrentIndex(0)
 
         elif state == 1:
-            self.tab_widget.addTab(self.dataset_strategy, "📊 Stratégie")
-            self.tab_widget.addTab(self.dataset_generation, "🚀 Génération")
-            self.tab_widget.addTab(self.prompt_list, "📜 Historique")
+            self.tab_widget.addTab(self.dataset_strategy, tr("strategy_tab"))
+            self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
             self.tab_widget.setCurrentIndex(0)
 
         self._update_tab_texts()
@@ -453,7 +464,6 @@ class MainWindow(QMainWindow):
 
         # Menu Fichier
         file_menu = menubar.addMenu(tr("file"))
-
         new_action = QtWidgets.QAction(tr("new"), self)
         new_action.setShortcut("Ctrl+N")
         new_action.triggered.connect(self._on_new_file)
@@ -483,7 +493,6 @@ class MainWindow(QMainWindow):
 
         # Menu Édition
         edit_menu = menubar.addMenu(tr("edit"))
-
         settings_action = QtWidgets.QAction(tr("preferences"), self)
         settings_action.triggered.connect(self._on_settings)
         edit_menu.addAction(settings_action)
@@ -497,14 +506,12 @@ class MainWindow(QMainWindow):
         refresh_action.triggered.connect(self._on_refresh)
         edit_menu.addAction(refresh_action)
 
-        # Menu IA (avec Clé API déplacé ici)
+        # Menu IA
         ai_menu = menubar.addMenu(tr("ai"))
-
         platforms_action = QtWidgets.QAction(tr("platforms"), self)
         platforms_action.triggered.connect(self._on_show_platforms)
         ai_menu.addAction(platforms_action)
 
-        # DÉPLACÉ: Gestion des clés API dans le menu IA
         manage_api_keys_action = QtWidgets.QAction(tr("manage_api_keys"), self)
         manage_api_keys_action.setShortcut("Ctrl+K")
         manage_api_keys_action.triggered.connect(self._on_manage_api_keys)
@@ -520,9 +527,8 @@ class MainWindow(QMainWindow):
         compare_action.triggered.connect(self._on_compare_ai)
         ai_menu.addAction(compare_action)
 
-        # NOUVEAU: Menu IDE (remplace l'ancien menu Clé API)
+        # Menu IDE
         ide_menu = menubar.addMenu("IDE")
-
         code_editor_action = QtWidgets.QAction("Éditeur de code", self)
         code_editor_action.triggered.connect(self._on_open_code_editor)
         ide_menu.addAction(code_editor_action)
@@ -537,20 +543,23 @@ class MainWindow(QMainWindow):
         project_explorer_action.triggered.connect(self._on_open_project_explorer)
         ide_menu.addAction(project_explorer_action)
 
-        # Menu Brainstorming
-        brainstorming_menu = menubar.addMenu("Brainstorming")
-        open_brainstorming_action = QtWidgets.QAction("Ouvrir Brainstorming", self)
-        open_brainstorming_action.triggered.connect(self._on_open_brainstorming)
-        brainstorming_menu.addAction(open_brainstorming_action)
+        # ❌ SUPPRIMÉ: Menu Brainstorming
 
-        # Menu Config
-        turing_menu = menubar.addMenu("Config")
+        # ✅ Menu Config - AJOUT de "Config Projet Data Science"
+        config_menu = menubar.addMenu("Config")
 
         config_projects_dev_action = QtWidgets.QAction(
             "Configuration projets dev", self
         )
         config_projects_dev_action.triggered.connect(self._on_show_project_config)
-        turing_menu.addAction(config_projects_dev_action)
+        config_menu.addAction(config_projects_dev_action)
+
+        # ✅ NOUVEAU: Config Projet Data Science
+        config_dataset_action = QtWidgets.QAction(
+            "Configuration projets data science", self
+        )
+        config_dataset_action.triggered.connect(self._on_show_dataset_config)
+        config_menu.addAction(config_dataset_action)
 
         # Menu Update avec icône couronne
         premium_action = QtWidgets.QAction(
@@ -564,7 +573,6 @@ class MainWindow(QMainWindow):
 
         # Menu Aide
         help_menu = menubar.addMenu(tr("help"))
-
         about_action = QtWidgets.QAction(tr("about"), self)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
@@ -572,6 +580,111 @@ class MainWindow(QMainWindow):
         docs_action = QtWidgets.QAction(tr("documentation"), self)
         docs_action.triggered.connect(self._on_documentation)
         help_menu.addAction(docs_action)
+
+    def _on_show_dataset_config(self):
+        """Ouvre la fenêtre de configuration Data Science avec dimensions responsives"""
+        if not self.conductor:
+            QMessageBox.warning(
+                self,
+                "Configuration Data Science",
+                tr("system_not_initialized")
+            )
+            return
+
+        try:
+            if not self.dataset_config_dialog_instance:
+                self.dataset_config_dialog_instance = QtWidgets.QDialog(self)
+                self.dataset_config_dialog_instance.setWindowTitle(
+                    "Configuration Projets Data Science"
+                )
+
+                # Dimensions responsives
+                screen = QtWidgets.QApplication.desktop().screenGeometry()
+                dialog_width = min(1400, int(screen.width() * 0.85))
+                dialog_height = min(900, int(screen.height() * 0.85))
+                self.dataset_config_dialog_instance.setMinimumSize(
+                    max(1000, int(screen.width() * 0.6)),
+                    max(700, int(screen.height() * 0.6))
+                )
+                self.dataset_config_dialog_instance.resize(dialog_width, dialog_height)
+                self.dataset_config_dialog_instance.setModal(False)
+
+                dialog_layout = QtWidgets.QVBoxLayout(
+                    self.dataset_config_dialog_instance
+                )
+                dialog_layout.setContentsMargins(0, 0, 0, 0)
+
+                # ✅ CRÉER le widget ICI
+                from ui.widgets.dataset_generator_widget import DatasetGeneratorWidget
+
+                self.dataset_generation = DatasetGeneratorWidget(
+                    conductor=self.conductor,
+                    parent=self.dataset_config_dialog_instance
+                )
+                self.dataset_generation.setSizePolicy(
+                    QtWidgets.QSizePolicy.Expanding,
+                    QtWidgets.QSizePolicy.Expanding
+                )
+
+                # Configurer le widget
+                if self.conductor:
+                    platforms = self.conductor.get_available_platforms()
+                    self.dataset_generation.set_conductor(self.conductor)
+                    self.dataset_generation.set_platforms(platforms)
+                    if self.database:
+                        self.dataset_generation.set_database(self.database)
+
+                dialog_layout.addWidget(self.dataset_generation)
+
+                # ✅ INTÉGRER LE BOUTON DE GÉNÉRATION ICI (après création du widget)
+                if hasattr(self, 'dataset_strategy') and self.dataset_strategy:
+                    from ui.widgets.dataset_generator import DatasetGenerator, integrate_generation_button
+
+                    # Créer le générateur
+                    self.dataset_generator = DatasetGenerator(
+                        self.dataset_strategy, 
+                        self.dataset_generation
+                    )
+
+                    # Intégrer le bouton
+                    integrate_generation_button(self.dataset_generation, self.dataset_strategy)
+
+                    logger.info("✅ Bouton de génération intégré avec succès")
+                else:
+                    logger.warning("⚠️ dataset_strategy non disponible pour integrate_generation_button")
+
+                self.dataset_config_dialog_instance.finished.connect(
+                    self._on_dataset_config_dialog_closed
+                )
+
+                # Centrer le dialogue
+                self._center_dialog(self.dataset_config_dialog_instance)
+
+                # Stocker la référence
+                self.dataset_config_widget_ref = self.dataset_generation
+
+            # Rafraîchir le widget s'il existe déjà
+            if self.dataset_generation and hasattr(self.dataset_generation, "refresh"):
+                self.dataset_generation.refresh()
+
+            self.dataset_config_dialog_instance.show()
+            self.dataset_config_dialog_instance.raise_()
+            self.dataset_config_dialog_instance.activateWindow()
+
+            logger.info("Fenêtre de configuration Data Science ouverte")
+
+        except Exception as e:
+            logger.error(f"Erreur lors de l'ouverture de la config Data Science: {str(e)}")
+            QMessageBox.critical(
+                self,
+                tr("error"),
+                f"Impossible d'ouvrir la configuration Data Science:\n\n{str(e)}"
+            )
+
+    def _on_dataset_config_dialog_closed(self, result):
+        """Gère la fermeture de la boîte de dialogue DatasetConfig"""
+        self.dataset_config_dialog_instance = None
+        logger.info("Fenêtre de configuration Data Science fermée.")
 
     def _on_manage_api_keys(self):
         """Ouvre le DashboardPanel avec dimensions responsives"""
@@ -918,23 +1031,28 @@ class MainWindow(QMainWindow):
 
     def _notify_language_change(self):
         """Notifie les widgets enfants du changement de langue"""
-        for panel in [
+        panels = [
             self.coding_panel,
             self.brainstorming_panel,
             self.annotation_form,
             self.dataset_table,
-            self.dataset_generation,
             self.prompt_list,
-        ]:
-            if hasattr(panel, "update_language"):
+        ]
+        
+        # ✅ Ajouter dataset_generation seulement s'il existe
+        if self.dataset_generation:
+            panels.append(self.dataset_generation)
+        
+        for panel in panels:
+            if panel and hasattr(panel, "update_language"):
                 panel.update_language()
-
+    
         if hasattr(self.dataset_strategy, "update_language"):
             self.dataset_strategy.update_language()
-
+    
         if self.dashboard_panel and hasattr(self.dashboard_panel, "update_language"):
             self.dashboard_panel.update_language()
-
+    
         if self.project_config_dialog_instance and isinstance(
                 self.project_config_dialog_instance, QtWidgets.QDialog
         ):
@@ -947,23 +1065,11 @@ class MainWindow(QMainWindow):
     def _restore_settings(self):
         """Restaure les paramètres utilisateur"""
         settings = QSettings("Liris", "IACollaborative")
-
+        
         if settings.contains("geometry"):
             self.restoreGeometry(settings.value("geometry"))
         if settings.contains("windowState"):
             self.restoreState(settings.value("windowState"))
-
-        last_mode = int(settings.value("last_mode", 0))
-        last_index = int(settings.value("last_index", 0))
-        self.mode_switch.setState(last_mode)
-        QTimer.singleShot(300, lambda: self.tab_widget.setCurrentIndex(last_index) if last_index < self.tab_widget.count() else None)
-
-        if settings.contains("lastExportPath"):
-            self.last_export_path = settings.value(
-                "lastExportPath", os.path.expanduser("~")
-            )
-        else:
-            self.last_export_path = os.path.expanduser("~")
 
     def _save_settings(self):
         """Sauvegarde les paramètres utilisateur"""
@@ -1045,10 +1151,6 @@ class MainWindow(QMainWindow):
         self.brainstorming_panel.set_conductor(self.conductor)
         self.brainstorming_panel.set_platforms(platforms)
 
-        self.dataset_generation.set_conductor(self.conductor)
-        self.dataset_generation.set_platforms(platforms)
-        self.dataset_generation.set_database(self.database)
-        
         self.audit_panel.set_conductor(self.conductor)
         self.audit_panel.set_platforms(platforms)
 
@@ -1066,15 +1168,6 @@ class MainWindow(QMainWindow):
 
         self.prompt_list.refresh_list()
         self.dataset_table.refresh_list()
-
-        if self.project_config_dialog_instance and isinstance(
-                self.project_config_dialog_instance, QtWidgets.QDialog
-        ):
-            for child in self.project_config_dialog_instance.findChildren(
-                    ProjectConfigOnlyWidget
-            ):
-                if hasattr(child, "refresh"):
-                    child.refresh()
 
     def update_status(self, message):
         """Met à jour le message de la barre d'état"""
@@ -1310,21 +1403,12 @@ class MainWindow(QMainWindow):
             if self.conductor:
                 platforms = self.conductor.get_available_platforms()
 
-                if platforms:
-                    self.platform_label.setText(
-                        tr("messages.platforms_available", count=len(platforms))
-                    )
-                else:
-                    self.platform_label.setText(tr("messages.no_platforms"))
+                # ... code existant ...
 
-                self.coding_panel.set_conductor(self.conductor)
-                self.coding_panel.set_platforms(platforms)
-
-                self.brainstorming_panel.set_conductor(self.conductor)
-                self.brainstorming_panel.set_platforms(platforms)
-
-                self.dataset_generation.set_conductor(self.conductor)
-                self.dataset_generation.set_platforms(platforms)
+                # ✅ VÉRIFIER si dataset_generation existe
+                if self.dataset_generation:
+                    self.dataset_generation.set_conductor(self.conductor)
+                    self.dataset_generation.set_platforms(platforms)
 
             logger.info(f"Configuration des plateformes mise à jour: {platform_name}")
             self.update_status(f"Plateforme {platform_name} mise à jour")
@@ -1430,12 +1514,11 @@ class MainWindow(QMainWindow):
                     self.conductor.refresh_configurations()
                 self.show_progress(40)
 
+            # ❌ SUPPRIMÉ: dataset_strategy et dataset_generation
             widgets_to_refresh = [
                 self.coding_panel,
                 self.brainstorming_panel,
                 self.audit_panel,
-                self.dataset_strategy,
-                self.dataset_generation,
                 self.prompt_list,
                 self.dataset_table
             ]
@@ -1451,6 +1534,14 @@ class MainWindow(QMainWindow):
                         widget.refresh_list()
                 current_progress += progress_step
                 self.show_progress(int(current_progress))
+
+            # Rafraîchir le dialogue dataset config si ouvert
+            if self.dataset_config_dialog_instance:
+                for child in self.dataset_config_dialog_instance.findChildren(
+                        DatasetGeneratorWidget
+                ):
+                    if hasattr(child, 'refresh'):
+                        child.refresh()
 
             if self.dashboard_panel and self.dashboard_dialog_instance:
                 if hasattr(self.dashboard_panel, 'refresh'):
@@ -1490,8 +1581,13 @@ class MainWindow(QMainWindow):
         else:
             self.platform_label.setText(tr("messages.no_platforms"))
 
-        for panel in [self.coding_panel, self.brainstorming_panel, 
-                      self.dataset_generation, self.audit_panel]:
+        # ✅ VÉRIFIER l'existence avant d'utiliser
+        panels_to_update = [self.coding_panel, self.brainstorming_panel, self.audit_panel]
+
+        if self.dataset_generation:
+            panels_to_update.append(self.dataset_generation)
+
+        for panel in panels_to_update:
             if panel and hasattr(panel, 'set_platforms'):
                 panel.set_platforms(platforms)
 

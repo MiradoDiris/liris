@@ -1216,7 +1216,6 @@ class DatasetStrategyWidget(QtWidgets.QWidget):
             logger.info(f"Chargé {len(projects)} projets")
         except Exception as e:
             logger.error(f"Erreur chargement projets : {str(e)}")
-            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement des projets : {str(e)}")
 
     def _get_project_id(self):
         project_name = self.project_combo.currentText()
@@ -1628,7 +1627,6 @@ class DatasetStrategyWidget(QtWidgets.QWidget):
                 logger.debug(f"Batches chargés pour projet ID {project_id} : {json.dumps(self.batch_data, indent=2)}")
         except Exception as e:
             logger.error(f"Erreur chargement batches pour projet ID {project_id} : {str(e)}")
-            QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement des batches : {str(e)}")
 
     def _save_batch_data(self, project_id):
         try:
@@ -1656,6 +1654,46 @@ class DatasetStrategyWidget(QtWidgets.QWidget):
             logger.error(f"Erreur sauvegarde batches pour projet ID {project_id} : {str(e)}")
             QtWidgets.QMessageBox.critical(self, "Erreur", f"Erreur lors de la sauvegarde des batches : {str(e)}")
             return False
+        
+    def save_batch(self, project_name, batch_number, total_batches, batch_data):
+        """Sauvegarde un batch de données"""
+        try:
+            cursor = self.connection.cursor()
+
+            # Récupérer l'ID du projet
+            cursor.execute("SELECT id FROM projects WHERE name = ?", (project_name,))
+            project_row = cursor.fetchone()
+
+            if not project_row:
+                logger.error(f"Projet '{project_name}' non trouvé")
+                return False
+
+            project_id = project_row['id']
+
+            # Sérialiser les données du batch
+            data_json = json.dumps(batch_data, ensure_ascii=False)
+
+            # Insérer ou mettre à jour le batch
+            cursor.execute("""
+                INSERT INTO batches (project_id, batch_number, total_batches, data, status)
+                VALUES (?, ?, ?, ?, 'pending')
+                ON CONFLICT(project_id, batch_number) 
+                DO UPDATE SET 
+                    data = excluded.data,
+                    total_batches = excluded.total_batches,
+                    status = 'pending',
+                    created_at = CURRENT_TIMESTAMP
+            """, (project_id, batch_number, total_batches, data_json))
+
+            self.connection.commit()
+            logger.info(f"Batch {batch_number}/{total_batches} sauvegardé pour '{project_name}'")
+            return True
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la sauvegarde du batch: {str(e)}")
+            return False
+        
+        
 
     def get_project_data_for_generation(self):
         if not self.project_data or not self.batch_data:

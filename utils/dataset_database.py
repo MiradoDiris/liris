@@ -158,6 +158,25 @@ class DatasetDatabase:
                 )
             ''')
 
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS batches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    batch_number INTEGER NOT NULL,
+                    total_batches INTEGER NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    data TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP,
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                    UNIQUE(project_id, batch_number)
+                )
+            ''')
+            
+            # Index pour optimiser les requêtes
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_batches_project ON batches(project_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status)')
+
             # Index pour optimiser les requêtes
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_typologies_project ON typologies(project_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_taxonomy_typologie ON taxonomy_clusters(typologie_id)')
@@ -173,8 +192,154 @@ class DatasetDatabase:
         except Exception as e:
             logger.error(f"Erreur lors de la création des tables : {str(e)}")
             raise e
+        
+    def save_batch(self, project_name, batch_number, total_batches, batch_data):
+        """Sauvegarde un batch de données"""
+        try:
+            cursor = self.connection.cursor()
 
-    # ========== GESTION DES PROJETS ==========
+            # Récupérer l'ID du projet
+            cursor.execute("SELECT id FROM projects WHERE name = ?", (project_name,))
+            project_row = cursor.fetchone()
+
+            if not project_row:
+                logger.error(f"Projet '{project_name}' non trouvé")
+                return False
+
+            project_id = project_row['id']
+
+            # Sérialiser les données du batch
+            data_json = json.dumps(batch_data, ensure_ascii=False)
+
+            # Insérer ou mettre à jour le batch
+            cursor.execute("""
+                INSERT INTO batches (project_id, batch_number, total_batches, data, status)
+                VALUES (?, ?, ?, ?, 'pending')
+                ON CONFLICT(project_id, batch_number) 
+                DO UPDATE SET 
+                    data = excluded.data,
+                    total_batches = excluded.total_batches,
+                    status = 'pending',
+                    created_at = CURRENT_TIMESTAMP
+            """, (project_id, batch_number, total_batches, data_json))
+
+            self.connection.commit()
+            logger.info(f"Batch {batch_number}/{total_batches} sauvegardé pour '{project_name}'")
+            return True
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la sauvegarde du batch: {str(e)}")
+            return False
+        
+    def get_batch(self, project_name, batch_number):
+        """Récupère un batch spécifique"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT b.* FROM batches b
+                JOIN projects p ON b.project_id = p.id
+                WHERE p.name = ? AND b.batch_number = ?
+            """, (project_name, batch_number))
+
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            return {
+                'id': row['id'],
+                'batch_number': row['batch_number'],
+                'total_batches': row['total_batches'],
+                'status': row['status'],
+                'data': json.loads(row['data']),
+                'created_at': row['created_at'],
+                'processed_at': row['processed_at']
+            }
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération du batch: {str(e)}")
+            return None
+        
+    def get_all_batches(self, project_name):
+        """Récupère tous les batches d'un projet"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT b.* FROM batches b
+                JOIN projects p ON b.project_id = p.id
+                WHERE p.name = ?
+                ORDER BY b.batch_number
+            """, (project_name,))
+
+            batches = []
+            for row in cursor.fetchall():
+                batches.append({
+                    'id': row['id'],
+                    'batch_number': row['batch_number'],
+                    'total_batches': row['total_batches'],
+                    'status': row['status'],
+                    'data': json.loads(row['data']),
+                    'created_at': row['created_at'],
+                    'processed_at': row['processed_at']
+                })
+
+            return batches
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des batches: {str(e)}")
+            return []
+
+    def update_batch_status(self, project_name, batch_number, status):
+        """Met à jour le statut d'un batch"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                UPDATE batches 
+                SET status = ?,
+                    processed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE processed_at END
+                WHERE project_id = (SELECT id FROM projects WHERE name = ?)
+                AND batch_number = ?
+            """, (status, status, project_name, batch_number))
+
+            self.connection.commit()
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la mise à jour du statut: {str(e)}")
+            return False
+        
+    def delete_batch(self, project_name, batch_number):
+        """Supprime un batch spécifique"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                DELETE FROM batches 
+                WHERE project_id = (SELECT id FROM projects WHERE name = ?)
+                AND batch_number = ?
+            """, (project_name, batch_number))
+
+            self.connection.commit()
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la suppression du batch: {str(e)}")
+            return False
+        
+    def delete_all_batches(self, project_name):
+        """Supprime tous les batches d'un projet"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                DELETE FROM batches 
+                WHERE project_id = (SELECT id FROM projects WHERE name = ?)
+            """, (project_name,))
+            
+            self.connection.commit()
+            logger.info(f"Tous les batches de '{project_name}' supprimés")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la suppression des batches: {str(e)}")
+            return False
 
     def get_dataset_projet(self, project_name):
         """Récupère un projet complet avec toute sa hiérarchie"""
