@@ -3,6 +3,7 @@ import logging
 import os
 import sqlite3
 from datetime import datetime
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +18,20 @@ class DatasetDatabase:
     """
 
     def __init__(self, db_path="data/liris.db"):
-        self.db_path = os.path.join("data", db_path)
+        # Déterminer le répertoire de base
+        if getattr(sys, 'frozen', False):
+            # Mode PyInstaller : utiliser le répertoire de l'exe
+            base_path = os.path.dirname(sys.executable)
+        else:
+            # Mode développement : utiliser le répertoire du script
+            base_path = os.path.dirname(os.path.abspath(__file__))
+
+        # Créer le chemin complet
+        self.db_path = os.path.join(base_path, db_path)
+
+        # Créer le répertoire si nécessaire
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+
         self.connection = None
         self._init_connection()
         self._create_tables()

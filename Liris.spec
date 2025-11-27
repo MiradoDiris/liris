@@ -38,6 +38,8 @@ a = Analysis(
         'utils.dgraph_project_manager',
         'utils.multi_language_parser',
         'utils.complete_call_resolver',
+        'utils.dataset_database',
+        'utils.dataset_project_manager'
         
         # UI widgets
         'ui.widgets.tabs.project_config_widget',

@@ -27,6 +27,7 @@ from ui.widgets.dataset_generator import DatasetGenerator, integrate_generation_
 from ui.widgets.dashboard_panel import DashboardPanel
 
 from ui.widgets.dataset_strategy import DatasetStrategyWidget
+from ui.widgets.dataset_generation import DatasetGenerationPanel
 import qtawesome as qta
 
 from ui.widgets.project_config_only_widget import (
@@ -276,6 +277,7 @@ class MainWindow(QMainWindow):
 
         self.dataset_generation = None
         self.dataset_strategy = DatasetStrategyWidget()
+        self.dataset_generation = DatasetGenerationPanel()
 
         # ✅ Instances de dialogues
         self.project_config_dialog_instance = None
@@ -452,6 +454,7 @@ class MainWindow(QMainWindow):
             self.tab_widget.setCurrentIndex(0)
 
         elif state == 1:
+            self.tab_widget.addTab(self.dataset_generation, tr("generation_tab"))
             self.tab_widget.addTab(self.dataset_strategy, tr("strategy_tab"))
             self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
             self.tab_widget.setCurrentIndex(0)
