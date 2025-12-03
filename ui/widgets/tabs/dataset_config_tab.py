@@ -10,6 +10,8 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from ui.localization.translator import tr
 from ui.styles.theme import Theme
 from utils.hierarchy_cache import HierarchyCache
+from PyQt5.QtWidgets import QScrollArea
+
 
 from utils.logger import logger
 
@@ -36,40 +38,52 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
     def _get_full_path(self) -> list:
         """
-        Construire le chemin complet actuel:
+        Construire le chemin complet actuel - VERSION CORRIGÉE
         [typologie, cluster, root, parent, child1, child2, ...]
         """
         path = []
-        
+
         typ_item = self.typologie_list.currentItem()
         if typ_item:
             path.append(typ_item.text())
         else:
+            logger.debug("Pas de typologie sélectionnée")
             return path
-        
+
         if hasattr(self, 'taxonomy_list'):
             tax_item = self.taxonomy_list.currentItem()
             if tax_item:
                 path.append(tax_item.text())
             else:
+                logger.debug("Pas de taxonomy sélectionnée")
                 return path
-        
+
         root_item = self.root_list.currentItem()
         if root_item:
             path.append(root_item.text())
         else:
+            logger.debug("Pas de root sélectionné")
             return path
-        
+
         parent_item = self.parent_list.currentItem()
         if parent_item:
-            path.append(parent_item.text())
+            parent_display = parent_item.text()
+            # CORRECTION CRITIQUE: Extraire le nom sans compteur
+            if " (" in parent_display:
+                parent_name = parent_display.split(" (")[0]
+            else:
+                parent_name = parent_display
+            path.append(parent_name)
         else:
+            logger.debug("Pas de parent sélectionné")
             return path
-        
-        # Ajouter le chemin de navigation dans les enfants
+
+        # Ajouter le chemin de navigation dans les enfants (déjà sans compteurs)
         path.extend(self._child_navigation_path)
-        
+
+        logger.debug(f"Chemin complet construit: {' > '.join(path)}")
         return path
+
     
     def _get_parent_path(self) -> list:
         """Chemin jusqu'au parent (excluant la navigation enfants)"""
@@ -79,13 +93,21 @@ class DatasetConfigTab(QtWidgets.QWidget):
         return path
     
     def _sync_list_to_cache(self, list_widget: QtWidgets.QListWidget, 
-                        parent_path: list):
-        """Synchroniser une liste UI vers le cache"""
+                    parent_path: list):
+        """Synchroniser une liste UI vers le cache - VERSION CORRIGÉE"""
         if not parent_path:
+            logger.warning("Chemin parent vide pour sync")
             return
 
-        items = [list_widget.item(i).text() 
-                 for i in range(list_widget.count())]
+        items = []
+        for i in range(list_widget.count()):
+            item_display = list_widget.item(i).text()
+            # CORRECTION: Extraire le nom sans compteur
+            if " (" in item_display:
+                item_name = item_display.split(" (")[0]
+            else:
+                item_name = item_display
+            items.append(item_name)
 
         # Obtenir les enfants actuels du cache
         cached = self.hierarchy_cache.get_children_at_path(parent_path)
@@ -99,14 +121,39 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
 
     def _load_list_from_cache(self, list_widget: QtWidgets.QListWidget,
-                               parent_path: list):
-        """Charger une liste UI depuis le cache"""
+                           parent_path: list):
+        """Charger une liste UI depuis le cache avec comptage des enfants"""
         list_widget.clear()
         children = self.hierarchy_cache.get_children_at_path(parent_path)
+
+        # Déterminer si on charge des parents (niveau 3 = parent)
+        is_parent_level = len(parent_path) == 3
+
         for name in children:
-            item = QtWidgets.QListWidgetItem(name)
+            if is_parent_level:
+                # Compter les enfants de ce parent
+                child_path = parent_path + [name]
+                child_count = len(self.hierarchy_cache.get_children_at_path(child_path))
+                display_name = f"{name} ({child_count})"
+            else:
+                display_name = name
+
+            item = QtWidgets.QListWidgetItem(display_name)
             list_widget.addItem(item)
+
         logger.debug(f"Chargé {len(children)} éléments pour {' > '.join(parent_path) if parent_path else 'racine'}")
+
+    def _refresh_parent_counts(self):
+        """Rafraîchir les compteurs d'enfants pour tous les parents visibles"""
+        typ_item = self.typologie_list.currentItem()
+        tax_item = self.taxonomy_list.currentItem() if hasattr(self, 'taxonomy_list') else None
+        root_item = self.root_list.currentItem()
+
+        if not (typ_item and tax_item and root_item):
+            return
+
+        path = [typ_item.text(), tax_item.text(), root_item.text()]
+        self._load_list_from_cache(self.parent_list, path)
 
     def _get_current_cache_path(self):
         """
@@ -136,27 +183,82 @@ class DatasetConfigTab(QtWidgets.QWidget):
             return (typologie_name, taxonomy_name, root_name, None)
         
         parent_name = parent_item.text()
-        
+
         return (typologie_name, taxonomy_name, root_name, parent_name)
 
     def _load_children_from_cache(self):
-        """
-        Charge les enfants au niveau actuel depuis le cache - VERSION CORRIGÉE
-        """
-        self.child_list.clear()
+        logger.debug("=" * 60)
+        logger.debug("DÉBUT _load_children_from_cache")
+        logger.debug("=" * 60)
 
+        # Vider la liste
+        logger.debug(f"Nombre d'items avant clear: {self.child_list.count()}")
+        self.child_list.clear()
+        logger.debug(f"Nombre d'items après clear: {self.child_list.count()}")
+
+        # Construire le chemin
         path = self._get_full_path()
-        if len(path) < 4:  # Besoin au minimum jusqu'au parent
-            logger.debug("Chemin incomplet pour charger les enfants")
+
+        logger.debug(f"Chemin complet obtenu: {path}")
+        logger.debug(f"Longueur du chemin: {len(path)}")
+        logger.debug(f"Navigation enfants actuelle: {self._child_navigation_path}")
+
+        # Vérifier validité du chemin
+        if len(path) < 4:
+            logger.warning(f"⚠️ Chemin incomplet (longueur {len(path)}): {path}")
+            logger.debug("Détails des sélections:")
+            logger.debug(f"  - Typologie: {self.typologie_list.currentItem().text() if self.typologie_list.currentItem() else 'None'}")
+            logger.debug(f"  - Taxonomy: {self.taxonomy_list.currentItem().text() if self.taxonomy_list.currentItem() else 'None'}")
+            logger.debug(f"  - Root: {self.root_list.currentItem().text() if self.root_list.currentItem() else 'None'}")
+            logger.debug(f"  - Parent: {self.parent_list.currentItem().text() if self.parent_list.currentItem() else 'None'}")
             return
 
+        logger.debug(f"✓ Chemin valide: {' > '.join(path)}")
+
+        # Récupérer les enfants du cache
+        logger.debug(f"Appel hierarchy_cache.get_children_at_path({path})")
         children = self.hierarchy_cache.get_children_at_path(path)
-        for name in children:
-            item = QtWidgets.QListWidgetItem(name)
+
+        logger.debug(f"✓ Enfants trouvés dans le cache: {children}")
+        logger.debug(f"✓ Nombre d'enfants: {len(children)}")
+
+        # Ajouter chaque enfant à la liste UI
+        for idx, name in enumerate(children):
+            logger.debug(f"  Traitement enfant {idx + 1}/{len(children)}: '{name}'")
+
+            # Compter les sous-enfants
+            child_path = path + [name]
+            logger.debug(f"    Chemin enfant: {' > '.join(child_path)}")
+
+            subchildren = self.hierarchy_cache.get_children_at_path(child_path)
+            subchild_count = len(subchildren)
+            logger.debug(f"    Sous-enfants: {subchild_count} ({subchildren})")
+
+            # Créer le nom d'affichage
+            if subchild_count > 0:
+                display_name = f"{name} ({subchild_count})"
+            else:
+                display_name = name
+
+            logger.debug(f"    Nom d'affichage: '{display_name}'")
+
+            # Ajouter à la liste UI
+            item = QtWidgets.QListWidgetItem(display_name)
             self.child_list.addItem(item)
+            logger.debug(f"    ✓ Ajouté à child_list")
+
+        # Vérification finale
+        final_count = self.child_list.count()
+        logger.debug(f"✓ Total d'items dans child_list: {final_count}")
+
+        if final_count != len(children):
+            logger.error(f"⚠️ INCOHÉRENCE: {len(children)} dans cache mais {final_count} dans UI!")
 
         depth = len(self._child_navigation_path)
-        logger.debug(f"Enfants chargés (niveau {depth}): {len(children)}")
+        logger.debug(f"Profondeur actuelle: {depth}")
+        logger.debug("=" * 60)
+        logger.debug("FIN _load_children_from_cache")
+        logger.debug("=" * 60)
 
     def _get_or_create_cache_structure(self, typologie_name, taxonomy_name=None, 
                                        root_name=None, parent_name=None):
@@ -192,53 +294,70 @@ class DatasetConfigTab(QtWidgets.QWidget):
         return self.temp_hierarchy_cache[typologie_name][taxonomy_name][root_name][parent_name]
 
     def _init_ui(self):
-        """Create configuration tab"""
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(15, 15, 15, 15)
+        """Create configuration tab with responsive design"""
+        # Container principal avec scroll
+        main_container = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(main_container)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
 
         columns_layout = QtWidgets.QHBoxLayout()
-        columns_layout.setSpacing(15)
-        
+        columns_layout.setSpacing(10)
+
         left_layout = self._create_left_column()
         left_widget = QtWidgets.QWidget()
         left_widget.setLayout(left_layout)
-        left_widget.setMinimumWidth(250)
+        # Largeur confortable pour la colonne gauche
+        left_widget.setMinimumWidth(220)
+        left_widget.setMaximumWidth(350)
         left_widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
         columns_layout.addWidget(left_widget, 3)
 
         right_layout = self._create_right_column()
         right_widget = QtWidgets.QWidget()
         right_widget.setLayout(right_layout)
+        right_widget.setMinimumWidth(350)  # Réduit de 400 à 350
         right_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         columns_layout.addWidget(right_widget, 7)
 
         layout.addLayout(columns_layout)
         self._create_action_buttons(layout)
 
+        # Envelopper dans un QScrollArea
+        scroll = QScrollArea()
+        scroll.setWidget(main_container)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+
+        final_layout = QtWidgets.QVBoxLayout(self)
+        final_layout.setContentsMargins(0, 0, 0, 0)
+        final_layout.addWidget(scroll)
+
     def _create_left_column(self):
-        """Create left column (project selection and details)"""
+        """Create left column (project selection and details) - responsive"""
         left_layout = QtWidgets.QVBoxLayout()
-        left_layout.setSpacing(15)
+        left_layout.setSpacing(10)
 
         project_group = self._create_modern_group(tr("dataset.select_project"))
         project_layout = QtWidgets.QVBoxLayout(project_group)
 
         self.project_combo = QtWidgets.QComboBox()
         self.project_combo.setStyleSheet(self._get_modern_input_style())
-        self.project_combo.setMinimumHeight(35)
+        self.project_combo.setMinimumHeight(32)
         self.project_combo.currentIndexChanged.connect(self._on_project_selected)
         project_layout.addWidget(self.project_combo)
 
         btn_layout = QtWidgets.QHBoxLayout()
-        btn_layout.setSpacing(6)
-        
+        btn_layout.setSpacing(4)
+
         self.add_project_btn = self._create_compact_button(tr("dataset.new_project"), self._add_project)
         self.delete_project_btn = self._create_compact_button(tr("dataset.delete_project"), self._delete_project)
-        
+
         self.add_project_btn.setEnabled(True)
         self.delete_project_btn.setEnabled(False)
-        
+
         btn_layout.addWidget(self.add_project_btn)
         btn_layout.addWidget(self.delete_project_btn)
         btn_layout.addStretch()
@@ -249,62 +368,61 @@ class DatasetConfigTab(QtWidgets.QWidget):
         details_group = self._create_modern_group(tr("dataset.project_details"))
         details_group.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
         details_layout = QtWidgets.QFormLayout(details_group)
-        details_layout.setSpacing(10)
+        details_layout.setSpacing(8)
 
         self.project_name_edit = QtWidgets.QLineEdit()
         self.project_name_edit.setPlaceholderText(tr("dataset.project_name_placeholder"))
         self.project_name_edit.setStyleSheet(self._get_modern_input_style())
-        self.project_name_edit.setMinimumHeight(35)
+        self.project_name_edit.setMinimumHeight(32)
         details_layout.addRow(tr("dataset.project_name"), self.project_name_edit)
 
         typologie_section = self._create_typologie_section()
         details_layout.addRow(typologie_section)
 
         left_layout.addWidget(details_group)
-        
+
         return left_layout
 
     def _create_typologie_section(self):
-        """Create typologies section"""
+        """Create typologies section - responsive with grid buttons"""
         container = QtWidgets.QWidget()
         container.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
         layout = QtWidgets.QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        
+        layout.setSpacing(6)
+
         title = QtWidgets.QLabel(tr("dataset.typologies"))
-        title.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 13px;")
+        title.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 12px;")
         layout.addWidget(title)
 
         self.typologie_list = QtWidgets.QListWidget()
         self.typologie_list.setStyleSheet(self._get_modern_list_style())
         self.typologie_list.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
-        self.typologie_list.setMinimumHeight(100)
+        self.typologie_list.setMinimumHeight(80)
         self.typologie_list.currentItemChanged.connect(self._on_typologie_selected)
         layout.addWidget(self.typologie_list)
 
         btn_container = QtWidgets.QWidget()
-        btn_layout = QtWidgets.QHBoxLayout(btn_container)
+        btn_layout = QtWidgets.QGridLayout(btn_container)
         btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(4)
-        
+        btn_layout.setSpacing(3)
+
         self.add_typologie_btn = self._create_compact_button(tr("dataset.add"), self._add_typologie)
         self.edit_typologie_btn = self._create_compact_button(tr("dataset.edit"), self._edit_typologie)
         self.remove_typologie_btn = self._create_compact_button(tr("dataset.delete"), self._remove_typologie)
-        
+
         self.add_typologie_btn.setEnabled(False)
         self.edit_typologie_btn.setEnabled(False)
         self.remove_typologie_btn.setEnabled(False)
-        
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.add_typologie_btn)
-        btn_layout.addWidget(self.edit_typologie_btn)
-        btn_layout.addWidget(self.remove_typologie_btn)
-        
+
+        # Disposition en grille 2x2
+        btn_layout.addWidget(self.add_typologie_btn, 0, 0)
+        btn_layout.addWidget(self.edit_typologie_btn, 0, 1)
+        btn_layout.addWidget(self.remove_typologie_btn, 1, 0, 1, 2)  # S'étend sur 2 colonnes
+
         layout.addWidget(btn_container)
 
         return container
-
     
     def _load_initial_data(self):
         """Charge les données initiales"""
@@ -327,13 +445,19 @@ class DatasetConfigTab(QtWidgets.QWidget):
                 f"Impossible de charger les projets: {str(e)}"
             )
 
+    def resizeEvent(self, event):
+        """Handle resize to switch between horizontal and vertical layouts"""
+        super().resizeEvent(event)
+        width = self.width()
+        pass
+
     def _create_right_column(self):
-        """Create right column (hierarchy in 2x2 grid)"""
+        """Create right column (hierarchy in 2x2 grid) - responsive"""
         layout = QtWidgets.QVBoxLayout()
-        layout.setSpacing(15)
+        layout.setSpacing(10)
 
         grid = QtWidgets.QGridLayout()
-        grid.setSpacing(15)
+        grid.setSpacing(10)
         grid.setContentsMargins(0, 0, 0, 0)
 
         taxonomy_widget = self._create_label_section('taxonomy', tr("dataset.taxonomy_clusters"))
@@ -354,20 +478,20 @@ class DatasetConfigTab(QtWidgets.QWidget):
         grid.setColumnStretch(1, 1)
 
         layout.addLayout(grid)
-        
+
         return layout
 
     def _create_label_section(self, level, title):
-        """Create a label section with list and CRUD buttons"""
+        """Create a label section with list and CRUD buttons - responsive single line"""
         group = self._create_modern_group(title)
         group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         layout = QtWidgets.QVBoxLayout(group)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
 
         list_widget = QtWidgets.QListWidget()
         list_widget.setStyleSheet(self._get_modern_list_style())
         list_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        list_widget.setMinimumHeight(120)
+        list_widget.setMinimumHeight(100)
         layout.addWidget(list_widget)
 
         if level == 'taxonomy':
@@ -383,7 +507,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
         btn_container = QtWidgets.QWidget()
         btn_layout = QtWidgets.QHBoxLayout(btn_container)
         btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(4)
+        btn_layout.setSpacing(2)
 
         add_btn = self._create_compact_button(tr("dataset.add"), lambda: self._add_label(level))
         edit_btn = self._create_compact_button(tr("dataset.edit"), lambda: self._edit_label(level))
@@ -400,54 +524,55 @@ class DatasetConfigTab(QtWidgets.QWidget):
         delete_btn.setEnabled(False)
         category_btn.setEnabled(False)
 
-        btn_layout.addStretch()
-        btn_layout.addWidget(add_btn)
-        btn_layout.addWidget(edit_btn)
-        btn_layout.addWidget(delete_btn)
-        btn_layout.addWidget(category_btn)
-        
+        # Tous les boutons ont le même poids pour se partager l'espace
+        btn_layout.addWidget(add_btn, 1)
+        btn_layout.addWidget(edit_btn, 1)
+        btn_layout.addWidget(delete_btn, 1)
+        btn_layout.addWidget(category_btn, 1)
+
         layout.addWidget(btn_container)
 
         return group
 
     def _create_dynamic_child_section(self):
-        """Create dynamic child section with breadcrumb navigation"""
+        """Create dynamic child section with breadcrumb navigation - responsive single line"""
         group = self._create_modern_group(tr("dataset.child_labels"))
         group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         layout = QtWidgets.QVBoxLayout(group)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
 
         breadcrumb_container = QtWidgets.QWidget()
         breadcrumb_layout = QtWidgets.QHBoxLayout(breadcrumb_container)
         breadcrumb_layout.setContentsMargins(0, 0, 0, 0)
-        breadcrumb_layout.setSpacing(4)
+        breadcrumb_layout.setSpacing(3)
 
         self.breadcrumb_label = QtWidgets.QLabel(tr("dataset.root"))
         self.breadcrumb_label.setStyleSheet("""
             color: #7f8c8d;
-            font-size: 11px;
+            font-size: 10px;
             font-family: 'Segoe UI', Arial, sans-serif;
-            padding: 4px 8px;
+            padding: 3px 6px;
             background-color: #f8f9fa;
-            border-radius: 4px;
+            border-radius: 3px;
         """)
-        breadcrumb_layout.addWidget(self.breadcrumb_label)
-        breadcrumb_layout.addStretch()
+        self.breadcrumb_label.setWordWrap(True)
+        self.breadcrumb_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        breadcrumb_layout.addWidget(self.breadcrumb_label, 3)
 
         self.up_btn = self._create_compact_button(tr("dataset.up"), self._navigate_up)
         self.up_btn.setEnabled(False)
-        breadcrumb_layout.addWidget(self.up_btn)
+        breadcrumb_layout.addWidget(self.up_btn, 1)
 
         self.dive_btn = self._create_compact_button(tr("dataset.dive"), self._navigate_into_child)
         self.dive_btn.setEnabled(False)
-        breadcrumb_layout.addWidget(self.dive_btn)
+        breadcrumb_layout.addWidget(self.dive_btn, 1)
 
         layout.addWidget(breadcrumb_container)
 
         self.child_list = QtWidgets.QListWidget()
         self.child_list.setStyleSheet(self._get_modern_list_style())
         self.child_list.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        self.child_list.setMinimumHeight(120)
+        self.child_list.setMinimumHeight(100)
         self.child_list.currentItemChanged.connect(self._on_child_selected)
         self.child_list.itemDoubleClicked.connect(self._navigate_into_child)
         layout.addWidget(self.child_list)
@@ -455,7 +580,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
         btn_container = QtWidgets.QWidget()
         btn_layout = QtWidgets.QHBoxLayout(btn_container)
         btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(4)
+        btn_layout.setSpacing(2)
 
         self.add_child_btn = self._create_compact_button(tr("dataset.add"), self._add_child)
         self.edit_child_btn = self._create_compact_button(tr("dataset.edit"), self._edit_child)
@@ -467,35 +592,35 @@ class DatasetConfigTab(QtWidgets.QWidget):
         self.remove_child_btn.setEnabled(False)
         self.category_child_btn.setEnabled(False)
 
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.add_child_btn)
-        btn_layout.addWidget(self.edit_child_btn)
-        btn_layout.addWidget(self.remove_child_btn)
-        btn_layout.addWidget(self.category_child_btn)
-        
+        # Tous les boutons ont le même poids
+        btn_layout.addWidget(self.add_child_btn, 1)
+        btn_layout.addWidget(self.edit_child_btn, 1)
+        btn_layout.addWidget(self.remove_child_btn, 1)
+        btn_layout.addWidget(self.category_child_btn, 1)
+
         layout.addWidget(btn_container)
 
         return group
 
     def _create_modern_group(self, title):
-        """Create modern styled group box"""
+        """Create modern styled group box - responsive"""
         group = QtWidgets.QGroupBox(title)
         group.setStyleSheet(f"""
             QGroupBox {{
                 font-weight: 600;
-                font-size: 13px;
+                font-size: 12px;
                 font-family: 'Segoe UI', Arial, sans-serif;
                 color: #2c3e50;
                 border: 2px solid #e1e4e8;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
                 background-color: white;
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 0 8px;
+                padding: 0 6px;
                 background-color: white;
                 color: {Theme.SECONDARY_COLOR};
             }}
@@ -503,7 +628,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
         return group
 
     def _create_compact_button(self, text, callback):
-        """Create compact gradient button"""
+        """Create compact gradient button - fully responsive"""
         btn = QtWidgets.QPushButton(text)
         btn.setStyleSheet(f"""
             QPushButton {{
@@ -512,13 +637,13 @@ class DatasetConfigTab(QtWidgets.QWidget):
                     stop:1 {Theme.SECONDARY_COLOR});
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 4px 8px;
+                border-radius: 3px;
+                padding: 3px 4px;
                 font-weight: 600;
-                font-size: 11px;
+                font-size: 10px;
                 font-family: 'Segoe UI', Arial, sans-serif;
-                min-height: 24px;
-                max-width: 80px;
+                min-height: 22px;
+                min-width: 40px;
             }}
             QPushButton:hover:enabled {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -537,20 +662,21 @@ class DatasetConfigTab(QtWidgets.QWidget):
         """)
         btn.clicked.connect(callback)
         btn.setCursor(Qt.PointingHandCursor)
+        btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         return btn
 
     def _get_modern_input_style(self):
-        """Modern input field style with correct dropdown icon"""
+        """Modern input field style with correct dropdown icon - responsive"""
         svg_path = self._get_dropdown_svg_path()
         svg_path = svg_path.replace('\\', '/')
-        
+
         return f"""
             QLineEdit, QComboBox {{
                 border: 2px solid #e1e4e8;
-                border-radius: 6px;
-                padding: 8px 12px;
+                border-radius: 5px;
+                padding: 6px 10px;
                 background-color: white;
-                font-size: 13px;
+                font-size: 12px;
                 font-family: 'Segoe UI', Arial, sans-serif;
                 color: #2c3e50;
             }}
@@ -558,24 +684,24 @@ class DatasetConfigTab(QtWidgets.QWidget):
                 border: 2px solid #2c3e50;
             }}
             QComboBox {{
-                min-height: 35px;
-                padding-left: 12px;
-                padding-right: 35px;
+                min-height: 30px;
+                padding-left: 10px;
+                padding-right: 30px;
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
-                width: 32px;
+                width: 28px;
                 border: none;
                 border-left: 1px solid #e1e4e8;
-                border-top-right-radius: 6px;
-                border-bottom-right-radius: 6px;
+                border-top-right-radius: 5px;
+                border-bottom-right-radius: 5px;
                 background: linear-gradient(to bottom, #fafafa, #f5f5f5);
             }}
             QComboBox::down-arrow {{
                 image: url({svg_path});
-                width: 18px;
-                height: 18px;
+                width: 16px;
+                height: 16px;
             }}
         """
     
@@ -589,21 +715,21 @@ class DatasetConfigTab(QtWidgets.QWidget):
         return svg_path
 
     def _get_modern_list_style(self):
-        """Modern list widget style"""
+        """Modern list widget style - responsive"""
         return """
             QListWidget {
                 border: 2px solid #e1e4e8;
-                border-radius: 6px;
+                border-radius: 5px;
                 background-color: white;
-                padding: 5px;
-                font-size: 13px;
+                padding: 4px;
+                font-size: 12px;
                 font-family: 'Segoe UI', Arial, sans-serif;
                 color: #2c3e50;
             }
             QListWidget::item {
-                padding: 8px;
-                border-radius: 4px;
-                margin: 2px 0;
+                padding: 6px;
+                border-radius: 3px;
+                margin: 1px 0;
                 color: #2c3e50;
             }
             QListWidget::item:selected {
@@ -617,11 +743,11 @@ class DatasetConfigTab(QtWidgets.QWidget):
         """
 
     def _create_action_buttons(self, parent_layout):
-        """Create main action buttons"""
+        """Create main action buttons - responsive"""
         btn_container = QtWidgets.QWidget()
         btn_layout = QtWidgets.QHBoxLayout(btn_container)
-        btn_layout.setContentsMargins(0, 10, 0, 0)
-        btn_layout.setSpacing(10)
+        btn_layout.setContentsMargins(0, 8, 0, 0)
+        btn_layout.setSpacing(8)
 
         btn_layout.addStretch()
 
@@ -633,12 +759,13 @@ class DatasetConfigTab(QtWidgets.QWidget):
                     stop:1 {Theme.SECONDARY_COLOR});
                 color: white;
                 border: none;
-                border-radius: 6px;
-                padding: 10px 25px;
+                border-radius: 5px;
+                padding: 8px 20px;
                 font-weight: 600;
-                font-size: 13px;
+                font-size: 12px;
                 font-family: 'Segoe UI', Arial, sans-serif;
-                min-width: 100px;
+                min-width: 90px;
+                min-height: 32px;
             }}
             QPushButton:hover:enabled {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -651,7 +778,6 @@ class DatasetConfigTab(QtWidgets.QWidget):
                 color: #2c3e50;
             }}
         """)
-        # FIX: Connexion du bouton save manquante
         self.save_btn.clicked.connect(self._save_project)
 
         btn_layout.addWidget(self.save_btn)
@@ -851,17 +977,23 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
     def _on_parent_selected(self, current, previous):
         """
-        Gestion de la sélection de parent - VERSION CORRIGÉE
+        Gestion de la sélection de parent - VERSION CORRIGÉE avec extraction du nom réel
         """
         if not current:
             self.child_list.clear()
             self._update_button_states()
             return
 
-        parent_name = current.text()
+        parent_display = current.text()
+        # CORRECTION: Extraire le nom réel sans le compteur
+        if " (" in parent_display:
+            parent_name = parent_display.split(" (")[0]
+        else:
+            parent_name = parent_display
+
         index = self.parent_list.currentRow()
 
-        # Mettre à jour le project_manager
+        # Mettre à jour le project_manager avec le NOM RÉEL
         self.project_manager.set_current_parent_index(index)
 
         # Réinitialiser la navigation enfants
@@ -874,24 +1006,41 @@ class DatasetConfigTab(QtWidgets.QWidget):
         self._update_breadcrumb()
 
         self._update_button_states()
-        logger.debug(f"Parent sélectionné: '{parent_name}'")
+        logger.debug(f"Parent sélectionné: '{parent_name}' (affiché: '{parent_display}')")
 
     def _on_child_selected(self, current, previous):
-        """Handle child selection"""
+        """Handle child selection - VERSION CORRIGÉE"""
         # Mettre à jour les boutons quand la sélection change
         self._update_button_states()
-
+    
         # Activer le bouton "Plonger" si un enfant est sélectionné
-        self.dive_btn.setEnabled(current is not None)
-
+        has_selection = current is not None
+        self.dive_btn.setEnabled(has_selection)
+        
+        if has_selection:
+            child_display = current.text()
+            # Extraire le nom sans compteur
+            if " (" in child_display:
+                child_name = child_display.split(" (")[0]
+            else:
+                child_name = child_display
+            logger.debug(f"Enfant sélectionné: '{child_name}'")
+    
     def _navigate_into_child(self):
+        """Navigation dans un enfant - VERSION CORRIGÉE avec extraction du nom"""
         current_item = self.child_list.currentItem()
         if not current_item:
             QtWidgets.QMessageBox.warning(self, "Sélection requise",
                 "Veuillez sélectionner un enfant pour naviguer dedans")
             return
 
-        child_name = current_item.text()
+        child_display = current_item.text()
+
+        # CORRECTION: Extraire le nom réel sans le compteur
+        if " (" in child_display:
+            child_name = child_display.split(" (")[0]
+        else:
+            child_name = child_display
 
         current_path = self._get_full_path()
         self._sync_list_to_cache(self.child_list, current_path)
@@ -940,32 +1089,36 @@ class DatasetConfigTab(QtWidgets.QWidget):
         logger.debug(f"Remonté depuis '{removed_child}': niveau {depth}")
 
     def _update_breadcrumb(self):
-        """Mettre à jour l'affichage du fil d'Ariane"""
+        """Mettre à jour le fil d'Ariane - VERSION CORRIGÉE"""
         depth = len(self._child_navigation_path)
-    
+
         if depth == 0:
-            # Afficher le parent
+            # Afficher le parent SANS le compteur
             parent_item = self.parent_list.currentItem()
             if parent_item:
-                display = f"{parent_item.text()}"
+                parent_display = parent_item.text()
+                # Extraire le nom sans compteur
+                if " (" in parent_display:
+                    parent_name = parent_display.split(" (")[0]
+                else:
+                    parent_name = parent_display
+                display = f"{parent_name}"
             else:
                 display = "Racine"
         else:
-            # Afficher le chemin dans les enfants
+            # Afficher le chemin dans les enfants (déjà sans compteurs)
             if depth <= 2:
-                # Afficher tout le chemin
                 display = " → ".join(self._child_navigation_path)
             else:
-                # Afficher les 2 derniers niveaux
                 display = "... → " + " → ".join(self._child_navigation_path[-2:])
-    
+
             display = f"{display} (Niveau {depth})"
-    
+
         self.breadcrumb_label.setText(display)
-    
-        # CORRECTION : Activer/désactiver les boutons de navigation basés sur _child_navigation_path
+
+        # Activer/désactiver les boutons de navigation
         self.up_btn.setEnabled(depth > 0)
-    
+
         # Le bouton "Plonger" est activé s'il y a un enfant sélectionné
         child_selected = self.child_list.currentItem() is not None
         self.dive_btn.setEnabled(child_selected)
@@ -1381,48 +1534,75 @@ class DatasetConfigTab(QtWidgets.QWidget):
         
         return None
 
+    
     def _add_child(self):
         """
-        Ajoute un enfant - VERSION CORRIGÉE
+        Ajoute un enfant - VERSION TOTALEMENT CORRIGÉE
         """
         parent_item = self.parent_list.currentItem()
         if not parent_item:
             QtWidgets.QMessageBox.warning(self, "Erreur",
                 "Veuillez d'abord sélectionner un parent")
             return
-
+    
         name, ok = QtWidgets.QInputDialog.getText(
             self, "Nouvel enfant", "Nom :"
         )
         if not ok or not name.strip():
             return
-
+    
         name = name.strip()
+    
+        # CORRECTION: Construire le chemin complet
         path = self._get_full_path()
-
+    
+        logger.debug(f"=== AJOUT ENFANT ===")
+        logger.debug(f"Nom: '{name}'")
+        logger.debug(f"Chemin: {' > '.join(path)}")
+        logger.debug(f"Longueur chemin: {len(path)}")
+    
+        if len(path) < 4:
+            QtWidgets.QMessageBox.warning(self, "Erreur",
+                "Chemin incomplet. Veuillez sélectionner typologie, taxonomy, root et parent.")
+            return
+    
         # Vérifier doublon dans le cache
         existing = self.hierarchy_cache.get_children_at_path(path)
+        logger.debug(f"Enfants existants à ce niveau: {existing}")
+    
         if name in existing:
             QtWidgets.QMessageBox.warning(self, "Doublon",
                 f"'{name}' existe déjà à ce niveau")
             return
-
+    
         # Ajouter au cache
         if self.hierarchy_cache.add_child_at_path(path, name):
+            logger.info(f"✓ '{name}' ajouté au cache")
+    
             # Ajouter au project_manager
             if self.project_manager.add_child_label(name, self):
-                # Mettre à jour l'UI
-                item = QtWidgets.QListWidgetItem(name)
-                self.child_list.addItem(item)
-
+                logger.info(f"✓ '{name}' ajouté au project_manager")
+    
+                # ⚠️ PARTIE CRITIQUE - Recharger la liste
+                logger.debug("🔄 Rechargement de la liste des enfants...")
+                self._load_children_from_cache()  # ← CETTE LIGNE DOIT ÊTRE PRÉSENTE
+                logger.debug("✓ Liste rechargée")
+    
+                # Rafraîchir le compteur du parent
+                logger.debug("🔄 Rafraîchissement des compteurs parents...")
+                self._refresh_parent_counts()
+                logger.debug("✓ Compteurs rafraîchis")
+    
                 depth = len(self._child_navigation_path)
-                logger.info(f"Enfant '{name}' ajouté au niveau {depth}")
+                logger.info(f"✓✓✓ Enfant '{name}' ajouté au niveau {depth}")
             else:
                 # Retirer du cache si échec
                 self.hierarchy_cache.remove_child_at_path(path, name)
+                logger.error(f"✗ Échec ajout au project_manager, rollback")
                 QtWidgets.QMessageBox.warning(self, "Erreur",
                     "Impossible d'ajouter l'enfant au project_manager")
         else:
+            logger.error(f"✗ Échec ajout au cache")
             QtWidgets.QMessageBox.warning(self, "Erreur",
                 "Impossible d'ajouter l'enfant au cache")
             
@@ -1434,12 +1614,18 @@ class DatasetConfigTab(QtWidgets.QWidget):
         logger.debug("Cache hiérarchique vidé")
 
     def _edit_child(self):
-        """Modifier un enfant"""
+        """Modifier un enfant - VERSION CORRIGÉE avec extraction du nom"""
         current = self.child_list.currentItem()
         if not current:
             return
-        
-        old_name = current.text()
+
+        old_display = current.text()
+        # CORRECTION: Extraire le nom réel pour l'édition
+        if " (" in old_display:
+            old_name = old_display.split(" (")[0]
+        else:
+            old_name = old_display
+
         new_name, ok = QtWidgets.QInputDialog.getText(
             self, tr("dataset.edit_child"),
             tr("dataset.new_name") + ":",
@@ -1447,34 +1633,48 @@ class DatasetConfigTab(QtWidgets.QWidget):
         )
         if not ok or not new_name.strip() or new_name == old_name:
             return
-        
+
+        new_name = new_name.strip()
         path = self._get_full_path()
-        
-        if self.hierarchy_cache.rename_child_at_path(path, old_name, new_name.strip()):
-            current.setText(new_name.strip())
+
+        # Renommer avec le NOM RÉEL (sans compteur)
+        if self.hierarchy_cache.rename_child_at_path(path, old_name, new_name):
+            # Recharger pour afficher le nouveau nom avec compteur mis à jour
+            self._load_children_from_cache()
             logger.info(f"Enfant renommé: '{old_name}' -> '{new_name}'")
 
     def _remove_child(self):
-        """Supprimer un enfant"""
+        """Supprimer un enfant - VERSION CORRIGÉE avec extraction du nom"""
         current = self.child_list.currentItem()
         if not current:
             return
-        
-        name = current.text()
+
+        child_display = current.text()
+        # CORRECTION: Extraire le nom réel pour la suppression
+        if " (" in child_display:
+            child_name = child_display.split(" (")[0]
+        else:
+            child_name = child_display
+
         reply = QtWidgets.QMessageBox.question(
             self, tr("dataset.confirm"),
-            f"Supprimer '{name}' et tous ses sous-éléments?",
+            f"Supprimer '{child_name}' et tous ses sous-éléments?",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
         )
         if reply != QtWidgets.QMessageBox.Yes:
             return
-        
+
         path = self._get_full_path()
-        
-        if self.hierarchy_cache.remove_child_at_path(path, name):
-            row = self.child_list.currentRow()
-            self.child_list.takeItem(row)
-            logger.info(f"Enfant '{name}' supprimé")
+
+        # Supprimer avec le NOM RÉEL (sans compteur)
+        if self.hierarchy_cache.remove_child_at_path(path, child_name):
+            # Recharger la liste pour mettre à jour les compteurs
+            self._load_children_from_cache()
+
+            # Rafraîchir le compteur du parent
+            self._refresh_parent_counts()
+
+            logger.info(f"Enfant '{child_name}' supprimé")
 
     def _modify_category(self, level):
         """Modify label category"""

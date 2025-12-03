@@ -6,6 +6,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QScrollArea
 
 from ui.localization.translator import tr
 from ui.styles.theme import Theme
@@ -45,20 +46,22 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.active_typologie_columns = []
 
     def _init_ui(self):
-        main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setSpacing(15)
-        main_layout.setContentsMargins(15, 15, 15, 15)
+        # Container principal avec scroll
+        main_container = QtWidgets.QWidget()
+        main_layout = QtWidgets.QVBoxLayout(main_container)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
 
         title_label = QtWidgets.QLabel(tr("dataset.combination_title"))
-        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {Theme.PRIMARY_COLOR}; padding: 10px 0;")
+        title_label.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {Theme.PRIMARY_COLOR}; padding: 8px 0;")
         main_layout.addWidget(title_label)
 
         content_layout = QtWidgets.QHBoxLayout()
-        content_layout.setSpacing(15)
+        content_layout.setSpacing(10)
 
         left_widget = self._create_left_section()
-        left_widget.setMinimumWidth(280)
-        left_widget.setMaximumWidth(320)
+        left_widget.setMinimumWidth(220)
+        left_widget.setMaximumWidth(350)
         content_layout.addWidget(left_widget, 2)
 
         right_widget = self._create_right_section()
@@ -67,10 +70,22 @@ class DatasetRelationTab(QtWidgets.QWidget):
         main_layout.addLayout(content_layout)
         self._create_action_buttons(main_layout)
 
+        # Envelopper dans un QScrollArea
+        scroll = QScrollArea()
+        scroll.setWidget(main_container)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+
+        final_layout = QtWidgets.QVBoxLayout(self)
+        final_layout.setContentsMargins(0, 0, 0, 0)
+        final_layout.addWidget(scroll)
+
     def _create_left_section(self):
         container = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(container)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._create_batch_info_card())
         layout.addWidget(self._create_master_card())
@@ -80,86 +95,88 @@ class DatasetRelationTab(QtWidgets.QWidget):
     def _create_batch_info_card(self):
         group = self._create_modern_card("Informations du Batch")
         layout = QtWidgets.QVBoxLayout(group)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
         project_label = QtWidgets.QLabel("Projet")
-        project_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 11px;")
+        project_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 10px;")
         layout.addWidget(project_label)
 
         self.project_combo = QtWidgets.QComboBox()
         self.project_combo.setStyleSheet(self._get_modern_input_style())
-        self.project_combo.setMinimumHeight(32)
+        self.project_combo.setMinimumHeight(28)
         self.project_combo.currentIndexChanged.connect(self._on_project_changed)
         layout.addWidget(self.project_combo)
 
         self._add_form_field(layout, "Famille de batch", "batch_family_edit", "Ex: Production, Test...")
         self._add_form_field(layout, "Nom du batch", "batch_name_edit", "Ex: Batch_Contexte")
-        
 
         desc_label = QtWidgets.QLabel("Input")
-        desc_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 11px;")
+        desc_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 10px;")
         layout.addWidget(desc_label)
 
         self.desc_edit = QtWidgets.QTextEdit()
         self.desc_edit.setPlaceholderText("Input...")
-        self.desc_edit.setMaximumHeight(80)
+        self.desc_edit.setMaximumHeight(70)
         self.desc_edit.setStyleSheet("""
-            QTextEdit { border: 2px solid #e1e4e8; border-radius: 6px; padding: 6px;
-                background-color: white; font-size: 11px; color: #2c3e50; }
+            QTextEdit { border: 2px solid #e1e4e8; border-radius: 5px; padding: 5px;
+                background-color: white; font-size: 10px; color: #2c3e50; }
             QTextEdit:focus { border: 2px solid #2c3e50; }
         """)
         layout.addWidget(self.desc_edit)
 
-        # ✅ NOUVEAU : Boutons de gestion des batches
+        # Boutons de gestion des batches - VERSION CÔTE À CÔTE OPTIMISÉE
         batch_buttons_layout = QtWidgets.QHBoxLayout()
-        batch_buttons_layout.setSpacing(6)
+        batch_buttons_layout.setSpacing(4)  # Espacement réduit
 
         self.load_batch_btn = self._create_mini_button("Charger", self._load_batch_dialog)
         self.load_batch_btn.setToolTip("Charger un batch sauvegardé")
+        self.load_batch_btn.setFixedWidth(65)  # 🔧 Largeur fixe compacte
         batch_buttons_layout.addWidget(self.load_batch_btn)
 
-        self.new_batch_btn = self._create_mini_button("ouveau", self._new_batch)
+        self.new_batch_btn = self._create_mini_button("Nouveau", self._new_batch)
         self.new_batch_btn.setToolTip("Créer un nouveau batch")
+        self.new_batch_btn.setFixedWidth(70)  # 🔧 Largeur fixe compacte
         batch_buttons_layout.addWidget(self.new_batch_btn)
 
+        # Ajouter un stretch pour pousser les boutons à gauche
         batch_buttons_layout.addStretch()
+
         layout.addLayout(batch_buttons_layout)
 
         # Indicateur de statut
         self.batch_status_label = QtWidgets.QLabel("Nouveau batch")
         self.batch_status_label.setStyleSheet(
-            "color: #95a5a6; font-size: 10px; font-style: italic; padding: 4px;"
+            "color: #95a5a6; font-size: 9px; font-style: italic; padding: 3px;"
         )
         layout.addWidget(self.batch_status_label)
 
         return group
-    
 
     def _create_master_card(self):
         group = self._create_modern_card("Typologie de Contexte Master")
         layout = QtWidgets.QVBoxLayout(group)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
         master_label = QtWidgets.QLabel("Sélectionner la typologie master")
-        master_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 11px;")
+        master_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 10px;")
         layout.addWidget(master_label)
 
         self.master_combo = QtWidgets.QComboBox()
         self.master_combo.setStyleSheet(self._get_modern_input_style())
-        self.master_combo.setMinimumHeight(32)
+        self.master_combo.setMinimumHeight(28)
         self.master_combo.currentIndexChanged.connect(self._on_master_typologie_changed)
         layout.addWidget(self.master_combo)
 
         stats_label = QtWidgets.QLabel("Statistiques")
-        stats_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 11px; margin-top: 8px;")
+        stats_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 10px; margin-top: 6px;")
         layout.addWidget(stats_label)
 
         self.master_stats = QtWidgets.QTextEdit()
         self.master_stats.setReadOnly(True)
-        self.master_stats.setMaximumHeight(100)
+        self.master_stats.setMaximumHeight(80)
         self.master_stats.setStyleSheet("""
-            QTextEdit { border: 2px solid #e1e4e8; border-radius: 6px; padding: 8px;
-                background-color: #f8f9fa; font-size: 11px; color: #2c3e50; }
+            QTextEdit { border: 2px solid #e1e4e8; border-radius: 5px; padding: 6px;
+                background-color: #f8f9fa; font-size: 10px; color: #2c3e50; }
         """)
         layout.addWidget(self.master_stats)
         return group
@@ -220,7 +237,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.batch_selector_combo.currentIndexChanged.connect(self._on_batch_selected_from_combo)
         batch_selector_layout.addWidget(self.batch_selector_combo)
 
-        self.refresh_batches_btn = self._create_mini_button("↻ actualiser", self._refresh_batch_list)
+        self.refresh_batches_btn = self._create_mini_button("actualiser", self._refresh_batch_list)
         self.refresh_batches_btn.setToolTip("Actualiser la liste des batches")
         self.refresh_batches_btn.setMaximumWidth(80)
         batch_selector_layout.addWidget(self.refresh_batches_btn)
@@ -1037,7 +1054,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         layout.addWidget(self.nav_breadcrumb)
         layout.addStretch()
 
-        self.reset_nav_btn = self._create_mini_button("↺ Reset", self._reset_navigation)
+        self.reset_nav_btn = self._create_mini_button("Reset", self._reset_navigation)
         layout.addWidget(self.reset_nav_btn)
         return container
 
@@ -3526,6 +3543,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         )
 
     def _get_secondary_button_style(self):
+        """Style pour boutons secondaires compacts"""
         return f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -3533,10 +3551,11 @@ class DatasetRelationTab(QtWidgets.QWidget):
                 color: white;
                 border: none;
                 border-radius: 6px;
-                padding: 10px 25px;
+                padding: 8px 15px;  /* Réduit de 25px à 15px */
                 font-weight: 600;
                 font-size: 12px;
-                min-width: 140px;
+                min-width: 90px;  /* Réduit de 140px à 90px */
+                max-width: 120px;  /* Limite la largeur maximale */
             }}
             QPushButton:hover:enabled {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -3722,7 +3741,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         """
     
     def _get_dialog_button_style(self):
-        """Style pour les boutons de dialogue"""
+        """Style pour boutons de dialogue compacts"""
         return f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -3730,10 +3749,11 @@ class DatasetRelationTab(QtWidgets.QWidget):
                 color: white;
                 border: none;
                 border-radius: 6px;
-                padding: 8px 20px;
+                padding: 6px 12px;  /* Réduit de 20px à 12px */
                 font-weight: 600;
                 font-size: 11px;
-                min-width: 100px;
+                min-width: 70px;  /* Réduit de 100px à 70px */
+                max-width: 100px;  /* Limite la largeur maximale */
             }}
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -3746,29 +3766,58 @@ class DatasetRelationTab(QtWidgets.QWidget):
     def _create_modern_card(self, title):
         group = QtWidgets.QGroupBox(title)
         group.setStyleSheet(f"""
-            QGroupBox {{ font-weight: 600; font-size: 12px; color: #2c3e50;
-                border: 2px solid #e1e4e8; border-radius: 8px;
-                margin-top: 10px; padding-top: 12px; background-color: white; }}
+            QGroupBox {{ font-weight: 600; font-size: 11px; color: #2c3e50;
+                border: 2px solid #e1e4e8; border-radius: 6px;
+                margin-top: 8px; padding-top: 10px; background-color: white; }}
             QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left;
-                padding: 0 8px; background-color: white; color: {Theme.SECONDARY_COLOR}; }}
+                padding: 0 6px; background-color: white; color: {Theme.SECONDARY_COLOR}; }}
         """)
         return group
 
     def _add_form_field(self, layout, label_text, attr_name, placeholder=""):
         label = QtWidgets.QLabel(label_text)
-        label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 11px;")
+        label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 10px;")
         layout.addWidget(label)
         edit = QtWidgets.QLineEdit()
         edit.setPlaceholderText(placeholder)
-        edit.setStyleSheet("QLineEdit { border: 2px solid #e1e4e8; border-radius: 6px; padding: 6px 10px; background-color: white; font-size: 12px; color: #2c3e50; } QLineEdit:focus { border: 2px solid #2c3e50; }")
-        edit.setMinimumHeight(32)
+        edit.setStyleSheet("""
+            QLineEdit { border: 2px solid #e1e4e8; border-radius: 5px; padding: 5px 8px; 
+                background-color: white; font-size: 10px; color: #2c3e50; } 
+            QLineEdit:focus { border: 2px solid #2c3e50; }
+        """)
+        edit.setMinimumHeight(28)
         layout.addWidget(edit)
         setattr(self, attr_name, edit)
 
     def _get_modern_input_style(self):
         svg = self._get_dropdown_svg_path().replace('\\', '/')
-        return f"QComboBox {{ border: 2px solid #e1e4e8; border-radius: 6px; padding: 6px 10px; padding-right: 30px; background-color: white; font-size: 12px; color: #2c3e50; }} QComboBox:focus {{ border: 2px solid #2c3e50; }} QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right; width: 28px; border: none; border-left: 1px solid #e1e4e8; }} QComboBox::down-arrow {{ image: url({svg}); width: 16px; height: 16px; }}"
-    
+        return f"""
+            QComboBox {{ 
+                border: 2px solid #e1e4e8; 
+                border-radius: 5px; 
+                padding: 5px 8px; 
+                padding-right: 28px; 
+                background-color: white; 
+                font-size: 10px; 
+                color: #2c3e50; 
+                min-height: 26px;
+            }} 
+            QComboBox:focus {{ 
+                border: 2px solid #2c3e50; 
+            }} 
+            QComboBox::drop-down {{ 
+                subcontrol-origin: padding; 
+                subcontrol-position: center right; 
+                width: 26px; 
+                border: none; 
+                border-left: 1px solid #e1e4e8; 
+            }} 
+            QComboBox::down-arrow {{ 
+                image: url({svg}); 
+                width: 14px; 
+                height: 14px; 
+            }}
+        """    
     def _update_item_icon(self, item, is_selected):
         """
         Ajoute ou retire une coche VERTE à l'extrême droite d'un QListWidgetItem
@@ -3832,22 +3881,90 @@ class DatasetRelationTab(QtWidgets.QWidget):
                 item.setFont(font)
 
     def _create_mini_button(self, text, callback):
+        """Boutons mini avec largeur minimale réduite"""
         btn = QtWidgets.QPushButton(text)
-        btn.setStyleSheet(f"QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR}); color: white; border: none; border-radius: 4px; padding: 4px 10px; font-weight: 600; font-size: 10px; min-height: 24px; }} QPushButton:hover:enabled {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR}); }} QPushButton:disabled {{ background: #d0d0d0; color: #808080; }}")
+        btn.setStyleSheet(f"""
+            QPushButton {{ 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR}); 
+                color: white; 
+                border: none; 
+                border-radius: 3px; 
+                padding: 3px 6px;  /* Réduit de 8px à 6px */
+                font-weight: 600; 
+                font-size: 11px; 
+                min-height: 22px;
+                min-width: 50px;  /* Ajout d'une largeur minimale compacte */
+                max-width: 100px;  /* Limite la largeur maximale */
+            }} 
+            QPushButton:hover:enabled {{ 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR}); 
+            }} 
+            QPushButton:disabled {{ 
+                background: #d0d0d0; 
+                color: #808080; 
+            }}
+        """)
         btn.clicked.connect(callback)
         btn.setCursor(Qt.PointingHandCursor)
+        # Changement de politique de taille pour éviter l'expansion
+        btn.setSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Fixed)
         return btn
 
     def _create_action_button(self, text, callback):
+        """Boutons d'action avec largeur réduite"""
         btn = QtWidgets.QPushButton(text)
-        btn.setStyleSheet(f"QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR}); color: white; border: none; border-radius: 6px; padding: 10px 25px; font-weight: 600; font-size: 12px; min-width: 140px; }} QPushButton:hover:enabled {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR}); }} QPushButton:disabled {{ background: #c0c0c0; color: #707070; }}")
+        btn.setStyleSheet(f"""
+            QPushButton {{ 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR}); 
+                color: white; 
+                border: none; 
+                border-radius: 6px; 
+                padding: 8px 15px;  /* Réduit de 25px à 15px */
+                font-weight: 600; 
+                font-size: 12px; 
+                min-width: 90px;  /* Réduit de 140px à 90px */
+                max-width: 120px;  /* Limite la largeur maximale */
+            }} 
+            QPushButton:hover:enabled {{ 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR}); 
+            }} 
+            QPushButton:disabled {{ 
+                background: #c0c0c0; 
+                color: #707070; 
+            }}
+        """)
         btn.clicked.connect(callback)
         btn.setCursor(Qt.PointingHandCursor)
         return btn
 
     def _get_primary_button_style(self):
-        return f"QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR}); color: white; border: none; border-radius: 6px; padding: 12px 30px; font-weight: 700; font-size: 13px; min-width: 180px; }} QPushButton:hover:enabled {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR}); }} QPushButton:disabled {{ background: #bdc3c7; color: #7f8c8d; }}"
-
+        """Style pour boutons primaires compacts"""
+        return f"""
+            QPushButton {{ 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR}); 
+                color: white; 
+                border: none; 
+                border-radius: 6px; 
+                padding: 10px 20px;  /* Réduit de 30px à 20px */
+                font-weight: 700; 
+                font-size: 13px; 
+                min-width: 100px;  /* Réduit de 180px à 100px */
+                max-width: 140px;  /* Limite la largeur maximale */
+            }} 
+            QPushButton:hover:enabled {{ 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR}); 
+            }} 
+            QPushButton:disabled {{ 
+                background: #bdc3c7; 
+                color: #7f8c8d; 
+            }}
+        """
     def _get_dropdown_svg_path(self):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.normpath(os.path.join(os.path.dirname(os.path.dirname(current_dir)), "resources", "icons", "dropdown.svg"))

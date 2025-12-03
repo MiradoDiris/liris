@@ -1428,50 +1428,53 @@ class MainWindow(QMainWindow):
                 tr("system_not_initialized")
             )
             return
-
+    
         try:
             if not self.project_config_dialog_instance:
                 self.project_config_dialog_instance = QtWidgets.QDialog(self)
                 self.project_config_dialog_instance.setWindowTitle(
                     tr("project_config_window_title")
                 )
-
-                # Dimensions responsives
+    
+                # Dimensions responsives (identiques à dataset_config)
                 screen = QtWidgets.QApplication.desktop().screenGeometry()
-                dialog_width = min(1200, int(screen.width() * 0.8))
-                dialog_height = min(800, int(screen.height() * 0.8))
+                dialog_width = min(1400, int(screen.width() * 0.85))  # ✅ Même que dataset
+                dialog_height = min(900, int(screen.height() * 0.85))  # ✅ Même que dataset
                 self.project_config_dialog_instance.setMinimumSize(
-                    max(900, int(screen.width() * 0.55)),
-                    max(650, int(screen.height() * 0.6))
+                    max(1000, int(screen.width() * 0.6)),  # ✅ Même que dataset
+                    max(700, int(screen.height() * 0.6))   # ✅ Même que dataset
                 )
                 self.project_config_dialog_instance.resize(dialog_width, dialog_height)
                 self.project_config_dialog_instance.setModal(False)
-
+    
+                # ✅ IMPORTANT: Marges à 0 comme dataset_config
                 dialog_layout = QtWidgets.QVBoxLayout(
                     self.project_config_dialog_instance
                 )
-                dialog_layout.setContentsMargins(0, 0, 0, 0)
-
+                dialog_layout.setContentsMargins(0, 0, 0, 0)  # ✅ Identique à dataset
+    
                 project_config_widget = ProjectConfigOnlyWidget(
                     self.config_provider,
                     self.conductor,
                     parent=self.project_config_dialog_instance,
                 )
+                # ✅ SizePolicy Expanding comme dataset_config
                 project_config_widget.setSizePolicy(
                     QtWidgets.QSizePolicy.Expanding,
                     QtWidgets.QSizePolicy.Expanding
                 )
                 dialog_layout.addWidget(project_config_widget)
-
+    
                 self.project_config_dialog_instance.finished.connect(
                     self._on_project_config_dialog_closed
                 )
-
-                # Centrer le dialogue
+    
+                # ✅ Centrer le dialogue
                 self._center_dialog(self.project_config_dialog_instance)
-
+    
+                # Connexions des signaux
                 project_config_widget.project_created.connect(
-                self._on_global_project_refresh
+                    self._on_global_project_refresh
                 )
                 project_config_widget.project_updated.connect(
                     self._on_global_project_refresh
@@ -1482,20 +1485,21 @@ class MainWindow(QMainWindow):
                 project_config_widget.project_loaded.connect(
                     self._on_global_project_refresh
                 )
-
+    
                 # Stocker la référence
                 self.project_config_widget_ref = project_config_widget
-
+    
+            # Rafraîchir les widgets existants
             for child in self.project_config_dialog_instance.findChildren(
                     ProjectConfigOnlyWidget
             ):
                 if hasattr(child, "refresh"):
                     child.refresh()
-
+    
             self.project_config_dialog_instance.show()
             self.project_config_dialog_instance.raise_()
             self.project_config_dialog_instance.activateWindow()
-
+    
         except Exception as e:
             logger.error(f"Erreur lors de l'ouverture de la configuration: {str(e)}")
             QMessageBox.critical(

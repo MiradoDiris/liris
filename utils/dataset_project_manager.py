@@ -8,19 +8,6 @@ from utils.logger import logger
 
 
 class DatasetProjectManager:
-    """
-    Gestionnaire de la logique métier pour les projets de datasets.
-    Gère une structure hiérarchique dynamique et illimitée de labels.
-    
-    Structure:
-    - Typologies (niveau fixe)
-      └── Taxonomy Clusters (niveau fixe)
-          └── Root Labels (niveau fixe)
-              └── Parent Labels (niveau fixe)
-                  └── Children (NIVEAU DYNAMIQUE INFINI)
-                      └── Children
-                          └── Children...
-    """
 
     def __init__(self, database):
         self.database = database
