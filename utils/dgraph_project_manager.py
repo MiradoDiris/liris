@@ -1282,7 +1282,7 @@ class DgraphProjectManager:
     
         return mutation
 
-    def _batch_save_to_dgraph(self, profile_data, initial_batch_size=500, max_retries=5):
+    def _batch_save_to_dgraph(self, profile_data, initial_batch_size=50, max_retries=5):
         """
         ✅ CORRIGÉ : Avec nettoyage des doublons AVANT insertion
         """
