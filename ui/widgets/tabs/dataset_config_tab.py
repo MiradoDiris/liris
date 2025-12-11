@@ -38,14 +38,17 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
     def _get_full_path(self) -> list:
         """
-        Construire le chemin complet actuel - VERSION CORRIGÉE
+        Construire le chemin complet actuel - VERSION CORRIGÉE AVEC EXTRACTION DES COMPTEURS
         [typologie, cluster, root, parent, child1, child2, ...]
         """
         path = []
 
         typ_item = self.typologie_list.currentItem()
         if typ_item:
-            path.append(typ_item.text())
+            # Extraire le nom sans compteur
+            typ_display = typ_item.text()
+            typ_name = typ_display.split(" (")[0] if " (" in typ_display else typ_display
+            path.append(typ_name)
         else:
             logger.debug("Pas de typologie sélectionnée")
             return path
@@ -53,14 +56,20 @@ class DatasetConfigTab(QtWidgets.QWidget):
         if hasattr(self, 'taxonomy_list'):
             tax_item = self.taxonomy_list.currentItem()
             if tax_item:
-                path.append(tax_item.text())
+                # Extraire le nom sans compteur
+                tax_display = tax_item.text()
+                tax_name = tax_display.split(" (")[0] if " (" in tax_display else tax_display
+                path.append(tax_name)
             else:
                 logger.debug("Pas de taxonomy sélectionnée")
                 return path
 
         root_item = self.root_list.currentItem()
         if root_item:
-            path.append(root_item.text())
+            # Extraire le nom sans compteur
+            root_display = root_item.text()
+            root_name = root_display.split(" (")[0] if " (" in root_display else root_display
+            path.append(root_name)
         else:
             logger.debug("Pas de root sélectionné")
             return path
@@ -68,7 +77,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
         parent_item = self.parent_list.currentItem()
         if parent_item:
             parent_display = parent_item.text()
-            # CORRECTION CRITIQUE: Extraire le nom sans compteur
+            # Extraire le nom sans compteur
             if " (" in parent_display:
                 parent_name = parent_display.split(" (")[0]
             else:
@@ -94,7 +103,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
     
     def _sync_list_to_cache(self, list_widget: QtWidgets.QListWidget, 
                     parent_path: list):
-        """Synchroniser une liste UI vers le cache - VERSION CORRIGÉE"""
+        """Synchroniser une liste UI vers le cache - VERSION CORRIGÉE AVEC EXTRACTION DES COMPTEURS"""
         if not parent_path:
             logger.warning("Chemin parent vide pour sync")
             return
@@ -126,14 +135,14 @@ class DatasetConfigTab(QtWidgets.QWidget):
         list_widget.clear()
         children = self.hierarchy_cache.get_children_at_path(parent_path)
 
-        # Déterminer si on charge des parents (niveau 3 = parent)
-        is_parent_level = len(parent_path) == 3
+        level = len(parent_path)
 
         for name in children:
-            if is_parent_level:
-                # Compter les enfants de ce parent
-                child_path = parent_path + [name]
-                child_count = len(self.hierarchy_cache.get_children_at_path(child_path))
+            child_path = parent_path + [name]
+
+            child_count = len(self.hierarchy_cache.get_children_at_path(child_path))
+
+            if child_count > 0:
                 display_name = f"{name} ({child_count})"
             else:
                 display_name = name
@@ -144,16 +153,8 @@ class DatasetConfigTab(QtWidgets.QWidget):
         logger.debug(f"Chargé {len(children)} éléments pour {' > '.join(parent_path) if parent_path else 'racine'}")
 
     def _refresh_parent_counts(self):
-        """Rafraîchir les compteurs d'enfants pour tous les parents visibles"""
-        typ_item = self.typologie_list.currentItem()
-        tax_item = self.taxonomy_list.currentItem() if hasattr(self, 'taxonomy_list') else None
-        root_item = self.root_list.currentItem()
-
-        if not (typ_item and tax_item and root_item):
-            return
-
-        path = [typ_item.text(), tax_item.text(), root_item.text()]
-        self._load_list_from_cache(self.parent_list, path)
+        """Rafraîchir les compteurs d'enfants pour tous les parents visibles - REMPLACÉ PAR _refresh_all_counts"""
+        self._refresh_all_counts()
 
     def _get_current_cache_path(self):
         """
@@ -259,6 +260,32 @@ class DatasetConfigTab(QtWidgets.QWidget):
         logger.debug("=" * 60)
         logger.debug("FIN _load_children_from_cache")
         logger.debug("=" * 60)
+
+    def _refresh_all_counts(self):
+        """Rafraîchir tous les compteurs d'enfants dans toutes les listes"""
+        # Rafraîchir la liste des typologies
+        self._load_list_from_cache(self.typologie_list, [])
+        
+        # Rafraîchir taxonomy si une typologie est sélectionnée
+        typ_item = self.typologie_list.currentItem()
+        if typ_item:
+            typ_display = typ_item.text()
+            typ_name = typ_display.split(" (")[0] if " (" in typ_display else typ_display
+            self._load_list_from_cache(self.taxonomy_list, [typ_name])
+            
+            # Rafraîchir root si un taxonomy est sélectionné
+            tax_item = self.taxonomy_list.currentItem() if hasattr(self, 'taxonomy_list') else None
+            if tax_item:
+                tax_display = tax_item.text()
+                tax_name = tax_display.split(" (")[0] if " (" in tax_display else tax_display
+                self._load_list_from_cache(self.root_list, [typ_name, tax_name])
+                
+                # Rafraîchir parent si un root est sélectionné
+                root_item = self.root_list.currentItem()
+                if root_item:
+                    root_display = root_item.text()
+                    root_name = root_display.split(" (")[0] if " (" in root_display else root_display
+                    self._load_list_from_cache(self.parent_list, [typ_name, tax_name, root_name])
 
     def _get_or_create_cache_structure(self, typologie_name, taxonomy_name=None, 
                                        root_name=None, parent_name=None):
@@ -832,13 +859,19 @@ class DatasetConfigTab(QtWidgets.QWidget):
             self._update_button_states()
             return
 
-        typologie_name = current.text()
+        # CORRECTION: Extraire le nom SANS le compteur
+        typologie_display = current.text()
+        if " (" in typologie_display:
+            typologie_name = typologie_display.split(" (")[0]
+        else:
+            typologie_name = typologie_display
+
         index = self.typologie_list.currentRow()
 
         # Mettre à jour le project_manager
         self.project_manager.set_current_typologie_index(index)
 
-        # Charger les clusters de taxonomie depuis le cache
+        # Charger les clusters de taxonomie depuis le cache AVEC LE NOM SANS COMPTEUR
         path = [typologie_name]
         self._load_list_from_cache(self.taxonomy_list, path)
 
@@ -879,28 +912,38 @@ class DatasetConfigTab(QtWidgets.QWidget):
             self.child_list.clear()
             self._update_button_states()
             return
-
+    
         typ_item = self.typologie_list.currentItem()
         if not typ_item:
             logger.warning("Typologie non sélectionnée")
             return
-
-        taxonomy_name = current.text()
-        typologie_name = typ_item.text()
-
+    
+        # CORRECTION CRITIQUE: Extraire les noms SANS les compteurs
+        taxonomy_display = current.text()
+        if " (" in taxonomy_display:
+            taxonomy_name = taxonomy_display.split(" (")[0]
+        else:
+            taxonomy_name = taxonomy_display
+    
+        typologie_display = typ_item.text()
+        if " (" in typologie_display:
+            typologie_name = typologie_display.split(" (")[0]
+        else:
+            typologie_name = typologie_display
+    
         logger.debug(f"Sélection taxonomy: '{taxonomy_name}' dans typologie '{typologie_name}'")
-
+    
         # === PARTIE CRITIQUE: SYNCHRONISER LE PROJECT_MANAGER ===
-
+    
         # 1. Trouver l'index du taxonomy dans le project_manager
         typologie = self.project_manager.get_current_typologie()
         if not typologie:
             logger.error(f"Typologie '{typologie_name}' non trouvée dans project_manager!")
             return
-
+    
         taxonomy_clusters = typologie.get('taxonomy_clusters', [])
         taxonomy_index = -1
-
+    
         for idx, cluster in enumerate(taxonomy_clusters):
             if cluster.get('name') == taxonomy_name:
                 taxonomy_index = idx
@@ -916,12 +959,12 @@ class DatasetConfigTab(QtWidgets.QWidget):
             }
             taxonomy_clusters.append(new_cluster)
             taxonomy_index = len(taxonomy_clusters) - 1
-
+    
         # 2. Définir l'index dans le project_manager
         self.project_manager.current_taxonomy_index = taxonomy_index
-
+    
         logger.info(f"✓ Taxonomy index synchronisé: {taxonomy_index} pour '{taxonomy_name}'")
-
+    
         # Vérification: S'assurer que get_current_taxonomy() fonctionne
         current_tax = self.project_manager.get_current_taxonomy()
         if current_tax:
@@ -929,18 +972,18 @@ class DatasetConfigTab(QtWidgets.QWidget):
         else:
             logger.error("✗ get_current_taxonomy() retourne None!")
             return
-
+    
         # === FIN PARTIE CRITIQUE ===
-
-        # Charger les roots depuis le cache
+    
+        # Charger les roots depuis le cache AVEC LES NOMS SANS COMPTEURS
         path = [typologie_name, taxonomy_name]
         self._load_list_from_cache(self.root_list, path)
-
+    
         # Effacer les niveaux inférieurs
         self.parent_list.clear()
         self.child_list.clear()
         self._child_navigation_path.clear()
-
+    
         self._update_button_states()
         logger.debug(f"Taxonomie '{taxonomy_name}' sélectionnée et synchronisée")
 
@@ -954,18 +997,31 @@ class DatasetConfigTab(QtWidgets.QWidget):
             self._update_button_states()
             return
 
-        root_name = current.text()
+        # CORRECTION: Extraire le nom SANS le compteur
+        root_display = current.text()
+        if " (" in root_display:
+            root_name = root_display.split(" (")[0]
+        else:
+            root_name = root_display
+
         index = self.root_list.currentRow()
 
         # Mettre à jour le project_manager
         self.project_manager.set_current_root_index(index)
 
-        # Construire le chemin
+        # Construire le chemin AVEC LES NOMS SANS COMPTEURS
         typ_item = self.typologie_list.currentItem()
         tax_item = self.taxonomy_list.currentItem()
 
         if typ_item and tax_item:
-            path = [typ_item.text(), tax_item.text(), root_name]
+            # Extraire les noms sans compteurs
+            typ_display = typ_item.text()
+            typ_name = typ_display.split(" (")[0] if " (" in typ_display else typ_display
+
+            tax_display = tax_item.text()
+            tax_name = tax_display.split(" (")[0] if " (" in tax_display else tax_display
+
+            path = [typ_name, tax_name, root_name]
             self._load_list_from_cache(self.parent_list, path)
 
         # Effacer les enfants
@@ -1122,7 +1178,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
         # Le bouton "Plonger" est activé s'il y a un enfant sélectionné
         child_selected = self.child_list.currentItem() is not None
         self.dive_btn.setEnabled(child_selected)
-    
+
     # ========== CRUD ACTIONS ==========
 
     def _add_project(self):
@@ -1281,6 +1337,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
                 # Aussi dans le manager
                 if self.project_manager.add_typologie(name, self):
                     self._refresh_typologie_list()
+                    self._refresh_all_counts()  # ← AJOUTER CETTE LIGNE
                     logger.info(f"Typologie '{name}' added")
             else:
                 QtWidgets.QMessageBox.warning(self, "Erreur", 
@@ -1340,10 +1397,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
         name = name.strip()
 
-        # === VALIDATION PRÉALABLE ===
-
         if level == "root":
-            # Vérifier que le taxonomy est bien sélectionné
             taxonomy = self.project_manager.get_current_taxonomy()
             if not taxonomy:
                 logger.error("ÉCHEC: get_current_taxonomy() retourne None")
@@ -1364,7 +1418,6 @@ class DatasetConfigTab(QtWidgets.QWidget):
             logger.debug(f"✓ Taxonomy validé: '{taxonomy.get('name')}'")
 
         elif level == "parent":
-            # Vérifier que le root est bien sélectionné
             root = self.project_manager.get_current_root()
             if not root:
                 logger.error("ÉCHEC: get_current_root() retourne None")
@@ -1377,8 +1430,6 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
             logger.debug(f"✓ Root validé: '{root.get('name')}'")
 
-        # === OBTENIR LE CHEMIN ===
-
         path = self._get_path_for_level(level)
         if path is None:
             QtWidgets.QMessageBox.warning(self, "Erreur", 
@@ -1387,15 +1438,11 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
         logger.debug(f"Chemin pour {level}: {' > '.join(path)}")
 
-        # === VÉRIFIER DOUBLON ===
-
         existing = self.hierarchy_cache.get_children_at_path(path)
         if name in existing:
             QtWidgets.QMessageBox.warning(self, "Doublon", 
                 f"'{name}' existe déjà à ce niveau")
             return
-
-        # === AJOUTER AU CACHE ===
 
         if not self.hierarchy_cache.add_child_at_path(path, name):
             QtWidgets.QMessageBox.warning(self, "Erreur",
@@ -1404,12 +1451,9 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
         logger.info(f"✓ '{name}' ajouté au cache")
 
-        # === AJOUTER AU PROJECT_MANAGER ===
-
         success = False
 
         if level == "taxonomy":
-            # Pas besoin d'ajouter au manager, sera synchronisé à la sauvegarde
             success = True
 
         elif level == "root":
@@ -1433,23 +1477,20 @@ class DatasetConfigTab(QtWidgets.QWidget):
             else:
                 logger.info(f"✓ '{name}' ajouté au project_manager")
 
-        # === METTRE À JOUR L'UI ===
-
         if success:
             list_widget = self._get_list_for_level(level)
-            item = QtWidgets.QListWidgetItem(name)
-            list_widget.addItem(item)
+            self._load_list_from_cache(list_widget, path)
+
+            self._refresh_all_counts()
 
             logger.info(f"✓✓✓ {level.capitalize()} '{name}' ajouté avec succès")
         else:
-            # Retirer du cache en cas d'échec
             self.hierarchy_cache.remove_child_at_path(path, name)
             logger.error(f"✗✗✗ Rollback: '{name}' retiré du cache")
 
             QtWidgets.QMessageBox.warning(self, "Erreur",
                 f"Impossible d'ajouter le {level} dans le gestionnaire de projet.\n\n"
-                f"Vérifiez les logs pour plus de détails.")
-
+                f"Vérifez les logs pour plus de détails.")
 
     def _edit_label(self, level):
         """Modifier un label"""
@@ -1510,31 +1551,51 @@ class DatasetConfigTab(QtWidgets.QWidget):
             logger.info(f"{level.capitalize()} '{name}' supprimé")
 
     def _get_path_for_level(self, level: str) -> list:
-        """Obtenir le chemin parent pour un niveau donné"""
+        """Obtenir le chemin parent pour un niveau donné - EXTRAIT LES NOMS SANS COMPTEURS"""
         typ_item = self.typologie_list.currentItem()
-        
+
         if level == "taxonomy":
             if typ_item:
-                return [typ_item.text()]
+                # Extraire le nom sans compteur
+                typ_display = typ_item.text()
+                typ_name = typ_display.split(" (")[0] if " (" in typ_display else typ_display
+                return [typ_name]
             return None
-        
+
         tax_item = self.taxonomy_list.currentItem() if hasattr(self, 'taxonomy_list') else None
-        
+
         if level == "root":
             if typ_item and tax_item:
-                return [typ_item.text(), tax_item.text()]
+                # Extraire les noms sans compteurs
+                typ_display = typ_item.text()
+                typ_name = typ_display.split(" (")[0] if " (" in typ_display else typ_display
+
+                tax_display = tax_item.text()
+                tax_name = tax_display.split(" (")[0] if " (" in tax_display else tax_display
+
+                return [typ_name, tax_name]
             return None
-        
+
         root_item = self.root_list.currentItem()
-        
+
         if level == "parent":
             if typ_item and tax_item and root_item:
-                return [typ_item.text(), tax_item.text(), root_item.text()]
+                # Extraire les noms sans compteurs
+                typ_display = typ_item.text()
+                typ_name = typ_display.split(" (")[0] if " (" in typ_display else typ_display
+
+                tax_display = tax_item.text()
+                tax_name = tax_display.split(" (")[0] if " (" in tax_display else tax_display
+
+                root_display = root_item.text()
+                root_name = root_display.split(" (")[0] if " (" in root_display else root_display
+
+                return [typ_name, tax_name, root_name]
             return None
-        
+
         return None
 
-    
+
     def _add_child(self):
         """
         Ajoute un enfant - VERSION TOTALEMENT CORRIGÉE
@@ -1582,19 +1643,14 @@ class DatasetConfigTab(QtWidgets.QWidget):
             # Ajouter au project_manager
             if self.project_manager.add_child_label(name, self):
                 logger.info(f"✓ '{name}' ajouté au project_manager")
-    
-                # ⚠️ PARTIE CRITIQUE - Recharger la liste
+
                 logger.debug("🔄 Rechargement de la liste des enfants...")
-                self._load_children_from_cache()  # ← CETTE LIGNE DOIT ÊTRE PRÉSENTE
+                self._load_children_from_cache()
                 logger.debug("✓ Liste rechargée")
-    
-                # Rafraîchir le compteur du parent
-                logger.debug("🔄 Rafraîchissement des compteurs parents...")
-                self._refresh_parent_counts()
+
+                logger.debug("🔄 Rafraîchissement de tous les compteurs...")
+                self._refresh_all_counts()
                 logger.debug("✓ Compteurs rafraîchis")
-    
-                depth = len(self._child_navigation_path)
-                logger.info(f"✓✓✓ Enfant '{name}' ajouté au niveau {depth}")
             else:
                 # Retirer du cache si échec
                 self.hierarchy_cache.remove_child_at_path(path, name)
@@ -1666,13 +1722,10 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
         path = self._get_full_path()
 
-        # Supprimer avec le NOM RÉEL (sans compteur)
         if self.hierarchy_cache.remove_child_at_path(path, child_name):
-            # Recharger la liste pour mettre à jour les compteurs
             self._load_children_from_cache()
 
-            # Rafraîchir le compteur du parent
-            self._refresh_parent_counts()
+            self._refresh_all_counts()
 
             logger.info(f"Enfant '{child_name}' supprimé")
 

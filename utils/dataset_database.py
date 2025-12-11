@@ -338,22 +338,29 @@ class DatasetDatabase:
             return False
         
     def delete_all_batches(self, project_name):
-        """Supprime tous les batches d'un projet"""
+        """Supprime tous les batches d'un projet (définitif et irréversible)"""
         try:
             cursor = self.connection.cursor()
+            # Compter d'abord pour logging
+            cursor.execute("""
+                SELECT COUNT(*) as count FROM batches 
+                WHERE project_id = (SELECT id FROM projects WHERE name = ?)
+            """, (project_name,))
+            count = cursor.fetchone()['count']
+            
             cursor.execute("""
                 DELETE FROM batches 
                 WHERE project_id = (SELECT id FROM projects WHERE name = ?)
             """, (project_name,))
             
             self.connection.commit()
-            logger.info(f"Tous les batches de '{project_name}' supprimés")
+            logger.info(f"{count} batches supprimés définitivement pour '{project_name}' (irréversible)")
             return True
             
         except Exception as e:
-            logger.error(f"Erreur lors de la suppression des batches: {str(e)}")
+            logger.error(f"Erreur lors de la suppression définitive des batches: {str(e)}")
             return False
-
+    
     def get_dataset_projet(self, project_name):
         """Récupère un projet complet avec toute sa hiérarchie"""
         try:

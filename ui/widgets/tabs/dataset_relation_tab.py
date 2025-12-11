@@ -24,7 +24,12 @@ class DatasetRelationTab(QtWidgets.QWidget):
         super().__init__(parent)
         self.project_manager = project_manager
         self.config_data = config_data
-        self.combinations = []
+        self.combinations = []  # Liste de combinaisons
+        self.current_combination = {
+            'contexts': [],  # Liste des contextes pour la combinaison en cours
+            'master': None
+        }
+        self.current_combination_index = 0
         self.selected_master_typologie = None
         self._typologies_cache = []
 
@@ -43,7 +48,6 @@ class DatasetRelationTab(QtWidgets.QWidget):
         
         self._init_ui()
         self._load_initial_data()
-        self.active_typologie_columns = []
 
     def _init_ui(self):
         # Container principal avec scroll
@@ -209,7 +213,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         return group
     
     def _create_batch_table_section(self):
-        """Tableau de combinaisons avec colonnes dynamiques par typologie"""
+        """Tableau de combinaisons avec colonnes dynamiques pour chaque contexte"""
         group = QtWidgets.QGroupBox("Tableau des Combinaisons")
         group.setStyleSheet("""
             QGroupBox { font-weight: 600; font-size: 11px; color: #2c3e50;
@@ -243,49 +247,58 @@ class DatasetRelationTab(QtWidgets.QWidget):
         batch_selector_layout.addWidget(self.refresh_batches_btn)
 
         batch_selector_layout.addStretch()
-
         layout.addLayout(batch_selector_layout)
 
         # En-tête avec stats et boutons
         header_layout = QtWidgets.QHBoxLayout()
 
-        self.stats_label = QtWidgets.QLabel("Combinaisons: 0")
-        self.stats_label.setStyleSheet("font-size: 10px; color: #7f8c8d; font-weight: 600;")
-        header_layout.addWidget(self.stats_label)
+        # Indicateur de combinaison en cours
+        self.current_combo_label = QtWidgets.QLabel("Combinaison 1 | Contextes: 0")
+        self.current_combo_label.setStyleSheet("""
+            font-size: 12px; 
+            color: #2c3e50; 
+            font-weight: 700;
+            padding: 6px 12px;
+            background-color: #e3f2fd;
+            border-radius: 4px;
+            border: 2px solid #2196f3;
+        """)
+        header_layout.addWidget(self.current_combo_label)
 
         header_layout.addStretch()
 
+        # Bouton "Nouvelle Combinaison"
+        self.new_combo_btn = self._create_mini_button("+ Combinaison", self._start_new_combination)
+        header_layout.addWidget(self.new_combo_btn)
+
         self.modify_selection_btn = self._create_mini_button("Modifier", self._modify_selected_row)
         self.modify_selection_btn.setEnabled(False)
-        self.modify_selection_btn.setToolTip("Modifier la combinaison sélectionnée")
         header_layout.addWidget(self.modify_selection_btn)
 
-        self.save_modification_btn = self._create_mini_button("Sauvegarder Modif", self._save_modification)
-        self.save_modification_btn.setVisible(False)
-        self.save_modification_btn.setToolTip("Enregistrer la modification")
-        header_layout.addWidget(self.save_modification_btn)
-
-        self.cancel_modification_btn = self._create_mini_button("Annuler", self._cancel_modification)
-        self.cancel_modification_btn.setVisible(False)
-        self.cancel_modification_btn.setToolTip("Annuler la modification")
-        header_layout.addWidget(self.cancel_modification_btn)
-
-        # Bouton supprimer
         self.delete_selection_btn = self._create_mini_button("Supprimer", self._delete_selected_row)
         self.delete_selection_btn.setEnabled(False)
-        self.delete_selection_btn.setToolTip("Supprimer la combinaison sélectionnée")
         header_layout.addWidget(self.delete_selection_btn)
 
-        self.clear_batch_btn = self._create_mini_button("Vider", self._clear_batch)
+        self.clear_batch_btn = self._create_mini_button("Effacer    ", self._permanent_clear_batch)
+        self.clear_batch_btn.setToolTip("Effacer définitivement tous les batches et combinaisons")
         header_layout.addWidget(self.clear_batch_btn)
 
         layout.addLayout(header_layout)
 
-        # Table
-        self.batch_table = QtWidgets.QTableWidget()
-        self.batch_table.setColumnCount(1)
-        self.batch_table.setHorizontalHeaderLabels(["Combinaison"])
+        # Stats globales
+        self.stats_label = QtWidgets.QLabel("Combinaisons totales: 0 | Samples: 0")
+        self.stats_label.setStyleSheet("""
+            font-size: 10px; 
+            color: #7f8c8d; 
+            font-weight: 600;
+            padding: 4px 8px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        """)
+        layout.addWidget(self.stats_label)
 
+        # Tableau avec colonnes dynamiques
+        self.batch_table = QtWidgets.QTableWidget()
         self.batch_table.setStyleSheet("""
             QTableWidget {
                 border: 2px solid #e1e4e8;
@@ -294,7 +307,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
                 gridline-color: #e1e4e8;
             }
             QTableWidget::item {
-                padding: 8px;
+                padding: 4px 6px;
                 color: #2c3e50;
             }
             QTableWidget::item:selected {
@@ -303,7 +316,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
             }
             QHeaderView::section {
                 background-color: #f8f9fa;
-                padding: 8px;
+                padding: 6px 8px;
                 border: none;
                 border-bottom: 2px solid #e1e4e8;
                 font-weight: 600;
@@ -311,19 +324,152 @@ class DatasetRelationTab(QtWidgets.QWidget):
             }
         """)
 
+        # Initialiser avec 3 colonnes minimum
+        self.batch_table.setColumnCount(3)
+        self.batch_table.setHorizontalHeaderLabels(["Combinaison", "samples", "Contexte 1"])
+
         self.batch_table.horizontalHeader().setStretchLastSection(False)
         self.batch_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
-        self.batch_table.setColumnWidth(0, 180)
+        self.batch_table.setColumnWidth(0, 150)
+        self.batch_table.setColumnWidth(1, 80)  # Largeur fixe pour Nb samples
+
+        # Les colonnes de contexte sont étirables
+        for i in range(2, self.batch_table.columnCount()):
+            self.batch_table.horizontalHeader().setSectionResizeMode(i, QtWidgets.QHeaderView.Stretch)
 
         self.batch_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.batch_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.batch_table.verticalHeader().setVisible(False)
 
         self.batch_table.itemSelectionChanged.connect(self._on_batch_row_selected)
+        self.batch_table.cellChanged.connect(self._on_nb_samples_changed)
 
         layout.addWidget(self.batch_table)
 
         return group
+    
+    def _start_new_combination(self):
+        """Démarrer une nouvelle combinaison"""
+        # Vérifier qu'il y a au moins 1 contexte dans la combinaison actuelle
+        if not self.current_combination['contexts']:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Attention",
+                "La combinaison actuelle ne contient aucun contexte.\n"
+                "Ajoutez au moins un contexte avant de créer une nouvelle combinaison."
+            )
+            return
+
+        # Sauvegarder la combinaison actuelle
+        self._save_current_combination()
+
+        # Réinitialiser pour une nouvelle combinaison
+        self.current_combination = {
+            'contexts': [],
+            'master': self.selected_master_typologie
+        }
+        self.current_combination_index += 1
+
+        # Mettre à jour l'affichage
+        self._update_current_combo_label()
+        self._mark_current_selections()
+
+        logger.info(f"✅ Nouvelle combinaison {self.current_combination_index + 1} créée")
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Nouvelle Combinaison",
+            f"Combinaison {self.current_combination_index + 1} créée.\n"
+            "Ajoutez des contextes à cette nouvelle combinaison."
+        )
+    
+    def _build_unified_context_display(self, context_info):
+        """
+        Affichage simplifié : [Typologie_Contexte] Élément_le_plus_bas
+        """
+        typologie = context_info.get('typologie', '')
+        level = context_info.get('level', '')
+
+        if not typologie:
+            return 'N/A'
+
+        # Toujours commencer par la typologie entre crochets
+        display = f"[{typologie}]"
+
+        if level == 'typologie':
+            # Si on sélectionne juste la typologie (sans enfants)
+            return display
+
+        elif level == 'taxonomy':
+            taxonomy = context_info.get('taxonomy', '')
+            if taxonomy:
+                display += f" {taxonomy}"
+
+        elif level == 'root':
+            root = context_info.get('root', '')
+            if root:
+                display += f" {root}"
+
+        elif level == 'parent':
+            parent = context_info.get('parent', '')
+            if parent:
+                display += f" {parent}"
+
+        elif level == 'child':
+            # Prendre SEULEMENT le dernier enfant (le plus bas)
+            child_path = context_info.get('child_path', [])
+            if child_path:
+                lowest_child = child_path[-1]
+                display += f" {lowest_child}"
+
+        return display
+
+    def _count_taxonomy_samples(self, taxonomy):
+        """Compte le nombre total de labels dans un cluster (taxonomy)"""
+        if not taxonomy:
+            return 0
+
+        total = 0
+        # Compter les root labels
+        root_labels = taxonomy.get('root_labels', [])
+
+        for root in root_labels:
+            # +1 pour le root lui-même
+            total += 1
+
+            # Compter les parent labels
+            parent_labels = root.get('parent_labels', [])
+            for parent in parent_labels:
+                # +1 pour le parent lui-même
+                total += 1
+
+                # Compter tous les enfants récursivement
+                total += self._count_children_recursive(parent.get('children', []))
+
+        return total
+    
+    def _count_root_samples(self, root):
+        """Compte le nombre total de labels dans un root"""
+        if not root:
+            return 0
+
+        total = 0
+        parent_labels = root.get('parent_labels', [])
+
+        for parent in parent_labels:
+            # +1 pour le parent lui-même
+            total += 1
+            # Ajouter tous les enfants
+            total += self._count_children_recursive(parent.get('children', []))
+
+        return total
+    
+    def _count_parent_samples(self, parent):
+        """Compte le nombre total d'enfants dans un parent"""
+        if not parent:
+            return 0
+
+        return self._count_children_recursive(parent.get('children', []))
     
     def _cancel_modification(self):
         """Annuler la modification en cours"""
@@ -356,7 +502,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
             )
     
     def _save_modification(self):
-        """Sauvegarder la modification de la combinaison"""
+        """Sauvegarder la modification - VERSION SIMPLIFIÉE"""
         if not self._modification_in_progress:
             return
 
@@ -397,12 +543,12 @@ class DatasetRelationTab(QtWidgets.QWidget):
         # Mettre à jour dans la liste
         self.combinations[index] = new_combination
 
-        # Mettre à jour le tableau
-        typologie_name = new_selection.get('typologie', '')
-        contexts_dict = {typologie_name: new_selection}
-
-        # Reconstruire complètement le tableau
-        self._rebuild_table()
+        # ✅ Mettre à jour SEULEMENT cette ligne dans le tableau
+        context_item = self.batch_table.item(index, 1)
+        if context_item:
+            display_text = self._build_unified_context_display(new_selection)
+            context_item.setText(display_text)
+            context_item.setData(Qt.UserRole, new_combination)
 
         # Quitter le mode modification
         self._show_modification_mode(False)
@@ -652,18 +798,18 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self._load_batch_into_table(batch)
 
     def _load_batch_into_table(self, batch):
-        """Charger un batch complet dans l'interface pour modification"""
-        logger.info(f"=== Chargement du batch #{batch['batch_number']} dans le tableau ===")
+        """Charger un batch - VERSION MULTI-CONTEXTES"""
+        logger.info(f"=== Chargement du batch #{batch['batch_number']} ===")
 
         data = batch.get('data', {})
 
-        # 1. Remplir les informations du batch
+        # Remplir les informations
         self.current_batch_id = batch['batch_number']
         self.batch_name_edit.setText(data.get('batch_name', ''))
         self.batch_family_edit.setText(data.get('batch_family', ''))
         self.desc_edit.setPlainText(data.get('description', ''))
 
-        # 2. Charger la typologie master
+        # Charger la typologie master
         master_name = data.get('master_typologie', '')
         if master_name:
             index = self.master_combo.findText(master_name)
@@ -671,185 +817,82 @@ class DatasetRelationTab(QtWidgets.QWidget):
                 self.master_combo.blockSignals(True)
                 self.master_combo.setCurrentIndex(index)
                 self.master_combo.blockSignals(False)
-                # Déclencher manuellement le changement
                 self._on_master_typologie_changed(index)
 
-        # 3. Charger les combinaisons
-        self.combinations = data.get('combinations', [])
+        # Charger les combinaisons et appliquer la migration si nécessaire
+        self.combinations = []
+        raw_combinations = data.get('combinations', [])
+        for i, raw_combo in enumerate(raw_combinations):
+            migrated_combo = self._migrate_old_combination_format(raw_combo)
+            migrated_combo['index'] = i  # Assurer l'index
+            self.combinations.append(migrated_combo)
 
-        # 4. Reconstruire les colonnes dynamiques
-        self.active_typologie_columns = []
-        typologies_used = set()
-
-        for combo in self.combinations:
-            context = combo.get('context', {})
-            typologie_name = context.get('typologie', '')
-            if typologie_name and typologie_name not in typologies_used:
-                typologies_used.add(typologie_name)
-                self.active_typologie_columns.append(typologie_name)
-
-        logger.debug(f"Typologies détectées: {self.active_typologie_columns}")
-
-        # 5. Mettre à jour les colonnes du tableau
-        self._update_table_columns()
-
-        # 6. Remplir le tableau
+        # Vider et remplir le tableau avec le nouveau format
         self.batch_table.setRowCount(0)
+        for i, combo in enumerate(self.combinations):
+            self._update_table_row(i, combo)
 
-        for combo in self.combinations:
-            master_name = combo.get('master', {}).get('name', 'N/A')
-            context = combo.get('context', {})
-            typologie_name = context.get('typologie', '')
-
-            # Construire le dict des contextes
-            contexts_dict = {typologie_name: context} if typologie_name else {}
-
-            # Ajouter la ligne (version silencieuse)
-            self._add_to_batch_table_silent(master_name, contexts_dict, combo)
-
-        # 7. Mettre à jour la colonne master avec fusion
-        self._update_master_column()
-
-        # 8. Marquer comme sauvegardé
+        # Marquer comme sauvegardé
         self.is_batch_saved = True
         self._update_batch_status(f"Batch #{batch['batch_number']} - {batch.get('status', 'pending')}")
 
-        # 9. Mettre à jour les stats
         self._update_stats()
-
-        # 10. Marquer les sélections actuelles
         self._mark_current_selections()
 
-        logger.info(f"✅ Batch #{batch['batch_number']} chargé avec {len(self.combinations)} combinaisons")
+        logger.info(f"✅ Batch chargé avec {len(self.combinations)} combinaisons")
 
         QtWidgets.QMessageBox.information(
             self,
             "Succès",
             f"Batch '{data.get('batch_name', '')}' chargé avec succès!\n"
-            f"Combinaisons: {len(self.combinations)}\n\n"
-            f"Vous pouvez maintenant modifier les combinaisons.\n"
-            f"N'oubliez pas de sauvegarder après vos modifications."
+            f"Combinaisons: {len(self.combinations)}"
         )
-
-    def _update_table_columns(self):
-        """Met à jour les colonnes du tableau selon les typologies utilisées"""
-        total_columns = 1 + len(self.active_typologie_columns)
-
-        self.batch_table.setColumnCount(total_columns)
-
-        headers = ["Combinaison"]
-        headers.extend(self.active_typologie_columns)
-
-        self.batch_table.setHorizontalHeaderLabels(headers)
-
-        self.batch_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
-        self.batch_table.setColumnWidth(0, 180)
-
-        for i in range(1, len(self.active_typologie_columns) + 1):
-            self.batch_table.horizontalHeader().setSectionResizeMode(i, QtWidgets.QHeaderView.Stretch)
-
-        logger.debug(f"Colonnes mises à jour : {headers}")
     
     def _add_to_batch_table(self, master_name, contexts_dict, combination_data):
-        # Extraire la typologie de contexte de cette combinaison
+        """Ajouter une ligne au tableau - VERSION 3 COLONNES"""
+        row = self.batch_table.rowCount()
+        self.batch_table.insertRow(row)
+
+        # Colonne 0 : Numéro
+        num_item = QtWidgets.QTableWidgetItem(f"Combinaison {row + 1}")
+        num_item.setFlags(num_item.flags() & ~Qt.ItemIsEditable)
+        num_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+        font = num_item.font()
+        font.setBold(True)
+        num_item.setFont(font)
+        num_item.setBackground(QColor("#f8f9fa"))
+        self.batch_table.setItem(row, 0, num_item)
+
+        # Colonne 1 : Nb samples (éditable, défaut 1 si non défini)
+        nb_samples = combination_data.get('nb_samples', 1)
+        nb_item = QtWidgets.QTableWidgetItem(str(nb_samples))
+        nb_item.setFlags(Qt.ItemIsEditable | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+        nb_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+        self.batch_table.setItem(row, 1, nb_item)
+
+        # Colonne 2 : Contexte unifié
         context_selection = combination_data.get('context', {})
-        typologie_name = context_selection.get('typologie', '')
+        display_text = self._build_unified_context_display(context_selection)
 
-        if typologie_name and typologie_name not in self.active_typologie_columns:
-            # Ajouter une nouvelle colonne pour cette typologie
-            self.active_typologie_columns.append(typologie_name)
-            self._update_table_columns()
+        context_item = QtWidgets.QTableWidgetItem(display_text)
+        context_item.setFlags(context_item.flags() & ~Qt.ItemIsEditable)
+        context_item.setData(Qt.UserRole, combination_data)
+        self.batch_table.setItem(row, 2, context_item)
 
-            # Recréer toutes les lignes existantes avec la nouvelle structure
-            self._rebuild_table()
-            return
-
-        # Ajouter la ligne
-        row = self.batch_table.rowCount()
-        self.batch_table.insertRow(row)
-
-        # Colonne 1: Master (fusionnée verticalement plus tard)
-        master_item = QtWidgets.QTableWidgetItem("")  # Sera rempli par _update_master_column
-        master_item.setFlags(master_item.flags() & ~Qt.ItemIsEditable)
-        self.batch_table.setItem(row, 0, master_item)
-
-        # Colonnes dynamiques pour chaque typologie de contexte
-        for col_idx, typ_name in enumerate(self.active_typologie_columns, start=1):
-            context_info = contexts_dict.get(typ_name, None)
-
-            if context_info:
-                # Construire le texte d'affichage
-                display_text = self._build_context_display_text(context_info)
-                context_item = QtWidgets.QTableWidgetItem(display_text)
-            else:
-                context_item = QtWidgets.QTableWidgetItem("-")
-
-            context_item.setFlags(context_item.flags() & ~Qt.ItemIsEditable)
-            context_item.setData(Qt.UserRole, combination_data)
-            self.batch_table.setItem(row, col_idx, context_item)
-
-        self._update_master_column()
-
-    def _rebuild_table(self):
-        """Reconstruit tout le tableau avec la structure de colonnes actuelle"""
-        logger.debug("🔄 Reconstruction du tableau...")
-
-        # Sauvegarder les combinaisons actuelles
-        saved_combinations = self.combinations.copy()
-
-        # Vider le tableau
-        self.batch_table.setRowCount(0)
-
-        # Recréer chaque ligne
-        for combo in saved_combinations:
-            master_name = combo.get('master', {}).get('name', 'N/A')
-
-            # Construire le dict des contextes par typologie
-            context = combo.get('context', {})
-            contexts_dict = {context.get('typologie', ''): context}
-
-            # Ajouter la ligne (sans déclencher de nouvelle reconstruction)
-            self._add_to_batch_table_silent(master_name, contexts_dict, combo)
-
-        # Mise à jour finale
-        self._update_master_column()
-        logger.debug(f"✅ Tableau reconstruit avec {len(saved_combinations)} lignes")
-
-    def _add_to_batch_table_silent(self, master_name, contexts_dict, combination_data):
-        """Version silencieuse qui n'ajoute pas de colonnes (utilisée lors de la reconstruction)"""
-        row = self.batch_table.rowCount()
-        self.batch_table.insertRow(row)
-
-        # Colonne Master
-        master_item = QtWidgets.QTableWidgetItem("")
-        master_item.setFlags(master_item.flags() & ~Qt.ItemIsEditable)
-        self.batch_table.setItem(row, 0, master_item)
-
-        # Colonnes de contextes
-        for col_idx, typ_name in enumerate(self.active_typologie_columns, start=1):
-            context_info = contexts_dict.get(typ_name, None)
-
-            if context_info:
-                display_text = self._build_context_display_text(context_info)
-                context_item = QtWidgets.QTableWidgetItem(display_text)
-            else:
-                context_item = QtWidgets.QTableWidgetItem("-")
-
-            context_item.setFlags(context_item.flags() & ~Qt.ItemIsEditable)
-            context_item.setData(Qt.UserRole, combination_data)
-            self.batch_table.setItem(row, col_idx, context_item)
+        # Stocker les données complètes dans la première colonne pour accès
+        num_item.setData(Qt.UserRole, combination_data)
 
     def _on_batch_row_selected(self):
         """Appelée quand une ligne du tableau est sélectionnée"""
         selected_rows = self.batch_table.selectionModel().selectedRows()
 
-        # ✅ Désactiver les boutons si en mode modification
+        # Désactiver les boutons si en mode modification
         if self._modification_in_progress:
             self.delete_selection_btn.setEnabled(False)
             self.modify_selection_btn.setEnabled(False)
             return
 
-        # ✅ Activer/désactiver les boutons selon la sélection
+        # Activer/désactiver les boutons selon la sélection
         has_selection = len(selected_rows) > 0
         self.delete_selection_btn.setEnabled(has_selection)
         self.modify_selection_btn.setEnabled(has_selection)
@@ -857,6 +900,187 @@ class DatasetRelationTab(QtWidgets.QWidget):
         if selected_rows:
             row = selected_rows[0].row()
             logger.debug(f"Ligne sélectionnée : {row}")
+
+            # ✅ NOUVEAU : Colorer toute la hiérarchie de cette combinaison
+            if row < len(self.combinations):
+                combination = self.combinations[row]
+                self._highlight_combination_hierarchy(combination)
+
+    def _highlight_combination_hierarchy(self, combination):
+        """
+        Met en surbrillance TOUTE la hiérarchie d'une combinaison sélectionnée
+        Colore en vert clair : Typologie > Cluster > Root > Parent > Enfant
+        """
+        # D'abord, réinitialiser toutes les couleurs
+        self._reset_all_hierarchy_colors()
+
+        context = combination.get('context', {})
+        if not context:
+            return
+
+        level = context.get('level', '')
+        typologie_name = context.get('typologie', '')
+
+        logger.info(f"=== Mise en évidence hiérarchie : {level} ===")
+        logger.debug(f"Typologie: {typologie_name}")
+
+        # Couleur de surbrillance
+        highlight_color = QColor("#c8e6c9")  # Vert clair
+
+        # 1️⃣ COLORER LA TYPOLOGIE
+        if typologie_name:
+            self._highlight_typologie_item(typologie_name, highlight_color)
+
+        # 2️⃣ COLORER LE CLUSTER (si applicable)
+        taxonomy_name = context.get('taxonomy', '')
+        if taxonomy_name and level in ['taxonomy', 'root', 'parent', 'child']:
+            self._highlight_taxonomy_item(taxonomy_name, highlight_color)
+
+        # 3️⃣ COLORER LE ROOT (si applicable)
+        root_name = context.get('root', '')
+        if root_name and level in ['root', 'parent', 'child']:
+            self._highlight_dynamic_label_item(root_name, 'root', highlight_color)
+
+        # 4️⃣ COLORER LE PARENT (si applicable)
+        parent_name = context.get('parent', '')
+        if parent_name and level in ['parent', 'child']:
+            self._highlight_dynamic_label_item(parent_name, 'parent', highlight_color)
+
+        # 5️⃣ COLORER L'ENFANT (si applicable)
+        if level == 'child':
+            child_path = context.get('child_path', [])
+            if child_path:
+                # Colorer le dernier enfant (le plus bas dans la hiérarchie)
+                last_child = child_path[-1]
+                self._highlight_dynamic_label_item(last_child, 'child', highlight_color)
+
+    def _highlight_typologie_item(self, typologie_name, color):
+        """Colore un item de typologie"""
+        for i in range(self.context_typologie_tree.topLevelItemCount()):
+            item = self.context_typologie_tree.topLevelItem(i)
+            full_text = item.text(0)
+            item_name = full_text.split(' (')[0] if ' (' in full_text else full_text
+            
+            if item_name == typologie_name:
+                # Utiliser setData avec BackgroundRole pour forcer la couleur
+                item.setData(0, Qt.BackgroundRole, color)
+                item.setBackground(0, color)
+                
+                # Police en gras pour plus de visibilité
+                font = item.font(0)
+                font.setBold(True)
+                item.setFont(0, font)
+                
+                # Couleur de texte pour contraste
+                item.setForeground(0, QColor("#1b5e20"))  # Vert foncé
+                
+                logger.debug(f"✅ Typologie colorée: {typologie_name}")
+                break
+
+    def _highlight_taxonomy_item(self, taxonomy_name, color):
+        """Colore un item de taxonomy (cluster)"""
+        for i in range(self.context_taxonomy_tree.topLevelItemCount()):
+            item = self.context_taxonomy_tree.topLevelItem(i)
+            full_text = item.text(0)
+            item_name = full_text.split(' (')[0] if ' (' in full_text else full_text
+
+            if item_name == taxonomy_name:
+                # Utiliser setData avec BackgroundRole pour forcer la couleur
+                item.setData(0, Qt.BackgroundRole, color)
+                item.setBackground(0, color)
+
+                font = item.font(0)
+                font.setBold(True)
+                item.setFont(0, font)
+
+                item.setForeground(0, QColor("#1b5e20"))
+
+                logger.debug(f"✅ Taxonomy coloré: {taxonomy_name}")
+                break
+
+    def _highlight_dynamic_label_item(self, item_name, expected_level, color):
+        """
+        Colore un item dans la liste dynamique (root, parent, ou child)
+        """
+        for i in range(self.dynamic_labels_tree.topLevelItemCount()):
+            item = self.dynamic_labels_tree.topLevelItem(i)
+            item_data = item.data(0, Qt.UserRole)
+
+            if not item_data:
+                continue
+            
+            item_level = item_data.get('level', '')
+
+            # Pour les enfants, utiliser le chemin complet
+            if expected_level == 'child' and item_level == 'child':
+                child_path = item_data.get('path', [])
+                if child_path and child_path[-1] == item_name:
+                    # Utiliser setData avec BackgroundRole
+                    item.setData(0, Qt.BackgroundRole, color)
+                    item.setBackground(0, color)
+
+                    font = item.font(0)
+                    font.setBold(True)
+                    item.setFont(0, font)
+
+                    item.setForeground(0, QColor("#1b5e20"))
+
+                    logger.debug(f"✅ Child coloré: {item_name}")
+                    break
+                
+            # Pour root et parent
+            elif item_level == expected_level:
+                data_name = item_data.get('data', {}).get('name', '')
+                if data_name == item_name:
+                    # Utiliser setData avec BackgroundRole
+                    item.setData(0, Qt.BackgroundRole, color)
+                    item.setBackground(0, color)
+
+                    font = item.font(0)
+                    font.setBold(True)
+                    item.setFont(0, font)
+
+                    item.setForeground(0, QColor("#1b5e20"))
+
+                    logger.debug(f"✅ {expected_level.capitalize()} coloré: {item_name}")
+                    break
+
+    def _reset_all_hierarchy_colors(self):
+        """
+        Réinitialise toutes les couleurs dans tous les arbres
+        """
+        default_bg = QColor("white")
+        default_fg = QColor("#2c3e50")
+
+        # Réinitialiser les typologies
+        for i in range(self.context_typologie_tree.topLevelItemCount()):
+            item = self.context_typologie_tree.topLevelItem(i)
+            item.setData(0, Qt.BackgroundRole, default_bg)
+            item.setBackground(0, default_bg)
+            item.setForeground(0, default_fg)
+            font = item.font(0)
+            font.setBold(False)
+            item.setFont(0, font)
+
+        # Réinitialiser les taxonomies
+        for i in range(self.context_taxonomy_tree.topLevelItemCount()):
+            item = self.context_taxonomy_tree.topLevelItem(i)
+            item.setData(0, Qt.BackgroundRole, default_bg)
+            item.setBackground(0, default_bg)
+            item.setForeground(0, default_fg)
+            font = item.font(0)
+            font.setBold(False)
+            item.setFont(0, font)
+
+        # Réinitialiser les labels dynamiques
+        for i in range(self.dynamic_labels_tree.topLevelItemCount()):
+            item = self.dynamic_labels_tree.topLevelItem(i)
+            item.setData(0, Qt.BackgroundRole, default_bg)
+            item.setBackground(0, default_bg)
+            item.setForeground(0, default_fg)
+            font = item.font(0)
+            font.setBold(False)
+            item.setFont(0, font)
 
     def _delete_selected_row(self):
         """Supprimer la ligne sélectionnée dans le tableau"""
@@ -927,57 +1151,30 @@ class DatasetRelationTab(QtWidgets.QWidget):
         return ' / '.join(parts) if parts else 'N/A'
 
     def _remove_batch_row(self, row):
-        """Supprimer une ligne du tableau"""
+        """Supprimer une ligne du tableau - VERSION MODIFIÉE"""
         if row < len(self.combinations):
-            removed_combo = self.combinations.pop(row)
+            self.combinations.pop(row)
             self.batch_table.removeRow(row)
 
-            removed_typ = removed_combo.get('context', {}).get('typologie', '')
-            if removed_typ:
-                count = sum(1 for c in self.combinations 
-                           if c.get('context', {}).get('typologie', '') == removed_typ)
-
-                if count == 0 and removed_typ in self.active_typologie_columns:
-                    self.active_typologie_columns.remove(removed_typ)
-                    self._update_table_columns()
-                    self._rebuild_table()
+            for i in range(self.batch_table.rowCount()):
+                num_item = self.batch_table.item(i, 0)
+                if num_item:
+                    num_item.setText(f"Combinaison {i + 1}")
 
             self._update_stats()
             self._mark_current_selections()
 
-            self._update_master_column()
+            selected_rows = self.batch_table.selectionModel().selectedRows()
+            if selected_rows and selected_rows[0].row() < len(self.combinations):
+                new_row = selected_rows[0].row()
+                self._highlight_combination_hierarchy(self.combinations[new_row])
+            else:
+                self._reset_all_hierarchy_colors()
 
-    def _update_master_column(self):
-        """Mettre à jour la colonne Combinaison avec numérotation"""
-        if self.batch_table.rowCount() == 0:
-            return
-
-        self.batch_table.setUpdatesEnabled(False)
-
-        try:
-            # Dégrouper toutes les cellules d'abord
-            for row in range(self.batch_table.rowCount()):
-                self.batch_table.setSpan(row, 0, 1, 1)
-
-            # ✅ CHANGEMENT PRINCIPAL: Numéroter chaque ligne au lieu de fusionner
-            for row in range(self.batch_table.rowCount()):
-                combo_item = QtWidgets.QTableWidgetItem(f"Combinaison {row + 1}")
-                combo_item.setFlags(combo_item.flags() & ~Qt.ItemIsEditable)
-                combo_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
-
-                # Style pour la cellule
-                font = combo_item.font()
-                font.setBold(True)
-                font.setPointSize(11)
-                combo_item.setFont(font)
-                combo_item.setBackground(QColor("#f8f9fa"))
-                combo_item.setForeground(QColor("#2c3e50"))
-
-                self.batch_table.setItem(row, 0, combo_item)
-
-        finally:
-            self.batch_table.setUpdatesEnabled(True)
-            self.batch_table.viewport().update()
+        # Marquer comme modifié si batch chargé
+        if self.current_batch_id and self.is_batch_saved:
+            self.is_batch_saved = False
+            self._update_batch_status(f"Batch #{self.current_batch_id} - Modifié (non sauvegardé)")
 
     def _create_dynamic_labels_section(self):
         """Section pour naviguer dans la hiérarchie complète avec checkboxes à droite"""
@@ -1296,21 +1493,25 @@ class DatasetRelationTab(QtWidgets.QWidget):
         """
 
     def _connect_hierarchy_signals(self):
-        """Connecter tous les signaux - VERSION AVEC CHECKBOXES"""
-        # ✅ Pour les trees : clic sur item (navigation ou toggle selon la colonne)
+        """Connecter tous les signaux - VERSION AVEC DOUBLE-CLIC"""
         self.context_typologie_tree.itemClicked.connect(self._on_typologie_item_clicked)
         self.context_taxonomy_tree.itemClicked.connect(self._on_taxonomy_item_clicked)
         self.dynamic_labels_tree.itemClicked.connect(self._on_label_item_clicked)
 
+        self.context_typologie_tree.itemDoubleClicked.connect(self._on_typologie_double_clicked)
+        self.context_taxonomy_tree.itemDoubleClicked.connect(self._on_taxonomy_double_clicked)
+        self.dynamic_labels_tree.itemDoubleClicked.connect(self._on_label_double_clicked)
+
     def _on_typologie_item_clicked(self, item, column):
-        """Gérer le clic sur typologie : colonne 0 = navigation, colonne 1 = ignoré (géré par checkbox)"""
-        if column == 1:  # ✅ Clic sur checkbox - ne rien faire, géré par stateChanged
+        """Gérer le clic sur typologie - Double-clic pour ajouter au batch"""
+        if column == 1:
             return
 
-        # ✅ Clic sur texte = sélectionner ET naviguer
         self.context_typologie_tree.setCurrentItem(item)
 
-        typ_name = item.text(0)
+        full_text = item.text(0)
+        typ_name = full_text.split(' (')[0] if ' (' in full_text else full_text
+
         typologie = self._find_typologie_by_name(typ_name)
         if not typologie:
             return
@@ -1329,30 +1530,66 @@ class DatasetRelationTab(QtWidgets.QWidget):
         for cluster in typologie.get('taxonomy_clusters', []):
             cluster_name = cluster.get('name', '')
             if cluster_name:
-                tree_item = QtWidgets.QTreeWidgetItem([cluster_name, ""])
+                sample_count = self._count_taxonomy_samples(cluster)
+                display_text = f"{cluster_name} ({sample_count})"
+
+                tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                 tree_item.setData(0, Qt.UserRole, cluster)
 
-                # ✅ Ajouter checkbox à droite (colonne 1)
-                checkbox = self._create_styled_checkbox()
-                self.context_taxonomy_tree.addTopLevelItem(tree_item)
-                self.context_taxonomy_tree.setItemWidget(tree_item, 1, checkbox)
+                # ✅ MODIFICATION: Checkbox uniquement pour éléments sans enfants
+                has_children = bool(cluster.get('root_labels', []))
 
-                # ✅ Connecter le checkbox pour toggle batch
-                checkbox.stateChanged.connect(
-                    lambda state, it=tree_item: self._on_checkbox_changed(it, 'taxonomy')
-                )
+                if not has_children:
+                    # Élément feuille : checkbox visible
+                    checkbox = self._create_styled_checkbox()
+                    self.context_taxonomy_tree.setItemWidget(tree_item, 1, checkbox)
+                    checkbox.stateChanged.connect(
+                        lambda state, it=tree_item: self._on_checkbox_changed(it, 'taxonomy')
+                    )
+
+                self.context_taxonomy_tree.addTopLevelItem(tree_item)
 
         self.dynamic_labels_tree.clear()
         self._update_navigation_breadcrumb()
         self._update_labels_breadcrumb()
         self._mark_current_selections()
 
+    def _on_typologie_double_clicked(self, item, column):
+        """Double-clic sur typologie pour ajouter au batch"""
+        if not self.selected_master_typologie:
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Attention", 
+                "Veuillez d'abord sélectionner une typologie master."
+            )
+            return
+    
+        full_text = item.text(0)
+        typ_name = full_text.split(' (')[0] if ' (' in full_text else full_text
+        
+        typologie = self._find_typologie_by_name(typ_name)
+        if not typologie:
+            return
+    
+        # Construire la sélection
+        selection = {
+            'level': 'typologie',
+            'typologie': typ_name,
+            'taxonomy': '',
+            'root': '',
+            'parent': '',
+            'child_path': [],
+            'child': '',
+            'display': typ_name
+        }
+    
+        self._toggle_single_selection_in_batch(selection)
+
     def _on_taxonomy_item_clicked(self, item, column):
-        """Gérer le clic sur taxonomy : colonne 0 = navigation, colonne 1 = ignoré (géré par checkbox)"""
-        if column == 1:  # Clic sur colonne checkbox - ne rien faire, géré par stateChanged
+        """Gérer le clic sur taxonomy - Double-clic pour ajouter au batch"""
+        if column == 1:
             return
 
-        # ✅ Clic sur texte = sélectionner ET naviguer
         self.context_taxonomy_tree.setCurrentItem(item)
 
         cluster = item.data(0, Qt.UserRole)
@@ -1370,7 +1607,10 @@ class DatasetRelationTab(QtWidgets.QWidget):
         for root in cluster.get('root_labels', []):
             root_name = root.get('name', '')
             if root_name:
-                tree_item = QtWidgets.QTreeWidgetItem([root_name, ""])
+                sample_count = self._count_root_samples(root)
+                display_text = f"{root_name} ({sample_count})"
+
+                tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                 tree_item.setData(0, Qt.UserRole, {
                     'level': 'root',
                     'data': root,
@@ -1379,18 +1619,61 @@ class DatasetRelationTab(QtWidgets.QWidget):
                     'name': root_name
                 })
 
-                # ✅ Ajouter checkbox à droite
-                checkbox = self._create_styled_checkbox()
-                self.dynamic_labels_tree.addTopLevelItem(tree_item)
-                self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
+                # ✅ MODIFICATION: Checkbox uniquement pour éléments sans enfants
+                has_children = bool(root.get('parent_labels', []))
 
-                # ✅ Connecter le checkbox
-                checkbox.stateChanged.connect(
-                    lambda state, it=tree_item: self._on_checkbox_changed(it, 'root')
-                )
+                if not has_children:
+                    # Élément feuille : checkbox visible
+                    checkbox = self._create_styled_checkbox()
+                    self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
+                    checkbox.stateChanged.connect(
+                        lambda state, it=tree_item: self._on_checkbox_changed(it, 'root')
+                    )
+
+                self.dynamic_labels_tree.addTopLevelItem(tree_item)
 
         self._update_navigation_breadcrumb()
         self._update_labels_breadcrumb()
+
+    def _on_taxonomy_double_clicked(self, item, column):
+        """Double-clic sur taxonomy pour ajouter au batch"""
+        if not self.selected_master_typologie:
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Attention", 
+                "Veuillez d'abord sélectionner une typologie master."
+            )
+            return
+
+        cluster = item.data(0, Qt.UserRole)
+        if not cluster:
+            return
+
+        nav = self._context_navigation
+        if not nav.get('typologie'):
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Attention", 
+                "Veuillez d'abord sélectionner une typologie de contexte."
+            )
+            return
+
+        typologie_name = nav['typologie'].get('name', '')
+        cluster_name = cluster.get('name', '')
+
+        # Construire la sélection
+        selection = {
+            'level': 'taxonomy',
+            'typologie': typologie_name,
+            'taxonomy': cluster_name,
+            'root': '',
+            'parent': '',
+            'child_path': [],
+            'child': '',
+            'display': f"{typologie_name} / {cluster_name}"
+        }
+
+        self._toggle_single_selection_in_batch(selection)
 
     def _on_label_item_clicked(self, item, column):
         """Gérer le clic sur labels dynamiques : colonne 0 = navigation, colonne 1 = ignoré"""
@@ -1706,19 +1989,16 @@ class DatasetRelationTab(QtWidgets.QWidget):
         return None
     
     def _mark_current_selections(self):
-        """Marquer les checkboxes selon le batch"""
-        batch_keys = set(c.get('path_key') for c in self.combinations if c.get('path_key'))
+        """Marquer les checkboxes selon la combinaison en cours"""
+        # Construire un set avec les path_keys de la combinaison en cours
+        current_keys = set(ctx.get('path_key') for ctx in self.current_combination.get('contexts', []) if ctx.get('path_key'))
 
-        # Marquer les typologies
-        self._mark_tree_checkboxes(self.context_typologie_tree, 'typologie', batch_keys)
+        self._mark_tree_checkboxes(self.context_typologie_tree, 'typologie', current_keys)
+        self._mark_tree_checkboxes(self.context_taxonomy_tree, 'taxonomy', current_keys)
 
-        # Marquer les taxonomies
-        self._mark_tree_checkboxes(self.context_taxonomy_tree, 'taxonomy', batch_keys)
-
-        # Marquer les labels dynamiques
         current_level = self._context_navigation.get('current_level', '')
         if current_level in ['root', 'parent', 'child', 'taxonomy']:
-            self._mark_tree_checkboxes(self.dynamic_labels_tree, current_level, batch_keys)
+            self._mark_tree_checkboxes(self.dynamic_labels_tree, current_level, current_keys)
 
     def _mark_tree_checkboxes(self, tree_widget, level, batch_keys):
         """Cocher/décocher les checkboxes selon le batch"""
@@ -2097,68 +2377,9 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
 
     def _toggle_single_selection_in_batch(self, selection):
-        """Version modifiée pour utiliser le tableau avec colonnes dynamiques"""
-        if not selection:
-            logger.error("❌ Sélection vide")
-            return
-
-        path_key = self._generate_path_key_from_selection(selection)
-        if not path_key:
-            return
-
-        master_name = self.selected_master_typologie.get('name', 'N/A')
-
-        # Chercher si existe
-        existing_index = None
-        for i, combo in enumerate(self.combinations):
-            if combo.get('path_key') == path_key:
-                existing_index = i
-                break
-
-        if existing_index is not None:
-            # Retirer
-            removed_combo = self.combinations.pop(existing_index)
-            self.batch_table.removeRow(existing_index)
-
-            # ✅ Vérifier si on doit retirer une colonne
-            removed_typ = removed_combo.get('context', {}).get('typologie', '')
-            if removed_typ:
-                # Compter combien de combinaisons utilisent encore cette typologie
-                count = sum(1 for c in self.combinations 
-                           if c.get('context', {}).get('typologie', '') == removed_typ)
-
-                if count == 0 and removed_typ in self.active_typologie_columns:
-                    # Plus aucune combinaison n'utilise cette typologie
-                    self.active_typologie_columns.remove(removed_typ)
-                    self._update_table_columns()
-                    self._rebuild_table()
-
-            # Réindexer les boutons
-            for i in range(self.batch_table.rowCount()):
-                delete_btn = self.batch_table.cellWidget(i, self.batch_table.columnCount() - 1)
-                if delete_btn:
-                    delete_btn.clicked.disconnect()
-                    delete_btn.clicked.connect(lambda checked, idx=i: self._remove_batch_row(idx))
-
-            logger.info(f"✅ RETIRÉ du batch")
-        else:
-            # Ajouter
-            combination = {
-                'master': {'name': master_name, 'data': self.selected_master_typologie},
-                'context': selection,
-                'display': selection['display'],
-                'path_key': path_key
-            }
-            self.combinations.append(combination)
-
-            # Construire le dict des contextes
-            contexts_dict = {selection.get('typologie', ''): selection}
-
-            self._add_to_batch_table(master_name, contexts_dict, combination)
-            logger.info(f"✅ AJOUTÉ au batch")
-
-        self._update_stats()
-        self._update_specific_child_item(path_key, was_added=(existing_index is None))
+        """Version adaptée pour le nouveau système multi-contextes"""
+        level = selection.get('level', '')
+        self._toggle_context_in_current_combination(selection, None, level)
 
     def _update_specific_child_item(self, path_key, was_added):
         # ✅ CORRECTION : Utiliser dynamic_labels_tree au lieu de dynamic_labels_list
@@ -2746,27 +2967,26 @@ class DatasetRelationTab(QtWidgets.QWidget):
             self._remove_batch_row(current_row)
 
     def _clear_batch(self):
-        """Vider le tableau"""
-        if self.batch_table.rowCount() == 0:
+        """Vider toutes les combinaisons"""
+        if self.batch_table.rowCount() == 0 and not self.current_combination.get('contexts', []):
             return
+
         if QtWidgets.QMessageBox.question(
             self, "Confirmation", 
             "Vider toutes les combinaisons?", 
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
         ) == QtWidgets.QMessageBox.Yes:
-            # Dégrouper toutes les cellules avant de vider
-            for row in range(self.batch_table.rowCount()):
-                self.batch_table.setSpan(row, 0, 1, 1)
-
             self.batch_table.setRowCount(0)
             self.combinations = []
-
-            # ✅ Réinitialiser les colonnes dynamiques
-            self.active_typologie_columns = []
-            self._update_table_columns()
-
+            self.current_combination = {
+                'contexts': [],
+                'master': self.selected_master_typologie
+            }
+            self.current_combination_index = 0
             self._update_stats()
+            self._update_current_combo_label()
             self._mark_current_selections()
+            self._reset_all_hierarchy_colors()
 
     def _on_label_clicked(self, item):
         """Gestion des clics sur la liste dynamique"""
@@ -2776,11 +2996,8 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self._update_label_navigation_buttons()
         self._mark_current_selections()
 
-    def _on_label_double_clicked(self, item):
-        """Double-clic = ajouter au batch"""
-        if not item:
-            return
-
+    def _on_label_double_clicked(self, item, column):
+        """Double-clic sur label pour ajouter au batch"""
         if not self.selected_master_typologie:
             QtWidgets.QMessageBox.warning(
                 self, 
@@ -2789,13 +3006,50 @@ class DatasetRelationTab(QtWidgets.QWidget):
             )
             return
 
-        item_data = item.data(Qt.UserRole)
+        item_data = item.data(0, Qt.UserRole)
         if not item_data:
             return
 
-        selection = self._build_selection_from_label_item(item_data)
+        level = item_data.get('level', '')
+
+        # Construire la sélection selon le niveau
+        selection = self._build_selection_from_item_data(item_data, level)
         if selection:
             self._toggle_single_selection_in_batch(selection)
+
+        elif level == 'parent':
+            parent = item_data.get('data', {})
+            root = item_data.get('root', {})
+            cluster = item_data.get('cluster', {})
+
+            self._context_navigation['parent'] = parent
+            self._context_navigation['current_level'] = 'parent'
+            self._context_navigation['child_path'] = []
+
+            self._load_children_in_dynamic_list(
+                parent.get('children', []),
+                cluster,
+                root,
+                parent
+            )
+
+        elif level == 'child':
+            child = item_data.get('data', {})
+            child_path = item_data.get('path', [])
+
+            if child and child.get('children'):
+                self._context_navigation['child_path'] = child_path
+                self._context_navigation['current_level'] = 'child'
+
+                self._load_children_in_dynamic_list(
+                    child.get('children', []),
+                    self._context_navigation.get('taxonomy'),
+                    self._context_navigation.get('root'),
+                    self._context_navigation.get('parent')
+                )
+
+        self._update_labels_breadcrumb()
+        self._update_label_navigation_buttons()
 
     def _on_label_selection_changed(self):
         """Mise à jour des boutons de navigation"""
@@ -2902,8 +3156,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
             return None
 
     def _navigate_down_labels(self):
-        """Descendre dans la hiérarchie"""
-        # ✅ CORRECTION : Utiliser l'item sélectionné au lieu de chercher le coché
+        """Descendre dans la hiérarchie - PAS de checkbox pour niveaux intermédiaires"""
         selected_item = self.dynamic_labels_tree.currentItem()
 
         if not selected_item:
@@ -2925,7 +3178,6 @@ class DatasetRelationTab(QtWidgets.QWidget):
         level = item_data.get('level', '')
 
         if level == 'root':
-            # Descendre vers les parents
             root = item_data.get('data', {})
             cluster = item_data.get('cluster', {})
 
@@ -2936,7 +3188,10 @@ class DatasetRelationTab(QtWidgets.QWidget):
             for parent in root.get('parent_labels', []):
                 parent_name = parent.get('name', '')
                 if parent_name:
-                    tree_item = QtWidgets.QTreeWidgetItem([f"{parent_name}", ""])
+                    sample_count = self._count_parent_samples(parent)
+                    display_text = f"{parent_name} ({sample_count})"
+
+                    tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                     tree_item.setData(0, Qt.UserRole, {
                         'level': 'parent',
                         'data': parent,
@@ -2946,64 +3201,32 @@ class DatasetRelationTab(QtWidgets.QWidget):
                         'name': parent_name
                     })
 
-                    checkbox = self._create_styled_checkbox()
+                    # ✅ MODIFICATION: Checkbox uniquement pour éléments sans enfants
+                    has_children = bool(parent.get('children', []))
+
+                    if not has_children:
+                        # Élément feuille : checkbox visible
+                        checkbox = self._create_styled_checkbox()
+                        self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
+                        checkbox.stateChanged.connect(
+                            lambda state, it=tree_item: self._on_checkbox_changed(it, 'parent')
+                        )
+
                     self.dynamic_labels_tree.addTopLevelItem(tree_item)
-                    self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
-                    checkbox.stateChanged.connect(
-                        lambda state, it=tree_item: self._on_checkbox_changed(it, 'parent')
-                    )
-
-        elif level == 'parent':
-            # Descendre vers les enfants
-            parent = item_data.get('data', {})
-            root = item_data.get('root', {})
-            cluster = item_data.get('cluster', {})
-
-            self._context_navigation['parent'] = parent
-            self._context_navigation['current_level'] = 'parent'
-            self._context_navigation['child_path'] = []
-
-            self._load_children_in_dynamic_list(
-                parent.get('children', []),
-                cluster,
-                root,
-                parent
-            )
-
-        elif level == 'child':
-            # Descendre plus profondément dans les enfants
-            child = item_data.get('data', {})
-            child_path = item_data.get('path', [])
-
-            if child and child.get('children'):
-                self._context_navigation['child_path'] = child_path
-                self._context_navigation['current_level'] = 'child'
-
-                self._load_children_in_dynamic_list(
-                    child.get('children', []),
-                    self._context_navigation.get('taxonomy'),
-                    self._context_navigation.get('root'),
-                    self._context_navigation.get('parent')
-                )
-
-        self._update_labels_breadcrumb()
-        self._update_label_navigation_buttons()
 
     def _navigate_up_labels(self):
-        """Remonter dans la hiérarchie"""
+        """Remonter dans la hiérarchie avec compteurs"""
         current_level = self._context_navigation.get('current_level', '')
         child_path = self._context_navigation.get('child_path', [])
-    
+
         if child_path:
-            # Remonter dans les enfants
             child_path.pop()
             self._context_navigation['child_path'] = child_path
-    
+
             if child_path:
-                # Recharger le niveau parent dans les enfants
                 parent = self._context_navigation.get('parent', {})
                 current_children = parent.get('children', [])
-    
+
                 for path_item in child_path:
                     for child in current_children:
                         if child.get('name') == path_item:
@@ -3017,7 +3240,6 @@ class DatasetRelationTab(QtWidgets.QWidget):
                     parent
                 )
             else:
-                # Retour au niveau parent
                 parent = self._context_navigation.get('parent', {})
                 self._load_children_in_dynamic_list(
                     parent.get('children', []),
@@ -3025,21 +3247,22 @@ class DatasetRelationTab(QtWidgets.QWidget):
                     self._context_navigation.get('root'),
                     parent
                 )
-    
+
         elif current_level == 'child':
-            # Remonter vers les parents
             root = self._context_navigation.get('root', {})
             cluster = self._context_navigation.get('taxonomy', {})
-    
+
             self._context_navigation['parent'] = None
             self._context_navigation['current_level'] = 'root'
-    
-            # ✅ CORRECTION : Utiliser dynamic_labels_tree au lieu de dynamic_labels_list
+
             self.dynamic_labels_tree.clear()
             for parent in root.get('parent_labels', []):
                 parent_name = parent.get('name', '')
                 if parent_name:
-                    tree_item = QtWidgets.QTreeWidgetItem([f"{parent_name}", ""])
+                    sample_count = self._count_parent_samples(parent)
+                    display_text = f"{parent_name} ({sample_count})"
+
+                    tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                     tree_item.setData(0, Qt.UserRole, {
                         'level': 'parent',
                         'data': parent,
@@ -3048,28 +3271,29 @@ class DatasetRelationTab(QtWidgets.QWidget):
                         'has_children': bool(parent.get('children', [])),
                         'name': parent_name
                     })
-                    
+
                     checkbox = self._create_styled_checkbox()
                     self.dynamic_labels_tree.addTopLevelItem(tree_item)
                     self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
                     checkbox.stateChanged.connect(
                         lambda state, it=tree_item: self._on_checkbox_changed(it, 'parent')
                     )
-    
+
         elif current_level == 'parent':
-            # Remonter vers les roots
             cluster = self._context_navigation.get('taxonomy', {})
-    
+
             self._context_navigation['root'] = None
             self._context_navigation['parent'] = None
             self._context_navigation['current_level'] = 'taxonomy'
-    
-            # ✅ CORRECTION : Utiliser dynamic_labels_tree au lieu de dynamic_labels_list
+
             self.dynamic_labels_tree.clear()
             for root in cluster.get('root_labels', []):
                 root_name = root.get('name', '')
                 if root_name:
-                    tree_item = QtWidgets.QTreeWidgetItem([f"{root_name}", ""])
+                    sample_count = self._count_root_samples(root)
+                    display_text = f"{root_name} ({sample_count})"
+
+                    tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                     tree_item.setData(0, Qt.UserRole, {
                         'level': 'root',
                         'data': root,
@@ -3077,48 +3301,63 @@ class DatasetRelationTab(QtWidgets.QWidget):
                         'has_children': bool(root.get('parent_labels', [])),
                         'name': root_name
                     })
-                    
+
                     checkbox = self._create_styled_checkbox()
                     self.dynamic_labels_tree.addTopLevelItem(tree_item)
                     self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
                     checkbox.stateChanged.connect(
                         lambda state, it=tree_item: self._on_checkbox_changed(it, 'root')
                     )
-    
+
         self._update_labels_breadcrumb()
         self._update_label_navigation_buttons()
 
-    def _on_checkbox_changed(self, item, level):
-        # ✅ MODE MODIFICATION : Remplacer au lieu d'ajouter
-        if self._modification_in_progress:
-            logger.info("=== Mode modification actif : Remplacement de la combinaison ===")
-            self._replace_combination_in_modification_mode(item, level)
+    def _permanent_clear_batch(self):
+        """Efface définitivement tous les batches et combinaisons avec confirmation UI."""
+        if not self.project_manager.current_project_name:
+            QtWidgets.QMessageBox.warning(self, tr("Aucun projet"), "Aucun projet sélectionné.")
             return
-    
-        # Mode normal : toggle
-        # Vérifier la typologie AVANT toute opération
-        nav = self._context_navigation
-    
-        if level != 'typologie' and not nav.get('typologie'):
-            checkbox = None
-            if level == 'taxonomy':
-                checkbox = self.context_taxonomy_tree.itemWidget(item, 1)
-            elif level in ['root', 'parent', 'child']:
-                checkbox = self.dynamic_labels_tree.itemWidget(item, 1)
-    
-            if checkbox:
-                checkbox.blockSignals(True)
-                checkbox.setChecked(False)
-                checkbox.blockSignals(False)
-    
-            QtWidgets.QMessageBox.warning(
-                self, 
-                "Attention", 
-                "Veuillez d'abord sélectionner une typologie de contexte."
+
+        # Dialogue de confirmation
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Confirmation de Suppression",
+            f"Êtes-vous sûr de vouloir effacer définitivement tous les batches et leurs combinaisons pour le projet '{self.project_manager.current_project_name}' ?\n\nCette action est irréversible et supprimera toutes les données sauvegardées.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+
+        if reply == QtWidgets.QMessageBox.Yes:
+            success = self.project_manager.permanent_delete_batches_and_combinations(
+                confirm_callback=None  # Déjà confirmé via dialogue
             )
-            logger.warning("❌ Tentative de sélection sans typologie dans la navigation")
-            return
-    
+            if success:
+                # Réinitialiser l'UI après suppression
+                self._clear_batch_ui()
+                self.batch_status_label.setText("Tous les batches effacés définitivement")
+                self.batch_status_label.setStyleSheet("color: #e74c3c; font-size: 9px; font-style: italic; padding: 3px;")
+                QtWidgets.QMessageBox.information(self, "Succès", "Tous les batches et combinaisons ont été effacés définitivement.")
+            else:
+                QtWidgets.QMessageBox.critical(self, "Erreur", "Échec de la suppression. Vérifiez les logs.")
+
+    def _clear_batch_ui(self):
+        """Réinitialise l'UI après effacement des batches."""
+        self.combinations = []
+        self.current_combination_index = 0
+        self.batch_table.setRowCount(0)
+        self.batch_table.setColumnCount(3)
+        self.batch_table.setHorizontalHeaderLabels(["Combinaison", "samples", "Contexte 1"])
+        self.stats_label.setText("Combinaisons totales: 0 | Samples: 0")
+        self.current_combo_label.setText("Combinaison 1 | Contextes: 0")
+        self.batch_selector_combo.clear()
+        self.batch_selector_combo.addItem("-- Sélectionner un batch --")
+        self.batch_status_label.setText("Nouveau batch")
+        self.batch_status_label.setStyleSheet("color: #95a5a6; font-size: 9px; font-style: italic; padding: 3px;")
+        self.is_batch_saved = False
+        self.current_batch_id = None
+
+    def _on_checkbox_changed(self, item, level):
+        """Ajouter/retirer un contexte à la combinaison en cours"""
         if not self.selected_master_typologie:
             checkbox = None
             if level == 'typologie':
@@ -3127,32 +3366,260 @@ class DatasetRelationTab(QtWidgets.QWidget):
                 checkbox = self.context_taxonomy_tree.itemWidget(item, 1)
             elif level in ['root', 'parent', 'child']:
                 checkbox = self.dynamic_labels_tree.itemWidget(item, 1)
-    
+
             if checkbox:
                 checkbox.blockSignals(True)
                 checkbox.setChecked(False)
                 checkbox.blockSignals(False)
-    
+
             QtWidgets.QMessageBox.warning(
                 self, 
                 "Attention", 
                 "Veuillez d'abord sélectionner une typologie master."
             )
             return
-    
+
+        # Vérifier la navigation pour les niveaux autres que typologie
+        nav = self._context_navigation
+
+        if level != 'typologie' and not nav.get('typologie'):
+            checkbox = None
+            if level == 'taxonomy':
+                checkbox = self.context_taxonomy_tree.itemWidget(item, 1)
+            elif level in ['root', 'parent', 'child']:
+                checkbox = self.dynamic_labels_tree.itemWidget(item, 1)
+
+            if checkbox:
+                checkbox.blockSignals(True)
+                checkbox.setChecked(False)
+                checkbox.blockSignals(False)
+
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Attention", 
+                "Veuillez d'abord sélectionner une typologie de contexte."
+            )
+            logger.warning("❌ Tentative de sélection sans typologie dans la navigation")
+            return
+
         item_data = item.data(0, Qt.UserRole)
         if not item_data:
             return
-    
+
         selection = self._build_selection_from_item_data(item_data, level)
         if not selection:
             logger.error(f"❌ Impossible de construire la sélection pour level={level}")
             return
-    
-        self._toggle_single_selection_in_batch(selection)
+
+        # Ajouter/retirer le contexte à la combinaison en cours
+        self._toggle_context_in_current_combination(selection, item, level)
+
+    def _toggle_context_in_current_combination(self, selection, item, level):
+        """Ajouter ou retirer un contexte de la combinaison en cours"""
+        path_key = self._generate_path_key_from_selection(selection)
+
+        if not path_key:
+            return
+
+        # Vérifier si le contexte existe déjà dans la combinaison actuelle
+        existing_index = None
+        for i, ctx in enumerate(self.current_combination['contexts']):
+            if ctx.get('path_key') == path_key:
+                existing_index = i
+                break
+            
+        if existing_index is not None:
+            # RETIRER le contexte
+            self.current_combination['contexts'].pop(existing_index)
+            logger.info(f"🗑️ Contexte RETIRÉ de la combinaison {self.current_combination_index + 1}")
+        else:
+            # AJOUTER le contexte
+            context_data = {
+                'selection': selection,
+                'path_key': path_key,
+                'display': selection['display']
+            }
+            self.current_combination['contexts'].append(context_data)
+            logger.info(f"✅ Contexte AJOUTÉ à la combinaison {self.current_combination_index + 1}")
+
+        # Mettre à jour l'affichage
+        self._update_current_combo_label()
+        self._update_table_current_row()
+        self._update_stats()
+
+    def _update_current_combo_label(self):
+        """Mettre à jour l'indicateur de combinaison en cours"""
+        combo_num = self.current_combination_index + 1
+        context_count = len(self.current_combination['contexts'])
+
+        self.current_combo_label.setText(
+            f"Combinaison {combo_num} | Contextes: {context_count}"
+        )
+
+
+    def _save_current_combination(self):
+        """Sauvegarder la combinaison actuelle dans la liste"""
+        if not self.current_combination['contexts']:
+            return
+
+        # Vérifier si une typologie master est sélectionnée
+        if not self.selected_master_typologie:
+            logger.warning("Aucune typologie master sélectionnée, impossibilité de sauvegarder la combinaison")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Attention",
+                "Veuillez sélectionner une typologie master avant de sauvegarder la combinaison."
+            )
+            return
+
+        master_name = self.selected_master_typologie.get('name', 'N/A')
+
+        # Récupérer nb_samples depuis le tableau si la ligne existe, sinon défaut 1
+        nb_samples = 1
+        if self.current_combination_index < self.batch_table.rowCount():
+            nb_item = self.batch_table.item(self.current_combination_index, 1)
+            if nb_item:
+                try:
+                    nb_samples = int(nb_item.text()) if nb_item.text().strip() else 1
+                except ValueError:
+                    nb_samples = 1
+
+        combination = {
+            'index': self.current_combination_index,
+            'master': {'name': master_name, 'data': self.selected_master_typologie},
+            'contexts': self.current_combination['contexts'].copy(),
+            'nb_samples': nb_samples
+        }
+
+        # Remplacer si existe déjà, sinon ajouter
+        if self.current_combination_index < len(self.combinations):
+            self.combinations[self.current_combination_index] = combination
+        else:
+            self.combinations.append(combination)
+
+        # Ajouter/mettre à jour dans le tableau
+        self._update_table_row(self.current_combination_index, combination)
+
+        logger.info(f"💾 Combinaison {self.current_combination_index + 1} sauvegardée avec {len(self.current_combination['contexts'])} contextes et {nb_samples} samples")
+
+    def _update_table_row(self, row_index, combination):
+        """Mettre à jour ou créer une ligne dans le tableau - Compatible ancien et nouveau format"""
+        # Migration automatique si ancien format
+        combination = self._migrate_old_combination_format(combination)
+
+        contexts = combination.get('contexts', [])
+        num_contexts = len(contexts)
+
+        # Ajuster le nombre de colonnes si nécessaire (Combinaison + Nb samples + contextes)
+        current_cols = self.batch_table.columnCount()
+        needed_cols = num_contexts + 2  # +1 pour Nb samples
+
+        if needed_cols > current_cols:
+            self.batch_table.setColumnCount(needed_cols)
+            headers = ["Combinaison", "Nb samples"]
+            for i in range(1, num_contexts + 1):
+                headers.append(f"Contexte {i}")
+            self.batch_table.setHorizontalHeaderLabels(headers)
+
+            self.batch_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
+            self.batch_table.setColumnWidth(0, 150)
+            self.batch_table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Fixed)
+            self.batch_table.setColumnWidth(1, 80)
+            for i in range(2, needed_cols):
+                self.batch_table.horizontalHeader().setSectionResizeMode(i, QtWidgets.QHeaderView.Stretch)
+
+        if row_index >= self.batch_table.rowCount():
+            self.batch_table.insertRow(row_index)
+
+        # Colonne 0 : Numéro
+        num_item = QtWidgets.QTableWidgetItem(f"Combinaison {row_index + 1}")
+        num_item.setFlags(num_item.flags() & ~Qt.ItemIsEditable)
+        num_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+        font = num_item.font()
+        font.setBold(True)
+        num_item.setFont(font)
+        num_item.setBackground(QColor("#f8f9fa"))
+        num_item.setData(Qt.UserRole, combination)
+        self.batch_table.setItem(row_index, 0, num_item)
+
+        # Colonne 1 : Nb samples (éditable)
+        nb_samples = combination.get('nb_samples', 1)
+        nb_item = QtWidgets.QTableWidgetItem(str(nb_samples))
+        nb_item.setFlags(Qt.ItemIsEditable | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+        nb_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+        self.batch_table.setItem(row_index, 1, nb_item)
+
+        # Colonnes de contextes (à partir de la colonne 2)
+        for ctx_index, ctx in enumerate(contexts):
+            col = ctx_index + 2
+
+            if 'selection' in ctx:
+                display_text = self._build_unified_context_display(ctx['selection'])
+            else:
+                display_text = ctx.get('display', 'N/A')
+
+            context_item = QtWidgets.QTableWidgetItem(display_text)
+            context_item.setFlags(context_item.flags() & ~Qt.ItemIsEditable)
+            context_item.setData(Qt.UserRole, ctx)
+            self.batch_table.setItem(row_index, col, context_item)
+
+        for col in range(num_contexts + 2, self.batch_table.columnCount()):
+            empty_item = QtWidgets.QTableWidgetItem("")
+            empty_item.setFlags(empty_item.flags() & ~Qt.ItemIsEditable)
+            self.batch_table.setItem(row_index, col, empty_item)
+
+    def _update_table_current_row(self):
+        """Mettre à jour la ligne de la combinaison en cours d'édition"""
+        if not self.current_combination['contexts']:
+            # Si pas de contextes, supprimer la ligne si elle existe
+            if self.current_combination_index < self.batch_table.rowCount():
+                self.batch_table.removeRow(self.current_combination_index)
+            return
+
+        master_name = self.selected_master_typologie.get('name', 'N/A')
+
+        # nb_samples défaut 1
+        nb_samples = 1
+
+        combination = {
+            'index': self.current_combination_index,
+            'master': {'name': master_name, 'data': self.selected_master_typologie},
+            'contexts': self.current_combination['contexts'].copy(),
+            'nb_samples': nb_samples
+        }
+
+        self._update_table_row(self.current_combination_index, combination)
+
+    def _migrate_old_combination_format(self, combination):
+        """Convertit l'ancien format (context) vers le nouveau format (contexts)"""
+        if 'contexts' in combination:
+            # Ajouter nb_samples si absent
+            if 'nb_samples' not in combination:
+                combination['nb_samples'] = 1
+            return combination
+
+        if 'context' in combination:
+            old_context = combination['context']
+
+            new_combination = {
+                'index': combination.get('index', 0),
+                'master': combination.get('master', {}),
+                'contexts': [{
+                    'selection': old_context,
+                    'path_key': combination.get('path_key', ''),
+                    'display': combination.get('display', old_context.get('display', ''))
+                }],
+                'nb_samples': 1  # Défaut pour ancien format
+            }
+
+            logger.info(f"🔄 Migration d'une combinaison de l'ancien format vers le nouveau")
+            return new_combination
+
+        logger.warning(f"⚠️ Format de combinaison inconnu : {combination}")
+        return combination
 
     def _load_children_in_dynamic_list(self, children_list, cluster, root, parent):
-        """Charger les enfants dans la liste dynamique avec checkboxes à droite"""
+        """Charger les enfants - checkbox UNIQUEMENT si pas d'enfants"""
         nav = self._context_navigation
         typologie_name = nav.get('typologie', {}).get('name', '') if nav.get('typologie') else ''
 
@@ -3169,9 +3636,17 @@ class DatasetRelationTab(QtWidgets.QWidget):
             
             current_path = nav.get('child_path', []) + [child_name]
             has_children = bool(child.get('children'))
-            prefix = "▶" if has_children else "•"
 
-            tree_item = QtWidgets.QTreeWidgetItem([f"{prefix} {child_name}", ""])
+            # Affichage
+            if has_children:
+                child_count = self._count_children_recursive(child.get('children', []))
+                prefix = "▶"
+                display_text = f"{prefix} {child_name} ({child_count})"
+            else:
+                prefix = "•"
+                display_text = f"{prefix} {child_name}"
+
+            tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
 
             item_data = {
                 'level': 'child',
@@ -3189,18 +3664,17 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
             tree_item.setData(0, Qt.UserRole, item_data)
 
-            # ✅ Ajouter checkbox à droite
-            checkbox = QtWidgets.QCheckBox()
-            checkbox.setStyleSheet(self._get_checkbox_style())
+            # ✅ MODIFICATION: Checkbox uniquement pour éléments sans enfants
+            if not has_children:
+                # Élément feuille : checkbox visible
+                checkbox = self._create_styled_checkbox()
+                self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
+                checkbox.stateChanged.connect(
+                    lambda state, it=tree_item: self._on_checkbox_changed(it, 'child')
+                )
+
             self.dynamic_labels_tree.addTopLevelItem(tree_item)
-            self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
 
-            # ✅ Connecter le checkbox
-            checkbox.stateChanged.connect(
-                lambda state, it=tree_item: self._on_checkbox_changed(it, 'child')
-            )
-
-        # ✅ CORRECTION : Configurer les colonnes après ajout des items
         self.dynamic_labels_tree.header().setStretchLastSection(False)
         self.dynamic_labels_tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
         self.dynamic_labels_tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.Fixed)
@@ -3265,17 +3739,65 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.remove_from_batch_btn.setEnabled(current is not None)
 
     def _update_stats(self):
-        """Mettre à jour les statistiques"""
-        count = len(self.combinations)
-        self.stats_label.setText(f"Combinaisons: {count}")
+        """Mettre à jour les statistiques globales - Somme des nb_samples"""
+        total_combos = len(self.combinations)
 
-        # Marquer comme non sauvegardé si des modifications ont été faites
-        if count > 0 and self.is_batch_saved:
+        # Ajouter 1 si la combinaison en cours a des contextes
+        if self.current_combination.get('contexts', []):
+            total_combos += 1
+
+        # Calculer le total de samples via somme des nb_samples
+        total_samples = 0
+        for combo in self.combinations:
+            total_samples += combo.get('nb_samples', 1)
+
+        # Ajouter pour la combinaison en cours
+        if self.current_combination.get('contexts', []):
+            current_nb = 1  # Défaut, ou récupérer depuis table si ligne existe
+            if self.current_combination_index < self.batch_table.rowCount():
+                nb_item = self.batch_table.item(self.current_combination_index, 1)
+                if nb_item:
+                    try:
+                        current_nb = int(nb_item.text()) if nb_item.text().strip() else 1
+                    except ValueError:
+                        current_nb = 1
+            total_samples += current_nb
+
+        self.stats_label.setText(f"Combinaisons totales: {total_combos} | Samples: {total_samples}")
+
+    def _on_nb_samples_changed(self, row, column):
+        """Gérer la modification du champ Nb samples"""
+        if column != 1:  # Seulement pour la colonne Nb samples
+            return
+
+        if row >= len(self.combinations):
+            return
+
+        item = self.batch_table.item(row, column)
+        if not item:
+            return
+
+        try:
+            value = int(item.text()) if item.text().strip() else 1
+            if value < 0:
+                value = 1
+                item.setText("1")
+        except ValueError:
+            value = 1
+            item.setText("1")
+
+        # Mettre à jour dans les données
+        self.combinations[row]['nb_samples'] = value
+
+        # Marquer comme modifié si batch chargé
+        if self.current_batch_id and self.is_batch_saved:
             self.is_batch_saved = False
-            if self.current_batch_id:
-                self._update_batch_status(f"Batch #{self.current_batch_id} - Modifié (non sauvegardé)")
-            else:
-                self._update_batch_status("Nouveau batch (non sauvegardé)")
+            self._update_batch_status(f"Batch #{self.current_batch_id} - Modifié (non sauvegardé)")
+
+        # Mettre à jour stats
+        self._update_stats()
+
+        logger.info(f"✅ Nb samples mis à jour pour combinaison {row + 1}: {value}")
 
     # ========== ACTIONS ==========
 
@@ -3322,7 +3844,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         logger.info("Nouveau batch créé")
 
     def _save_batch(self):
-        """Sauvegarder le batch actuel"""
+        """Sauvegarder le batch avec le nouveau format multi-contextes"""
         batch_name = self.batch_name_edit.text().strip()
         if not batch_name:
             QtWidgets.QMessageBox.warning(
@@ -3340,6 +3862,10 @@ class DatasetRelationTab(QtWidgets.QWidget):
             )
             return
 
+        # Sauvegarder la combinaison en cours si elle a des contextes
+        if self.current_combination['contexts']:
+            self._save_current_combination()
+
         if not self.combinations:
             QtWidgets.QMessageBox.warning(
                 self, 
@@ -3348,7 +3874,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
             )
             return
 
-        # Préparer les données du batch
+        # Préparer les données (inclut nb_samples par défaut via _save_current_combination)
         batch_data = {
             'batch_name': batch_name,
             'batch_family': self.batch_family_edit.text().strip(),
@@ -3359,12 +3885,11 @@ class DatasetRelationTab(QtWidgets.QWidget):
             'created_at': datetime.now().isoformat()
         }
 
-        # Déterminer le batch_number
+        # Sauvegarder
         project_name = self.project_combo.currentText()
         existing_batches = self.project_manager.get_all_batches()
 
         if self.current_batch_id:
-            # Mise à jour d'un batch existant
             batch_number = self.current_batch_id
             success = self.project_manager.save_batch(
                 batch_number,
@@ -3373,7 +3898,6 @@ class DatasetRelationTab(QtWidgets.QWidget):
             )
             action = "mis à jour"
         else:
-            # Nouveau batch
             batch_number = len(existing_batches) + 1
             success = self.project_manager.save_batch(
                 batch_number,
@@ -3386,7 +3910,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         if success:
             self.is_batch_saved = True
             self._update_batch_status(f"Batch #{batch_number} - Sauvegardé")
-            self._refresh_batch_list()  # ✅ AJOUT: Actualiser la liste
+            self._refresh_batch_list()
 
             QtWidgets.QMessageBox.information(
                 self, 
@@ -3645,7 +4169,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.master_stats.clear()
 
     def _load_context_typologies(self):
-        """Charger les typologies de contexte avec checkboxes à droite"""
+        """Charger les typologies - PAS de checkbox si ont des enfants"""
         self.context_typologie_tree.clear()
         master_name = self.selected_master_typologie.get('name', '') if self.selected_master_typologie else None
 
@@ -3653,19 +4177,26 @@ class DatasetRelationTab(QtWidgets.QWidget):
             if isinstance(typ, dict):
                 name = typ.get('name', typ.get('nom', ''))
                 if name and name != master_name:
-                    tree_item = QtWidgets.QTreeWidgetItem([name, ""])
+                    clusters = typ.get('taxonomy_clusters', [])
+                    cluster_count = len(clusters)
+
+                    display_text = f"{name} ({cluster_count})"
+
+                    tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                     tree_item.setData(0, Qt.UserRole, typ)
 
-                    # ✅ Ajouter checkbox à droite
-                    checkbox = QtWidgets.QCheckBox()
-                    checkbox.setStyleSheet(self._get_checkbox_style())
-                    self.context_typologie_tree.addTopLevelItem(tree_item)
-                    self.context_typologie_tree.setItemWidget(tree_item, 1, checkbox)
+                    # ✅ MODIFICATION: Checkbox uniquement pour éléments sans enfants
+                    has_children = bool(clusters)
 
-                    # ✅ Connecter le checkbox
-                    checkbox.stateChanged.connect(
-                        lambda state, it=tree_item: self._on_checkbox_changed(it, 'typologie')
-                    )
+                    if not has_children:
+                        # Élément feuille : checkbox visible
+                        checkbox = self._create_styled_checkbox()
+                        self.context_typologie_tree.setItemWidget(tree_item, 1, checkbox)
+                        checkbox.stateChanged.connect(
+                            lambda state, it=tree_item: self._on_checkbox_changed(it, 'typologie')
+                        )
+
+                    self.context_typologie_tree.addTopLevelItem(tree_item)
 
         self.context_taxonomy_tree.clear()
         self.dynamic_labels_tree.clear()
@@ -3940,6 +4471,58 @@ class DatasetRelationTab(QtWidgets.QWidget):
         btn.clicked.connect(callback)
         btn.setCursor(Qt.PointingHandCursor)
         return btn
+    
+    def _count_typologie_total_samples(self, typologie_name):
+        """Compte le nombre total de labels dans une typologie"""
+        if not typologie_name:
+            return 0
+
+        total = 0
+        # Parcourir tous les clusters
+        typ_path = [typologie_name]
+        clusters = self.hierarchy_cache.get_children_at_path(typ_path)
+
+        for cluster_name in clusters:
+            total += self._count_cluster_total_samples(typologie_name, cluster_name)
+
+        return total
+    
+    def _count_cluster_total_samples(self, typologie_name, cluster_name):
+        """Compte le nombre total de labels dans un cluster"""
+        if not typologie_name or not cluster_name:
+            return 0
+
+        total = 0
+        cluster_path = [typologie_name, cluster_name]
+        roots = self.hierarchy_cache.get_children_at_path(cluster_path)
+
+        for root_name in roots:
+            # +1 pour le root lui-même
+            total += 1
+
+            root_path = [typologie_name, cluster_name, root_name]
+            parents = self.hierarchy_cache.get_children_at_path(root_path)
+
+            for parent_name in parents:
+                # +1 pour le parent lui-même
+                total += 1
+
+                # Compter tous les enfants récursivement
+                parent_path = [typologie_name, cluster_name, root_name, parent_name]
+                total += self._count_children_recursive_in_cache(parent_path)
+
+        return total
+    
+    def _count_children_recursive_in_cache(self, path):
+        """Compte récursivement tous les enfants à un chemin donné"""
+        children = self.hierarchy_cache.get_children_at_path(path)
+        count = len(children)
+
+        for child_name in children:
+            child_path = path + [child_name]
+            count += self._count_children_recursive_in_cache(child_path)
+
+        return count
 
     def _get_primary_button_style(self):
         """Style pour boutons primaires compacts"""
