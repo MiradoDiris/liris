@@ -58,18 +58,51 @@ class DatasetProjectManager:
         return success
 
     def save_project(self):
-        """Sauvegarde le projet actuel dans la base de données"""
+        """Sauvegarde le projet actuel dans la base de données - VERSION AVEC LOGGING"""
+        logger.info("┌" + "─" * 78 + "┐")
+        logger.info("│ PROJECT_MANAGER: save_project()                                              │")
+        logger.info("└" + "─" * 78 + "┘")
+        
         if not self.current_project_name or not self.current_project_data:
-            logger.error("Aucun projet à sauvegarder")
+            logger.error("❌ PROJECT_MANAGER: Aucun projet à sauvegarder")
+            logger.error(f"  - current_project_name: {self.current_project_name}")
+            logger.error(f"  - current_project_data: {self.current_project_data is not None}")
             return False
-
+        
         project_name = self.current_project_data.get('nom', self.current_project_name)
+        logger.info(f"📝 PROJECT_MANAGER: Préparation de la sauvegarde")
+        logger.info(f"  - Nom du projet: '{project_name}'")
+        logger.info(f"  - Nombre de typologies: {len(self.current_project_data.get('typologies', []))}")
+        
+        # Statistiques sur le contenu
+        typologies = self.current_project_data.get('typologies', [])
+        total_clusters = sum(len(t.get('taxonomy_clusters', [])) for t in typologies)
+        total_roots = sum(
+            len(c.get('root_labels', []))
+            for t in typologies
+            for c in t.get('taxonomy_clusters', [])
+        )
+        total_parents = sum(
+            len(r.get('parent_labels', []))
+            for t in typologies
+            for c in t.get('taxonomy_clusters', [])
+            for r in c.get('root_labels', [])
+        )
+        
+        logger.info(f"📊 PROJECT_MANAGER: Statistiques du contenu")
+        logger.info(f"  - {len(typologies)} typologie(s)")
+        logger.info(f"  - {total_clusters} cluster(s) de taxonomie")
+        logger.info(f"  - {total_roots} root label(s)")
+        logger.info(f"  - {total_parents} parent label(s)")
+        
+        logger.info(f"➡️  PROJECT_MANAGER: Appel de database.save_dataset_projet()")
+        
         success = self.database.save_dataset_projet(project_name, self.current_project_data)
         
         if success:
-            logger.info(f"Projet '{project_name}' sauvegardé")
+            logger.info(f"✅ PROJECT_MANAGER: Sauvegarde réussie pour '{project_name}'")
         else:
-            logger.error(f"Échec sauvegarde projet '{project_name}'")
+            logger.error(f"❌ PROJECT_MANAGER: Échec de la sauvegarde pour '{project_name}'")
         
         return success
 
@@ -110,6 +143,59 @@ class DatasetProjectManager:
         self.current_parent_index = -1
         self.children_path = []
         logger.debug("Navigation du project manager réinitialisée")
+
+    def permanent_delete_batches_and_combinations(self, confirm_callback=None):
+        logger.info("=" * 80)
+        logger.info("🗑️  SUPPRESSION DÉFINITIVE DES BATCHES")
+        logger.info("=" * 80)
+        
+        if not self.current_project_name:
+            logger.error("❌ Aucun projet actuel")
+            return False
+        
+        logger.info(f"Projet: {self.current_project_name}")
+        
+        # Double confirmation si callback fourni
+        if confirm_callback and not confirm_callback():
+            logger.info("⚠️  Suppression annulée par l'utilisateur")
+            return False
+        
+        try:
+            # Compter d'abord pour information
+            batches = self.database.get_all_batches(self.current_project_name)
+            count = len(batches)
+            
+            logger.info(f"📊 {count} batch(es) à supprimer")
+            
+            if count == 0:
+                logger.info("ℹ️  Aucun batch à supprimer")
+                return True
+            
+            # Afficher le détail
+            for batch in batches:
+                data = batch.get('data', {})
+                batch_name = data.get('batch_name', 'Sans nom')
+                combo_count = data.get('count', 0)
+                logger.info(f"  - Batch #{batch['batch_number']}: {batch_name} ({combo_count} combinaisons)")
+            
+            # Suppression définitive
+            logger.info("\n🗑️  Suppression en cours...")
+            success = self.database.delete_all_batches(self.current_project_name)
+            
+            if success:
+                logger.info(f"✅ {count} batch(es) supprimé(s) définitivement")
+                logger.info("=" * 80 + "\n")
+                return True
+            else:
+                logger.error("❌ Échec de la suppression")
+                logger.info("=" * 80 + "\n")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la suppression: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
 
     def set_current_typologie_index(self, index):
         """Définit l'index de la typologie courante"""

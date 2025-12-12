@@ -656,23 +656,66 @@ class ContextClusterAnalysisTab(QtWidgets.QWidget):
         Args:
             analysis_data: Données retournées par ContextClusterAnalyzer
         """
-        self.analysis_data = analysis_data
-
+        logger.info("\n" + "=" * 80)
+        logger.info("📊 UPDATE_ANALYSIS() - DÉBUT")
+        logger.info("=" * 80)
+        
         if not analysis_data:
+            logger.warning("❌ Aucune donnée d'analyse reçue (analysis_data is None)")
             self._clear_all()
             return
+        
+        logger.info("✅ Données d'analyse reçues")
+        
+        # Log détaillé du contenu
+        logger.info(f"\n📋 CONTENU DE L'ANALYSE:")
+        logger.info(f"   • total_samples: {analysis_data.get('total_samples', 0)}")
+        logger.info(f"   • context_typologies: {len(analysis_data.get('context_typologies', {}))}")
+        logger.info(f"   • master_typologies: {len(analysis_data.get('master_typologies', {}))}")
+        
+        # Détail des context typologies
+        context_typos = analysis_data.get('context_typologies', {})
+        if context_typos:
+            logger.info(f"\n📌 CONTEXT TYPOLOGIES ({len(context_typos)}):")
+            for typ_name, typ_data in context_typos.items():
+                logger.info(f"   • {typ_name}")
+                logger.info(f"      → {typ_data.get('total_samples', 0)} samples")
+                logger.info(f"      → {len(typ_data.get('clusters', {}))} cluster(s)")
+                for cluster_name, cluster_data in typ_data.get('clusters', {}).items():
+                    logger.info(f"         ├─ {cluster_name}: {cluster_data.get('sample_count', 0)} samples")
+        else:
+            logger.warning("⚠️  Aucune typologie CONTEXT trouvée")
+        
+        # Détail des master typologies
+        master_typos = analysis_data.get('master_typologies', {})
+        if master_typos:
+            logger.info(f"\n📌 MASTER TYPOLOGIES ({len(master_typos)}):")
+            for typ_name, typ_data in master_typos.items():
+                logger.info(f"   • {typ_name}")
+                logger.info(f"      → {typ_data.get('total_samples', 0)} samples")
+        else:
+            logger.info("ℹ️  Aucune typologie MASTER")
+        
+        self.analysis_data = analysis_data
 
         # Reset la sélection
+        logger.info("\n🔄 Reset de la sélection...")
         self._reset_selection()
 
         # === MISE À JOUR DES STATS GLOBALES ===
         total = analysis_data.get('total_samples', 0)
+        logger.info(f"\n📊 MISE À JOUR DES STATS:")
+        logger.info(f"   • Total samples: {total}")
         self.total_label.value_label.setText(str(total))
 
         # Mise à jour des stats initiales
         filter_type = self._get_current_filter()
+        logger.info(f"   • Filtre actuel: {filter_type}")
+        
         from utils.context_cluster_analyzer import ContextClusterAnalyzer
         sorted_typologies = ContextClusterAnalyzer.get_sorted_typologies(analysis_data, filter_type)
+        
+        logger.info(f"   • Typologies triées: {len(sorted_typologies)}")
         
         self.dynamic_stat_1.value_label.setText(str(len(sorted_typologies)))
         self.dynamic_stat_1.desc_label.setText("Typologies")
@@ -681,9 +724,14 @@ class ContextClusterAnalysisTab(QtWidgets.QWidget):
         self.dynamic_stat_2.desc_label.setText("Proportion")
 
         # === CRÉER LE GRAPHIQUE PRINCIPAL ===
+        logger.info("\n📈 CRÉATION DU GRAPHIQUE PRINCIPAL...")
         self._create_main_chart()
-
-        logger.info(f"Dashboard d'analyse globale mis à jour - Total: {total} samples, {len(sorted_typologies)} typologies")
+        
+        logger.info("\n" + "=" * 80)
+        logger.info(f"✅ UPDATE_ANALYSIS() - TERMINÉ")
+        logger.info(f"   • {total} samples")
+        logger.info(f"   • {len(sorted_typologies)} typologies affichées")
+        logger.info("=" * 80 + "\n")
 
     def _on_toggle_changed(self):
         """Gestion du changement de filtre Master/Context/All"""
@@ -702,30 +750,51 @@ class ContextClusterAnalysisTab(QtWidgets.QWidget):
 
     def _create_main_chart(self):
         """Crée le graphique principal en camembert"""
+        logger.info("\n🔍 _CREATE_MAIN_CHART() - DÉBUT")
+        
         if not self.analysis_data:
+            logger.warning("❌ Pas de données d'analyse disponibles")
             return
 
         # Si un cluster est sélectionné, afficher les labels en histogramme
         if self.selected_cluster:
+            logger.info(f"📊 Cluster sélectionné: {self.selected_cluster}")
+            logger.info("   → Création histogramme des labels")
             self._create_labels_histogram()
             return
 
         # Si une typologie est sélectionnée, afficher ses clusters
         if self.selected_typologie:
+            logger.info(f"📊 Typologie sélectionnée: {self.selected_typologie}")
+            logger.info("   → Création camembert des clusters")
             self._create_cluster_chart()
             return
 
         # Sinon, afficher les typologies
+        logger.info("📊 Aucune sélection → Création camembert des typologies")
         self._create_typologie_chart()
 
     def _create_typologie_chart(self):
         """Crée le graphique des typologies"""
+        logger.info("\n📊 _CREATE_TYPOLOGIE_CHART() - DÉBUT")
+        
         series = QPieSeries()
 
         from utils.context_cluster_analyzer import ContextClusterAnalyzer
         
         filter_type = self._get_current_filter()
+        logger.info(f"   • Filtre: {filter_type}")
+        
         sorted_typologies = ContextClusterAnalyzer.get_sorted_typologies(self.analysis_data, filter_type)
+        
+        logger.info(f"   • {len(sorted_typologies)} typologie(s) à afficher")
+
+        if not sorted_typologies:
+            logger.warning("⚠️  Aucune typologie à afficher!")
+            logger.info("   • Analysis data disponibles:")
+            logger.info(f"      - context_typologies: {len(self.analysis_data.get('context_typologies', {}))}")
+            logger.info(f"      - master_typologies: {len(self.analysis_data.get('master_typologies', {}))}")
+            return
 
         # Palette de couleurs
         colors = [
@@ -735,16 +804,19 @@ class ContextClusterAnalysisTab(QtWidgets.QWidget):
         ]
 
         total_samples = self.analysis_data.get('total_samples', 1)
+        logger.info(f"   • Total samples: {total_samples}")
 
         # NOUVEAU: Réinitialiser la map
         self.slice_to_typologie_map = {}
 
         for idx, (typologie_name, typo_data) in enumerate(sorted_typologies):
             samples = typo_data['total_samples']
-            pct = (samples / total_samples * 100)
+            pct = (samples / total_samples * 100) if total_samples > 0 else 0
             typ_type = typo_data['type']
 
             type_label = "M" if typ_type == 'master' else "C"
+            
+            logger.info(f"   [{idx+1}] {typologie_name} [{type_label}]: {samples} samples ({pct:.1f}%)")
 
             slice_ = series.append(f"[{type_label}] {typologie_name}", samples)
             slice_.setLabelVisible(True)
@@ -769,6 +841,8 @@ class ContextClusterAnalysisTab(QtWidgets.QWidget):
         else:
             title = "Distribution Globale des Typologies"
         
+        logger.info(f"   • Titre du graphique: {title}")
+        
         chart.setTitle(title)
         chart.setTitleFont(self._get_chart_title_font())
         chart.setTitleBrush(QColor("#212529"))
@@ -776,7 +850,12 @@ class ContextClusterAnalysisTab(QtWidgets.QWidget):
         chart.legend().setVisible(False)
         chart.setBackgroundBrush(QColor("#ffffff"))
 
+        logger.info("   • Configuration du chart terminée")
+        
         self.main_chart_view.setChart(chart)
+        
+        logger.info("✅ _CREATE_TYPOLOGIE_CHART() - TERMINÉ")
+        logger.info(f"   • {len(sorted_typologies)} slice(s) ajoutée(s) au camembert\n")
 
     def _create_cluster_chart(self):
         """Crée le graphique des clusters pour la typologie sélectionnée"""

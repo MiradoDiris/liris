@@ -4,6 +4,7 @@ import os
 import sqlite3
 from datetime import datetime
 import sys
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -18,58 +19,208 @@ class DatasetDatabase:
     """
 
     def __init__(self, db_path="data/liris.db"):
-        # Déterminer le répertoire de base
+        """Initialise la base de données avec détection de corruption"""
+
+        # Déterminer le chemin
         if getattr(sys, 'frozen', False):
-            # Mode PyInstaller : utiliser le répertoire de l'exe
             base_path = os.path.dirname(sys.executable)
         else:
-            # Mode développement : utiliser le répertoire du script
-            base_path = os.path.dirname(os.path.abspath(__file__))
+            current_file = os.path.abspath(__file__)
+            utils_dir = os.path.dirname(current_file)
+            base_path = os.path.dirname(utils_dir)
 
-        # Créer le chemin complet
         self.db_path = os.path.join(base_path, db_path)
 
-        # Créer le répertoire si nécessaire
+        logger.info("=" * 80)
+        logger.info("🗄️  INITIALISATION BASE DE DONNÉES")
+        logger.info("=" * 80)
+        logger.info(f"  Chemin: {self.db_path}")
+        logger.info(f"  Existe: {os.path.exists(self.db_path)}")
+
+        # Créer le répertoire
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
 
         self.connection = None
+
+        # ORDRE CRITIQUE:
+        # 1. Connexion
+        # 2. Validation (avec suppression si nécessaire)
+        # 3. Création des tables
+
         self._init_connection()
+        self._validate_and_fix_schema()  # ← NOUVEAU : Avant _create_tables
         self._create_tables()
 
+        logger.info("✅ Base de données initialisée")
+        logger.info("=" * 80)
+
+    def _validate_schema(self):
+        """Valide que le schéma de la base est correct"""
+        try:
+            cursor = self.connection.cursor()
+
+            # Vérifier la structure de root_labels
+            cursor.execute("PRAGMA table_info(root_labels)")
+            columns = {row[1] for row in cursor.fetchall()}
+
+            required_columns = {'id', 'taxonomy_id', 'name', 'description', 'category', 'position'}
+
+            if not required_columns.issubset(columns):
+                logger.warning(f"⚠️ Schéma invalide détecté pour root_labels")
+                logger.warning(f"   Colonnes présentes: {columns}")
+                logger.warning(f"   Colonnes requises: {required_columns}")
+                logger.warning(f"   Colonnes manquantes: {required_columns - columns}")
+                return False
+
+            # Vérifier parent_labels
+            cursor.execute("PRAGMA table_info(parent_labels)")
+            columns = {row[1] for row in cursor.fetchall()}
+            required_columns = {'id', 'root_id', 'name', 'description', 'category', 'position'}
+
+            if not required_columns.issubset(columns):
+                logger.warning(f"⚠️ Schéma invalide pour parent_labels")
+                return False
+
+            # Vérifier child_labels
+            cursor.execute("PRAGMA table_info(child_labels)")
+            columns = {row[1] for row in cursor.fetchall()}
+            required_columns = {'id', 'parent_label_id', 'parent_child_id', 'name', 'description', 'category', 'depth', 'position'}
+
+            if not required_columns.issubset(columns):
+                logger.warning(f"⚠️ Schéma invalide pour child_labels")
+                return False
+
+            logger.info("✅ Schéma de base de données valide")
+            return True
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la validation du schéma: {e}")
+            return False
+
     def _init_connection(self):
-        """Initialise la connexion à la base de données SQLite"""
+        """Initialise la connexion SQLite"""
         try:
             self.connection = sqlite3.connect(self.db_path)
             self.connection.row_factory = sqlite3.Row
-            
-            # Activer les clés étrangères
             self.connection.execute("PRAGMA foreign_keys = ON")
-            
-            # Test de structure
-            try:
-                cursor = self.connection.cursor()
-                cursor.execute("SELECT id FROM projects LIMIT 1")
-                logger.info("Structure de table valide")
-            except Exception as e:
-                logger.warning(f"Table corrompue détectée : {str(e)}")
-                logger.info("Suppression des tables corrompues...")
-                cursor = self.connection.cursor()
-                cursor.execute("DROP TABLE IF EXISTS child_labels")
-                cursor.execute("DROP TABLE IF EXISTS parent_labels")
-                cursor.execute("DROP TABLE IF EXISTS root_labels")
-                cursor.execute("DROP TABLE IF EXISTS taxonomy_clusters")
-                cursor.execute("DROP TABLE IF EXISTS typologies")
-                cursor.execute("DROP TABLE IF EXISTS projects")
-                cursor.execute("DROP TABLE IF EXISTS platforms")
-                self.connection.commit()
-                logger.info("Tables corrompues supprimées")
+            logger.info("✅ Connexion établie")
+        except Exception as e:
+            logger.error(f"❌ Erreur connexion: {e}")
+            raise
 
-            logger.info(f"Base de données initialisée avec succès : {self.db_path}")
+    def _validate_and_fix_schema(self):
+        """Valide le schéma et supprime les tables corrompues si nécessaire"""
+        try:
+            cursor = self.connection.cursor()
+
+            # Vérifier si des tables existent
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            existing_tables = {row[0] for row in cursor.fetchall()}
+
+            if not existing_tables:
+                logger.info("📝 Nouvelle base de données")
+                return
+
+            logger.info(f"📋 Tables existantes: {existing_tables}")
+
+            # Vérifier root_labels si elle existe
+            if 'root_labels' in existing_tables:
+                cursor.execute("PRAGMA table_info(root_labels)")
+                columns = {row[1] for row in cursor.fetchall()}
+
+                logger.info(f"🔍 Colonnes de root_labels: {columns}")
+
+                # Vérifier si taxonomy_id existe
+                if 'taxonomy_id' not in columns:
+                    logger.error("❌ CORRUPTION DÉTECTÉE: taxonomy_id manquant!")
+                    logger.warning("🗑️  Suppression des tables corrompues...")
+
+                    # Supprimer TOUTES les tables dans le bon ordre
+                    tables_to_drop = [
+                        'child_labels',
+                        'parent_labels',
+                        'root_labels',
+                        'taxonomy_clusters',
+                        'typologies',
+                        'batches',
+                        'projects',
+                        'platforms'
+                    ]
+
+                    for table in tables_to_drop:
+                        try:
+                            cursor.execute(f"DROP TABLE IF EXISTS {table}")
+                            logger.info(f"   ✅ {table} supprimée")
+                        except Exception as e:
+                            logger.warning(f"   ⚠️  {table}: {e}")
+
+                    # Supprimer les index aussi
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
+                    indexes = [row[0] for row in cursor.fetchall()]
+                    for idx in indexes:
+                        if not idx.startswith('sqlite_'):  # Garder les index système
+                            try:
+                                cursor.execute(f"DROP INDEX IF EXISTS {idx}")
+                            except:
+                                pass
+                            
+                    self.connection.commit()
+                    logger.info("✅ Tables corrompues supprimées")
+
+                    return
+
+            # Vérifier parent_labels
+            if 'parent_labels' in existing_tables:
+                cursor.execute("PRAGMA table_info(parent_labels)")
+                columns = {row[1] for row in cursor.fetchall()}
+                if 'root_id' not in columns:
+                    logger.error("❌ parent_labels corrompu")
+                    self._drop_all_tables()
+                    return
+
+            # Vérifier child_labels
+            if 'child_labels' in existing_tables:
+                cursor.execute("PRAGMA table_info(child_labels)")
+                columns = {row[1] for row in cursor.fetchall()}
+                if 'parent_label_id' not in columns or 'parent_child_id' not in columns:
+                    logger.error("❌ child_labels corrompu")
+                    self._drop_all_tables()
+                    return
+
+            logger.info("✅ Schéma valide")
 
         except Exception as e:
-            logger.error(f"Erreur lors de l'initialisation de la base de données : {str(e)}")
-            self.connection = None
-            raise e
+            logger.error(f"❌ Erreur validation: {e}")
+            logger.warning("🗑️  Suppression par sécurité...")
+            self._drop_all_tables()
+
+    def _drop_all_tables(self):
+        """Supprime toutes les tables"""
+        try:
+            cursor = self.connection.cursor()
+            
+            tables = [
+                'child_labels',
+                'parent_labels',
+                'root_labels',
+                'taxonomy_clusters',
+                'typologies',
+                'batches',
+                'projects',
+                'platforms'
+            ]
+            
+            for table in tables:
+                try:
+                    cursor.execute(f"DROP TABLE IF EXISTS {table}")
+                except:
+                    pass
+                
+            self.connection.commit()
+            logger.info("✅ Toutes les tables supprimées")
+            
+        except Exception as e:
+            logger.error(f"Erreur suppression: {e}")
 
     def _create_tables(self):
         """Crée les tables nécessaires pour la structure hiérarchique complète"""
@@ -506,122 +657,271 @@ class DatasetDatabase:
         return children
 
     def save_dataset_projet(self, project_name, project_data):
-        """Sauvegarde un projet complet avec toute sa hiérarchie"""
+        """Sauvegarde un projet complet avec toute sa hiérarchie - VERSION AVEC LOGGING DÉTAILLÉ"""
         try:
             if not self.connection:
-                logger.error("Aucune connexion à la base de données")
+                logger.error("❌ DATABASE: Aucune connexion à la base de données")
                 return False
-
+    
+            logger.info("╔" + "═" * 78 + "╗")
+            logger.info("║ DATABASE: save_dataset_projet()                                             ║")
+            logger.info("╠" + "═" * 78 + "╣")
+            logger.info(f"║ Projet: {project_name:<66} ║")
+            logger.info("╚" + "═" * 78 + "╝")
+    
             cursor = self.connection.cursor()
             
             # Vérifier si le projet existe
+            logger.info(f"🔍 DATABASE: Vérification de l'existence du projet '{project_name}'")
             cursor.execute("SELECT id FROM projects WHERE name = ?", (project_name,))
             existing = cursor.fetchone()
-
+    
             if existing:
                 project_id = existing['id']
-                # Mettre à jour le projet
+                logger.info(f"📝 DATABASE: Projet existant trouvé (ID: {project_id})")
+                
                 cursor.execute("""
                     UPDATE projects
                     SET description = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (project_data.get('description', ''), project_id))
+                logger.info(f"✅ DATABASE: Projet mis à jour")
+                logger.info(f"   Description: '{project_data.get('description', '')[:50]}...'")
                 
-                # Supprimer l'ancienne hiérarchie pour la recréer
+                # Compter les anciennes données avant suppression
+                cursor.execute("SELECT COUNT(*) as count FROM typologies WHERE project_id = ?", (project_id,))
+                old_count = cursor.fetchone()['count']
+                
+                logger.info(f"🗑️  DATABASE: Suppression de l'ancienne hiérarchie...")
                 cursor.execute("DELETE FROM typologies WHERE project_id = ?", (project_id,))
+                deleted_count = cursor.rowcount
+                logger.info(f"✅ DATABASE: {deleted_count} typologie(s) supprimée(s) (CASCADE)")
             else:
-                # Créer nouveau projet
+                logger.info(f"🆕 DATABASE: Création d'un nouveau projet")
                 cursor.execute("""
                     INSERT INTO projects (name, description)
                     VALUES (?, ?)
                 """, (project_name, project_data.get('description', '')))
                 project_id = cursor.lastrowid
-
+                logger.info(f"✅ DATABASE: Nouveau projet créé (ID: {project_id})")
+    
             # Sauvegarder la hiérarchie complète
-            self._save_typologies(cursor, project_id, project_data.get('typologies', []))
-
+            typologies = project_data.get('typologies', [])
+            logger.info(f"\n📊 DATABASE: Sauvegarde de {len(typologies)} typologie(s)")
+            
+            self._save_typologies(cursor, project_id, typologies)
+    
             self.connection.commit()
-            logger.info(f"Projet '{project_name}' sauvegardé avec succès")
+            logger.info("\n✅ DATABASE: Transaction COMMIT réussie")
+            
+            # Vérification post-sauvegarde
+            logger.info("\n🔍 DATABASE: Vérification post-sauvegarde")
+            self._verify_saved_data(cursor, project_id, project_name)
+            
+            logger.info("\n╔" + "═" * 78 + "╗")
+            logger.info(f"║ ✅ SAUVEGARDE RÉUSSIE: {project_name:<58} ║")
+            logger.info("╚" + "═" * 78 + "╝\n")
+            
             return True
-
+    
         except Exception as e:
-            logger.error(f"Erreur lors de la sauvegarde du projet '{project_name}': {str(e)}")
+            logger.error("\n╔" + "═" * 78 + "╗")
+            logger.error(f"║ ❌ ERREUR DATABASE: {str(e):<61} ║")
+            logger.error("╚" + "═" * 78 + "╝")
+            logger.error(f"\n🔥 Exception complète:\n{traceback.format_exc()}")
+            
             if self.connection:
                 self.connection.rollback()
+                logger.warning("⚠️  DATABASE: Transaction ROLLBACK effectué")
             return False
 
     def _save_typologies(self, cursor, project_id, typologies):
-        """Sauvegarde toutes les typologies"""
+        """Sauvegarde toutes les typologies avec logs détaillés"""
+        logger.info(f"\n  ┌─ Sauvegarde des typologies")
+
         for position, typologie in enumerate(typologies):
+            typ_name = typologie['name']
+            typ_desc = typologie.get('description', '')
+
+            logger.info(f"  │")
+            logger.info(f"  ├─ [{position+1}/{len(typologies)}] Typologie: '{typ_name}'")
+
             cursor.execute("""
                 INSERT INTO typologies (project_id, name, description, position)
                 VALUES (?, ?, ?, ?)
-            """, (project_id, typologie['name'], typologie.get('description', ''), position))
+            """, (project_id, typ_name, typ_desc, position))
             typologie_id = cursor.lastrowid
-            
+
+            logger.info(f"  │    ✅ Inséré (ID: {typologie_id}, pos: {position})")
+
             # Sauvegarder les clusters de taxonomie
             taxonomy_clusters = typologie.get('taxonomy_clusters', [])
-            self._save_taxonomy_clusters(cursor, typologie_id, taxonomy_clusters)
+            logger.info(f"  │    📊 {len(taxonomy_clusters)} cluster(s) de taxonomie")
 
-    def _save_taxonomy_clusters(self, cursor, typologie_id, clusters):
-        """Sauvegarde tous les clusters de taxonomie"""
+            self._save_taxonomy_clusters(cursor, typologie_id, taxonomy_clusters, position+1, len(typologies))
+
+        logger.info(f"  └─ ✅ Toutes les typologies sauvegardées\n")
+
+    def _save_taxonomy_clusters(self, cursor, typologie_id, clusters, typ_num, typ_total):
+        """Sauvegarde tous les clusters de taxonomie avec logs détaillés"""
         for position, cluster in enumerate(clusters):
+            cluster_name = cluster['name']
+            cluster_desc = cluster.get('description', '')
+
+            logger.info(f"  │    │")
+            logger.info(f"  │    ├─ [{position+1}/{len(clusters)}] Cluster: '{cluster_name}'")
+
             cursor.execute("""
                 INSERT INTO taxonomy_clusters (typologie_id, name, description, position)
                 VALUES (?, ?, ?, ?)
-            """, (typologie_id, cluster['name'], cluster.get('description', ''), position))
+            """, (typologie_id, cluster_name, cluster_desc, position))
             taxonomy_id = cursor.lastrowid
-            
+
+            logger.info(f"  │    │    ✅ Inséré (ID: {taxonomy_id}, pos: {position})")
+
             # Sauvegarder les root labels
             root_labels = cluster.get('root_labels', [])
+            logger.info(f"  │    │    🏷️  {len(root_labels)} root label(s)")
+
             self._save_root_labels(cursor, taxonomy_id, root_labels)
 
     def _save_root_labels(self, cursor, taxonomy_id, roots):
-        """Sauvegarde tous les root labels"""
+        """Sauvegarde tous les root labels avec logs détaillés"""
         for position, root in enumerate(roots):
+            root_name = root['name']
+            root_desc = root.get('description', '')
+            root_cat = root.get('category', 'default')
+
+            logger.info(f"  │    │    │")
+            logger.info(f"  │    │    ├─ [{position+1}/{len(roots)}] Root: '{root_name}' (cat: {root_cat})")
+
             cursor.execute("""
                 INSERT INTO root_labels (taxonomy_id, name, description, category, position)
                 VALUES (?, ?, ?, ?, ?)
-            """, (taxonomy_id, root['name'], root.get('description', ''), 
-                  root.get('category', 'default'), position))
+            """, (taxonomy_id, root_name, root_desc, root_cat, position))
             root_id = cursor.lastrowid
-            
+
+            logger.info(f"  │    │    │    ✅ Inséré (ID: {root_id}, pos: {position})")
+
             # Sauvegarder les parent labels
             parent_labels = root.get('parent_labels', [])
+            logger.info(f"  │    │    │    👨 {len(parent_labels)} parent label(s)")
+
             self._save_parent_labels(cursor, root_id, parent_labels)
 
     def _save_parent_labels(self, cursor, root_id, parents):
-        """Sauvegarde tous les parent labels"""
+        """Sauvegarde tous les parent labels avec logs détaillés"""
         for position, parent in enumerate(parents):
+            parent_name = parent['name']
+            parent_desc = parent.get('description', '')
+            parent_cat = parent.get('category', 'default')
+
+            logger.info(f"  │    │    │    │")
+            logger.info(f"  │    │    │    ├─ [{position+1}/{len(parents)}] Parent: '{parent_name}' (cat: {parent_cat})")
+
             cursor.execute("""
                 INSERT INTO parent_labels (root_id, name, description, category, position)
                 VALUES (?, ?, ?, ?, ?)
-            """, (root_id, parent['name'], parent.get('description', ''), 
-                  parent.get('category', 'default'), position))
+            """, (root_id, parent_name, parent_desc, parent_cat, position))
             parent_id = cursor.lastrowid
-            
+
+            logger.info(f"  │    │    │    │    ✅ Inséré (ID: {parent_id}, pos: {position})")
+
             # Sauvegarder les enfants récursivement
             children = parent.get('children', [])
+            logger.info(f"  │    │    │    │    👶 {len(children)} enfant(s) direct(s)")
+
             self._save_children_recursive(cursor, children, parent_label_id=parent_id, depth=0)
 
     def _save_children_recursive(self, cursor, children, parent_label_id=None, 
                                   parent_child_id=None, depth=0):
-        """Sauvegarde récursivement tous les enfants"""
+        """Sauvegarde récursivement tous les enfants avec logs détaillés"""
+        indent = "  │    │    │    │    │" + ("    │" * depth)
+
         for position, child in enumerate(children):
+            child_name = child['name']
+            child_desc = child.get('description', '')
+            child_cat = child.get('category', 'default')
+
+            logger.info(f"{indent}")
+            logger.info(f"{indent}├─ [{position+1}/{len(children)}] Child (depth {depth}): '{child_name}'")
+
             cursor.execute("""
                 INSERT INTO child_labels 
                 (parent_label_id, parent_child_id, name, description, category, depth, position)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (parent_label_id, parent_child_id, child['name'], 
-                  child.get('description', ''), child.get('category', 'default'), 
-                  depth, position))
+            """, (parent_label_id, parent_child_id, child_name, child_desc, child_cat, depth, position))
             child_id = cursor.lastrowid
-            
+
+            logger.info(f"{indent}│    ✅ Inséré (ID: {child_id}, depth: {depth}, pos: {position})")
+
             # Sauvegarder les sous-enfants
             sub_children = child.get('children', [])
             if sub_children:
+                logger.info(f"{indent}│    👶 {len(sub_children)} sous-enfant(s)")
                 self._save_children_recursive(cursor, sub_children, 
                                              parent_child_id=child_id, depth=depth+1)
+                
+    def _verify_saved_data(self, cursor, project_id, project_name):
+        """Vérifie que les données ont bien été sauvegardées"""
+        logger.info("  ┌─ Vérification des données sauvegardées")
+
+        # Compter les typologies
+        cursor.execute("SELECT COUNT(*) as count FROM typologies WHERE project_id = ?", (project_id,))
+        typ_count = cursor.fetchone()['count']
+        logger.info(f"  │  ✅ {typ_count} typologie(s) dans la base")
+
+        # Compter les clusters
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM taxonomy_clusters 
+            WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+        """, (project_id,))
+        cluster_count = cursor.fetchone()['count']
+        logger.info(f"  │  ✅ {cluster_count} cluster(s) de taxonomie dans la base")
+
+        # Compter les roots
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM root_labels 
+            WHERE taxonomy_id IN (
+                SELECT id FROM taxonomy_clusters 
+                WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+            )
+        """, (project_id,))
+        root_count = cursor.fetchone()['count']
+        logger.info(f"  │  ✅ {root_count} root label(s) dans la base")
+
+        # Compter les parents
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM parent_labels 
+            WHERE root_id IN (
+                SELECT id FROM root_labels 
+                WHERE taxonomy_id IN (
+                    SELECT id FROM taxonomy_clusters 
+                    WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+                )
+            )
+        """, (project_id,))
+        parent_count = cursor.fetchone()['count']
+        logger.info(f"  │  ✅ {parent_count} parent label(s) dans la base")
+
+        # Compter les enfants
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM child_labels 
+            WHERE parent_label_id IN (
+                SELECT id FROM parent_labels 
+                WHERE root_id IN (
+                    SELECT id FROM root_labels 
+                    WHERE taxonomy_id IN (
+                        SELECT id FROM taxonomy_clusters 
+                        WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+                    )
+                )
+            )
+        """, (project_id,))
+        child_count = cursor.fetchone()['count']
+        logger.info(f"  │  ✅ {child_count} child label(s) dans la base")
+
+        logger.info("  └─ ✅ Vérification terminée")
 
     def delete_dataset_projet(self, project_name):
         """Supprime un projet et toute sa hiérarchie (CASCADE)"""

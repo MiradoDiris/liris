@@ -1213,118 +1213,475 @@ class DatasetConfigTab(QtWidgets.QWidget):
                 logger.info(f"Project '{project_name}' deleted")
 
     def _save_project(self):
-        """
-        Sauvegarde le projet - VERSION COMPLÈTE CORRIGÉE
-        Synchronise le cache vers le manager puis sauvegarde en DB
-        """
-        # DEBUG: Afficher l'état actuel pour diagnostic
-        logger.debug(f"=== DÉBUT SAUVEGARDE ===")
-        logger.debug(f"  - current_project_name: {self.project_manager.current_project_name}")
-        logger.debug(f"  - current_project_data exists: {self.project_manager.current_project_data is not None}")
-        logger.debug(f"  - combo index: {self.project_combo.currentIndex()}")
-        logger.debug(f"  - combo text: {self.project_combo.currentText()}")
-        self._debug_print_cache()
-
-        # CORRECTION: Récupérer le nom du projet depuis plusieurs sources
+        """Sauvegarde le projet - VERSION COMPLÈTE AVEC DIAGNOSTIC"""
+        logger.info("=" * 100)
+        logger.info("🚀 DÉBUT DU PROCESSUS DE SAUVEGARDE")
+        logger.info("=" * 100)
+    
+        # POINT 1: État Initial
+        logger.info("\n📋 DIAGNOSTIC POINT 1: État Initial")
+        logger.info(f"  project_manager.current_project_name: '{self.project_manager.current_project_name}'")
+        logger.info(f"  project_manager.current_project_data existe: {self.project_manager.current_project_data is not None}")
+        logger.info(f"  project_combo.currentText(): '{self.project_combo.currentText()}'")
+        logger.info(f"  project_name_edit.text(): '{self.project_name_edit.text()}'")
+    
+        # POINT 2: Récupération du nom
+        logger.info("\n📋 DIAGNOSTIC POINT 2: Récupération du nom")
         project_name = self.project_manager.current_project_name
-
-        # Fallback 1: Utiliser le combo si current_project_name est vide
+        logger.info(f"  current_project_name: '{project_name}'")
+    
         if not project_name:
             combo_text = self.project_combo.currentText()
             if combo_text:
-                logger.info(f"Fallback: chargement du projet depuis combo '{combo_text}'")
                 if self.project_manager.load_project(combo_text):
                     project_name = combo_text
-                else:
-                    logger.warning(f"Échec du chargement du projet '{combo_text}'")
-
-        # Fallback 2: Utiliser le champ texte pour créer un nouveau projet
+                    logger.info(f"  ✅ Chargé depuis combo: '{project_name}'")
+    
         if not project_name:
             new_name = self.project_name_edit.text().strip()
             if new_name:
-                logger.info(f"Fallback: création d'un nouveau projet '{new_name}'")
                 if self.project_manager.create_new_project(new_name, ""):
                     project_name = new_name
-                else:
-                    QtWidgets.QMessageBox.warning(self, tr("dataset.error"),
-                        f"Impossible de créer le projet '{new_name}'. Il existe peut-être déjà.")
-                    return
-
-        # Vérification finale
+                    logger.info(f"  ✅ Nouveau projet créé: '{project_name}'")
+    
+        # POINT 3: Validation
+        logger.info("\n📋 DIAGNOSTIC POINT 3: Validation")
         if not self.project_manager.current_project_name:
-            QtWidgets.QMessageBox.warning(self, tr("dataset.error"),
-                "Aucun projet sélectionné.\n\n"
-                "Veuillez d'abord:\n"
-                "1. Sélectionner un projet existant dans la liste, ou\n"
-                "2. Cliquer sur 'Nouveau projet' pour en créer un")
+            logger.error("❌ BLOCAGE: current_project_name est None")
+            QtWidgets.QMessageBox.critical(self, "Erreur", "Projet sans nom valide")
             return
-
+    
         if not self.project_manager.current_project_data:
-            QtWidgets.QMessageBox.warning(self, tr("dataset.error"),
-                "Données du projet non initialisées.\n"
-                "Veuillez recharger le projet.")
+            logger.error("❌ BLOCAGE: current_project_data est None")
+            QtWidgets.QMessageBox.critical(self, "Erreur", "Données non initialisées")
             return
-
-        # Récupérer le nouveau nom depuis le champ texte
+    
         new_name = self.project_name_edit.text().strip()
         if not new_name:
-            QtWidgets.QMessageBox.warning(self, tr("dataset.error"),
-                "Le nom du projet ne peut pas être vide")
+            logger.error("❌ BLOCAGE: project_name_edit vide")
+            QtWidgets.QMessageBox.warning(self, "Erreur", "Nom manquant")
             return
-
+    
+        logger.info(f"✅ Validations OK - Projet: '{new_name}'")
+    
+        # POINT 4: Contenu du cache
+        logger.info("\n📋 DIAGNOSTIC POINT 4: Cache")
+        typologies_cache = self.hierarchy_cache.get_typologies()
+        logger.info(f"  {len(typologies_cache)} typologie(s) dans cache")
+    
+        # POINT 5: Synchronisation
+        logger.info("\n📋 DIAGNOSTIC POINT 5: Synchronisation")
         try:
-            # 1. Synchroniser le cache vers le project_manager
-            logger.info("Synchronisation du cache vers le project_manager...")
-            logger.info("AVANT SYNC:")
-            self._debug_print_cache()
-            if not self._sync_cache_to_project_manager():
-                QtWidgets.QMessageBox.critical(self, "Erreur",
-                    "Échec de la synchronisation du cache.\n"
-                    "Les modifications n'ont pas pu être préparées pour la sauvegarde.")
+            sync_success = self._sync_cache_to_project_manager()
+            logger.info(f"  sync result: {sync_success}")
+            if not sync_success:
+                logger.error("❌ BLOCAGE: Sync failed")
+                QtWidgets.QMessageBox.critical(self, "Erreur", "Sync échouée")
+                return
+        except Exception as e:
+            logger.error(f"❌ EXCEPTION SYNC: {e}")
+            QtWidgets.QMessageBox.critical(self, "Exception", str(e))
+            return
+    
+        logger.info("✅ Sync OK")
+    
+        # POINT 6: Project Manager Content
+        logger.info("\n📋 DIAGNOSTIC POINT 6: Project Manager")
+        typologies_manager = self.project_manager.current_project_data.get('typologies', [])
+        logger.info(f"  {len(typologies_manager)} typologie(s) dans manager")
+    
+        # POINT 7: Nom
+        logger.info("\n📋 DIAGNOSTIC POINT 7: Mise à jour nom")
+        old_name = self.project_manager.current_project_name
+        self.project_manager.current_project_data['nom'] = new_name
+        self.project_manager.current_project_name = new_name
+        logger.info(f"  '{old_name}' → '{new_name}'")
+    
+        # POINT 8: Save Project
+        logger.info("\n📋 DIAGNOSTIC POINT 8: Appel save_project()")
+        try:
+            save_success = self.project_manager.save_project()
+            logger.info(f"  save_project() result: {save_success}")
+            
+            if not save_success:
+                logger.error("❌ BLOCAGE: save_project() = False")
+                QtWidgets.QMessageBox.critical(self, "Échec", "save_project() a échoué")
+                return
+        except Exception as e:
+            logger.error(f"❌ EXCEPTION SAVE: {e}")
+            logger.error(traceback.format_exc())
+            QtWidgets.QMessageBox.critical(self, "Exception", str(e))
+            return
+    
+        logger.info("✅ save_project() OK")
+    
+        # ================================================================
+        # POINT 9: VÉRIFICATION EN BASE - SECTION CRITIQUE
+        # ================================================================
+        logger.info("\n" + "=" * 100)
+        logger.info("📋 DIAGNOSTIC POINT 9: VÉRIFICATION BASE DE DONNÉES")
+        logger.info("=" * 100)
+    
+        try:
+            db = self.project_manager.database
+            
+            if not db.connection:
+                logger.error("❌ CRITIQUE: Pas de connexion DB!")
+                QtWidgets.QMessageBox.critical(self, "Erreur", "Pas de connexion DB")
                 return
             
-            logger.info("APRÈS SYNC:")
-            self._debug_print_project_data()
-
-            # 2. Mettre à jour le nom du projet si modifié
-            old_name = self.project_manager.current_project_name
-            self.project_manager.current_project_data['nom'] = new_name
-
-            # Si le nom a changé, mettre à jour current_project_name
-            if new_name != old_name:
-                self.project_manager.current_project_name = new_name
-                logger.info(f"Nom du projet changé: '{old_name}' -> '{new_name}'")
-
-            # 3. Sauvegarder en base de données
-            logger.info(f"Sauvegarde du projet '{new_name}' en base de données...")
-            if self.project_manager.save_project():
-                # Marquer le cache comme propre
-                self.hierarchy_cache.mark_clean()
-
-                # Rafraîchir la liste des projets
-                self._refresh_project_combos()
-
-                # Resélectionner le projet dans le combo
-                index = self.project_combo.findText(new_name)
-                if index >= 0:
-                    self.project_combo.setCurrentIndex(index)
-
-                # Émettre le signal de sauvegarde
-                self.project_saved.emit()
-
-                QtWidgets.QMessageBox.information(self, "Succès",
-                    f"Projet '{new_name}' sauvegardé avec succès!")
-                logger.info(f"✓ Projet '{new_name}' sauvegardé avec succès")
+            logger.info(f"DB path: {db.db_path}")
+            cursor = db.connection.cursor()
+            
+            # Recherche du projet
+            logger.info(f"\n🔍 Recherche projet '{new_name}'...")
+            cursor.execute("SELECT * FROM projects WHERE name = ?", (new_name,))
+            project_row = cursor.fetchone()
+            
+            if project_row:
+                logger.info("✅ PROJET TROUVÉ EN BASE!")
+                logger.info(f"   ID: {project_row['id']}")
+                logger.info(f"   Nom: {project_row['name']}")
+                
+                project_id = project_row['id']
+                
+                # Compter les éléments
+                cursor.execute("SELECT COUNT(*) as c FROM typologies WHERE project_id = ?", (project_id,))
+                typ_count = cursor.fetchone()['c']
+                
+                cursor.execute("""
+                    SELECT COUNT(*) as c FROM taxonomy_clusters 
+                    WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+                """, (project_id,))
+                cluster_count = cursor.fetchone()['c']
+                
+                cursor.execute("""
+                    SELECT COUNT(*) as c FROM root_labels 
+                    WHERE taxonomy_id IN (
+                        SELECT id FROM taxonomy_clusters 
+                        WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+                    )
+                """, (project_id,))
+                root_count = cursor.fetchone()['c']
+                
+                cursor.execute("""
+                    SELECT COUNT(*) as c FROM parent_labels 
+                    WHERE root_id IN (
+                        SELECT id FROM root_labels 
+                        WHERE taxonomy_id IN (
+                            SELECT id FROM taxonomy_clusters 
+                            WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+                        )
+                    )
+                """, (project_id,))
+                parent_count = cursor.fetchone()['c']
+                
+                cursor.execute("""
+                    SELECT COUNT(*) as c FROM child_labels 
+                    WHERE parent_label_id IN (
+                        SELECT id FROM parent_labels 
+                        WHERE root_id IN (
+                            SELECT id FROM root_labels 
+                            WHERE taxonomy_id IN (
+                                SELECT id FROM taxonomy_clusters 
+                                WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+                            )
+                        )
+                    )
+                """, (project_id,))
+                child_count = cursor.fetchone()['c']
+                
+                logger.info(f"\n📊 Contenu:")
+                logger.info(f"   - {typ_count} typologie(s)")
+                logger.info(f"   - {cluster_count} cluster(s)")
+                logger.info(f"   - {root_count} root(s)")
+                logger.info(f"   - {parent_count} parent(s)")
+                logger.info(f"   - {child_count} enfant(s)")
+                
+                total = typ_count + cluster_count + root_count + parent_count + child_count
+                logger.info(f"\n🎯 TOTAL: {total} enregistrements")
+                
+                if total == 0:
+                    logger.error("⚠️ ALERTE: Projet VIDE!")
+                    QtWidgets.QMessageBox.warning(
+                        self, "Projet Vide",
+                        f"Le projet '{new_name}' existe en base mais est VIDE!\n\n"
+                        f"Ajoutez des typologies avant de sauvegarder."
+                    )
+                else:
+                    logger.info("✅ PROJET CORRECTEMENT SAUVEGARDÉ!")
+                    
             else:
-                QtWidgets.QMessageBox.critical(self, tr("dataset.error"),
-                    "Échec de la sauvegarde en base de données.\n"
-                    "Vérifiez les logs pour plus de détails.")
-                logger.error(f"✗ Échec de la sauvegarde du projet '{new_name}'")
+                logger.error(f"❌ PROJET '{new_name}' NON TROUVÉ!")
+                
+                cursor.execute("SELECT name FROM projects")
+                all_projects = [r['name'] for r in cursor.fetchall()]
+                logger.error(f"Projets existants: {all_projects}")
+                
+                QtWidgets.QMessageBox.critical(
+                    self, "Échec",
+                    f"Le projet '{new_name}' N'EST PAS en base!\n\n"
+                    f"Projets existants: {', '.join(all_projects) if all_projects else 'Aucun'}"
+                )
+                return
+                
+        except Exception as e:
+            logger.error(f"❌ EXCEPTION POINT 9: {e}")
+            logger.error(traceback.format_exc())
+            QtWidgets.QMessageBox.critical(self, "Erreur", f"Exception: {e}")
+            return
+    
+        logger.info("\n" + "=" * 100)
+        logger.info("✅ VÉRIFICATION POINT 9 TERMINÉE")
+        logger.info("=" * 100)
+    
+        # POINT 10: Post-traitement
+        logger.info("\n📋 DIAGNOSTIC POINT 10: Post-traitement")
+        self.hierarchy_cache.mark_clean()
+        self._refresh_project_combos()
+        index = self.project_combo.findText(new_name)
+        if index >= 0:
+            self.project_combo.setCurrentIndex(index)
+        self.project_saved.emit()
+    
+        logger.info("\n" + "=" * 100)
+        logger.info(f"🎉 SAUVEGARDE TERMINÉE AVEC SUCCÈS: '{new_name}'")
+        logger.info("=" * 100)
+        
+        QtWidgets.QMessageBox.information(
+            self, "Succès",
+            f"✅ Projet '{new_name}' sauvegardé!\n\nConsultez les logs."
+        )
+            
+    def _verify_database_content(self, project_name):
+        """
+        Vérifie le contenu réel de la base de données SQLite
+        À appeler après une sauvegarde pour confirmer l'insertion
+        """
+        logger.info("\n" + "=" * 100)
+        logger.info("🔍 VÉRIFICATION DIRECTE DU CONTENU DE LA BASE DE DONNÉES SQLite")
+        logger.info("=" * 100)
+
+        try:
+            # Accès direct à la connexion SQLite
+            db = self.project_manager.database
+            if not db.connection:
+                logger.error("❌ Pas de connexion à la base de données")
+                return
+
+            cursor = db.connection.cursor()
+
+            # 1. Vérifier le projet
+            logger.info(f"\n📋 1. VÉRIFICATION DU PROJET '{project_name}'")
+            cursor.execute("SELECT * FROM projects WHERE name = ?", (project_name,))
+            project = cursor.fetchone()
+
+            if project:
+                logger.info(f"  ✅ Projet trouvé dans la base")
+                logger.info(f"     - ID: {project['id']}")
+                logger.info(f"     - Nom: {project['name']}")
+                logger.info(f"     - Description: {project['description']}")
+                logger.info(f"     - Créé le: {project['created_at']}")
+                logger.info(f"     - Modifié le: {project['updated_at']}")
+                project_id = project['id']
+            else:
+                logger.error(f"  ❌ Projet '{project_name}' NON TROUVÉ dans la base!")
+                return
+
+            # 2. Vérifier les typologies
+            logger.info(f"\n📁 2. VÉRIFICATION DES TYPOLOGIES")
+            cursor.execute("""
+                SELECT * FROM typologies 
+                WHERE project_id = ? 
+                ORDER BY position
+            """, (project_id,))
+            typologies = cursor.fetchall()
+
+            if typologies:
+                logger.info(f"  ✅ {len(typologies)} typologie(s) trouvée(s)")
+                for idx, typ in enumerate(typologies):
+                    logger.info(f"\n     [{idx+1}] Typologie:")
+                    logger.info(f"         - ID: {typ['id']}")
+                    logger.info(f"         - Nom: {typ['name']}")
+                    logger.info(f"         - Description: {typ['description']}")
+                    logger.info(f"         - Position: {typ['position']}")
+
+                    # 3. Vérifier les clusters de taxonomie
+                    logger.info(f"\n     📊 Clusters de taxonomie pour '{typ['name']}':")
+                    cursor.execute("""
+                        SELECT * FROM taxonomy_clusters 
+                        WHERE typologie_id = ? 
+                        ORDER BY position
+                    """, (typ['id'],))
+                    clusters = cursor.fetchall()
+
+                    if clusters:
+                        logger.info(f"        ✅ {len(clusters)} cluster(s) trouvé(s)")
+                        for c_idx, cluster in enumerate(clusters):
+                            logger.info(f"\n        [{c_idx+1}] Cluster:")
+                            logger.info(f"            - ID: {cluster['id']}")
+                            logger.info(f"            - Nom: {cluster['name']}")
+                            logger.info(f"            - Description: {cluster['description']}")
+                            logger.info(f"            - Position: {cluster['position']}")
+
+                            # 4. Vérifier les root labels
+                            logger.info(f"\n        🏷️  Root labels pour '{cluster['name']}':")
+                            cursor.execute("""
+                                SELECT * FROM root_labels 
+                                WHERE taxonomy_id = ? 
+                                ORDER BY position
+                            """, (cluster['id'],))
+                            roots = cursor.fetchall()
+
+                            if roots:
+                                logger.info(f"           ✅ {len(roots)} root(s) trouvé(s)")
+                                for r_idx, root in enumerate(roots):
+                                    logger.info(f"\n           [{r_idx+1}] Root:")
+                                    logger.info(f"               - ID: {root['id']}")
+                                    logger.info(f"               - Nom: {root['name']}")
+                                    logger.info(f"               - Catégorie: {root['category']}")
+                                    logger.info(f"               - Position: {root['position']}")
+
+                                    # 5. Vérifier les parent labels
+                                    logger.info(f"\n           👨 Parent labels pour '{root['name']}':")
+                                    cursor.execute("""
+                                        SELECT * FROM parent_labels 
+                                        WHERE root_id = ? 
+                                        ORDER BY position
+                                    """, (root['id'],))
+                                    parents = cursor.fetchall()
+
+                                    if parents:
+                                        logger.info(f"              ✅ {len(parents)} parent(s) trouvé(s)")
+                                        for p_idx, parent in enumerate(parents):
+                                            logger.info(f"\n              [{p_idx+1}] Parent:")
+                                            logger.info(f"                  - ID: {parent['id']}")
+                                            logger.info(f"                  - Nom: {parent['name']}")
+                                            logger.info(f"                  - Catégorie: {parent['category']}")
+                                            logger.info(f"                  - Position: {parent['position']}")
+
+                                            # 6. Vérifier les child labels
+                                            logger.info(f"\n              👶 Child labels pour '{parent['name']}':")
+                                            cursor.execute("""
+                                                SELECT * FROM child_labels 
+                                                WHERE parent_label_id = ? AND parent_child_id IS NULL
+                                                ORDER BY position
+                                            """, (parent['id'],))
+                                            children = cursor.fetchall()
+
+                                            if children:
+                                                logger.info(f"                 ✅ {len(children)} enfant(s) direct(s) trouvé(s)")
+                                                for ch_idx, child in enumerate(children):
+                                                    logger.info(f"\n                 [{ch_idx+1}] Child:")
+                                                    logger.info(f"                     - ID: {child['id']}")
+                                                    logger.info(f"                     - Nom: {child['name']}")
+                                                    logger.info(f"                     - Catégorie: {child['category']}")
+                                                    logger.info(f"                     - Profondeur: {child['depth']}")
+                                                    logger.info(f"                     - Position: {child['position']}")
+
+                                                    # Vérifier les sous-enfants récursivement
+                                                    self._verify_children_recursive(cursor, child['id'], 1)
+                                            else:
+                                                logger.info(f"                 ⚠️  Aucun enfant trouvé")
+                                    else:
+                                        logger.info(f"              ⚠️  Aucun parent trouvé")
+                            else:
+                                logger.info(f"           ⚠️  Aucun root trouvé")
+                    else:
+                        logger.info(f"        ⚠️  Aucun cluster trouvé")
+            else:
+                logger.info(f"  ⚠️  Aucune typologie trouvée")
+
+            # 7. RÉSUMÉ FINAL
+            logger.info("\n" + "=" * 100)
+            logger.info("📊 RÉSUMÉ DE LA VÉRIFICATION")
+            logger.info("=" * 100)
+
+            # Compter tous les éléments
+            cursor.execute("SELECT COUNT(*) as count FROM typologies WHERE project_id = ?", (project_id,))
+            typ_count = cursor.fetchone()['count']
+
+            cursor.execute("""
+                SELECT COUNT(*) as count FROM taxonomy_clusters 
+                WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+            """, (project_id,))
+            cluster_count = cursor.fetchone()['count']
+
+            cursor.execute("""
+                SELECT COUNT(*) as count FROM root_labels 
+                WHERE taxonomy_id IN (
+                    SELECT id FROM taxonomy_clusters 
+                    WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+                )
+            """, (project_id,))
+            root_count = cursor.fetchone()['count']
+
+            cursor.execute("""
+                SELECT COUNT(*) as count FROM parent_labels 
+                WHERE root_id IN (
+                    SELECT id FROM root_labels 
+                    WHERE taxonomy_id IN (
+                        SELECT id FROM taxonomy_clusters 
+                        WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+                    )
+                )
+            """, (project_id,))
+            parent_count = cursor.fetchone()['count']
+
+            cursor.execute("""
+                SELECT COUNT(*) as count FROM child_labels 
+                WHERE parent_label_id IN (
+                    SELECT id FROM parent_labels 
+                    WHERE root_id IN (
+                        SELECT id FROM root_labels 
+                        WHERE taxonomy_id IN (
+                            SELECT id FROM taxonomy_clusters 
+                            WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
+                        )
+                    )
+                )
+            """, (project_id,))
+            child_count = cursor.fetchone()['count']
+
+            logger.info(f"  ✅ Projet: '{project_name}' (ID: {project_id})")
+            logger.info(f"  ✅ {typ_count} typologie(s)")
+            logger.info(f"  ✅ {cluster_count} cluster(s) de taxonomie")
+            logger.info(f"  ✅ {root_count} root label(s)")
+            logger.info(f"  ✅ {parent_count} parent label(s)")
+            logger.info(f"  ✅ {child_count} child label(s)")
+            logger.info(f"\n  🎯 TOTAL: {typ_count + cluster_count + root_count + parent_count + child_count} enregistrements")
+
+            logger.info("\n" + "=" * 100)
+            logger.info("✅ VÉRIFICATION TERMINÉE - TOUTES LES DONNÉES SONT BIEN EN BASE")
+            logger.info("=" * 100 + "\n")
 
         except Exception as e:
-            logger.error(f"Erreur lors de la sauvegarde: {e}\n{traceback.format_exc()}")
-            QtWidgets.QMessageBox.critical(self, "Erreur",
-                f"Impossible de sauvegarder le projet:\n{str(e)}")
+            logger.error(f"\n❌ ERREUR lors de la vérification: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    def _verify_children_recursive(self, cursor, parent_child_id, depth):
+        """Vérifie récursivement les enfants imbriqués"""
+        indent = "                     " + ("  " * depth)
+
+        cursor.execute("""
+            SELECT * FROM child_labels 
+            WHERE parent_child_id = ? 
+            ORDER BY position
+        """, (parent_child_id,))
+        sub_children = cursor.fetchall()
+
+        if sub_children:
+            logger.info(f"{indent}👶 {len(sub_children)} sous-enfant(s) (profondeur {depth})")
+            for idx, child in enumerate(sub_children):
+                logger.info(f"\n{indent}[{idx+1}] Sous-enfant:")
+                logger.info(f"{indent}    - ID: {child['id']}")
+                logger.info(f"{indent}    - Nom: {child['name']}")
+                logger.info(f"{indent}    - Profondeur: {child['depth']}")
+                logger.info(f"{indent}    - Position: {child['position']}")
+
+                # Vérifier les enfants de cet enfant
+                self._verify_children_recursive(cursor, child['id'], depth + 1)
 
     def _add_typologie(self):
         """Add typologie"""

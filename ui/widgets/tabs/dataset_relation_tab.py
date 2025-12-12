@@ -798,10 +798,15 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self._load_batch_into_table(batch)
 
     def _load_batch_into_table(self, batch):
-        """Charger un batch - VERSION MULTI-CONTEXTES"""
-        logger.info(f"=== Chargement du batch #{batch['batch_number']} ===")
+        """Charger un batch - VERSION CORRIGÉE AVEC NOUVELLE STRUCTURE"""
+        logger.info("=" * 100)
+        logger.info(f"📂 CHARGEMENT BATCH #{batch['batch_number']}")
+        logger.info("=" * 100)
 
         data = batch.get('data', {})
+
+        logger.info(f"Nom: {data.get('batch_name')}")
+        logger.info(f"Famille: {data.get('batch_family')}")
 
         # Remplir les informations
         self.current_batch_id = batch['batch_number']
@@ -810,24 +815,45 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.desc_edit.setPlainText(data.get('description', ''))
 
         # Charger la typologie master
-        master_name = data.get('master_typologie', '')
+        master_data = data.get('master_typologie', {})
+
+        if isinstance(master_data, dict):
+            # Nouvelle structure (complète)
+            master_name = master_data.get('name', '')
+            logger.info(f"Master typologie (complète): {master_name}")
+            logger.info(f"  - {len(master_data.get('taxonomy_clusters', []))} clusters")
+        else:
+            # Ancienne structure (juste le nom)
+            master_name = master_data if isinstance(master_data, str) else str(master_data)
+            logger.info(f"Master typologie (nom seul): {master_name}")
+
         if master_name:
+            # Chercher dans la combo
             index = self.master_combo.findText(master_name)
             if index > 0:
                 self.master_combo.blockSignals(True)
                 self.master_combo.setCurrentIndex(index)
                 self.master_combo.blockSignals(False)
                 self._on_master_typologie_changed(index)
+                logger.info(f"✅ Master sélectionné: {master_name}")
 
-        # Charger les combinaisons et appliquer la migration si nécessaire
+        # Charger les combinaisons avec la nouvelle structure
         self.combinations = []
         raw_combinations = data.get('combinations', [])
-        for i, raw_combo in enumerate(raw_combinations):
-            migrated_combo = self._migrate_old_combination_format(raw_combo)
-            migrated_combo['index'] = i  # Assurer l'index
-            self.combinations.append(migrated_combo)
 
-        # Vider et remplir le tableau avec le nouveau format
+        logger.info(f"\n📊 {len(raw_combinations)} combinaison(s) à charger")
+
+        for i, raw_combo in enumerate(raw_combinations):
+            logger.info(f"\n[Combinaison {i + 1}]")
+
+            # Convertir au format interne
+            converted_combo = self._convert_batch_combination(raw_combo, master_name, i)
+
+            if converted_combo:
+                self.combinations.append(converted_combo)
+                logger.info(f"  ✅ Combinaison {i + 1} chargée")
+
+        # Vider et remplir le tableau
         self.batch_table.setRowCount(0)
         for i, combo in enumerate(self.combinations):
             self._update_table_row(i, combo)
@@ -839,7 +865,8 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self._update_stats()
         self._mark_current_selections()
 
-        logger.info(f"✅ Batch chargé avec {len(self.combinations)} combinaisons")
+        logger.info(f"\n✅ Batch chargé: {len(self.combinations)} combinaisons")
+        logger.info("=" * 100 + "\n")
 
         QtWidgets.QMessageBox.information(
             self,
@@ -847,6 +874,162 @@ class DatasetRelationTab(QtWidgets.QWidget):
             f"Batch '{data.get('batch_name', '')}' chargé avec succès!\n"
             f"Combinaisons: {len(self.combinations)}"
         )
+
+    def _convert_batch_combination(self, batch_combo, master_name, index):
+        """
+        Convertit une combinaison du batch vers le format interne
+        """
+        contexts_data = batch_combo.get('contexts', [])
+        nb_samples = batch_combo.get('nb_samples', 1)
+
+        logger.info(f"  - {len(contexts_data)} contexte(s)")
+        logger.info(f"  - {nb_samples} samples")
+
+        # Construire les contextes au format interne
+        internal_contexts = []
+
+        for ctx_idx, ctx in enumerate(contexts_data):
+            level = ctx.get('level', '')
+            context_data = ctx.get('data', {})
+            display = ctx.get('display', '')
+
+            logger.info(f"    [Contexte {ctx_idx + 1}] {level}: {display}")
+
+            # Reconstruire la sélection depuis les données
+            selection = self._rebuild_selection_from_context(level, context_data, display)
+
+            if selection:
+                path_key = self._generate_path_key_from_selection(selection)
+
+                internal_contexts.append({
+                    'selection': selection,
+                    'path_key': path_key,
+                    'display': display
+                })
+
+                logger.info(f"      ✅ Contexte converti")
+
+        return {
+            'index': index,
+            'master': {
+                'name': master_name,
+                'data': self.selected_master_typologie
+            },
+            'contexts': internal_contexts,
+            'nb_samples': nb_samples
+        }
+    
+    def _rebuild_selection_from_context(self, level, context_data, display):
+        """
+        Reconstruit un objet selection depuis les données du contexte
+        """
+        typologie_name = context_data.get('name', '')
+
+        if level == 'typologie':
+            return {
+                'level': 'typologie',
+                'typologie': typologie_name,
+                'taxonomy': '',
+                'root': '',
+                'parent': '',
+                'child_path': [],
+                'child': '',
+                'display': display
+            }
+
+        clusters = context_data.get('taxonomy_clusters', [])
+        if not clusters:
+            return None
+
+        cluster = clusters[0]
+        taxonomy_name = cluster.get('name', '')
+
+        if level == 'taxonomy':
+            return {
+                'level': 'taxonomy',
+                'typologie': typologie_name,
+                'taxonomy': taxonomy_name,
+                'root': '',
+                'parent': '',
+                'child_path': [],
+                'child': '',
+                'display': display
+            }
+
+        roots = cluster.get('root_labels', [])
+        if not roots:
+            return None
+
+        root = roots[0]
+        root_name = root.get('name', '')
+
+        if level == 'root':
+            return {
+                'level': 'root',
+                'typologie': typologie_name,
+                'taxonomy': taxonomy_name,
+                'root': root_name,
+                'parent': '',
+                'child_path': [],
+                'child': '',
+                'display': display
+            }
+
+        parents = root.get('parent_labels', [])
+        if not parents:
+            return None
+
+        parent = parents[0]
+        parent_name = parent.get('name', '')
+
+        if level == 'parent':
+            return {
+                'level': 'parent',
+                'typologie': typologie_name,
+                'taxonomy': taxonomy_name,
+                'root': root_name,
+                'parent': parent_name,
+                'child_path': [],
+                'child': '',
+                'display': display
+            }
+
+        if level == 'child':
+            # Reconstruire le chemin enfant depuis la hiérarchie
+            child_path = self._extract_child_path_from_hierarchy(parent.get('children', []))
+
+            return {
+                'level': 'child',
+                'typologie': typologie_name,
+                'taxonomy': taxonomy_name,
+                'root': root_name,
+                'parent': parent_name,
+                'child_path': child_path,
+                'child': child_path[-1] if child_path else '',
+                'display': display
+            }
+
+        return None
+    
+    def _extract_child_path_from_hierarchy(self, children):
+        """
+        Extrait le chemin des enfants depuis une hiérarchie
+        """
+        if not children:
+            return []
+        
+        path = []
+        current = children[0]  # Prendre le premier (c'est la sélection)
+        
+        while current:
+            path.append(current.get('name', ''))
+            sub_children = current.get('children', [])
+            if sub_children:
+                current = sub_children[0]
+            else:
+                break
+            
+        return path
     
     def _add_to_batch_table(self, master_name, contexts_dict, combination_data):
         """Ajouter une ligne au tableau - VERSION 3 COLONNES"""
@@ -3458,13 +3641,12 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
 
     def _save_current_combination(self):
-        """Sauvegarder la combinaison actuelle dans la liste"""
+        """Sauvegarder la combinaison actuelle dans la liste - VERSION CORRIGÉE"""
         if not self.current_combination['contexts']:
             return
 
-        # Vérifier si une typologie master est sélectionnée
         if not self.selected_master_typologie:
-            logger.warning("Aucune typologie master sélectionnée, impossibilité de sauvegarder la combinaison")
+            logger.warning("Aucune typologie master sélectionnée")
             QtWidgets.QMessageBox.warning(
                 self,
                 "Attention",
@@ -3474,21 +3656,27 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
         master_name = self.selected_master_typologie.get('name', 'N/A')
 
-        # Récupérer nb_samples depuis le tableau si la ligne existe, sinon défaut 1
-        nb_samples = 1
+        # ✅ CORRECTION : Récupérer nb_samples depuis le tableau
+        nb_samples = 1  # Valeur par défaut
+
         if self.current_combination_index < self.batch_table.rowCount():
             nb_item = self.batch_table.item(self.current_combination_index, 1)
             if nb_item:
                 try:
                     nb_samples = int(nb_item.text()) if nb_item.text().strip() else 1
+                    if nb_samples < 1:
+                        nb_samples = 1
                 except ValueError:
+                    logger.warning(f"Valeur nb_samples invalide pour combinaison {self.current_combination_index + 1}, utilisation de 1")
                     nb_samples = 1
+
+        logger.info(f"💾 Sauvegarde combinaison {self.current_combination_index + 1} avec {nb_samples} samples")
 
         combination = {
             'index': self.current_combination_index,
             'master': {'name': master_name, 'data': self.selected_master_typologie},
             'contexts': self.current_combination['contexts'].copy(),
-            'nb_samples': nb_samples
+            'nb_samples': nb_samples  # ✅ Valeur récupérée du tableau
         }
 
         # Remplacer si existe déjà, sinon ajouter
@@ -3500,7 +3688,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         # Ajouter/mettre à jour dans le tableau
         self._update_table_row(self.current_combination_index, combination)
 
-        logger.info(f"💾 Combinaison {self.current_combination_index + 1} sauvegardée avec {len(self.current_combination['contexts'])} contextes et {nb_samples} samples")
+        logger.info(f"✅ Combinaison {self.current_combination_index + 1} sauvegardée avec {len(self.current_combination['contexts'])} contextes et {nb_samples} samples")
 
     def _update_table_row(self, row_index, combination):
         """Mettre à jour ou créer une ligne dans le tableau - Compatible ancien et nouveau format"""
@@ -3569,7 +3757,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
             self.batch_table.setItem(row_index, col, empty_item)
 
     def _update_table_current_row(self):
-        """Mettre à jour la ligne de la combinaison en cours d'édition"""
+        """Mettre à jour la ligne de la combinaison en cours d'édition - VERSION CORRIGÉE"""
         if not self.current_combination['contexts']:
             # Si pas de contextes, supprimer la ligne si elle existe
             if self.current_combination_index < self.batch_table.rowCount():
@@ -3578,14 +3766,24 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
         master_name = self.selected_master_typologie.get('name', 'N/A')
 
-        # nb_samples défaut 1
+        # ✅ CORRECTION : Récupérer nb_samples depuis le tableau existant
         nb_samples = 1
+
+        if self.current_combination_index < self.batch_table.rowCount():
+            nb_item = self.batch_table.item(self.current_combination_index, 1)
+            if nb_item:
+                try:
+                    nb_samples = int(nb_item.text()) if nb_item.text().strip() else 1
+                    if nb_samples < 1:
+                        nb_samples = 1
+                except ValueError:
+                    nb_samples = 1
 
         combination = {
             'index': self.current_combination_index,
             'master': {'name': master_name, 'data': self.selected_master_typologie},
             'contexts': self.current_combination['contexts'].copy(),
-            'nb_samples': nb_samples
+            'nb_samples': nb_samples  # ✅ Préserver la valeur du tableau
         }
 
         self._update_table_row(self.current_combination_index, combination)
@@ -3766,39 +3964,42 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.stats_label.setText(f"Combinaisons totales: {total_combos} | Samples: {total_samples}")
 
     def _on_nb_samples_changed(self, row, column):
-        """Gérer la modification du champ Nb samples"""
+        """Gérer la modification du champ Nb samples - VERSION AMÉLIORÉE"""
         if column != 1:  # Seulement pour la colonne Nb samples
             return
-
+    
         if row >= len(self.combinations):
             return
-
+    
         item = self.batch_table.item(row, column)
         if not item:
             return
-
+    
         try:
             value = int(item.text()) if item.text().strip() else 1
-            if value < 0:
+            if value < 1:
                 value = 1
                 item.setText("1")
         except ValueError:
             value = 1
             item.setText("1")
-
-        # Mettre à jour dans les données
+            logger.warning(f"Valeur invalide pour nb_samples ligne {row + 1}, réinitialisation à 1")
+    
+        # ✅ Mettre à jour dans les données ET bloquer les signaux pour éviter la boucle
+        old_value = self.combinations[row].get('nb_samples', 1)
         self.combinations[row]['nb_samples'] = value
-
+    
         # Marquer comme modifié si batch chargé
         if self.current_batch_id and self.is_batch_saved:
             self.is_batch_saved = False
             self._update_batch_status(f"Batch #{self.current_batch_id} - Modifié (non sauvegardé)")
-
+    
         # Mettre à jour stats
         self._update_stats()
-
-        logger.info(f"✅ Nb samples mis à jour pour combinaison {row + 1}: {value}")
-
+    
+        if old_value != value:
+            logger.info(f"✅ Nb samples mis à jour pour combinaison {row + 1}: {old_value} → {value}")
+    
     # ========== ACTIONS ==========
 
     def _create_action_buttons(self, parent_layout):
@@ -3829,24 +4030,59 @@ class DatasetRelationTab(QtWidgets.QWidget):
             )
             if reply != QtWidgets.QMessageBox.Yes:
                 return
-
-        # Réinitialiser
+    
+        # Réinitialiser l'ID et le statut
         self.current_batch_id = None
         self.is_batch_saved = False
+        
+        # Réinitialiser les champs du formulaire
         self.batch_name_edit.clear()
         self.batch_family_edit.clear()
         self.desc_edit.clear()
-        self.batch_list.clear()
+        
+        # ✅ CORRECTION : Réinitialiser le tableau au lieu de batch_list
+        self.batch_table.setRowCount(0)
+        self.batch_table.setColumnCount(3)
+        self.batch_table.setHorizontalHeaderLabels(["Combinaison", "samples", "Contexte 1"])
+        
+        # Réinitialiser les combinaisons
         self.combinations = []
+        self.current_combination = {
+            'contexts': [],
+            'master': self.selected_master_typologie
+        }
+        self.current_combination_index = 0
+        
+        # Mettre à jour l'affichage
         self._update_stats()
+        self._update_current_combo_label()
         self._update_batch_status("Nouveau batch")
-
-        logger.info("Nouveau batch créé")
+        self._mark_current_selections()
+        self._reset_all_hierarchy_colors()
+        
+        # Réinitialiser le sélecteur de batch
+        self.batch_selector_combo.blockSignals(True)
+        self.batch_selector_combo.setCurrentIndex(0)
+        self.batch_selector_combo.blockSignals(False)
+    
+        logger.info("✅ Nouveau batch créé")
+        
+        QtWidgets.QMessageBox.information(
+            self,
+            "Nouveau Batch",
+            "Un nouveau batch a été créé.\n"
+            "Vous pouvez maintenant ajouter des combinaisons."
+        )
 
     def _save_batch(self):
-        """Sauvegarder le batch avec le nouveau format multi-contextes"""
+        """Sauvegarder le batch avec le nouveau format multi-contextes - VERSION CORRIGÉE AVEC LOGS"""
+        logger.info("=" * 100)
+        logger.info("🚀 DÉBUT SAUVEGARDE BATCH - VERSION DÉTAILLÉE")
+        logger.info("=" * 100)
+
         batch_name = self.batch_name_edit.text().strip()
         if not batch_name:
+            logger.error("❌ Nom du batch vide")
             QtWidgets.QMessageBox.warning(
                 self, 
                 "Attention", 
@@ -3855,6 +4091,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
             return
 
         if self.project_combo.currentIndex() <= 0:
+            logger.error("❌ Aucun projet sélectionné")
             QtWidgets.QMessageBox.warning(
                 self, 
                 "Attention", 
@@ -3864,33 +4101,214 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
         # Sauvegarder la combinaison en cours si elle a des contextes
         if self.current_combination['contexts']:
+            logger.info(f"📦 Sauvegarde combinaison en cours: {len(self.current_combination['contexts'])} contextes")
             self._save_current_combination()
 
         if not self.combinations:
+            logger.error("❌ Aucune combinaison dans le batch")
             QtWidgets.QMessageBox.warning(
                 self, 
                 "Attention", 
                 "Aucune combinaison dans le batch."
             )
             return
+        
+        logger.info("\n🔄 SYNCHRONISATION nb_samples depuis le tableau")
+        logger.info("-" * 80)
+        
+        for row_idx in range(self.batch_table.rowCount()):
+            if row_idx < len(self.combinations):
+                nb_item = self.batch_table.item(row_idx, 1)  # Colonne Nb samples
+                if nb_item:
+                    try:
+                        nb_samples = int(nb_item.text()) if nb_item.text().strip() else 1
+                        if nb_samples < 1:
+                            nb_samples = 1
+                        
+                        old_value = self.combinations[row_idx].get('nb_samples', 1)
+                        self.combinations[row_idx]['nb_samples'] = nb_samples
+                        
+                        if old_value != nb_samples:
+                            logger.info(f"  Ligne {row_idx + 1}: {old_value} → {nb_samples} samples")
+                        
+                    except ValueError:
+                        logger.warning(f"  Ligne {row_idx + 1}: Valeur invalide, utilisation de 1 par défaut")
+                        self.combinations[row_idx]['nb_samples'] = 1
+    
+        logger.info("✅ Synchronisation terminée")
 
-        # Préparer les données (inclut nb_samples par défaut via _save_current_combination)
+        logger.info("\n📊 VÉRIFICATION AVANT EXTRACTION")
+        logger.info("-" * 80)
+        for idx, combo in enumerate(self.combinations):
+            nb = combo.get('nb_samples', 1)
+            ctx_count = len(combo.get('contexts', []))
+            logger.info(f"  Combinaison {idx + 1}: {ctx_count} contextes, {nb} samples")
+
+        # Puis continuer avec l'extraction des contextes...
+        processed_combinations = []
+
+        for combo_idx, combo in enumerate(self.combinations):
+            logger.info(f"\n[Combinaison {combo_idx + 1}/{len(self.combinations)}]")
+
+            contexts = combo.get('contexts', [])
+            nb_samples = combo.get('nb_samples', 1)
+
+            logger.info(f"  - {len(contexts)} contexte(s)")
+            logger.info(f"  - {nb_samples} samples")
+    
+        # ========================================
+        # EXTRACTION DE LA TYPOLOGIE MASTER COMPLÈTE
+        # ========================================
+        logger.info("\n📊 EXTRACTION TYPOLOGIE MASTER")
+        logger.info("-" * 80)
+
+        if not self.selected_master_typologie:
+            logger.error("❌ Aucune typologie master sélectionnée")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Attention",
+                "Veuillez sélectionner une typologie master."
+            )
+            return
+
+        master_name = self.selected_master_typologie.get('name', '')
+        logger.info(f"Master typologie: {master_name}")
+
+        # Extraire TOUTE la hiérarchie de la typologie master
+        master_full_data = {
+            'name': master_name,
+            'description': self.selected_master_typologie.get('description', ''),
+            'taxonomy_clusters': []
+        }
+
+        # Copier tous les clusters avec leur hiérarchie complète
+        clusters = self.selected_master_typologie.get('taxonomy_clusters', [])
+        logger.info(f"  - {len(clusters)} cluster(s) de taxonomie")
+
+        total_roots = 0
+        total_parents = 0
+        total_children = 0
+
+        for cluster in clusters:
+            cluster_data = {
+                'name': cluster.get('name', ''),
+                'description': cluster.get('description', ''),
+                'root_labels': []
+            }
+
+            roots = cluster.get('root_labels', [])
+            total_roots += len(roots)
+
+            for root in roots:
+                root_data = {
+                    'name': root.get('name', ''),
+                    'description': root.get('description', ''),
+                    'category': root.get('category', 'default'),
+                    'parent_labels': []
+                }
+
+                parents = root.get('parent_labels', [])
+                total_parents += len(parents)
+
+                for parent in parents:
+                    parent_data = {
+                        'name': parent.get('name', ''),
+                        'description': parent.get('description', ''),
+                        'category': parent.get('category', 'default'),
+                        'children': self._extract_children_hierarchy(parent.get('children', []))
+                    }
+
+                    total_children += self._count_children_recursive(parent.get('children', []))
+                    root_data['parent_labels'].append(parent_data)
+
+                cluster_data['root_labels'].append(root_data)
+
+            master_full_data['taxonomy_clusters'].append(cluster_data)
+
+        logger.info(f"  - {total_roots} root labels")
+        logger.info(f"  - {total_parents} parent labels")
+        logger.info(f"  - {total_children} children labels")
+        logger.info(f"✅ Typologie master complète extraite")
+
+        # ========================================
+        # EXTRACTION DES CONTEXTES (SEULEMENT SÉLECTION)
+        # ========================================
+        logger.info("\n📊 EXTRACTION CONTEXTES À COMBINER")
+        logger.info("-" * 80)
+
+        processed_combinations = []
+
+        for combo_idx, combo in enumerate(self.combinations):
+            logger.info(f"\n[Combinaison {combo_idx + 1}/{len(self.combinations)}]")
+
+            contexts = combo.get('contexts', [])
+            logger.info(f"  - {len(contexts)} contexte(s)")
+
+            processed_contexts = []
+
+            for ctx_idx, ctx in enumerate(contexts):
+                logger.info(f"\n    [Contexte {ctx_idx + 1}]")
+
+                selection = ctx.get('selection', {})
+                level = selection.get('level', '')
+                typologie = selection.get('typologie', '')
+
+                logger.info(f"      Typologie: {typologie}")
+                logger.info(f"      Niveau: {level}")
+
+                # Construire le contexte avec seulement la hiérarchie sélectionnée
+                context_data = self._extract_context_hierarchy(selection)
+
+                if context_data:
+                    processed_contexts.append({
+                        'level': level,
+                        'data': context_data,
+                        'display': ctx.get('display', '')
+                    })
+                    logger.info(f"      ✅ Contexte extrait")
+                else:
+                    logger.warning(f"      ⚠️ Contexte vide")
+
+            processed_combinations.append({
+                'contexts': processed_contexts,
+                'nb_samples': combo.get('nb_samples', 1)
+            })
+
+            logger.info(f"  ✅ Combinaison {combo_idx + 1} traitée")
+
+        # ========================================
+        # PRÉPARATION DES DONNÉES BATCH
+        # ========================================
+        logger.info("\n📦 PRÉPARATION BATCH DATA")
+        logger.info("-" * 80)
+
         batch_data = {
             'batch_name': batch_name,
             'batch_family': self.batch_family_edit.text().strip(),
             'description': self.desc_edit.toPlainText(),
-            'master_typologie': self.selected_master_typologie.get('name', '') if self.selected_master_typologie else '',
-            'combinations': self.combinations,
-            'count': len(self.combinations),
+            'master_typologie': master_full_data,  # ✅ TYPOLOGIE COMPLÈTE
+            'combinations': processed_combinations,  # ✅ CONTEXTES SÉLECTIONNÉS
+            'count': len(processed_combinations),
             'created_at': datetime.now().isoformat()
         }
 
-        # Sauvegarder
+        logger.info(f"  - Nom: {batch_name}")
+        logger.info(f"  - Famille: {batch_data['batch_family']}")
+        logger.info(f"  - Master: {master_name} (complet)")
+        logger.info(f"  - Combinaisons: {len(processed_combinations)}")
+
+        # ========================================
+        # SAUVEGARDE DANS LA BASE DE DONNÉES
+        # ========================================
+        logger.info("\n💾 SAUVEGARDE DANS SQLITE")
+        logger.info("-" * 80)
+
         project_name = self.project_combo.currentText()
         existing_batches = self.project_manager.get_all_batches()
 
         if self.current_batch_id:
             batch_number = self.current_batch_id
+            logger.info(f"  Mode: Mise à jour (Batch #{batch_number})")
             success = self.project_manager.save_batch(
                 batch_number,
                 len(existing_batches),
@@ -3899,6 +4317,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
             action = "mis à jour"
         else:
             batch_number = len(existing_batches) + 1
+            logger.info(f"  Mode: Nouveau (Batch #{batch_number})")
             success = self.project_manager.save_batch(
                 batch_number,
                 batch_number,
@@ -3907,25 +4326,272 @@ class DatasetRelationTab(QtWidgets.QWidget):
             action = "sauvegardé"
             self.current_batch_id = batch_number
 
+        # ========================================
+        # VÉRIFICATION POST-SAUVEGARDE
+        # ========================================
         if success:
+            logger.info(f"\n✅ SAUVEGARDE RÉUSSIE")
+            logger.info("-" * 80)
+
+            # Vérifier dans la base
+            logger.info("🔍 Vérification dans la base...")
+
+            try:
+                cursor = self.project_manager.database.connection.cursor()
+
+                # Récupérer le projet
+                cursor.execute("SELECT id FROM projects WHERE name = ?", (project_name,))
+                project_row = cursor.fetchone()
+
+                if project_row:
+                    project_id = project_row['id']
+                    logger.info(f"  ✅ Projet trouvé (ID: {project_id})")
+
+                    # Récupérer le batch
+                    cursor.execute("""
+                        SELECT * FROM batches 
+                        WHERE project_id = ? AND batch_number = ?
+                    """, (project_id, batch_number))
+
+                    batch_row = cursor.fetchone()
+
+                    if batch_row:
+                        logger.info(f"  ✅ Batch trouvé en base")
+                        logger.info(f"     - ID: {batch_row['id']}")
+                        logger.info(f"     - Numéro: {batch_row['batch_number']}")
+                        logger.info(f"     - Statut: {batch_row['status']}")
+                        logger.info(f"     - Créé: {batch_row['created_at']}")
+
+                        # Vérifier le contenu
+                        import json
+                        saved_data = json.loads(batch_row['data'])
+
+                        logger.info(f"\n  📊 Contenu sauvegardé:")
+                        logger.info(f"     - Nom: {saved_data.get('batch_name')}")
+                        logger.info(f"     - Master: {saved_data.get('master_typologie', {}).get('name')}")
+                        logger.info(f"     - Clusters master: {len(saved_data.get('master_typologie', {}).get('taxonomy_clusters', []))}")
+                        logger.info(f"     - Combinaisons: {len(saved_data.get('combinations', []))}")
+
+                        # Vérifier chaque combinaison
+                        for idx, combo in enumerate(saved_data.get('combinations', [])):
+                            logger.info(f"\n     [Combinaison {idx + 1}]")
+                            logger.info(f"       - Contextes: {len(combo.get('contexts', []))}")
+                            logger.info(f"       - Samples: {combo.get('nb_samples', 1)}")
+
+                            for ctx_idx, ctx in enumerate(combo.get('contexts', [])):
+                                logger.info(f"       [Contexte {ctx_idx + 1}]")
+                                logger.info(f"         - Niveau: {ctx.get('level')}")
+                                logger.info(f"         - Display: {ctx.get('display')}")
+
+                        logger.info(f"\n✅ DONNÉES VÉRIFIÉES EN BASE")
+                    else:
+                        logger.error("  ❌ Batch NON TROUVÉ en base!")
+                else:
+                    logger.error("  ❌ Projet NON TROUVÉ!")
+
+            except Exception as e:
+                logger.error(f"❌ Erreur vérification: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+
+            # Mise à jour UI
             self.is_batch_saved = True
             self._update_batch_status(f"Batch #{batch_number} - Sauvegardé")
             self._refresh_batch_list()
+
+            logger.info("\n" + "=" * 100)
+            logger.info(f"🎉 SAUVEGARDE TERMINÉE: Batch #{batch_number} - {batch_name}")
+            logger.info("=" * 100 + "\n")
 
             QtWidgets.QMessageBox.information(
                 self, 
                 "Succès", 
                 f"Batch '{batch_name}' {action} avec succès!\n"
-                f"Combinaisons: {len(self.combinations)}"
+                f"Batch #{batch_number}\n"
+                f"Combinaisons: {len(self.combinations)}\n\n"
+                f"Consultez les logs pour les détails."
             )
-            logger.info(f"Batch #{batch_number} '{batch_name}' {action}")
         else:
+            logger.error(f"\n❌ ÉCHEC SAUVEGARDE")
             QtWidgets.QMessageBox.critical(
                 self, 
                 "Erreur", 
                 f"Impossible de sauvegarder le batch '{batch_name}'"
             )
-            logger.error(f"Échec sauvegarde batch '{batch_name}'")
+
+
+    def _extract_context_hierarchy(self, selection):
+        """
+        Extrait UNIQUEMENT la hiérarchie sélectionnée pour un contexte
+        Retourne la structure hiérarchique minimale
+        """
+        level = selection.get('level', '')
+        typologie_name = selection.get('typologie', '')
+
+        logger.info(f"        Extraction hiérarchie: {level}")
+
+        # Trouver la typologie complète dans le cache
+        typologie = self._find_typologie_by_name(typologie_name)
+        if not typologie:
+            logger.error(f"        ❌ Typologie '{typologie_name}' non trouvée")
+            return None
+
+        if level == 'typologie':
+            # Toute la typologie
+            logger.info(f"        → Niveau typologie (complète)")
+            return {
+                'name': typologie_name,
+                'taxonomy_clusters': typologie.get('taxonomy_clusters', [])
+            }
+
+        elif level == 'taxonomy':
+            taxonomy_name = selection.get('taxonomy', '')
+            logger.info(f"        → Niveau taxonomy: {taxonomy_name}")
+
+            # Trouver le cluster
+            for cluster in typologie.get('taxonomy_clusters', []):
+                if cluster.get('name') == taxonomy_name:
+                    return {
+                        'name': typologie_name,
+                        'taxonomy_clusters': [{
+                            'name': taxonomy_name,
+                            'root_labels': cluster.get('root_labels', [])
+                        }]
+                    }
+
+            logger.error(f"        ❌ Cluster '{taxonomy_name}' non trouvé")
+            return None
+
+        elif level == 'root':
+            taxonomy_name = selection.get('taxonomy', '')
+            root_name = selection.get('root', '')
+            logger.info(f"        → Niveau root: {taxonomy_name} > {root_name}")
+
+            for cluster in typologie.get('taxonomy_clusters', []):
+                if cluster.get('name') == taxonomy_name:
+                    for root in cluster.get('root_labels', []):
+                        if root.get('name') == root_name:
+                            return {
+                                'name': typologie_name,
+                                'taxonomy_clusters': [{
+                                    'name': taxonomy_name,
+                                    'root_labels': [root]
+                                }]
+                            }
+
+            logger.error(f"        ❌ Root '{root_name}' non trouvé")
+            return None
+
+        elif level == 'parent':
+            taxonomy_name = selection.get('taxonomy', '')
+            root_name = selection.get('root', '')
+            parent_name = selection.get('parent', '')
+            logger.info(f"        → Niveau parent: {taxonomy_name} > {root_name} > {parent_name}")
+
+            for cluster in typologie.get('taxonomy_clusters', []):
+                if cluster.get('name') == taxonomy_name:
+                    for root in cluster.get('root_labels', []):
+                        if root.get('name') == root_name:
+                            for parent in root.get('parent_labels', []):
+                                if parent.get('name') == parent_name:
+                                    return {
+                                        'name': typologie_name,
+                                        'taxonomy_clusters': [{
+                                            'name': taxonomy_name,
+                                            'root_labels': [{
+                                                'name': root_name,
+                                                'parent_labels': [parent]
+                                            }]
+                                        }]
+                                    }
+
+            logger.error(f"        ❌ Parent '{parent_name}' non trouvé")
+            return None
+
+        elif level == 'child':
+            taxonomy_name = selection.get('taxonomy', '')
+            root_name = selection.get('root', '')
+            parent_name = selection.get('parent', '')
+            child_path = selection.get('child_path', [])
+
+            logger.info(f"        → Niveau child: {' > '.join(child_path)}")
+
+            for cluster in typologie.get('taxonomy_clusters', []):
+                if cluster.get('name') == taxonomy_name:
+                    for root in cluster.get('root_labels', []):
+                        if root.get('name') == root_name:
+                            for parent in root.get('parent_labels', []):
+                                if parent.get('name') == parent_name:
+                                    # Extraire le chemin enfant spécifique
+                                    child_hierarchy = self._extract_child_path(
+                                        parent.get('children', []),
+                                        child_path
+                                    )
+
+                                    if child_hierarchy:
+                                        return {
+                                            'name': typologie_name,
+                                            'taxonomy_clusters': [{
+                                                'name': taxonomy_name,
+                                                'root_labels': [{
+                                                    'name': root_name,
+                                                    'parent_labels': [{
+                                                        'name': parent_name,
+                                                        'children': child_hierarchy
+                                                    }]
+                                                }]
+                                            }]
+                                        }
+
+            logger.error(f"        ❌ Chemin child non trouvé")
+            return None
+
+        return None
+    
+    def _extract_child_path(self, children_list, target_path):
+        """
+        Extrait un chemin spécifique dans la hiérarchie des enfants
+        """
+        if not target_path:
+            return children_list
+
+        target_name = target_path[0]
+        remaining_path = target_path[1:]
+
+        for child in children_list:
+            if child.get('name') == target_name:
+                if not remaining_path:
+                    # C'est l'enfant cible, retourner sa hiérarchie complète
+                    return [child]
+                else:
+                    # Continuer dans les sous-enfants
+                    sub_hierarchy = self._extract_child_path(
+                        child.get('children', []),
+                        remaining_path
+                    )
+                    if sub_hierarchy:
+                        return [{
+                            'name': child.get('name'),
+                            'description': child.get('description', ''),
+                            'category': child.get('category', 'default'),
+                            'children': sub_hierarchy
+                        }]
+
+        return None
+
+
+    def _extract_children_hierarchy(self, children):
+        """Copie récursive de la hiérarchie des enfants"""
+        result = []
+        for child in children:
+            child_copy = {
+                'name': child.get('name', ''),
+                'description': child.get('description', ''),
+                'category': child.get('category', 'default'),
+                'children': self._extract_children_hierarchy(child.get('children', []))
+            }
+            result.append(child_copy)
+        return result
 
     def _load_batch_dialog(self):
         """Afficher un dialogue pour charger un batch sauvegardé"""

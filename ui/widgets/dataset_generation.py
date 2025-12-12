@@ -9,6 +9,7 @@ Left: Project & Config | Center: Prompt Editor | Right: Combinations Visualizer
 import json
 import os
 from datetime import datetime
+from typing import Dict
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import (
@@ -21,6 +22,8 @@ from PyQt5.QtGui import QFont, QColor, QPalette, QLinearGradient, QPainter, QBru
 # ⚠️ IMPORTS CORRIGÉS - Chemins relatifs depuis ui/panels/
 import sys
 from pathlib import Path
+
+from typing import Dict, Any
 
 # Ajouter le répertoire parent au path pour les imports
 current_dir = Path(__file__).parent
@@ -41,6 +44,107 @@ def get_dropdown_svg_path():
     svg_path = os.path.join(ui_dir, "resources", "icons", "dropdown.svg")
     svg_path = os.path.normpath(svg_path)
     return svg_path.replace('\\', '/')
+
+class CollapsibleSection(QWidget):
+    """Section collapsible avec chevron - VERSION CORRIGÉE"""
+    
+    def __init__(self, title="Section", parent=None):
+        super().__init__(parent)
+        self.is_collapsed = True
+        self.section_title = title  # Stocker le titre comme attribut
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Header avec chevron
+        self.header = QPushButton()
+        self.header.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 10px 15px;
+                text-align: left;
+                font-size: 11pt;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+        """)
+        self.header.setCursor(Qt.PointingHandCursor)
+        self.header.clicked.connect(self.toggle)
+        
+        # Initialiser le texte du header
+        self.update_header_text(title)
+        
+        layout.addWidget(self.header)
+        
+        # Content
+        self.content = QWidget()
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(10, 10, 10, 10)
+        self.content.setVisible(False)
+        self.content.setMaximumHeight(0)  # Initialement fermé
+        self.content.setStyleSheet("""
+            QWidget {
+                background: #F8F9FA;
+                border: 2px solid #E0E0E0;
+                border-top: none;
+                border-bottom-left-radius: 6px;
+                border-bottom-right-radius: 6px;
+            }
+        """)
+        
+        layout.addWidget(self.content)
+        
+    def update_header_text(self, title):
+        """Met à jour le texte du header avec chevron"""
+        chevron = "▲" if not self.is_collapsed else "▼"
+        self.header.setText(f"{chevron}  {title}")
+        self.section_title = title  # Mettre à jour le titre stocké
+        
+    def toggle(self):
+        """Bascule l'état collapsed/expanded"""
+        self.is_collapsed = not self.is_collapsed
+        self.content.setVisible(not self.is_collapsed)
+        self.update_header_text(self.section_title)  # Utiliser le titre stocké
+        
+        # Animation
+        if hasattr(self, 'animation'):
+            self.animation.stop()
+        
+        self.animation = QPropertyAnimation(self.content, b"maximumHeight")
+        self.animation.setDuration(200)
+        self.animation.setEasingCurve(QEasingCurve.InOutQuad)
+        
+        if self.is_collapsed:
+            # Fermeture
+            self.animation.setStartValue(self.content.sizeHint().height())
+            self.animation.setEndValue(0)
+        else:
+            # Ouverture
+            self.animation.setStartValue(0)
+            # Calculer la hauteur nécessaire
+            target_height = self.content.sizeHint().height()
+            if target_height < 100:  # Hauteur minimum raisonnable
+                target_height = 200
+            self.animation.setEndValue(target_height)
+        
+        self.animation.start()
+        
+    def add_widget(self, widget):
+        """Ajoute un widget au contenu"""
+        self.content_layout.addWidget(widget)
+        
+    def set_title(self, title):
+        """Définit le titre"""
+        self.section_title = title
+        self.update_header_text(title)
 
 
 class GradientProgressBar(QProgressBar):
@@ -116,7 +220,7 @@ class GradientButton(QPushButton):
 
 
 class CombinationVisualizer(QWidget):
-    """Widget de visualisation des combinaisons de typologies"""
+    """Widget de visualisation des combinaisons - VERSION CORRIGÉE"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -128,7 +232,6 @@ class CombinationVisualizer(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # Zone de scroll pour les combinaisons
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -153,14 +256,12 @@ class CombinationVisualizer(QWidget):
             self._update_display()
             
     def _update_display(self):
-        """Met à jour l'affichage des combinaisons"""
-        # Nettoyer l'affichage précédent
+        """Met à jour l'affichage - VERSION AVEC MASTER"""
         while self.combinations_layout.count():
             item = self.combinations_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         
-        # Afficher chaque combinaison
         for i, combo in enumerate(self.combinations):
             combo_frame = QFrame()
             combo_frame.setFrameShape(QFrame.StyledPanel)
@@ -187,28 +288,57 @@ class CombinationVisualizer(QWidget):
                 """)
                 text_color = "#333333"
             
-            combo_layout = QHBoxLayout(combo_frame)
+            combo_layout = QVBoxLayout(combo_frame)
             
-            # Numéro
+            # En-tête : Numéro + Master + Samples
+            header_layout = QHBoxLayout()
+            
             num_label = QLabel(f"#{i+1}")
             num_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
             num_label.setStyleSheet(f"color: {text_color};")
             num_label.setFixedWidth(40)
-            combo_layout.addWidget(num_label)
+            header_layout.addWidget(num_label)
             
-            # Détails de la combinaison
-            details = " → ".join([f"{k}: {v}" for k, v in combo.items()])
-            detail_label = QLabel(details)
-            detail_label.setFont(QFont("Segoe UI", 9))
-            detail_label.setStyleSheet(f"color: {text_color};")
-            detail_label.setWordWrap(True)
-            combo_layout.addWidget(detail_label, 1)
+            # ✅ AFFICHAGE DU MASTER
+            master_name = combo.get('master', 'N/A')
+            master_label = QLabel(f"Master: {master_name}")
+            master_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            master_label.setStyleSheet(f"color: {text_color}; text-decoration: underline;")
+            header_layout.addWidget(master_label)
+            
+            header_layout.addStretch()
+            
+            # Nombre de contextes et samples
+            nb_contexts = len(combo.get('contexts', []))
+            nb_samples = combo.get('nb_samples', 1)
+            
+            info_label = QLabel(f"{nb_contexts} contexte(s) • {nb_samples} sample(s)")
+            info_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            info_label.setStyleSheet(f"color: {text_color};")
+            header_layout.addWidget(info_label)
             
             # Icône de statut
             status_label = QLabel("✓" if is_completed else "○")
             status_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
             status_label.setStyleSheet(f"color: {text_color};")
-            combo_layout.addWidget(status_label)
+            header_layout.addWidget(status_label)
+            
+            combo_layout.addLayout(header_layout)
+            
+            # Séparateur
+            separator = QFrame()
+            separator.setFrameShape(QFrame.HLine)
+            separator.setStyleSheet(f"background-color: {text_color}; max-height: 1px;")
+            combo_layout.addWidget(separator)
+            
+            # Liste des contextes
+            contexts = combo.get('contexts', [])
+            for ctx_idx, ctx in enumerate(contexts):
+                ctx_label = QLabel(f"  {ctx_idx + 1}. {ctx.get('display', 'N/A')}")
+                ctx_label.setFont(QFont("Segoe UI", 8))
+                ctx_label.setStyleSheet(f"color: {text_color}; padding-left: 20px;")
+                ctx_label.setWordWrap(True)
+                combo_layout.addWidget(ctx_label)
             
             self.combinations_layout.addWidget(combo_frame)
         
@@ -244,8 +374,14 @@ class DatasetGenerationPanel(QWidget):
         
         self.current_project = None
         self.current_project_name = None
+        self.current_batch_number = None
+        self.current_batch_data = None
         self.combinations = []
         self.dropdown_svg = get_dropdown_svg_path()
+
+        self.generation_results = []
+        self.generation_metadata = {}
+        self.worker = None
         
         # Log d'initialisation
         print("=" * 60)
@@ -316,24 +452,90 @@ class DatasetGenerationPanel(QWidget):
         config_section = self._create_config_section()
         layout.addWidget(config_section)
         
+        # INFO: Affichage des infos du batch sélectionné
+        self.batch_info_label = QLabel()
+        self.batch_info_label.setWordWrap(True)
+        self.batch_info_label.setStyleSheet("""
+            QLabel {
+                background: #F0F8FF;
+                border: 2px solid #4A90E2;
+                border-radius: 6px;
+                padding: 10px;
+                font-size: 9pt;
+                color: #333;
+            }
+        """)
+        self.batch_info_label.setVisible(False)
+        layout.addWidget(self.batch_info_label)
+        
         layout.addStretch()
         
         return column
         
     def _create_center_column(self):
-        """Crée la colonne centrale - Éditeur de Prompt"""
+        """Crée la colonne centrale - Éditeur de Prompt (Global + Local)"""
         column = QWidget()
         layout = QVBoxLayout(column)
-        layout.setSpacing(10)
+        layout.setSpacing(15)
         layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Titre
-        title = QLabel("Prompt de Génération")
-        title.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
-        layout.addWidget(title)
-        
-        # Éditeur de prompt
+
+        # === CONTEXTE GLOBAL (Collapsible avec chevron) ===
+        self.global_section = CollapsibleSection("Contexte Global du Projet")
+
+        # Info
+        global_info = QLabel("ℹ️ Contexte partagé pour tous les batches du projet")
+        global_info.setFont(QFont("Segoe UI", 8))
+        global_info.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        self.global_section.add_widget(global_info)
+
+        # Éditeur contexte global
+        self.global_context_editor = QTextEdit()
+        self.global_context_editor.setPlaceholderText(
+            "Définissez ici le contexte général du projet...\n\n"
+            "Exemple:\n"
+            "- Objectif du dataset\n"
+            "- Domaine d'application\n"
+            "- Contraintes générales\n"
+            "- Style de sortie attendu"
+        )
+        self.global_context_editor.setMinimumHeight(120)
+        self.global_context_editor.setMaximumHeight(180)
+        self.global_context_editor.setStyleSheet(f"""
+            QTextEdit {{
+                border: 2px solid #E0E0E0;
+                border-radius: 6px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9pt;
+                background: white;
+            }}
+            QTextEdit:focus {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+            }}
+        """)
+        self.global_section.add_widget(self.global_context_editor)
+
+        layout.addWidget(self.global_section)
+
+        # === CONTEXTE LOCAL (Toujours visible - occupe toute la colonne) ===
+        local_header = QWidget()
+        local_header_layout = QHBoxLayout(local_header)
+        local_header_layout.setContentsMargins(0, 0, 0, 0)
+
+        local_title = QLabel("✍️ Prompt Local (Batch)")
+        local_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        local_title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
+        local_header_layout.addWidget(local_title)
+
+        local_info = QLabel("Instructions spécifiques pour ce batch")
+        local_info.setFont(QFont("Segoe UI", 8))
+        local_info.setStyleSheet("color: #666; font-style: italic;")
+        local_header_layout.addWidget(local_info)
+        local_header_layout.addStretch()
+
+        layout.addWidget(local_header)
+
+        # Éditeur contexte local - OCCUPE TOUTE LA COLONNE
         self.prompt_editor = QTextEdit()
         self.prompt_editor.setPlaceholderText(
             "Exemple:\n\n"
@@ -354,8 +556,8 @@ class DatasetGenerationPanel(QWidget):
                 border: 2px solid {Theme.PRIMARY_COLOR};
             }}
         """)
-        layout.addWidget(self.prompt_editor, 1)
-        
+        layout.addWidget(self.prompt_editor, 1)  # stretch factor = 1 pour occuper tout l'espace
+
         return column
         
     def _create_right_column(self):
@@ -365,11 +567,20 @@ class DatasetGenerationPanel(QWidget):
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # Titre
+        # Titre avec compteur
+        title_layout = QHBoxLayout()
         title = QLabel("Combinaisons à Générer")
         title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
-        layout.addWidget(title)
+        title_layout.addWidget(title)
+        
+        self.combo_count_label = QLabel("(0)")
+        self.combo_count_label.setFont(QFont("Segoe UI", 10))
+        self.combo_count_label.setStyleSheet("color: #666;")
+        title_layout.addWidget(self.combo_count_label)
+        title_layout.addStretch()
+        
+        layout.addLayout(title_layout)
         
         # Visualiseur
         self.visualizer = CombinationVisualizer()
@@ -396,7 +607,7 @@ class DatasetGenerationPanel(QWidget):
         layout = QVBoxLayout(widget)
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Groupe encadré
         group = QGroupBox("Sélection du Projet")
         group.setFont(QFont("Segoe UI", 10, QFont.Bold))
@@ -415,48 +626,44 @@ class DatasetGenerationPanel(QWidget):
                 padding: 0 5px;
             }}
         """)
-        
+
         group_layout = QVBoxLayout(group)
-        
-        # Bouton de test/refresh
-        test_btn = QPushButton("🔄 Recharger les projets")
-        test_btn.setMinimumHeight(35)
-        test_btn.clicked.connect(self._test_load_projects)
-        test_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #17a2b8;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #138496;
-            }
-        """)
-        group_layout.addWidget(test_btn)
-        
-        # Combo projet
+
+        # ✅ 1. COMBO PROJET
+        project_label = QLabel("Projet:")
+        project_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        group_layout.addWidget(project_label)
+
         self.project_combo = QComboBox()
         self.project_combo.setMinimumHeight(40)
         self.project_combo.currentTextChanged.connect(self._on_project_changed)
         self._apply_combo_style(self.project_combo)
         group_layout.addWidget(self.project_combo)
-        
-        # Combo batch
+
+        # ✅ 2. COMBO FAMILLE DE BATCH (NOUVEAU)
+        family_label = QLabel("Famille de batch:")
+        family_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        group_layout.addWidget(family_label)
+
+        self.batch_family_combo = QComboBox()
+        self.batch_family_combo.setMinimumHeight(40)
+        self.batch_family_combo.currentTextChanged.connect(self._on_batch_family_changed)
+        self._apply_combo_style(self.batch_family_combo)
+        group_layout.addWidget(self.batch_family_combo)
+
+        # ✅ 3. COMBO BATCH
         batch_label = QLabel("Batch:")
         batch_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
         group_layout.addWidget(batch_label)
-        
+
         self.batch_combo = QComboBox()
         self.batch_combo.setMinimumHeight(40)
         self.batch_combo.currentIndexChanged.connect(self._on_batch_changed)
         self._apply_combo_style(self.batch_combo)
         group_layout.addWidget(self.batch_combo)
-        
+
         layout.addWidget(group)
-        
+
         return widget
         
     def _create_config_section(self):
@@ -465,7 +672,7 @@ class DatasetGenerationPanel(QWidget):
         layout = QVBoxLayout(widget)
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Groupe encadré
         group = QGroupBox("Configuration")
         group.setFont(QFont("Segoe UI", 10, QFont.Bold))
@@ -484,36 +691,70 @@ class DatasetGenerationPanel(QWidget):
                 padding: 0 5px;
             }}
         """)
-        
+
         group_layout = QVBoxLayout(group)
-        
-        # Nombre de samples par combinaison
-        samples_label = QLabel("Samples par combinaison:")
-        samples_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        group_layout.addWidget(samples_label)
-        
-        self.samples_spin = QSpinBox()
-        self.samples_spin.setMinimum(1)
-        self.samples_spin.setMaximum(10000)
-        self.samples_spin.setValue(10)
-        self.samples_spin.setMinimumHeight(40)
-        self._apply_spinbox_style(self.samples_spin)
-        group_layout.addWidget(self.samples_spin)
-        
+
+        # ⭐ MODIFICATION: Nombre de batches au lieu de samples
+        batches_label = QLabel("Nombre de batches à traiter:")
+        batches_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        group_layout.addWidget(batches_label)
+
+        self.batches_input = QtWidgets.QLineEdit()
+        self.batches_input.setPlaceholderText("Nombre de batches...")
+        self.batches_input.setText("1")  # Valeur par défaut
+        self.batches_input.setMinimumHeight(40)
+        self.batches_input.setValidator(QtGui.QIntValidator(1, 100))
+        self.batches_input.setAlignment(Qt.AlignCenter)
+        self._apply_lineedit_style(self.batches_input)
+        group_layout.addWidget(self.batches_input)
+
+        # Info: les samples viennent de la BDD
+        info_label = QLabel("ℹ️ Le nombre de samples par combinaison\nest défini dans le batch")
+        info_label.setFont(QFont("Segoe UI", 8))
+        info_label.setStyleSheet("color: #666; font-style: italic;")
+        info_label.setAlignment(Qt.AlignCenter)
+        group_layout.addWidget(info_label)
+
         # Format de sortie
         format_label = QLabel("Format de sortie:")
         format_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
         group_layout.addWidget(format_label)
-        
+
         self.format_combo = QComboBox()
         self.format_combo.addItems(["JSON", "CSV", "JSONL", "Parquet"])
         self.format_combo.setMinimumHeight(40)
         self._apply_combo_style(self.format_combo)
         group_layout.addWidget(self.format_combo)
-        
+
         layout.addWidget(group)
-        
+
         return widget
+    
+    def _apply_lineedit_style(self, lineedit):
+        """Applique le style aux champs de texte"""
+        lineedit.setStyleSheet(f"""
+            QLineEdit {{
+                border: 2px solid #E0E0E0;
+                border-radius: 6px;
+                padding: 10px 15px;
+                background: white;
+                font-size: 11pt;
+                font-weight: bold;
+                color: {Theme.PRIMARY_COLOR};
+            }}
+            QLineEdit:hover {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {Theme.SECONDARY_COLOR};
+                background: #FAFAFA;
+            }}
+            QLineEdit::placeholder {{
+                color: #AAAAAA;
+                font-weight: normal;
+                font-style: italic;
+            }}
+        """)
         
     def _create_actions(self):
         """Crée la barre d'actions"""
@@ -584,116 +825,21 @@ class DatasetGenerationPanel(QWidget):
             }}
         """)
         
-    def _apply_spinbox_style(self, spinbox):
-        """Applique le style aux spinbox"""
-        spinbox.setStyleSheet(f"""
-            QSpinBox {{
-                border: 2px solid #E0E0E0;
-                border-radius: 6px;
-                padding: 8px 12px;
-                background: white;
-                font-size: 10pt;
-            }}
-            QSpinBox:hover {{
-                border: 2px solid {Theme.PRIMARY_COLOR};
-            }}
-            QSpinBox::up-button, QSpinBox::down-button {{
-                width: 20px;
-                border: none;
-                background: {Theme.PRIMARY_COLOR};
-            }}
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
-                background: {Theme.SECONDARY_COLOR};
-            }}
-        """)
-    
-    def _test_load_projects(self):
-        """Méthode de test pour forcer le rechargement des projets"""
-        print("\n" + "=" * 60)
-        print("🧪 TEST: Rechargement manuel des projets")
-        print("=" * 60)
-        
-        if not self.database:
-            print("❌ Database est None!")
-            QMessageBox.critical(
-                self,
-                "Erreur",
-                "La base de données n'est pas initialisée!\n\n"
-                "Vérifiez que set_database() a été appelé."
-            )
-            return
-        
-        print(f"✅ Database: {self.database}")
-        print(f"✅ Type: {type(self.database)}")
-        
-        # Test direct
-        try:
-            print("\n🔍 Test direct de get_all_projects()...")
-            projects = self.database.get_all_projects()
-            print(f"📦 Résultat: {projects}")
-            print(f"📦 Nombre: {len(projects) if projects else 0}")
-            
-            if projects:
-                print("\n📋 Détails des projets:")
-                for i, proj in enumerate(projects):
-                    print(f"  {i+1}. {proj}")
-            
-            QMessageBox.information(
-                self,
-                "Test Database",
-                f"Projets trouvés: {len(projects) if projects else 0}\n\n"
-                f"Voir la console pour les détails."
-            )
-            
-        except Exception as e:
-            print(f"\n❌ ERREUR: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            QMessageBox.critical(
-                self,
-                "Erreur",
-                f"Erreur lors du test:\n\n{str(e)}"
-            )
-            return
-        
-        # Recharger
-        print("\n🔄 Rechargement via _load_projects()...")
-        self._load_projects()
-        
-        print("=" * 60)
-        print("🧪 TEST terminé")
-        print("=" * 60 + "\n")
-    
     def set_conductor(self, conductor):
         """Définit le conductor"""
         self.conductor = conductor
-        print(f"🎼 Conductor défini: {conductor}")
         logger.info(f"🎼 Conductor défini: {conductor}")
         
     def set_database(self, database):
         """Définit la base de données"""
-        print("=" * 60)
-        print(f"💾 SET_DATABASE appelé avec: {database}")
-        print(f"💾 Type: {type(database)}")
-        print("=" * 60)
-        
         logger.info(f"💾 set_database appelé avec: {database}")
-        logger.info(f"💾 Type de database: {type(database)}")
-        
         self.database = database
         
         if database is None:
-            print("⚠️ ATTENTION: Database est None!")
             logger.warning("⚠️ Database est None!")
             return
             
-        print("📂 Appel de _load_projects()...")
-        logger.info("📂 Appel de _load_projects()...")
-        
         self._load_projects()
-        
-        print("✅ set_database terminé")
         logger.info("✅ set_database terminé")
         
     def set_project_manager(self, project_manager):
@@ -702,108 +848,60 @@ class DatasetGenerationPanel(QWidget):
         logger.info(f"📋 Project Manager défini: {project_manager}")
         
     def _load_projects(self):
-        """Charge les projets disponibles - CORRIGÉ"""
-        print("=" * 60)
-        print("📋 _LOAD_PROJECTS appelé")
-        print("=" * 60)
-        
+        """Charge les projets disponibles"""
         logger.info("📋 _load_projects démarré")
         
         if not self.database:
-            print("❌ ERREUR: self.database est None!")
-            logger.error("❌ Database non initialisée dans _load_projects")
+            logger.error("❌ Database non initialisée")
             return
-        
-        print(f"✅ Database OK: {self.database}")
-        print(f"✅ Type: {type(self.database)}")
-        logger.info(f"✅ Database présente: {type(self.database)}")
             
         try:
-            print("🔍 Appel de get_all_projects()...")
-            logger.info("🔍 Appel de get_all_projects()")
-            
-            # Récupération similaire au dashboard
             projects = self.database.get_all_projects()
+            logger.info(f"📦 {len(projects) if projects else 0} projet(s) trouvé(s)")
             
-            print(f"📦 Résultat: {projects}")
-            print(f"📦 Type: {type(projects)}")
-            print(f"📦 Nombre: {len(projects) if projects else 0}")
-            logger.info(f"📦 Projets récupérés: {len(projects) if projects else 0}")
-            
-            if not projects:
-                print("⚠️ ATTENTION: Aucun projet trouvé!")
-                logger.warning("⚠️ Aucun projet trouvé dans la base de données")
-            
-            print("🧹 Clear du combo...")
             self.project_combo.clear()
-            
-            print("➕ Ajout de l'option par défaut...")
             self.project_combo.addItem("-- Sélectionner un projet --", None)
             
-            print(f"🔄 Parcours de {len(projects) if projects else 0} projets...")
-            
-            for i, project in enumerate(projects):
-                print(f"\n  Projet {i+1}:")
-                print(f"    Type: {type(project)}")
-                print(f"    Contenu: {project}")
-                
-                # Le get_all_projects retourne une liste de dicts avec la clé 'name'
+            for project in projects:
                 if isinstance(project, dict):
                     project_name = project.get('name', project.get('nom', 'Sans nom'))
-                    print(f"    Nom extrait: {project_name}")
-                else:
-                    print(f"    ⚠️ Format inattendu!")
-                    logger.warning(f"Format de projet inattendu: {type(project)}")
-                    continue
-                
-                print(f"    ➕ Ajout au combo: {project_name}")
-                self.project_combo.addItem(project_name, project_name)
-                logger.debug(f"✓ Projet ajouté: {project_name}")
+                    self.project_combo.addItem(project_name, project_name)
+                    logger.debug(f"✓ Projet ajouté: {project_name}")
             
-            combo_count = self.project_combo.count() - 1  # -1 pour l'option par défaut
-            print(f"\n✅ {combo_count} projets ajoutés au combo")
-            print(f"✅ Total items dans combo: {self.project_combo.count()}")
-            logger.info(f"✅ {combo_count} projets chargés dans le combo")
+            logger.info(f"✅ {self.project_combo.count() - 1} projet(s) chargé(s)")
                 
         except Exception as e:
-            print(f"\n❌ EXCEPTION dans _load_projects:")
-            print(f"❌ Type: {type(e)}")
-            print(f"❌ Message: {str(e)}")
             logger.error(f"❌ Erreur lors du chargement des projets: {str(e)}")
-        
             import traceback
-            print(f"\n📋 Traceback complet:")
-            traceback.print_exc()
             logger.error(traceback.format_exc())
-    
-        print("=" * 60)
-        print("📋 _LOAD_PROJECTS terminé")
-        print("=" * 60)
         
     def _on_project_changed(self, project_name):
-        """Gère le changement de projet - CORRIGÉ"""
+        """Gère le changement de projet"""
         logger.info(f"🔄 Changement de projet: {project_name}")
 
         # Reset si sélection vide
         if project_name == "-- Sélectionner un projet --" or not project_name:
             self.current_project = None
             self.current_project_name = None
+            self.current_batch_number = None
+            self.current_batch_data = None
             self.combinations = []
             self.visualizer.set_combinations([])
+            self.combo_count_label.setText("(0)")
+            self.batch_family_combo.clear()
+            self.batch_family_combo.addItem("-- Aucun projet sélectionné --", None)
             self.batch_combo.clear()
             self.batch_combo.addItem("-- Aucun projet sélectionné --", None)
+            self.batch_info_label.setVisible(False)
             logger.info("Reset de la sélection")
             return
 
         try:
-            # Stocker le nom du projet
             self.current_project_name = project_name
-
-            # Charger le projet complet depuis la BD
             project_data = self.database.get_dataset_projet(project_name)
 
             if not project_data:
-                logger.error(f"❌ Projet '{project_name}' non trouvé dans la BD")
+                logger.error(f"❌ Projet '{project_name}' non trouvé")
                 QMessageBox.warning(
                     self, 
                     "Projet introuvable", 
@@ -813,100 +911,89 @@ class DatasetGenerationPanel(QWidget):
 
             self.current_project = project_data
             logger.info(f"✅ Projet chargé: {project_name}")
-            logger.debug(f"Données du projet: {project_data.keys() if isinstance(project_data, dict) else type(project_data)}")
 
-            # Charger les batches pour ce projet
-            self._load_batches()
-
-        except Exception as e:
-            logger.error(f"❌ Erreur lors du chargement du projet '{project_name}': {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            QMessageBox.critical(
-                self, 
-                "Erreur", 
-                f"Impossible de charger le projet:\n\n{str(e)}"
-            )
-
-    def _load_batches(self):
-        """Charge les batches du projet actuel - CORRIGÉ AVEC ACCÈS AU CHAMP 'data'"""
-        self.batch_combo.clear()
-        self.batch_combo.addItem("-- Sélectionner un batch --", None)
-
-        if not self.current_project_name:
-            logger.warning("Aucun projet actuel pour charger les batches")
-            return
-
-        try:
-            logger.info(f"🔍 Recherche des batches pour le projet: {self.current_project_name}")
-
-            # Récupération des batches depuis la BD
-            batches = self.database.get_all_batches(self.current_project_name)
-
-            if not batches or len(batches) == 0:
-                logger.info(f"⚠️ Aucun batch trouvé pour le projet '{self.current_project_name}'")
-                self.batch_combo.addItem("-- Aucun batch disponible --", None)
-                return
-
-            logger.info(f"📦 {len(batches)} batches trouvés")
-
-            # Trier par numéro de batch
-            try:
-                batches_sorted = sorted(batches, key=lambda x: x.get('batch_number', 0))
-            except Exception as sort_error:
-                logger.warning(f"Impossible de trier les batches: {sort_error}")
-                batches_sorted = batches
-
-            # Ajouter chaque batch au combo
-            for batch in batches_sorted:
-                batch_num = batch.get('batch_number', 0)
-                total_batches = batch.get('total_batches', 0)
-
-                # ⚠️ CORRECTION: Les données sont dans le champ 'data' qui est un dict parsé
-                batch_data_content = batch.get('data', {})
-
-                # Extraire le nom et les combinaisons depuis 'data'
-                batch_name = batch_data_content.get('batch_name', f'Batch {batch_num}')
-                combinations = batch_data_content.get('combinations', [])
-                combinations_count = len(combinations)
-
-                # Format d'affichage cohérent avec le dashboard
-                if total_batches > 0:
-                    display_name = f"Batch {batch_num}/{total_batches} - {batch_name} ({combinations_count} combos)"
-                else:
-                    display_name = f"Batch {batch_num} - {batch_name} ({combinations_count} combos)"
-
-                self.batch_combo.addItem(display_name, batch_num)
-                logger.debug(f"  ✓ Batch ajouté: {display_name}")
-
-            logger.info(f"✅ {len(batches)} batches chargés dans le combo")
+            # ✅ CHARGER LES FAMILLES DE BATCH
+            self._load_batch_families()
 
         except Exception as e:
-            logger.error(f"❌ Erreur lors du chargement des batches: {str(e)}")
+            logger.error(f"❌ Erreur: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
-            self.batch_combo.addItem("-- Erreur de chargement --", None)
+
+    #def _load_batches(self):
+    #    """Charge les batches du projet actuel"""
+    #    self.batch_combo.clear()
+    #    self.batch_combo.addItem("-- Sélectionner un batch --", None)
+#
+    #    if not self.current_project_name:
+    #        logger.warning("Aucun projet actuel")
+    #        return
+#
+    #    try:
+    #        logger.info(f"🔍 Recherche des batches pour: {self.current_project_name}")
+    #        batches = self.database.get_all_batches(self.current_project_name)
+#
+    #        if not batches or len(batches) == 0:
+    #            logger.info(f"⚠️ Aucun batch trouvé")
+    #            self.batch_combo.addItem("-- Aucun batch disponible --", None)
+    #            return
+#
+    #        logger.info(f"📦 {len(batches)} batch(es) trouvé(s)")
+#
+    #        # Trier par numéro
+    #        try:
+    #            batches_sorted = sorted(batches, key=lambda x: x.get('batch_number', 0))
+    #        except:
+    #            batches_sorted = batches
+#
+    #        # Ajouter chaque batch
+    #        for batch in batches_sorted:
+    #            batch_num = batch.get('batch_number', 0)
+    #            total_batches = batch.get('total_batches', 0)
+    #            batch_data_content = batch.get('data', {})
+    #            
+    #            batch_name = batch_data_content.get('batch_name', f'Batch {batch_num}')
+    #            combinations = batch_data_content.get('combinations', [])
+    #            combinations_count = len(combinations)
+#
+    #            if total_batches > 0:
+    #                display_name = f"Batch {batch_num}/{total_batches} - {batch_name} ({combinations_count} combos)"
+    #            else:
+    #                display_name = f"Batch {batch_num} - {batch_name} ({combinations_count} combos)"
+#
+    #            self.batch_combo.addItem(display_name, batch_num)
+    #            logger.debug(f"  ✓ Batch ajouté: {display_name}")
+#
+    #        logger.info(f"✅ {len(batches)} batch(es) chargé(s)")
+#
+    #    except Exception as e:
+    #        logger.error(f"❌ Erreur: {str(e)}")
+    #        import traceback
+    #        logger.error(traceback.format_exc())
+    #        self.batch_combo.addItem("-- Erreur de chargement --", None)
 
     def _on_batch_changed(self, index):
-        """Gère le changement de batch - CORRIGÉ AVEC ACCÈS AU CHAMP 'data'"""
+        """Gère le changement de batch - VERSION AVEC RÉCUPÉRATION SAMPLES"""
         batch_number = self.batch_combo.currentData()
-
         logger.info(f"🔄 Changement de batch: index={index}, batch_number={batch_number}")
 
         if batch_number is None:
+            self.current_batch_number = None
+            self.current_batch_data = None
+            self.current_master_typologie = None
             self.combinations = []
             self.visualizer.set_combinations([])
+            self.combo_count_label.setText("(0)")
+            self.batch_info_label.setVisible(False)
             logger.info("Reset des combinaisons")
             return
 
         try:
-            logger.info(f"🔍 Chargement du batch {batch_number} pour le projet {self.current_project_name}")
-
-            # Charger le batch depuis la BD
+            logger.info(f"📂 Chargement du batch {batch_number}")
             batch_result = self.database.get_batch(self.current_project_name, batch_number)
 
             if not batch_result:
-                logger.error(f"❌ Batch {batch_number} non trouvé pour le projet {self.current_project_name}")
+                logger.error(f"❌ Batch {batch_number} non trouvé")
                 QMessageBox.warning(
                     self,
                     "Batch introuvable",
@@ -914,72 +1001,152 @@ class DatasetGenerationPanel(QWidget):
                 )
                 return
 
-            logger.debug(f"Batch récupéré: {batch_result.keys() if isinstance(batch_result, dict) else type(batch_result)}")
+            logger.info(f"✅ Batch récupéré")
 
-            # ⚠️ CORRECTION: Les données sont dans batch_result['data']
+            # Stocker les données du batch
+            self.current_batch_number = batch_number
+            self.current_batch_data = batch_result
+
+            # Extraire les données depuis le champ 'data'
             batch_data = batch_result.get('data', {})
 
             if not batch_data:
-                logger.error(f"❌ Le champ 'data' est vide dans le batch {batch_number}")
+                logger.error(f"❌ Le champ 'data' est vide")
                 self.combinations = []
                 self.visualizer.set_combinations([])
+                self.combo_count_label.setText("(0)")
                 return
 
-            # Extraire les combinaisons depuis 'data'
+            # ✅ EXTRACTION DE LA TYPOLOGIE MASTER COMPLÈTE
+            logger.info(f"\n📊 EXTRACTION TYPOLOGIE MASTER")
+            master_typologie = batch_data.get('master_typologie', {})
+
+            if master_typologie:
+                master_name = master_typologie.get('name', 'N/A')
+                clusters = master_typologie.get('taxonomy_clusters', [])
+
+                logger.info(f"  Master: {master_name}")
+                logger.info(f"  Clusters: {len(clusters)}")
+
+                # Compter tous les éléments
+                total_roots = sum(len(c.get('root_labels', [])) for c in clusters)
+                total_parents = sum(
+                    len(r.get('parent_labels', []))
+                    for c in clusters
+                    for r in c.get('root_labels', [])
+                )
+                total_children = sum(
+                    self._count_children_recursive(p.get('children', []))
+                    for c in clusters
+                    for r in c.get('root_labels', [])
+                    for p in r.get('parent_labels', [])
+                )
+
+                logger.info(f"  Structure complète:")
+                logger.info(f"    • Roots: {total_roots}")
+                logger.info(f"    • Parents: {total_parents}")
+                logger.info(f"    • Children: {total_children}")
+
+                # Stocker la typologie master complète
+                self.current_master_typologie = master_typologie
+                logger.info(f"✅ Typologie master complète chargée")
+            else:
+                logger.warning(f"⚠️ Pas de typologie master dans le batch")
+                self.current_master_typologie = None
+
+            # Extraire les informations du batch
+            batch_name = batch_data.get('batch_name', 'Sans nom')
+            batch_family = batch_data.get('batch_family', '')
+            total_batches = batch_result.get('total_batches', 0)
             combinations = batch_data.get('combinations', [])
 
             if not combinations:
-                logger.warning(f"⚠️ Le batch {batch_number} ne contient aucune combinaison")
+                logger.warning(f"⚠️ Aucune combinaison")
                 self.combinations = []
                 self.visualizer.set_combinations([])
+                self.combo_count_label.setText("(0)")
                 return
 
-            logger.info(f"📊 {len(combinations)} combinaisons trouvées dans le batch")
+            logger.info(f"\n📊 {len(combinations)} combinaison(s) trouvée(s)")
 
-            # Créer l'affichage des combinaisons
+            # ⭐ CALCUL DU TOTAL DE SAMPLES DEPUIS LA BDD
+            total_samples_in_batch = sum(combo.get('nb_samples', 0) for combo in combinations)
+            logger.info(f"⭐ Total samples définis dans le batch: {total_samples_in_batch}")
+
+            # Afficher les infos du batch avec samples
+            info_text = f"<b>Batch:</b> {batch_name}<br>"
+            if batch_family:
+                info_text += f"<b>Famille:</b> {batch_family}<br>"
+            info_text += f"<b>Numéro:</b> {batch_number}/{total_batches}<br>"
+            if master_typologie:
+                info_text += f"<b>Master:</b> {master_typologie.get('name', 'N/A')}<br>"
+            info_text += f"<b>Combinaisons:</b> {len(combinations)}<br>"
+            info_text += f"<b>⭐ Total samples:</b> {total_samples_in_batch}"
+            self.batch_info_label.setText(info_text)
+            self.batch_info_label.setVisible(True)
+
+            # ✅ Construire l'affichage avec MASTER + CONTEXTES + SAMPLES
             display_combos = []
+
             for i, combo in enumerate(combinations):
                 try:
-                    master = combo.get('master', {})
-                    context = combo.get('context', {})
+                    logger.info(f"\n=== Combinaison {i + 1} ===")
 
-                    # Extraction robuste des informations
-                    master_name = 'Unknown'
-                    if isinstance(master, dict):
-                        master_name = master.get('name', master.get('typologie', 'Unknown'))
-                    elif isinstance(master, str):
-                        master_name = master
+                    # Nouveau format : {contexts: [...], nb_samples: N}
+                    contexts = combo.get('contexts', [])
+                    nb_samples = combo.get('nb_samples', 1)  # ⭐ DEPUIS LA BDD
 
-                    context_name = 'Unknown'
-                    context_level = 'unknown'
-                    if isinstance(context, dict):
-                        context_name = context.get('typologie', context.get('name', 'Unknown'))
-                        context_level = context.get('level', 'unknown')
-                    elif isinstance(context, str):
-                        context_name = context
+                    logger.info(f"  Contextes: {len(contexts)}")
+                    logger.info(f"  ⭐ Samples (BDD): {nb_samples}")
 
+                    # Créer l'objet d'affichage avec MASTER + SAMPLES
                     display_combo = {
-                        'Master': master_name,
-                        'Context': context_name,
-                        'Level': context_level
+                        'master': master_name if master_typologie else 'N/A',
+                        'contexts': [],
+                        'nb_samples': nb_samples,  # ⭐ CONSERVÉ DEPUIS LA BDD
+                        'master_data': master_typologie
                     }
+
+                    # Extraire chaque contexte
+                    for ctx_idx, ctx in enumerate(contexts):
+                        level = ctx.get('level', 'unknown')
+                        display = ctx.get('display', 'N/A')
+                        ctx_data = ctx.get('data', {})
+
+                        logger.debug(f"    Contexte {ctx_idx + 1}: {level} - {display}")
+
+                        display_combo['contexts'].append({
+                            'level': level,
+                            'display': display,
+                            'data': ctx_data
+                        })
+
                     display_combos.append(display_combo)
+                    logger.info(f"  ✅ Combinaison {i + 1} traitée")
 
                 except Exception as combo_error:
-                    logger.error(f"Erreur lors du traitement de la combinaison {i}: {combo_error}")
+                    logger.error(f"Erreur combo {i}: {combo_error}")
+                    import traceback
+                    logger.error(traceback.format_exc())
                     display_combos.append({
-                        'Master': 'Error',
-                        'Context': 'Error',
-                        'Level': 'error'
+                        'master': 'Error',
+                        'contexts': [{'level': 'error', 'display': 'Erreur de chargement'}],
+                        'nb_samples': 1,
+                        'master_data': None
                     })
 
+            # Mettre à jour l'affichage
             self.combinations = combinations
             self.visualizer.set_combinations(display_combos)
+            self.combo_count_label.setText(f"({len(combinations)})")
 
-            logger.info(f"✅ Batch {batch_number} chargé avec {len(combinations)} combinaisons")
+            logger.info(f"\n✅ Batch {batch_number} chargé:")
+            logger.info(f"  • Master: {master_name if master_typologie else 'N/A'}")
+            logger.info(f"  • Combinaisons: {len(combinations)}")
+            logger.info(f"  • ⭐ Total samples (BDD): {total_samples_in_batch}")
 
         except Exception as e:
-            logger.error(f"❌ Erreur lors du chargement du batch {batch_number}: {str(e)}")
+            logger.error(f"❌ Erreur: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             QMessageBox.critical(
@@ -988,47 +1155,418 @@ class DatasetGenerationPanel(QWidget):
                 f"Impossible de charger le batch:\n\n{str(e)}"
             )
 
+    def _count_children_recursive(self, children):
+        """Compte récursivement tous les enfants"""
+        if not children:
+            return 0
+        count = len(children)
+        for child in children:
+            count += self._count_children_recursive(child.get('children', []))
+        return count
+
     def _on_generate(self):
-        """Lance la génération du dataset"""
+        """Lance la génération du dataset - VERSION AVEC WORKER"""
+        logger.info("\n" + "=" * 80)
+        logger.info("🎯 GÉNÉRATION DATASET - DÉMARRAGE")
+        logger.info("=" * 80)
+
         if not self.current_project or not self.combinations:
-            QMessageBox.warning(self, "Attention", "Veuillez d'abord sélectionner un projet et un batch")
+            QMessageBox.warning(
+                self, 
+                "Attention", 
+                "Veuillez d'abord sélectionner un projet et un batch"
+            )
             return
 
-        if not self.prompt_editor.toPlainText().strip():
-            QMessageBox.warning(self, "Attention", "Veuillez rédiger un prompt de génération")
+        # ✅ VÉRIFICATION TYPOLOGIE MASTER
+        if not self.current_master_typologie:
+            logger.error("❌ Pas de typologie master chargée!")
+            QMessageBox.warning(
+                self,
+                "Attention",
+                "La typologie master n'est pas chargée.\n"
+                "Impossible de générer le dataset."
+            )
             return
 
-        # Confirmation
+        # ✅ RÉCUPÉRATION DU NOMBRE DE BATCHES À TRAITER
+        try:
+            num_batches_to_process = int(self.batches_input.text())
+            if num_batches_to_process < 1:
+                raise ValueError("Le nombre de batches doit être >= 1")
+        except (ValueError, AttributeError) as e:
+            logger.error(f"❌ Nombre de batches invalide: {self.batches_input.text()}")
+            QMessageBox.warning(
+                self,
+                "Nombre de batches invalide",
+                "Veuillez entrer un nombre entier valide (minimum 1)"
+            )
+            return
+
+        # ⭐ CALCUL DU TOTAL DE SAMPLES
+        total_samples_per_batch = sum(combo.get('nb_samples', 0) for combo in self.combinations)
+        total_samples_all_batches = total_samples_per_batch * num_batches_to_process
+
+        # ✅ RÉCUPÉRATION DES PROMPTS
+        global_context = self.global_context_editor.toPlainText().strip()
+        local_prompt = self.prompt_editor.toPlainText().strip()
+
+        if not local_prompt:
+            QMessageBox.warning(
+                self,
+                "Prompt manquant",
+                "Veuillez définir au moins un prompt local de génération"
+            )
+            return
+
+        # Combiner les contextes
+        if global_context:
+            combined_prompt = f"{global_context}\n\n---\n\n{local_prompt}"
+            logger.info("✅ Contexte global et local combinés")
+        else:
+            combined_prompt = local_prompt
+            logger.info("ℹ️ Utilisation du contexte local uniquement")
+
+        # 📦 PRÉPARER LA CONFIGURATION POUR LE WORKER
+        batch_data = self.current_batch_data.get('data', {})
+
+        generation_config = {
+            "metadata": {
+                "project_name": self.current_project_name,
+                "batch_number": self.current_batch_number,
+                "batch_name": batch_data.get('batch_name', 'Sans nom'),
+                "batch_family": batch_data.get('batch_family', ''),
+                "num_batches_to_process": num_batches_to_process,
+                "total_samples_per_batch": total_samples_per_batch,
+                "total_samples_all_batches": total_samples_all_batches,
+                "output_format": self.format_combo.currentText()
+            },
+            "prompts": {
+                "global_context": global_context or None,
+                "local_prompt": local_prompt,
+                "combined_prompt": combined_prompt
+            },
+            "prompt": combined_prompt,  # Pour le worker
+            "master_typologie": {
+                "name": self.current_master_typologie.get('name', 'N/A'),
+                "full_data": self.current_master_typologie
+            },
+            "combinations": []
+        }
+
+        # 📋 CONSTRUIRE LES COMBINAISONS COMPLÈTES
+        for i, combo in enumerate(self.combinations):
+            contexts = combo.get('contexts', [])
+            nb_samples = combo.get('nb_samples', 1)
+
+            # ✅ DEBUG : Vérifier ce qu'on envoie
+            logger.debug(f"\n🔍 DEBUG Combination {i+1} preparation:")
+            logger.debug(f"   Master typologie keys: {self.current_master_typologie.keys()}")
+            logger.debug(f"   Master has taxonomy_clusters: {bool(self.current_master_typologie.get('taxonomy_clusters'))}")
+
+            if self.current_master_typologie.get('taxonomy_clusters'):
+                clusters = self.current_master_typologie['taxonomy_clusters']
+                logger.debug(f"   Master clusters count: {len(clusters)}")
+                if clusters:
+                    logger.debug(f"   First cluster keys: {clusters[0].keys()}")
+                    logger.debug(f"   First cluster name: {clusters[0].get('cluster_name', 'NO NAME')}")
+
+            combo_export = {
+                "combination_index": i + 1,
+                "nb_samples": nb_samples,
+                "master": {
+                    "name": self.current_master_typologie.get('name', 'N/A'),
+                    "full_data": self.current_master_typologie  # ✅ Doit contenir taxonomy_clusters
+                },
+                "contexts": []
+            }
+
+            for ctx_idx, ctx in enumerate(contexts):
+                ctx_data = ctx.get('data', {})
+
+                # ✅ DEBUG : Vérifier chaque contexte
+                logger.debug(f"   Context {ctx_idx+1} data keys: {ctx_data.keys() if ctx_data else 'EMPTY'}")
+                logger.debug(f"   Context {ctx_idx+1} has taxonomy_clusters: {bool(ctx_data.get('taxonomy_clusters'))}")
+
+                context_export = {
+                    "level": ctx.get('level', 'unknown'),
+                    "display": ctx.get('display', 'N/A'),
+                    "full_data": ctx_data  # ✅ Doit contenir taxonomy_clusters
+                }
+                combo_export["contexts"].append(context_export)
+
+            generation_config["combinations"].append(combo_export)
+
+        # ✅ CONFIRMATION
+        msg = f"<b>🚀 Prêt à générer le dataset</b><br><br>"
+        msg += f"<b>Configuration :</b><br>"
+        msg += f"• Projet : {self.current_project_name}<br>"
+        msg += f"• Batch : {batch_data.get('batch_name', 'Sans nom')}<br>"
+        msg += f"• Master : {self.current_master_typologie.get('name', 'N/A')}<br>"
+        msg += f"• Combinaisons : {len(self.combinations)}<br>"
+        msg += f"• Batches à traiter : {num_batches_to_process}<br>"
+        msg += f"• Samples par batch : {total_samples_per_batch}<br>"
+        msg += f"• <b>Total samples : {total_samples_all_batches}</b><br>"
+        msg += f"• Format : {self.format_combo.currentText()}<br><br>"
+        msg += f"<b>Lancer la génération ?</b>"
+
         reply = QMessageBox.question(
             self,
-            "Confirmation",
-            f"Générer {len(self.combinations)} exemples avec {self.samples_spin.value()} samples chacun ?",
-            QMessageBox.Yes | QMessageBox.No
+            "🚀 Confirmer la génération",
+            msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
         )
 
         if reply != QMessageBox.Yes:
+            logger.info("❌ Génération annulée par l'utilisateur")
             return
 
-        # Démarrer la génération
-        self.generate_btn.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setMaximum(len(self.combinations))
-        self.progress_bar.setValue(0)
+        # 🎬 LANCER LE WORKER
+        try:
+            from ui.widgets.workers.gemini_dataset_worker import GeminiDatasetWorker
 
-        self.generation_started.emit(self.current_project_name)
+            self.worker = GeminiDatasetWorker(generation_config)
 
-        # TODO: Implémenter la génération asynchrone avec l'IA
-        QMessageBox.information(self, "Génération", "La génération du dataset va démarrer...")
+            # Connecter les signaux
+            self.worker.progress_updated.connect(self._on_progress_updated)
+            self.worker.combination_completed.connect(self._on_combination_completed)
+            self.worker.batch_completed.connect(self._on_batch_completed)
+            self.worker.generation_completed.connect(self._on_generation_completed)
+            self.worker.generation_failed.connect(self._on_generation_failed)
+            self.worker.log_message.connect(self._on_log_message)
 
+            # Démarrer
+            self.worker.start()
+
+            # UI : mode génération
+            self.generate_btn.setEnabled(False)
+            self.generate_btn.setText("⏳ Génération en cours...")
+            self.export_btn.setEnabled(False)
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setMaximum(total_samples_all_batches)
+
+            logger.info("✅ Worker lancé avec succès")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors du lancement: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Impossible de lancer la génération:\n\n{str(e)}"
+            )
+
+    def _load_batch_families(self):
+        """Charge les familles de batch du projet actuel"""
+        self.batch_family_combo.clear()
+        self.batch_family_combo.addItem("-- Sélectionner une famille --", None)
+
+        if not self.current_project_name:
+            logger.warning("Aucun projet actuel")
+            return
+
+        try:
+            logger.info(f"🔍 Recherche des familles de batch pour: {self.current_project_name}")
+            batches = self.database.get_all_batches(self.current_project_name)
+
+            if not batches or len(batches) == 0:
+                logger.info(f"⚠️ Aucun batch trouvé")
+                self.batch_family_combo.addItem("-- Aucune famille disponible --", None)
+                return
+
+            # Extraire les familles uniques
+            families = set()
+            for batch in batches:
+                batch_data = batch.get('data', {})
+                family = batch_data.get('batch_family', '')
+                if family:
+                    families.add(family)
+
+            if not families:
+                logger.info(f"⚠️ Aucune famille définie")
+                self.batch_family_combo.addItem("-- Aucune famille définie --", None)
+                return
+
+            # Trier et ajouter les familles
+            families_sorted = sorted(list(families))
+            logger.info(f"📦 {len(families_sorted)} famille(s) trouvée(s)")
+
+            for family in families_sorted:
+                # Compter les batches dans cette famille
+                count = sum(1 for b in batches if b.get('data', {}).get('batch_family', '') == family)
+                display_name = f"{family} ({count} batch{'es' if count > 1 else ''})"
+                self.batch_family_combo.addItem(display_name, family)
+                logger.debug(f"  ✓ Famille ajoutée: {display_name}")
+
+            logger.info(f"✅ {len(families_sorted)} famille(s) chargée(s)")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self.batch_family_combo.addItem("-- Erreur de chargement --", None)
+
+    def _on_batch_family_changed(self, family_name):
+        """Gère le changement de famille de batch"""
+        family = self.batch_family_combo.currentData()
+        logger.info(f"🔄 Changement de famille: {family_name} (data: {family})")
+
+        # Reset des combinaisons
+        self.current_batch_number = None
+        self.current_batch_data = None
+        self.combinations = []
+        self.visualizer.set_combinations([])
+        self.combo_count_label.setText("(0)")
+        self.batch_info_label.setVisible(False)
+
+        if family is None:
+            self.batch_combo.clear()
+            self.batch_combo.addItem("-- Sélectionner une famille --", None)
+            logger.info("Reset des batches")
+            return
+
+        # Charger les batches de cette famille
+        self._load_batches_by_family(family)
+
+    def _load_batches_by_family(self, family):
+        """Charge les batches d'une famille spécifique"""
+        self.batch_combo.clear()
+        self.batch_combo.addItem("-- Sélectionner un batch --", None)
+
+        if not self.current_project_name or not family:
+            logger.warning("Projet ou famille manquant")
+            return
+
+        try:
+            logger.info(f"🔍 Recherche des batches pour famille: {family}")
+            all_batches = self.database.get_all_batches(self.current_project_name)
+
+            if not all_batches:
+                logger.info(f"⚠️ Aucun batch trouvé")
+                self.batch_combo.addItem("-- Aucun batch disponible --", None)
+                return
+
+            # Filtrer par famille
+            batches = [b for b in all_batches if b.get('data', {}).get('batch_family', '') == family]
+
+            if not batches:
+                logger.info(f"⚠️ Aucun batch dans cette famille")
+                self.batch_combo.addItem("-- Aucun batch dans cette famille --", None)
+                return
+
+            logger.info(f"📦 {len(batches)} batch(es) trouvé(s) dans {family}")
+
+            # Trier par numéro
+            try:
+                batches_sorted = sorted(batches, key=lambda x: x.get('batch_number', 0))
+            except:
+                batches_sorted = batches
+
+            # Ajouter chaque batch
+            for batch in batches_sorted:
+                batch_num = batch.get('batch_number', 0)
+                total_batches = batch.get('total_batches', 0)
+                batch_data_content = batch.get('data', {})
+
+                batch_name = batch_data_content.get('batch_name', f'Batch {batch_num}')
+                combinations = batch_data_content.get('combinations', [])
+                combinations_count = len(combinations)
+
+                if total_batches > 0:
+                    display_name = f"Batch {batch_num}/{total_batches} - {batch_name} ({combinations_count} combos)"
+                else:
+                    display_name = f"Batch {batch_num} - {batch_name} ({combinations_count} combos)"
+
+                self.batch_combo.addItem(display_name, batch_num)
+                logger.debug(f"  ✓ Batch ajouté: {display_name}")
+
+            logger.info(f"✅ {len(batches)} batch(es) chargé(s)")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self.batch_combo.addItem("-- Erreur de chargement --", None)
+
+    def _on_progress_updated(self, current: int, total: int, message: str):
+        """Met à jour la barre de progression"""
+        self.progress_bar.setValue(current)
+        self.progress_bar.setFormat(f"{message} - {current}/{total} samples ({current*100//total if total > 0 else 0}%)")
+        logger.debug(f"📊 Progression: {current}/{total} - {message}")
+
+    def _on_combination_completed(self, combo_idx: int, info: dict):
+        """Marque une combinaison comme complétée"""
+        self.visualizer.mark_completed(combo_idx)
+        samples_generated = info.get('samples_generated', 0)
+        logger.info(f"✅ Combinaison {combo_idx + 1} complétée: {samples_generated} samples")
+
+    def _on_batch_completed(self, batch_number: int, results: list):
+        """Appelé quand un batch est terminé"""
+        logger.info(f"✅ Batch {batch_number} terminé: {len(results)} samples")
+
+    def _on_generation_completed(self, results: list, metadata: dict):
+        """Appelé quand toute la génération est terminée"""
+        logger.info(f"\n{'=' * 80}")
+        logger.info(f"🎉 GÉNÉRATION TERMINÉE")
+        logger.info(f"   • Total samples: {len(results)}")
+        logger.info(f"{'=' * 80}")
+
+        # Stocker les résultats
+        self.generation_results = results
+        self.generation_metadata = metadata
+
+        # UI : réactiver les boutons
         self.generate_btn.setEnabled(True)
+        self.generate_btn.setText("Générer le Dataset")
         self.export_btn.setEnabled(True)
+        self.progress_bar.setValue(self.progress_bar.maximum())
+
+        # Message de succès
+        QMessageBox.information(
+            self,
+            "✅ Génération terminée",
+            f"<b>Dataset généré avec succès !</b><br><br>"
+            f"• Total samples: {len(results)}<br>"
+            f"• Format: {metadata.get('output_format', 'JSON')}<br><br>"
+            f"Utilisez le bouton 'Exporter' pour sauvegarder."
+        )
+
+    def _on_generation_failed(self, error: str):
+        """Appelé en cas d'erreur"""
+        logger.error(f"❌ Génération échouée: {error}")
+
+        # UI : réactiver les boutons
+        self.generate_btn.setEnabled(True)
+        self.generate_btn.setText("Générer le Dataset")
         self.progress_bar.setVisible(False)
 
+        QMessageBox.critical(
+            self,
+            "❌ Erreur de génération",
+            f"La génération a échoué:\n\n{error}"
+        )
+
+    def _on_log_message(self, level: str, message: str):
+        """Reçoit les logs du worker"""
+        # Optionnel : afficher dans une console de logs dans l'UI
+        pass
+
     def _on_export(self):
-        """Exporte le dataset généré"""
-        if not self.current_project:
+        """Exporte le dataset généré avec données nettoyées"""
+        if not self.generation_results:
+            QMessageBox.warning(
+                self,
+                "Aucune donnée",
+                "Aucun dataset à exporter.\nVeuillez d'abord générer un dataset."
+            )
             return
 
+        output_format = self.format_combo.currentText()
+
+        # Extensions
         format_ext = {
             "JSON": ".json",
             "CSV": ".csv",
@@ -1036,17 +1574,118 @@ class DatasetGenerationPanel(QWidget):
             "Parquet": ".parquet"
         }
 
-        ext = format_ext.get(self.format_combo.currentText(), ".json")
-        filename = f"dataset_{self.current_project_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+        ext = format_ext.get(output_format, ".json")
+        default_filename = f"dataset_{self.current_project_name}_batch{self.current_batch_number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
 
         filepath, _ = QFileDialog.getSaveFileName(
             self,
-            "Enregistrer le dataset",
-            filename,
-            f"Fichiers {self.format_combo.currentText()} (*{ext})"
+            "💾 Exporter le dataset",
+            default_filename,
+            f"Fichiers {output_format} (*{ext})"
         )
 
-        if filepath:
-            # TODO: Implémenter l'export réel
-            QMessageBox.information(self, "Export", f"Dataset exporté vers:\n{filepath}")
-            self.generation_completed.emit(self.current_project_name, filepath)
+        if not filepath:
+            logger.info("❌ Export annulé")
+            return
+
+        try:
+            # Export selon le format
+            if output_format == "JSON":
+                self._export_json(filepath)
+            elif output_format == "JSONL":
+                self._export_jsonl(filepath)
+            elif output_format == "CSV":
+                self._export_csv(filepath)
+            elif output_format == "Parquet":
+                self._export_parquet(filepath)
+
+            logger.info(f"✅ Dataset exporté: {filepath}")
+
+            QMessageBox.information(
+                self,
+                "✅ Export réussi",
+                f"Dataset exporté avec succès vers:\n\n{filepath}\n\n"
+                f"Format: {output_format}\n"
+                f"Samples: {len(self.generation_results)}"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Erreur export: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            QMessageBox.critical(
+                self,
+                "Erreur d'export",
+                f"Impossible d'exporter le dataset:\n\n{str(e)}"
+            )
+
+    def _export_json(self, filepath: str):
+        """Exporte en JSON avec samples nettoyés"""
+        # ✅ Nettoyer les samples
+        cleaned_samples = [self._clean_sample_for_export(s) for s in self.generation_results]
+
+        output = {
+            "metadata": self.generation_metadata,
+            "samples": cleaned_samples
+        }
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(output, f, ensure_ascii=False, indent=2)
+
+    def _export_jsonl(self, filepath: str):
+        """Exporte en JSONL (une ligne par sample) avec données nettoyées"""
+        with open(filepath, 'w', encoding='utf-8') as f:
+            for sample in self.generation_results:
+                # ✅ Nettoyer chaque sample
+                cleaned = self._clean_sample_for_export(sample)
+                f.write(json.dumps(cleaned, ensure_ascii=False) + '\n')
+
+    def _export_csv(self, filepath: str):
+        """Exporte en CSV avec données nettoyées"""
+        import csv
+
+        if not self.generation_results:
+            return
+
+        # ✅ Nettoyer les samples
+        cleaned_samples = [self._clean_sample_for_export(s) for s in self.generation_results]
+
+        # Colonnes fixes dans l'ordre
+        fieldnames = ['sample_id', 'typologie_de_contexte', 'cluster', 'label', 'input', 'output']
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for sample in cleaned_samples:
+                writer.writerow(sample)
+
+    def _clean_sample_for_export(self, sample: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Nettoie un sample en ne gardant que les champs essentiels
+        """
+        return {
+            'sample_id': sample.get('sample_id'),
+            'typologie_de_contexte': sample.get('typologie_de_contexte', ''),
+            'cluster': sample.get('cluster', ''),
+            'label': sample.get('label', ''),
+            'input': sample.get('input', ''),
+            'output': sample.get('output', '')
+        }
+
+    def _export_parquet(self, filepath: str):
+        """Exporte en Parquet avec données nettoyées"""
+        try:
+            import pandas as pd
+
+            # ✅ Nettoyer les samples
+            cleaned_samples = [self._clean_sample_for_export(s) for s in self.generation_results]
+
+            df = pd.DataFrame(cleaned_samples)
+            df.to_parquet(filepath, index=False)
+
+        except ImportError:
+            raise Exception(
+                "Le module 'pandas' est requis pour exporter en Parquet.\n"
+                "Installez-le avec: pip install pandas pyarrow"
+            )

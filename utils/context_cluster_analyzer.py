@@ -4,6 +4,7 @@
 """
 Enhanced Dataset Analyzer - CORRECTION COMPLÈTE
 Analyse basée sur le NOMBRE DE SAMPLES avec support complet des typologies Master et Context
+VERSION CORRIGÉE: Ne traite pas master si absent
 """
 
 import logging
@@ -108,7 +109,7 @@ class ContextClusterAnalyzer:
     def analyze_context_typologies_with_clusters(combinations: List[Dict]) -> Dict[str, Any]:
         """
         Analyse complète basée sur le NOMBRE DE SAMPLES
-        VERSION CORRIGÉE avec support complet Master + Context
+        VERSION CORRIGÉE: Ne traite 'master' que s'il existe dans la combinaison
         
         Args:
             combinations: Liste des combinaisons du batch
@@ -165,55 +166,59 @@ class ContextClusterAnalyzer:
         for combo in combinations:
             sample_count = combo.get('sample_count', 1)
             
-            # === TRAITEMENT MASTER ===
-            master_raw = combo.get('master', {})
-            master_info = ContextClusterAnalyzer.extract_typologie_info(master_raw, 'master')
+            # === TRAITEMENT MASTER (SEULEMENT SI PRÉSENT) ===
+            # NOUVEAU: Vérifier si 'master' existe ET n'est pas vide
+            if 'master' in combo and combo['master']:
+                master_raw = combo['master']
+                master_info = ContextClusterAnalyzer.extract_typologie_info(master_raw, 'master')
+                
+                master_data = analysis['master_typologies'][master_info['name']]
+                master_data['total_samples'] += sample_count
+                
+                master_cluster_data = master_data['clusters'][master_info['taxonomy']]
+                master_cluster_data['sample_count'] += sample_count
+                master_cluster_data['labels'][master_info['full_label']] += sample_count
+                master_cluster_data['levels'][master_info['level']] += sample_count
+                
+                # Détails par niveau
+                level_detail = master_cluster_data['level_details'][master_info['level']]
+                if master_info['level'] == 'root' and master_info['root_label']:
+                    level_detail['root_labels'][master_info['root_label']] += sample_count
+                elif master_info['level'] == 'parent' and master_info['parent_label']:
+                    level_detail['parent_labels'][master_info['parent_label']] += sample_count
+                elif master_info['level'] == 'child' and master_info['child_path']:
+                    level_detail['child_labels'][master_info['child_path'][-1]] += sample_count
+                
+                analysis['global_clusters'][master_info['taxonomy']] += sample_count
+                analysis['global_labels'][master_info['full_label']] += sample_count
+                analysis['level_distribution']['master'][master_info['level']] += sample_count
             
-            master_data = analysis['master_typologies'][master_info['name']]
-            master_data['total_samples'] += sample_count
-            
-            master_cluster_data = master_data['clusters'][master_info['taxonomy']]
-            master_cluster_data['sample_count'] += sample_count
-            master_cluster_data['labels'][master_info['full_label']] += sample_count
-            master_cluster_data['levels'][master_info['level']] += sample_count
-            
-            # Détails par niveau
-            level_detail = master_cluster_data['level_details'][master_info['level']]
-            if master_info['level'] == 'root' and master_info['root_label']:
-                level_detail['root_labels'][master_info['root_label']] += sample_count
-            elif master_info['level'] == 'parent' and master_info['parent_label']:
-                level_detail['parent_labels'][master_info['parent_label']] += sample_count
-            elif master_info['level'] == 'child' and master_info['child_path']:
-                level_detail['child_labels'][master_info['child_path'][-1]] += sample_count
-            
-            analysis['global_clusters'][master_info['taxonomy']] += sample_count
-            analysis['global_labels'][master_info['full_label']] += sample_count
-            analysis['level_distribution']['master'][master_info['level']] += sample_count
-            
-            # === TRAITEMENT CONTEXT ===
-            context_raw = combo.get('context', {})
-            context_info = ContextClusterAnalyzer.extract_typologie_info(context_raw, 'context')
-            
-            typo_data = analysis['context_typologies'][context_info['name']]
-            typo_data['total_samples'] += sample_count
-            
-            cluster_data = typo_data['clusters'][context_info['taxonomy']]
-            cluster_data['sample_count'] += sample_count
-            cluster_data['labels'][context_info['full_label']] += sample_count
-            cluster_data['levels'][context_info['level']] += sample_count
-            
-            # Détails par niveau
-            level_detail = cluster_data['level_details'][context_info['level']]
-            if context_info['level'] == 'root' and context_info['root_label']:
-                level_detail['root_labels'][context_info['root_label']] += sample_count
-            elif context_info['level'] == 'parent' and context_info['parent_label']:
-                level_detail['parent_labels'][context_info['parent_label']] += sample_count
-            elif context_info['level'] == 'child' and context_info['child_path']:
-                level_detail['child_labels'][context_info['child_path'][-1]] += sample_count
-            
-            analysis['global_clusters'][context_info['taxonomy']] += sample_count
-            analysis['global_labels'][context_info['full_label']] += sample_count
-            analysis['level_distribution']['context'][context_info['level']] += sample_count
+            # === TRAITEMENT CONTEXT (TOUJOURS) ===
+            # NOUVEAU: Vérifier si 'context' existe
+            if 'context' in combo and combo['context']:
+                context_raw = combo['context']
+                context_info = ContextClusterAnalyzer.extract_typologie_info(context_raw, 'context')
+                
+                typo_data = analysis['context_typologies'][context_info['name']]
+                typo_data['total_samples'] += sample_count
+                
+                cluster_data = typo_data['clusters'][context_info['taxonomy']]
+                cluster_data['sample_count'] += sample_count
+                cluster_data['labels'][context_info['full_label']] += sample_count
+                cluster_data['levels'][context_info['level']] += sample_count
+                
+                # Détails par niveau
+                level_detail = cluster_data['level_details'][context_info['level']]
+                if context_info['level'] == 'root' and context_info['root_label']:
+                    level_detail['root_labels'][context_info['root_label']] += sample_count
+                elif context_info['level'] == 'parent' and context_info['parent_label']:
+                    level_detail['parent_labels'][context_info['parent_label']] += sample_count
+                elif context_info['level'] == 'child' and context_info['child_path']:
+                    level_detail['child_labels'][context_info['child_path'][-1]] += sample_count
+                
+                analysis['global_clusters'][context_info['taxonomy']] += sample_count
+                analysis['global_labels'][context_info['full_label']] += sample_count
+                analysis['level_distribution']['context'][context_info['level']] += sample_count
 
         # === CALCUL DES POURCENTAGES ===
         total_samples = analysis['total_samples']

@@ -145,64 +145,261 @@ class DatasetPreviewTab(QtWidgets.QWidget):
                 # Mettre à jour l'analyse Context & Clusters pour ce batch
                 self._update_context_cluster_analysis(batch_data)
 
+    def _get_full_project_structure_from_db(self):
+        """
+        Récupère la structure COMPLÈTE du projet depuis la base de données
+        pour avoir TOUS les contextes définis, même ceux non utilisés dans les batches
+        """
+        if not self.project_manager or not self.project_manager.current_project_name:
+            logger.warning("⚠️  No project loaded")
+            return None
+
+        try:
+            project_name = self.project_manager.current_project_name
+            
+            logger.info("=" * 80)
+            logger.info("🗄️  RÉCUPÉRATION STRUCTURE COMPLÈTE DEPUIS DB")
+            logger.info("=" * 80)
+            logger.info(f"📂 Projet: {project_name}")
+            
+            # Récupérer la structure complète depuis la DB
+            project_data = self.project_manager.database.get_dataset_projet(project_name)
+            
+            if not project_data:
+                logger.warning(f"❌ No project data found for: {project_name}")
+                return None
+            
+            logger.info(f"✅ Données du projet récupérées")
+            
+            # Extraire tous les contextes définis dans la structure
+            all_contexts = {}
+            
+            typologies = project_data.get('typologies', [])
+            logger.info(f"📊 {len(typologies)} typologie(s) trouvée(s)")
+            
+            for typ_idx, typologie in enumerate(typologies):
+                typ_name = typologie.get('name', '')
+                logger.info(f"\n  [{typ_idx+1}] Typologie: '{typ_name}'")
+                
+                clusters = typologie.get('taxonomy_clusters', [])
+                logger.info(f"      └─ {len(clusters)} cluster(s)")
+                
+                for cluster_idx, cluster in enumerate(clusters):
+                    cluster_name = cluster.get('name', '')
+                    context_key = f"{typ_name} > {cluster_name}"
+                    
+                    # Compter tous les root_labels définis
+                    root_labels = cluster.get('root_labels', [])
+                    
+                    logger.info(f"         [{cluster_idx+1}] Cluster: '{cluster_name}'")
+                    logger.info(f"             └─ {len(root_labels)} root_label(s) défini(s)")
+                    
+                    if context_key not in all_contexts:
+                        all_contexts[context_key] = {
+                            'typologie': typ_name,
+                            'cluster': cluster_name,
+                            'total_defined': len(root_labels),
+                            'count_in_batches': 0  # Sera mis à jour après
+                        }
+            
+            logger.info(f"\n{'=' * 80}")
+            logger.info(f"✅ {len(all_contexts)} contextes trouvés dans la structure DB")
+            logger.info(f"{'=' * 80}\n")
+            
+            return all_contexts
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting project structure from DB: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
     def _update_global_analysis(self):
         """
         Met à jour l'analyse globale de TOUS les batches du projet
+        EN UTILISANT la structure complète de la DB comme référence
         """
         if not self.project_manager or not self.project_manager.current_project_name:
-            logger.warning("No project loaded for global analysis")
+            logger.warning("⚠️  No project loaded for global analysis")
             return
 
         try:
             project_name = self.project_manager.current_project_name
             
-            # Récupérer tous les batches
-            all_batches = self.project_manager.get_all_batches()
+            logger.info("\n" + "=" * 80)
+            logger.info("🌍 MISE À JOUR ANALYSE GLOBALE")
+            logger.info("=" * 80)
+            logger.info(f"📂 Projet: {project_name}")
             
-            if not all_batches:
-                logger.warning(f"No batches found for project: {project_name}")
+            # 1. Récupérer la structure COMPLÈTE depuis la DB
+            logger.info("\n🔍 ÉTAPE 1: Récupération structure DB...")
+            full_structure = self._get_full_project_structure_from_db()
+            
+            if not full_structure:
+                logger.warning("❌ Unable to get full project structure")
                 if hasattr(self, 'context_cluster_tab'):
                     self.context_cluster_tab.update_analysis(None)
                 return
+            
+            # 2. Récupérer tous les batches
+            logger.info("\n🔍 ÉTAPE 2: Récupération des batches...")
+            all_batches = self.project_manager.get_all_batches()
+            
+            logger.info(f"📦 {len(all_batches)} batch(es) trouvé(s)")
+            
+            if not all_batches:
+                logger.warning(f"⚠️  No batches found for project: {project_name}")
+                logger.info("   → Affichage de la structure sans occurrences")
+                # Afficher quand même la structure complète avec 0 occurrences
+                analysis = self._create_analysis_from_structure(full_structure)
+                if hasattr(self, 'context_cluster_tab'):
+                    logger.info("📊 Envoi de l'analyse au tab...")
+                    self.context_cluster_tab.update_analysis(analysis)
+                return
 
-            # Agréger toutes les combinaisons de tous les batches
+            # 3. Agréger toutes les combinaisons de tous les batches
+            logger.info("\n🔍 ÉTAPE 3: Agrégation des combinaisons...")
             all_combinations = []
             total_batches = len(all_batches)
             
-            for batch in all_batches:
+            for batch_idx, batch in enumerate(all_batches):
                 batch_data = batch.get('data', {})
+                batch_name = batch_data.get('batch_name', f"Batch #{batch.get('batch_number')}")
                 combinations = batch_data.get('combinations', [])
+                
+                logger.info(f"  [{batch_idx+1}/{total_batches}] {batch_name}: {len(combinations)} combinaisons")
                 all_combinations.extend(combinations)
             
-            if not all_combinations:
-                logger.warning("No combinations found in any batch")
-                if hasattr(self, 'context_cluster_tab'):
-                    self.context_cluster_tab.update_analysis(None)
-                return
+            logger.info(f"\n✅ Total: {len(all_combinations)} combinaisons agrégées")
+            
+            # 4. Compter les occurrences dans les batches
+            logger.info("\n🔍 ÉTAPE 4: Comptage des occurrences...")
+            for combo_idx, combination in enumerate(all_combinations):
+                typologie = combination.get('typologie', combination.get('context', {}).get('typologie', ''))
+                taxonomy = combination.get('taxonomy_cluster', combination.get('context', {}).get('taxonomy', ''))
+                context_key = f"{typologie} > {taxonomy}"
+                
+                if context_key in full_structure:
+                    full_structure[context_key]['count_in_batches'] += 1
+                else:
+                    logger.warning(f"   ⚠️  Contexte non trouvé dans structure: {context_key}")
+            
+            # Log résumé des occurrences
+            logger.info("\n📊 RÉSUMÉ DES OCCURRENCES:")
+            for context_key, context_data in full_structure.items():
+                count = context_data['count_in_batches']
+                total_def = context_data['total_defined']
+                logger.info(f"  • {context_key}")
+                logger.info(f"      → {count} occurrences, {total_def} labels définis")
+            
+            # 5. Créer l'analyse complète
+            logger.info("\n🔍 ÉTAPE 5: Création de l'analyse...")
+            analysis = self._create_analysis_from_structure(full_structure)
 
-            # Analyse complète sur TOUTES les combinaisons
-            analysis = ContextClusterAnalyzer.analyze_context_typologies_with_clusters(
-                all_combinations
-            )
-
-            # Mise à jour de l'onglet
+            # 6. Mise à jour de l'onglet
             if hasattr(self, 'context_cluster_tab'):
+                logger.info("\n📊 ÉTAPE 6: Envoi de l'analyse au tab...")
                 self.context_cluster_tab.update_analysis(analysis)
+                logger.info("✅ Analyse envoyée au tab")
 
-            logger.info(f"Global analysis updated for project '{project_name}': "
-                       f"{len(all_combinations)} total combinations from {total_batches} batches")
+            logger.info("\n" + "=" * 80)
+            logger.info(f"✅ ANALYSE GLOBALE TERMINÉE")
+            logger.info(f"   • Projet: {project_name}")
+            logger.info(f"   • {len(all_combinations)} combinaisons")
+            logger.info(f"   • {total_batches} batches")
+            logger.info(f"   • {len(full_structure)} contextes")
+            logger.info("=" * 80 + "\n")
 
         except Exception as e:
-            logger.error(f"Error updating global analysis: {e}")
+            logger.error(f"\n❌ Error updating global analysis: {e}")
             import traceback
             logger.error(traceback.format_exc())
+
+    def _create_analysis_from_structure(self, full_structure):
+        """
+        Crée une analyse complète basée sur la structure complète du projet
+        Compatible avec ContextClusterAnalyzer
+        VERSION CORRIGÉE: Ne crée PAS de master vide
+        """
+        try:
+            logger.info("=" * 80)
+            logger.info("📊 CRÉATION DE L'ANALYSE DEPUIS LA STRUCTURE DB")
+            logger.info("=" * 80)
+            
+            # Créer des combinaisons virtuelles pour chaque contexte
+            virtual_combinations = []
+            
+            for context_key, context_data in full_structure.items():
+                typologie = context_data['typologie']
+                cluster = context_data['cluster']
+                count = context_data['count_in_batches']
+                total_defined = context_data['total_defined']
+                
+                logger.info(f"  📍 Contexte: {context_key}")
+                logger.info(f"     - Typologie: {typologie}")
+                logger.info(f"     - Cluster: {cluster}")
+                logger.info(f"     - Occurrences dans batches: {count}")
+                logger.info(f"     - Labels définis dans DB: {total_defined}")
+                
+                # Créer une combinaison virtuelle pour ce contexte
+                # IMPORTANT: NE PAS inclure 'master' du tout (pas même vide)
+                if count > 0:
+                    virtual_combinations.append({
+                        'context': {
+                            'typologie': typologie,
+                            'taxonomy': cluster,
+                            'label': f"{typologie} > {cluster}",
+                            'level': 'typologie'
+                        },
+                        'sample_count': count
+                        # PAS DE 'master' ici !
+                    })
+                else:
+                    # Ajouter quand même avec 1 sample pour le visualiser
+                    logger.info(f"     ⚠️  Aucune occurrence, ajout avec 1 sample virtuel")
+                    virtual_combinations.append({
+                        'context': {
+                            'typologie': typologie,
+                            'taxonomy': cluster,
+                            'label': f"{typologie} > {cluster}",
+                            'level': 'typologie'
+                        },
+                        'sample_count': 1
+                        # PAS DE 'master' ici non plus !
+                    })
+            
+            logger.info(f"\n✅ {len(virtual_combinations)} combinaisons virtuelles créées")
+            logger.info("=" * 80 + "\n")
+            
+            # Utiliser ContextClusterAnalyzer pour créer l'analyse
+            from utils.context_cluster_analyzer import ContextClusterAnalyzer
+            analysis = ContextClusterAnalyzer.analyze_context_typologies_with_clusters(
+                virtual_combinations
+            )
+            
+            logger.info("✅ Analyse créée par ContextClusterAnalyzer")
+            logger.info(f"   - Total samples: {analysis.get('total_samples', 0)}")
+            logger.info(f"   - Context typologies: {len(analysis.get('context_typologies', {}))}")
+            logger.info(f"   - Master typologies: {len(analysis.get('master_typologies', {}))}")
+            
+            # ⚠️ VÉRIFICATION: S'assurer qu'il n'y a pas de master généré
+            if analysis.get('master_typologies'):
+                logger.warning("⚠️  Des master typologies ont été générées alors qu'elles ne devraient pas exister!")
+                for master_name in analysis['master_typologies'].keys():
+                    logger.warning(f"    → {master_name}")
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating analysis from structure: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
 
     def _update_context_cluster_analysis(self, batch_data):
         """
         Met à jour l'analyse des typologies de contexte et clusters pour UN batch
-        
-        Args:
-            batch_data: Données du batch sélectionné
+        EN UTILISANT la structure complète de la DB comme référence
         """
         if not batch_data:
             if hasattr(self, 'context_cluster_tab'):
@@ -210,25 +407,45 @@ class DatasetPreviewTab(QtWidgets.QWidget):
             return
 
         try:
+            # 1. Récupérer la structure complète depuis la DB
+            full_structure = self._get_full_project_structure_from_db()
+            
+            if not full_structure:
+                logger.warning("Unable to get full project structure")
+                if hasattr(self, 'context_cluster_tab'):
+                    self.context_cluster_tab.update_analysis(None)
+                return
+            
+            # 2. Récupérer les combinaisons du batch
             combinations = batch_data.get('combinations', [])
             
             if not combinations:
                 logger.warning("No combinations found for context/cluster analysis")
+                # Afficher quand même la structure complète avec 0 occurrences
+                analysis = self._create_analysis_from_structure(full_structure)
                 if hasattr(self, 'context_cluster_tab'):
-                    self.context_cluster_tab.update_analysis(None)
+                    self.context_cluster_tab.update_analysis(analysis)
                 return
 
-            # Analyse complète via ContextClusterAnalyzer
-            analysis = ContextClusterAnalyzer.analyze_context_typologies_with_clusters(
-                combinations
-            )
+            # 3. Compter les occurrences dans ce batch
+            for combination in combinations:
+                typologie = combination.get('typologie', '')
+                taxonomy = combination.get('taxonomy_cluster', '')
+                context_key = f"{typologie} > {taxonomy}"
+                
+                if context_key in full_structure:
+                    full_structure[context_key]['count_in_batches'] += 1
 
-            # Mise à jour de l'onglet
+            # 4. Créer l'analyse complète
+            analysis = self._create_analysis_from_structure(full_structure)
+
+            # 5. Mise à jour de l'onglet
             if hasattr(self, 'context_cluster_tab'):
                 self.context_cluster_tab.update_analysis(analysis)
 
-            logger.info(f"Context/Cluster analysis updated for batch: "
-                       f"{batch_data.get('batch_name', 'N/A')}")
+            logger.info(f"✅ Context/Cluster analysis updated for batch: "
+                       f"{batch_data.get('batch_name', 'N/A')}, "
+                       f"{len(combinations)} combinations, {len(full_structure)} contexts in structure")
 
         except Exception as e:
             logger.error(f"Error updating context/cluster analysis: {e}")

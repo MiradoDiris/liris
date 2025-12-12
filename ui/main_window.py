@@ -271,18 +271,19 @@ class MainWindow(QMainWindow):
         self.ide_dialog_instance = None
         self.dashboard_panel = None
 
-        # ✅ Widgets Data Science
-        #self.dataset_strategy = DatasetStrategyWidget()
-        #self.dataset_generation = DatasetGeneratorWidget()
-
-        self.dataset_generation = None
+        # ✅ CORRECTION: Widgets Data Science avec noms distincts
         self.dataset_strategy = DatasetStrategyWidget()
-        self.dataset_generation = DatasetGenerationPanel()
+
+        # Widget pour l'onglet "Génération" (mode Data)
+        self.dataset_generation_tab = DatasetGenerationPanel()
+
+        # Widget pour le dialogue de configuration (menu Config -> Configuration projets data science)
+        self.dataset_config_widget = None  # Sera créé à la demande dans _on_show_dataset_config
 
         # ✅ Instances de dialogues
         self.project_config_dialog_instance = None
         self.dashboard_dialog_instance = None
-        self.dataset_config_dialog_instance = None  # ← AJOUT IMPORTANT
+        self.dataset_config_dialog_instance = None
 
         # Barre de progression
         self.progress_bar = QtWidgets.QProgressBar()
@@ -447,18 +448,19 @@ class MainWindow(QMainWindow):
         modes = {0: "dev", 1: "data"}
         self.current_mode = modes.get(state, "dev")
         self.tab_widget.clear()
-
+    
         if state == 0:
             self.tab_widget.addTab(self.coding_panel, tr("coding_tab"))
             self.tab_widget.addTab(self.audit_panel, tr("audit_tab"))
             self.tab_widget.setCurrentIndex(0)
-
+    
         elif state == 1:
-            self.tab_widget.addTab(self.dataset_generation, tr("generation_tab"))
+            # ✅ CORRECTION: Utiliser l'instance correcte pour l'onglet
+            self.tab_widget.addTab(self.dataset_generation_tab, tr("generation_tab"))
             self.tab_widget.addTab(self.dataset_strategy, tr("strategy_tab"))
             self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
             self.tab_widget.setCurrentIndex(0)
-
+    
         self._update_tab_texts()
 
     def _init_menu(self):

@@ -1,167 +1,80 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
-Script de migration pour corriger le format des données de projet
-À exécuter une seule fois pour nettoyer la base de données existante
+Test minimal de sauvegarde SQLite
+À exécuter dans votre environnement pour diagnostiquer
 """
-
-import logging
-import sys
-import os
-
-# Ajouter le chemin du projet au PYTHONPATH
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.dataset_database import DatasetDatabase
+from utils.dataset_project_manager import DatasetProjectManager
 
-logger = logging.getLogger(__name__)
-
-
-def migrate_project_data_format():
-    """
-    Migre tous les projets existants vers le format standard
-    Format attendu: {'nom': '...', 'description': '...', 'typologies': [...]}
-    """
-    print("=" * 60)
-    print("MIGRATION: Correction du format des données de projet")
-    print("=" * 60)
+def test_minimal_save():
+    """Test minimal de sauvegarde"""
+    print("=" * 80)
+    print("TEST MINIMAL DE SAUVEGARDE")
+    print("=" * 80)
     
-    try:
-        # Initialiser la base de données
-        db = DatasetDatabase()
+    # 1. Initialiser la DB
+    print("\n1. Initialisation de la base de données...")
+    db = DatasetDatabase("data/test_liris.db")
+    print(f"   ✅ DB initialisée: {db.db_path}")
+    print(f"   ✅ Connection: {db.connection is not None}")
+    
+    # 2. Créer un project manager
+    print("\n2. Création du project manager...")
+    manager = DatasetProjectManager(db)
+    print(f"   ✅ Manager créé")
+    
+    # 3. Créer un projet minimal
+    print("\n3. Création d'un projet minimal...")
+    project_name = "TEST_MINIMAL"
+    success = manager.create_new_project(project_name, "Test de diagnostic")
+    print(f"   Résultat create_new_project: {success}")
+    print(f"   current_project_name: {manager.current_project_name}")
+    print(f"   current_project_data: {manager.current_project_data is not None}")
+    
+    # 4. Vérifier la structure
+    print("\n4. Vérification de la structure...")
+    if manager.current_project_data:
+        print(f"   Structure: {manager.current_project_data.keys()}")
+        print(f"   Nom: {manager.current_project_data.get('nom')}")
+        print(f"   Typologies: {manager.current_project_data.get('typologies')}")
+    
+    # 5. Tenter la sauvegarde
+    print("\n5. Tentative de sauvegarde...")
+    save_success = manager.save_project()
+    print(f"   Résultat save_project: {save_success}")
+    
+    # 6. Vérifier en base
+    print("\n6. Vérification en base de données...")
+    cursor = db.connection.cursor()
+    cursor.execute("SELECT * FROM projects WHERE name = ?", (project_name,))
+    result = cursor.fetchone()
+    
+    if result:
+        print(f"   ✅ Projet trouvé en base!")
+        print(f"      ID: {result['id']}")
+        print(f"      Nom: {result['name']}")
+        print(f"      Description: {result['description']}")
+    else:
+        print(f"   ❌ Projet NON trouvé en base!")
         
-        # Récupérer tous les projets
-        projects = db.get_all_projects()
-        print(f"\n📊 Projets trouvés: {len(projects)}")
-        
-        if not projects:
-            print("✅ Aucun projet à migrer")
-            return True
-        
-        migrated_count = 0
-        error_count = 0
-        
-        for project in projects:
-            project_name = project.get('name', '')
-            print(f"\n--- Analyse du projet: {project_name} ---")
-            
-            try:
-                # Charger les données complètes
-                project_data = db.get_dataset_projet(project_name)
-                
-                if not project_data:
-                    print(f"❌ Impossible de charger '{project_name}'")
-                    error_count += 1
-                    continue
-                
-                # Vérifier le format
-                needs_migration = False
-                
-                if isinstance(project_data, list):
-                    print(f"⚠️  Format: LISTE (legacy) - {len(project_data)} typologie(s)")
-                    needs_migration = True
-                    
-                elif isinstance(project_data, dict):
-                    has_nom = 'nom' in project_data
-                    has_desc = 'description' in project_data
-                    has_typo = 'typologies' in project_data
-                    typo_is_list = isinstance(project_data.get('typologies'), list) if has_typo else False
-                    
-                    print(f"   Format: DICT")
-                    print(f"   - 'nom': {'✅' if has_nom else '❌'}")
-                    print(f"   - 'description': {'✅' if has_desc else '❌'}")
-                    print(f"   - 'typologies': {'✅' if has_typo else '❌'}")
-                    if has_typo:
-                        print(f"   - typologies is list: {'✅' if typo_is_list else '❌'}")
-                    
-                    needs_migration = not (has_nom and has_desc and has_typo and typo_is_list)
-                
-                else:
-                    print(f"❌ Format inconnu: {type(project_data)}")
-                    error_count += 1
-                    continue
-                
-                if needs_migration:
-                    print(f"🔧 Migration nécessaire...")
-                    
-                    # Normaliser les données
-                    if isinstance(project_data, list):
-                        normalized_data = {
-                            "nom": project_name,
-                            "description": "",
-                            "typologies": project_data
-                        }
-                    else:
-                        normalized_data = {
-                            "nom": project_data.get('nom', project_name),
-                            "description": project_data.get('description', ''),
-                            "typologies": project_data.get('typologies', [])
-                        }
-                        
-                        # S'assurer que typologies est une liste
-                        if not isinstance(normalized_data['typologies'], list):
-                            print(f"   ⚠️  Conversion de 'typologies' en liste vide")
-                            normalized_data['typologies'] = []
-                    
-                    # Sauvegarder
-                    success = db.save_dataset_projet(project_name, normalized_data)
-                    
-                    if success:
-                        print(f"✅ Migration réussie")
-                        migrated_count += 1
-                        
-                        # Vérifier la migration
-                        verify_data = db.get_dataset_projet(project_name)
-                        if isinstance(verify_data, dict) and 'typologies' in verify_data:
-                            typo_count = len(verify_data.get('typologies', []))
-                            print(f"   ✓ Vérification: {typo_count} typologie(s)")
-                        else:
-                            print(f"   ⚠️  Vérification: format inattendu")
-                    else:
-                        print(f"❌ Échec de la migration")
-                        error_count += 1
-                else:
-                    print(f"✅ Format correct, pas de migration nécessaire")
-                    
-            except Exception as e:
-                print(f"❌ Erreur pour '{project_name}': {e}")
-                import traceback
-                traceback.print_exc()
-                error_count += 1
-        
-        # Résumé
-        print("\n" + "=" * 60)
-        print("RÉSUMÉ DE LA MIGRATION")
-        print("=" * 60)
-        print(f"Projets analysés: {len(projects)}")
-        print(f"Projets migrés: {migrated_count}")
-        print(f"Erreurs: {error_count}")
-        print(f"Statut: {'✅ SUCCÈS' if error_count == 0 else '⚠️  AVEC ERREURS'}")
-        print("=" * 60)
-        
-        db.close()
-        return error_count == 0
-        
-    except Exception as e:
-        print(f"\n❌ ERREUR CRITIQUE: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
+        # Debug: Lister tous les projets
+        cursor.execute("SELECT name FROM projects")
+        all_projects = cursor.fetchall()
+        print(f"   Projets existants: {[p['name'] for p in all_projects]}")
+    
+    # 7. Cleanup
+    print("\n7. Nettoyage...")
+    db.close()
+    print("   ✅ Connexion fermée")
+    
+    print("\n" + "=" * 80)
+    if result:
+        print("🎉 TEST RÉUSSI: Le projet a été sauvegardé en SQLite")
+    else:
+        print("❌ TEST ÉCHOUÉ: Le projet n'est PAS en SQLite")
+    print("=" * 80)
 
 if __name__ == "__main__":
-    # Configuration du logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    print("\n⚠️  ATTENTION: Cette migration va modifier la base de données")
-    print("   Assurez-vous d'avoir une sauvegarde avant de continuer")
-    
-    response = input("\nContinuer? (oui/non): ").strip().lower()
-    
-    if response in ['oui', 'o', 'yes', 'y']:
-        success = migrate_project_data_format()
-        sys.exit(0 if success else 1)
-    else:
-        print("\n❌ Migration annulée")
-        sys.exit(0)
+    test_minimal_save()
