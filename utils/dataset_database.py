@@ -19,17 +19,10 @@ class DatasetDatabase:
     """
 
     def __init__(self, db_path="data/liris.db"):
-        """Initialise la base de données avec détection de corruption"""
+        """Initialise la base de données avec gestion robuste des chemins"""
 
-        # Déterminer le chemin
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            current_file = os.path.abspath(__file__)
-            utils_dir = os.path.dirname(current_file)
-            base_path = os.path.dirname(utils_dir)
-
-        self.db_path = os.path.join(base_path, db_path)
+        # ✅ CORRECTION 1: Utiliser un chemin utilisateur sûr
+        self.db_path = self._get_safe_database_path(db_path)
 
         logger.info("=" * 80)
         logger.info("🗄️  INITIALISATION BASE DE DONNÉES")
@@ -37,22 +30,94 @@ class DatasetDatabase:
         logger.info(f"  Chemin: {self.db_path}")
         logger.info(f"  Existe: {os.path.exists(self.db_path)}")
 
-        # Créer le répertoire
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        # ✅ CORRECTION 2: Vérifier les permissions AVANT de continuer
+        if not self._check_write_permissions():
+            raise PermissionError(
+                f"Impossible d'écrire dans le dossier: {os.path.dirname(self.db_path)}\n"
+                f"Vérifiez les permissions ou déplacez l'application ailleurs."
+            )
 
         self.connection = None
 
-        # ORDRE CRITIQUE:
-        # 1. Connexion
-        # 2. Validation (avec suppression si nécessaire)
-        # 3. Création des tables
+        try:
+            self._init_connection()
+            self._validate_and_fix_schema()
+            self._create_tables()
+            logger.info("✅ Base de données initialisée")
+        except Exception as e:
+            logger.error(f"❌ Erreur critique lors de l'initialisation: {e}")
+            logger.error(traceback.format_exc())
+            raise
 
-        self._init_connection()
-        self._validate_and_fix_schema()  # ← NOUVEAU : Avant _create_tables
-        self._create_tables()
-
-        logger.info("✅ Base de données initialisée")
         logger.info("=" * 80)
+
+    def _get_safe_database_path(self, db_path):
+        """
+        ✅ CORRECTION: Retourne un chemin sûr pour la base de données
+        Utilise le dossier utilisateur si l'application est en lecture seule
+        """
+        if getattr(sys, 'frozen', False):
+            # Application compilée
+            exe_dir = os.path.dirname(sys.executable)
+            
+            # Tester si le dossier exe est accessible en écriture
+            test_file = os.path.join(exe_dir, '.write_test')
+            try:
+                with open(test_file, 'w') as f:
+                    f.write('test')
+                os.remove(test_file)
+                # Le dossier est accessible, utiliser exe_dir
+                full_path = os.path.join(exe_dir, db_path)
+            except (PermissionError, OSError):
+                # Dossier en lecture seule, utiliser le dossier utilisateur
+                app_data = os.path.join(
+                    os.path.expanduser('~'),
+                    '.liris'  # Dossier caché dans le home de l'utilisateur
+                )
+                full_path = os.path.join(app_data, db_path)
+                logger.warning(f"⚠️ Dossier exe en lecture seule, utilisation de: {app_data}")
+        else:
+            # Mode développement
+            current_file = os.path.abspath(__file__)
+            utils_dir = os.path.dirname(current_file)
+            base_path = os.path.dirname(utils_dir)
+            full_path = os.path.join(base_path, db_path)
+
+        # Créer le répertoire avec gestion d'erreur
+        db_dir = os.path.dirname(full_path)
+        try:
+            os.makedirs(db_dir, exist_ok=True)
+            logger.info(f"📁 Dossier créé/vérifié: {db_dir}")
+        except Exception as e:
+            logger.error(f"❌ Impossible de créer le dossier {db_dir}: {e}")
+            raise
+
+        return full_path
+    
+    def _check_write_permissions(self):
+        """
+        ✅ CORRECTION: Vérifie que le dossier est accessible en écriture
+        """
+        db_dir = os.path.dirname(self.db_path)
+        
+        if not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except Exception as e:
+                logger.error(f"❌ Impossible de créer le dossier: {e}")
+                return False
+
+        # Test d'écriture
+        test_file = os.path.join(db_dir, '.permission_test')
+        try:
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+            logger.info("✅ Permissions d'écriture vérifiées")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Pas de permission d'écriture: {e}")
+            return False
 
     def _validate_schema(self):
         """Valide que le schéma de la base est correct"""
@@ -98,18 +163,31 @@ class DatasetDatabase:
             return False
 
     def _init_connection(self):
-        """Initialise la connexion SQLite"""
+        """Initialise la connexion SQLite avec gestion d'erreur améliorée"""
         try:
             self.connection = sqlite3.connect(self.db_path)
             self.connection.row_factory = sqlite3.Row
             self.connection.execute("PRAGMA foreign_keys = ON")
-            logger.info("✅ Connexion établie")
+            
+            # ✅ CORRECTION: Vérifier que la connexion fonctionne
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            
+            logger.info("✅ Connexion établie et testée")
+        except sqlite3.OperationalError as e:
+            logger.error(f"❌ Erreur SQLite: {e}")
+            logger.error(f"   Chemin DB: {self.db_path}")
+            logger.error(f"   DB existe: {os.path.exists(self.db_path)}")
+            raise
         except Exception as e:
             logger.error(f"❌ Erreur connexion: {e}")
             raise
 
     def _validate_and_fix_schema(self):
-        """Valide le schéma et supprime les tables corrompues si nécessaire"""
+        """
+        ✅ CORRECTION: Validation plus tolérante avec backup avant suppression
+        """
         try:
             cursor = self.connection.cursor()
 
@@ -118,7 +196,7 @@ class DatasetDatabase:
             existing_tables = {row[0] for row in cursor.fetchall()}
 
             if not existing_tables:
-                logger.info("📝 Nouvelle base de données")
+                logger.info("📄 Nouvelle base de données")
                 return
 
             logger.info(f"📋 Tables existantes: {existing_tables}")
@@ -133,57 +211,11 @@ class DatasetDatabase:
                 # Vérifier si taxonomy_id existe
                 if 'taxonomy_id' not in columns:
                     logger.error("❌ CORRUPTION DÉTECTÉE: taxonomy_id manquant!")
+                    
+                    # ✅ CORRECTION: Créer un backup avant de supprimer
+                    self._create_backup()
+                    
                     logger.warning("🗑️  Suppression des tables corrompues...")
-
-                    # Supprimer TOUTES les tables dans le bon ordre
-                    tables_to_drop = [
-                        'child_labels',
-                        'parent_labels',
-                        'root_labels',
-                        'taxonomy_clusters',
-                        'typologies',
-                        'batches',
-                        'projects',
-                        'platforms'
-                    ]
-
-                    for table in tables_to_drop:
-                        try:
-                            cursor.execute(f"DROP TABLE IF EXISTS {table}")
-                            logger.info(f"   ✅ {table} supprimée")
-                        except Exception as e:
-                            logger.warning(f"   ⚠️  {table}: {e}")
-
-                    # Supprimer les index aussi
-                    cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
-                    indexes = [row[0] for row in cursor.fetchall()]
-                    for idx in indexes:
-                        if not idx.startswith('sqlite_'):  # Garder les index système
-                            try:
-                                cursor.execute(f"DROP INDEX IF EXISTS {idx}")
-                            except:
-                                pass
-                            
-                    self.connection.commit()
-                    logger.info("✅ Tables corrompues supprimées")
-
-                    return
-
-            # Vérifier parent_labels
-            if 'parent_labels' in existing_tables:
-                cursor.execute("PRAGMA table_info(parent_labels)")
-                columns = {row[1] for row in cursor.fetchall()}
-                if 'root_id' not in columns:
-                    logger.error("❌ parent_labels corrompu")
-                    self._drop_all_tables()
-                    return
-
-            # Vérifier child_labels
-            if 'child_labels' in existing_tables:
-                cursor.execute("PRAGMA table_info(child_labels)")
-                columns = {row[1] for row in cursor.fetchall()}
-                if 'parent_label_id' not in columns or 'parent_child_id' not in columns:
-                    logger.error("❌ child_labels corrompu")
                     self._drop_all_tables()
                     return
 
@@ -191,8 +223,24 @@ class DatasetDatabase:
 
         except Exception as e:
             logger.error(f"❌ Erreur validation: {e}")
-            logger.warning("🗑️  Suppression par sécurité...")
-            self._drop_all_tables()
+            logger.error(traceback.format_exc())
+            # ✅ CORRECTION: Ne pas supprimer automatiquement en cas d'erreur inconnue
+            logger.warning("⚠️  Validation échouée mais conservation de la base")
+
+    def _create_backup(self):
+        """
+        ✅ NOUVELLE FONCTION: Crée un backup de la base avant suppression
+        """
+        if not os.path.exists(self.db_path):
+            return
+        
+        backup_path = f"{self.db_path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        try:
+            import shutil
+            shutil.copy2(self.db_path, backup_path)
+            logger.info(f"💾 Backup créé: {backup_path}")
+        except Exception as e:
+            logger.warning(f"⚠️  Impossible de créer un backup: {e}")
 
     def _drop_all_tables(self):
         """Supprime toutes les tables"""
@@ -221,6 +269,37 @@ class DatasetDatabase:
             
         except Exception as e:
             logger.error(f"Erreur suppression: {e}")
+
+    def _drop_all_tables(self):
+        """Supprime toutes les tables avec logging détaillé"""
+        try:
+            cursor = self.connection.cursor()
+            
+            tables = [
+                'child_labels',
+                'parent_labels',
+                'root_labels',
+                'taxonomy_clusters',
+                'typologies',
+                'batches',
+                'projects',
+                'platforms'
+            ]
+            
+            dropped_count = 0
+            for table in tables:
+                try:
+                    cursor.execute(f"DROP TABLE IF EXISTS {table}")
+                    dropped_count += 1
+                    logger.info(f"  ✅ {table} supprimée")
+                except Exception as e:
+                    logger.warning(f"  ⚠️  {table}: {e}")
+                
+            self.connection.commit()
+            logger.info(f"✅ {dropped_count} table(s) supprimée(s)")
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur suppression: {e}")
 
     def _create_tables(self):
         """Crée les tables nécessaires pour la structure hiérarchique complète"""
@@ -657,11 +736,14 @@ class DatasetDatabase:
         return children
 
     def save_dataset_projet(self, project_name, project_data):
-        """Sauvegarde un projet complet avec toute sa hiérarchie - VERSION AVEC LOGGING DÉTAILLÉ"""
+        """
+        ✅ CORRECTION: Sauvegarde avec meilleure gestion d'erreur
+        """
         try:
             if not self.connection:
-                logger.error("❌ DATABASE: Aucune connexion à la base de données")
-                return False
+                error_msg = "❌ DATABASE: Aucune connexion à la base de données"
+                logger.error(error_msg)
+                raise ConnectionError(error_msg)
     
             logger.info("╔" + "═" * 78 + "╗")
             logger.info("║ DATABASE: save_dataset_projet()                                             ║")
@@ -678,7 +760,7 @@ class DatasetDatabase:
     
             if existing:
                 project_id = existing['id']
-                logger.info(f"📝 DATABASE: Projet existant trouvé (ID: {project_id})")
+                logger.info(f"🔄 DATABASE: Projet existant trouvé (ID: {project_id})")
                 
                 cursor.execute("""
                     UPDATE projects
@@ -686,11 +768,6 @@ class DatasetDatabase:
                     WHERE id = ?
                 """, (project_data.get('description', ''), project_id))
                 logger.info(f"✅ DATABASE: Projet mis à jour")
-                logger.info(f"   Description: '{project_data.get('description', '')[:50]}...'")
-                
-                # Compter les anciennes données avant suppression
-                cursor.execute("SELECT COUNT(*) as count FROM typologies WHERE project_id = ?", (project_id,))
-                old_count = cursor.fetchone()['count']
                 
                 logger.info(f"🗑️  DATABASE: Suppression de l'ancienne hiérarchie...")
                 cursor.execute("DELETE FROM typologies WHERE project_id = ?", (project_id,))
@@ -711,6 +788,12 @@ class DatasetDatabase:
             
             self._save_typologies(cursor, project_id, typologies)
     
+            # ✅ CORRECTION: Vérifier avant de commiter
+            logger.info("\n🔍 DATABASE: Vérification pré-commit")
+            cursor.execute("SELECT COUNT(*) as count FROM typologies WHERE project_id = ?", (project_id,))
+            count_before_commit = cursor.fetchone()['count']
+            logger.info(f"  Typologies à commiter: {count_before_commit}")
+    
             self.connection.commit()
             logger.info("\n✅ DATABASE: Transaction COMMIT réussie")
             
@@ -723,6 +806,30 @@ class DatasetDatabase:
             logger.info("╚" + "═" * 78 + "╝\n")
             
             return True
+    
+        except sqlite3.Error as e:
+            error_msg = f"❌ Erreur SQLite: {e}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            
+            if self.connection:
+                self.connection.rollback()
+                logger.warning("⚠️  DATABASE: Transaction ROLLBACK effectué")
+            
+            # ✅ CORRECTION: Remonter l'exception pour que l'UI puisse l'afficher
+            raise RuntimeError(f"Erreur de sauvegarde: {e}")
+            
+        except Exception as e:
+            logger.error("\n╔" + "═" * 78 + "╗")
+            logger.error(f"║ ❌ ERREUR DATABASE: {str(e):<61} ║")
+            logger.error("╚" + "═" * 78 + "╝")
+            logger.error(f"\n🔥 Exception complète:\n{traceback.format_exc()}")
+            
+            if self.connection:
+                self.connection.rollback()
+                logger.warning("⚠️  DATABASE: Transaction ROLLBACK effectué")
+            
+            raise
     
         except Exception as e:
             logger.error("\n╔" + "═" * 78 + "╗")
@@ -1023,5 +1130,8 @@ class DatasetDatabase:
     def close(self):
         """Ferme la connexion à la base de données"""
         if self.connection:
-            self.connection.close()
-            logger.info("Connexion à la base de données fermée")
+            try:
+                self.connection.close()
+                logger.info("✅ Connexion à la base de données fermée")
+            except Exception as e:
+                logger.warning(f"⚠️  Erreur lors de la fermeture: {e}")

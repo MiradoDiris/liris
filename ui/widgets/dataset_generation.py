@@ -18,23 +18,19 @@ from PyQt5.QtWidgets import (
     QFrame, QGroupBox, QCheckBox, QMessageBox, QFileDialog
 )
 from PyQt5.QtGui import QFont, QColor, QPalette, QLinearGradient, QPainter, QBrush
-
-# ⚠️ IMPORTS CORRIGÉS - Chemins relatifs depuis ui/panels/
 import sys
 from pathlib import Path
-
 from typing import Dict, Any
-
-# Ajouter le répertoire parent au path pour les imports
 current_dir = Path(__file__).parent
 project_root = current_dir.parent.parent
 sys.path.insert(0, str(project_root))
-
-# Imports des modules nécessaires
 from ui.styles.theme import Theme
 from utils.logger import logger
 from utils.dataset_database import DatasetDatabase
 from utils.dataset_project_manager import DatasetProjectManager
+import qtawesome as qta  # Nécessaire pour les icônes du snippet
+from PyQt5.QtChart import QChart, QChartView, QPieSeries, QPieSlice
+from PyQt5.QtGui import QPainter
 
 
 def get_dropdown_svg_path():
@@ -46,12 +42,12 @@ def get_dropdown_svg_path():
     return svg_path.replace('\\', '/')
 
 class CollapsibleSection(QWidget):
-    """Section collapsible avec chevron - VERSION CORRIGÉE"""
+    """Section collapsible avec chevron - VERSION RESPONSIVE"""
     
     def __init__(self, title="Section", parent=None):
         super().__init__(parent)
         self.is_collapsed = True
-        self.section_title = title  # Stocker le titre comme attribut
+        self.section_title = title
         
         layout = QVBoxLayout(self)
         layout.setSpacing(0)
@@ -59,6 +55,11 @@ class CollapsibleSection(QWidget):
         
         # Header avec chevron
         self.header = QPushButton()
+        self.header.setMinimumHeight(40)  # ✅ Hauteur minimum
+        self.header.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed
+        )
         self.header.setStyleSheet(f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -78,8 +79,6 @@ class CollapsibleSection(QWidget):
         """)
         self.header.setCursor(Qt.PointingHandCursor)
         self.header.clicked.connect(self.toggle)
-        
-        # Initialiser le texte du header
         self.update_header_text(title)
         
         layout.addWidget(self.header)
@@ -89,7 +88,11 @@ class CollapsibleSection(QWidget):
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(10, 10, 10, 10)
         self.content.setVisible(False)
-        self.content.setMaximumHeight(0)  # Initialement fermé
+        self.content.setMaximumHeight(0)
+        self.content.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Maximum
+        )
         self.content.setStyleSheet("""
             QWidget {
                 background: #F8F9FA;
@@ -220,7 +223,7 @@ class GradientButton(QPushButton):
 
 
 class CombinationVisualizer(QWidget):
-    """Widget de visualisation des combinaisons - VERSION CORRIGÉE"""
+    """Widget de visualisation avec Camembert et Liste"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -231,7 +234,15 @@ class CombinationVisualizer(QWidget):
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+        layout.setSpacing(10)
+
+        # === 1. CAMEMBERT (QChart) ===
+        self.chart_view = self._create_pie_chart()
+        self.chart_view.setMinimumHeight(200)
+        self.chart_view.setMaximumHeight(250)
+        layout.addWidget(self.chart_view)
+
+        # === 2. LISTE DÉFILANTE ===
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -242,17 +253,64 @@ class CombinationVisualizer(QWidget):
         scroll.setWidget(self.combinations_widget)
         
         layout.addWidget(scroll)
+
+    def _create_pie_chart(self):
+        """Crée le graphique camembert"""
+        self.series = QPieSeries()
+        self.series.setHoleSize(0.40) # Style "Donut" moderne
         
+        # Données initiales vides
+        self.slice_todo = self.series.append("À faire", 1)
+        self.slice_done = self.series.append("Terminé", 0)
+        
+        # Couleurs
+        self.slice_todo.setColor(QColor("#E0E0E0"))
+        self.slice_todo.setBorderColor(QColor("#E0E0E0"))
+        self.slice_done.setColor(QColor(Theme.PRIMARY_COLOR))
+        self.slice_done.setBorderColor(QColor(Theme.PRIMARY_COLOR))
+
+        chart = QChart()
+        chart.addSeries(self.series)
+        chart.setTitle("Progression du Batch")
+        chart.setTitleFont(QFont("Segoe UI", 10, QFont.Bold))
+        chart.legend().setVisible(True)
+        chart.legend().setAlignment(Qt.AlignBottom)
+        chart.setBackgroundRoundness(0)
+        chart.setMargins(QtCore.QMargins(0, 0, 0, 0))
+        
+        chart_view = QChartView(chart)
+        chart_view.setRenderHint(QPainter.Antialiasing)
+        
+        return chart_view
+
+    def update_chart_data(self):
+        """Met à jour les données du camembert"""
+        total = len(self.combinations)
+        done_count = sum(1 for c in self.completed if c)
+        todo_count = total - done_count
+        
+        if total == 0:
+            self.slice_todo.setValue(1)
+            self.slice_done.setValue(0)
+            self.chart_view.chart().setTitle("Aucune donnée")
+        else:
+            self.slice_todo.setValue(todo_count)
+            self.slice_done.setValue(done_count)
+            percentage = int((done_count / total) * 100)
+            self.chart_view.chart().setTitle(f"Progression: {percentage}%")
+
     def set_combinations(self, combinations):
-        """Définit les combinaisons à afficher"""
+        """Définit les combinaisons à afficher et met à jour le graph"""
         self.combinations = combinations
         self.completed = [False] * len(combinations)
+        self.update_chart_data() # Update chart
         self._update_display()
         
     def mark_completed(self, index):
-        """Marque une combinaison comme complétée"""
+        """Marque une combinaison comme complétée et met à jour le graph"""
         if 0 <= index < len(self.completed):
             self.completed[index] = True
+            self.update_chart_data() # Update chart
             self._update_display()
             
     def _update_display(self):
@@ -344,6 +402,642 @@ class CombinationVisualizer(QWidget):
         
         self.combinations_layout.addStretch()
 
+class BatchRepresentativityChart(QWidget):
+    """
+    Widget de visualisation de la représentativité des batches
+    Style et logique alignés avec ContextClusterAnalysisTab
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.combinations_data = []  # Liste des combinaisons du batch
+        self._init_ui()
+        
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        # === TITRE ===
+        title = QLabel("Distribution des Typologies de Contexte")
+        title.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; background: transparent; border: none;")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # === CAMEMBERT (QChart) - Style moderne ===
+        self.chart_view = self._create_pie_chart()
+        layout.addWidget(self.chart_view, 1)  # stretch = 1 pour occuper tout l'espace
+        
+    def _create_pie_chart(self):
+        """Crée le graphique camembert avec style moderne épuré"""
+        self.series = QPieSeries()
+        # PAS de trou pour un style plein comme l'image 2
+        self.series.setHoleSize(0.0)
+        
+        # Données initiales vides
+        self.slice_default = self.series.append("Aucune donnée", 1)
+        self.slice_default.setColor(QColor("#E0E0E0"))
+        self.slice_default.setBorderColor(Qt.transparent)  # Pas de bordure
+        self.slice_default.setLabelVisible(False)
+
+        chart = QChart()
+        chart.addSeries(self.series)
+        chart.setTitle("Sélectionnez un batch")
+        chart.setTitleFont(QFont("Segoe UI", 13, QFont.Bold))
+        chart.setTitleBrush(QBrush(QColor("#1e293b")))
+        
+        # Légende moderne en bas
+        chart.legend().setVisible(True)
+        chart.legend().setAlignment(Qt.AlignBottom)
+        chart.legend().setFont(QFont("Segoe UI", 10))
+        chart.legend().setLabelColor(QColor("#1e293b"))
+        chart.legend().setBackgroundVisible(False)
+        chart.legend().setBorderColor(Qt.transparent)
+        
+        # Fond transparent et sans bordure
+        chart.setBackgroundVisible(False)
+        chart.setBackgroundRoundness(0)
+        chart.setMargins(QtCore.QMargins(20, 20, 20, 20))
+        chart.setAnimationOptions(QChart.SeriesAnimations)
+        
+        chart_view = QChartView(chart)
+        chart_view.setRenderHint(QPainter.Antialiasing)
+        chart_view.setStyleSheet("background: transparent; border: none;")
+        
+        return chart_view
+
+    def set_batch_combinations(self, combinations):
+        """
+        Définit les combinaisons d'un batch pour analyser les typologies
+        combinations: liste de dict avec 'contexts' contenant les typologies
+        Format: [
+            {
+                'contexts': [
+                    {'level': 'typologie', 'display': 'UX/UI 4', 'data': {...}},
+                    ...
+                ],
+                'nb_samples': 3
+            },
+            ...
+        ]
+        """
+        self.combinations_data = combinations
+        self._update_chart()
+    
+    def set_batch_family_data(self, data):
+        """Alias pour compatibilité - redirige vers set_batch_combinations"""
+        # Pour la compatibilité avec l'ancien code
+        # data peut être [] pour vider ou une liste de combinaisons
+        self.set_batch_combinations(data if data else [])
+        
+    def _update_chart(self):
+        """Analyse et affiche la distribution des typologies de contexte"""
+        # Effacer les données précédentes
+        self.series.clear()
+
+        # ✅ DEBUG : Afficher ce qu'on reçoit
+        logger.info(f"\n📊 DEBUG _update_chart")
+        logger.info(f"   Combinations reçues: {len(self.combinations_data)}")
+
+        if self.combinations_data:
+            logger.info(f"   Premier combo keys: {self.combinations_data[0].keys()}")
+            if 'contexts' in self.combinations_data[0]:
+                logger.info(f"   Nombre de contextes: {len(self.combinations_data[0]['contexts'])}")
+            if 'master' in self.combinations_data[0]:
+                logger.info(f"   Master: {self.combinations_data[0].get('master')}")
+
+        if not self.combinations_data or len(self.combinations_data) == 0:
+            # Aucune donnée
+            self.slice_default = self.series.append("Aucune donnée", 1)
+            self.slice_default.setColor(QColor("#E0E0E0"))
+            self.slice_default.setBorderColor(Qt.transparent)
+            self.slice_default.setLabelVisible(False)
+            self.chart_view.chart().setTitle("Aucune donnée disponible")
+            return
+
+        # 📊 ANALYSER LES TYPOLOGIES (MASTER + TOUS LES CONTEXTES)
+        typologie_counts = {}
+        total_contexts = 0
+
+        for combo_idx, combo in enumerate(self.combinations_data):
+            logger.info(f"\n   Combo {combo_idx + 1}:")
+
+            # ✅ 1. COMPTER LE MASTER (toujours présent dans chaque combo)
+            master_name = combo.get('master', 'N/A')
+            if master_name and master_name != 'N/A':
+                logger.info(f"      ⭐ Master: {master_name}")
+
+                if master_name not in typologie_counts:
+                    typologie_counts[master_name] = {
+                        'count': 0,
+                        'level': 'master',
+                        'data': combo.get('master_data', {})
+                    }
+
+                typologie_counts[master_name]['count'] += 1
+                total_contexts += 1
+
+            # ✅ 2. COMPTER TOUS LES CONTEXTES (sans filtre de level)
+            contexts = combo.get('contexts', [])
+            logger.info(f"      Contextes: {len(contexts)}")
+
+            for ctx_idx, ctx in enumerate(contexts):
+                level = ctx.get('level', 'unknown')
+                display = ctx.get('display', 'Inconnu')
+
+                logger.info(f"         • Contexte {ctx_idx + 1}: level='{level}', display='{display}'")
+
+                # ⭐ ACCEPTER TOUS LES CONTEXTES (pas de filtre sur level)
+                if display and display != 'Inconnu' and display != 'N/A':
+                    if display not in typologie_counts:
+                        typologie_counts[display] = {
+                            'count': 0,
+                            'level': level,
+                            'data': ctx.get('data', {})
+                        }
+
+                    typologie_counts[display]['count'] += 1
+                    total_contexts += 1
+                else:
+                    logger.warning(f"            ⚠️ Contexte ignoré: display invalide")
+
+        logger.info(f"\n   ✅ Total typologies comptées: {total_contexts}")
+        logger.info(f"   ✅ Typologies uniques: {list(typologie_counts.keys())}")
+        for typo_name, info in typologie_counts.items():
+            logger.info(f"      • {typo_name}: {info['count']} occurrence(s) (level: {info['level']})")
+
+        if total_contexts == 0 or not typologie_counts:
+            self.slice_default = self.series.append("Aucune typologie trouvée", 1)
+            self.slice_default.setColor(QColor("#E0E0E0"))
+            self.slice_default.setBorderColor(Qt.transparent)
+            self.slice_default.setLabelVisible(False)
+            self.chart_view.chart().setTitle("Aucune typologie trouvée")
+            return
+
+        # Palette moderne et éclatante
+        colors = [
+            "#FF6B6B",  # Rouge corail clair
+            "#4ECDC4",  # Turquoise clair
+            "#45B7D1",  # Bleu ciel
+            "#96CEB4",  # Vert menthe
+            "#FFEAA7",  # Jaune pastel
+            "#DFE6E9",  # Gris très clair
+            "#74B9FF",  # Bleu pervenche
+            "#A29BFE",  # Lavande
+            "#FD79A8",  # Rose bonbon
+            "#FDCB6E",  # Orange pastel
+            "#6C5CE7",  # Violet doux
+            "#00B894",  # Vert émeraude clair
+            "#55EFC4",  # Vert menthe vif
+            "#81ECEC",  # Cyan clair
+            "#FAB1A0",  # Pêche clair
+            "#FF7675"   # Rouge saumon
+        ]
+
+        # Trier par count décroissant
+        sorted_typologies = sorted(
+            typologie_counts.items(), 
+            key=lambda x: x[1]['count'], 
+            reverse=True
+        )
+
+        # Ajouter une slice par typologie
+        for i, (typologie_name, info) in enumerate(sorted_typologies):
+            count = info['count']
+            level = info['level']
+
+            # Calculer le pourcentage
+            percentage = (count / total_contexts) * 100 if total_contexts > 0 else 0
+
+            slice_obj = self.series.append(typologie_name, count)
+
+            # Couleur unie, SANS bordure visible
+            color = QColor(colors[i % len(colors)])
+            slice_obj.setColor(color)
+            slice_obj.setBorderColor(Qt.transparent)
+            slice_obj.setBorderWidth(0)
+
+            # Labels directement sur le camembert
+            slice_obj.setLabelVisible(True)
+            slice_obj.setLabelPosition(QPieSlice.LabelOutside)
+            slice_obj.setLabelArmLengthFactor(0.15)
+            slice_obj.setLabelColor(QColor("#1e293b"))
+            slice_obj.setLabelFont(QFont("Segoe UI", 10, QFont.Bold))
+
+            # Format du label : ajouter un badge si c'est le master
+            if level == 'master':
+                slice_obj.setLabel(f"⭐ {typologie_name} ({percentage:.1f}%)")
+            else:
+                slice_obj.setLabel(f"{typologie_name} ({percentage:.1f}%)")
+
+            # Explosion légère pour le master
+            if level == 'master':
+                slice_obj.setExploded(True)
+                slice_obj.setExplodeDistanceFactor(0.05)
+            else:
+                slice_obj.setExploded(False)
+                slice_obj.setExplodeDistanceFactor(0.03)
+
+            # Stocker les données
+            slice_obj.setProperty("typologie_data", {
+                'name': typologie_name,
+                'level': level,
+                'count': count,
+                'percentage': percentage,
+                'data': info['data']
+            })
+
+            # Événements
+            slice_obj.hovered.connect(lambda state, s=slice_obj: self._on_slice_hovered(s, state))
+            slice_obj.clicked.connect(lambda s=slice_obj: self._on_slice_clicked(s))
+
+        # Titre avec stats
+        self.chart_view.chart().setTitle(
+            f"Distribution: {len(typologie_counts)} typologie(s) • {total_contexts} occurrence(s) • {len(self.combinations_data)} combo(s)"
+        )
+    
+    def _on_slice_hovered(self, slice_obj, state):
+        """Effet hover subtil sur les slices"""
+        if state:
+            # Légère explosion au survol
+            slice_obj.setExploded(True)
+        else:
+            slice_obj.setExploded(False)
+    
+    def _on_slice_clicked(self, slice_obj):
+        """Affiche une popup avec les détails de la typologie cliquée"""
+        typologie_data = slice_obj.property("typologie_data")
+        if not typologie_data:
+            return
+        
+        self._show_typologie_details_popup(typologie_data)
+    
+    def _show_typologie_details_popup(self, typologie_data):
+        """Affiche une popup stylée moderne et compacte avec les détails d'une typologie"""
+        dialog = QtWidgets.QDialog(self)
+
+        # ✅ SUPPRIMER LE CADRE DE LA FENÊTRE
+        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        dialog.setAttribute(Qt.WA_TranslucentBackground)
+
+        dialog.setMinimumWidth(500)
+        dialog.setMaximumWidth(600)
+
+        # Container principal avec ombre
+        main_container = QWidget()
+        main_container.setStyleSheet(f"""
+            QWidget {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ffffff, stop:1 #f8fafc);
+                border-radius: 12px;
+                border: 2px solid #e2e8f0;
+            }}
+        """)
+
+        # Effet d'ombre sur le container
+        try:
+            from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+            shadow = QGraphicsDropShadowEffect()
+            shadow.setBlurRadius(30)
+            shadow.setColor(QColor(0, 0, 0, 80))
+            shadow.setOffset(0, 8)
+            main_container.setGraphicsEffect(shadow)
+        except:
+            pass
+        
+        # Layout du dialog
+        dialog_layout = QVBoxLayout(dialog)
+        dialog_layout.setContentsMargins(0, 0, 0, 0)
+        dialog_layout.addWidget(main_container)
+
+        layout = QVBoxLayout(main_container)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 30, 30, 30)
+
+        # === BARRE DE TITRE CUSTOM ===
+        title_bar = QWidget()
+        title_bar.setStyleSheet("background: transparent;")
+        title_bar_layout = QHBoxLayout(title_bar)
+        title_bar_layout.setContentsMargins(0, 0, 0, 0)
+        title_bar_layout.setSpacing(0)
+
+        title_bar_layout.addStretch()
+
+        # Bouton X pour fermer
+        close_x_btn = QPushButton("✕")
+        close_x_btn.setFixedSize(32, 32)
+        close_x_btn.setCursor(Qt.PointingHandCursor)
+        close_x_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: #94a3b8;
+                border: none;
+                border-radius: 16px;
+                font-size: 18px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: #fee2e2;
+                color: #dc2626;
+            }}
+        """)
+        close_x_btn.clicked.connect(dialog.reject)
+        title_bar_layout.addWidget(close_x_btn)
+
+        layout.addWidget(title_bar)
+
+        # === EN-TÊTE AVEC ICÔNE ET TITRE ===
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(15)
+
+        # Icône
+        icon_label = QLabel("📊")
+        icon_label.setStyleSheet("font-size: 32px; background: transparent;")
+        header_layout.addWidget(icon_label)
+
+        # Titre et level
+        title_widget = QWidget()
+        title_widget.setStyleSheet("background: transparent;")
+        title_layout = QVBoxLayout(title_widget)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(5)
+
+        name = typologie_data.get('name', 'Inconnu')
+        level = typologie_data.get('level', 'unknown')
+        count = typologie_data.get('count', 0)
+        percentage = typologie_data.get('percentage', 0.0)
+        data = typologie_data.get('data', {})
+
+        title_label = QLabel(f"<b>{name}</b>")
+        title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title_label.setStyleSheet("color: #1e293b; background: transparent;")
+        title_layout.addWidget(title_label)
+
+        # Badge du level
+        level_badge = QLabel(f"🏷️ {level.upper()}")
+        level_badge.setStyleSheet(f"""
+            background: {Theme.PRIMARY_COLOR if level == 'master' else '#e2e8f0'};
+            color: {'white' if level == 'master' else '#475569'};
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+        """)
+        title_layout.addWidget(level_badge)
+
+        header_layout.addWidget(title_widget)
+        header_layout.addStretch()
+
+        layout.addWidget(header)
+
+        # === STATISTIQUES ===
+        stats_container = QWidget()
+        stats_container.setStyleSheet("background: transparent;")
+        stats_layout = QHBoxLayout(stats_container)
+        stats_layout.setSpacing(15)
+
+        # Carte Occurrences
+        occ_card = QFrame()
+        occ_card.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ffffff, stop:1 #f0f9ff);
+                border: 2px solid {Theme.PRIMARY_COLOR};
+                border-radius: 12px;
+                padding: 15px;
+            }}
+        """)
+        occ_layout = QVBoxLayout(occ_card)
+        occ_layout.setSpacing(5)
+
+        occ_value = QLabel(str(count))
+        occ_value.setFont(QFont("Segoe UI", 28, QFont.Bold))
+        occ_value.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; background: transparent;")
+        occ_value.setAlignment(Qt.AlignCenter)
+        occ_layout.addWidget(occ_value)
+
+        occ_label = QLabel("Occurrences")
+        occ_label.setFont(QFont("Segoe UI", 10))
+        occ_label.setStyleSheet("color: #64748b; background: transparent;")
+        occ_label.setAlignment(Qt.AlignCenter)
+        occ_layout.addWidget(occ_label)
+
+        stats_layout.addWidget(occ_card)
+
+        # Carte Pourcentage
+        pct_card = QFrame()
+        pct_card.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ffffff, stop:1 #fef3f2);
+                border: 2px solid {Theme.SECONDARY_COLOR};
+                border-radius: 12px;
+                padding: 15px;
+            }}
+        """)
+        pct_layout = QVBoxLayout(pct_card)
+        pct_layout.setSpacing(5)
+
+        pct_value = QLabel(f"{percentage:.1f}%")
+        pct_value.setFont(QFont("Segoe UI", 28, QFont.Bold))
+        pct_value.setStyleSheet(f"color: {Theme.SECONDARY_COLOR}; background: transparent;")
+        pct_value.setAlignment(Qt.AlignCenter)
+        pct_layout.addWidget(pct_value)
+
+        pct_label = QLabel("Du total")
+        pct_label.setFont(QFont("Segoe UI", 10))
+        pct_label.setStyleSheet("color: #64748b; background: transparent;")
+        pct_label.setAlignment(Qt.AlignCenter)
+        pct_layout.addWidget(pct_label)
+
+        stats_layout.addWidget(pct_card)
+
+        layout.addWidget(stats_container)
+
+        # === INFORMATIONS SUPPLÉMENTAIRES ===
+        if data:
+            clusters = data.get('taxonomy_clusters', [])
+            if clusters:
+                info_container = QFrame()
+                info_container.setStyleSheet("""
+                    QFrame {
+                        background: #f8fafc;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 8px;
+                        padding: 12px;
+                    }
+                """)
+                info_layout = QHBoxLayout(info_container)
+                info_layout.setSpacing(10)
+
+                cluster_icon = QLabel("🗂️")
+                cluster_icon.setStyleSheet("font-size: 20px; background: transparent;")
+                info_layout.addWidget(cluster_icon)
+
+                cluster_text = QLabel(f"<b>{len(clusters)}</b> cluster(s) taxonomique(s)")
+                cluster_text.setFont(QFont("Segoe UI", 10))
+                cluster_text.setStyleSheet("color: #475569; background: transparent;")
+                info_layout.addWidget(cluster_text)
+                info_layout.addStretch()
+
+                layout.addWidget(info_container)
+
+        # === BOUTON FERMER MODERNE ===
+        layout.addSpacing(10)
+
+        close_btn = QPushButton("Fermer")
+        close_btn.setMinimumHeight(45)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 24px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+            QPushButton:pressed {{
+                background: {Theme.PRIMARY_COLOR};
+                padding: 13px 23px 11px 25px;
+            }}
+        """)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.exec_()
+    
+    def clear(self):
+        """Efface le chart et réinitialise"""
+        self.combinations_data = []
+        self._update_chart()
+
+class CombinationsPopup(QtWidgets.QDialog):
+    """Popup pour afficher les combinaisons à générer"""
+    
+    def __init__(self, combinations, parent=None):
+        super().__init__(parent)
+        self.combinations = combinations
+        self.completed = [False] * len(combinations)
+        self._init_ui()
+        
+    def _init_ui(self):
+        self.setWindowTitle("📋 Combinaisons à Générer")
+        self.setMinimumSize(700, 600)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        
+        # Titre
+        title = QLabel(f"<h2>🎯 {len(self.combinations)} Combinaison(s) à Générer</h2>")
+        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
+        layout.addWidget(title)
+        
+        # Zone scrollable
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        
+        content = QWidget()
+        self.content_layout = QVBoxLayout(content)
+        self.content_layout.setSpacing(10)
+        
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
+        
+        # Bouton Fermer
+        close_btn = GradientButton("Fermer")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+        
+        # Remplir avec les combinaisons
+        self._populate_combinations()
+        
+    def _populate_combinations(self):
+        """Remplit la liste des combinaisons"""
+        for i, combo in enumerate(self.combinations):
+            combo_frame = QFrame()
+            combo_frame.setFrameShape(QFrame.StyledPanel)
+            combo_frame.setStyleSheet("""
+                QFrame {
+                    background: white;
+                    border: 2px solid #E0E0E0;
+                    border-radius: 8px;
+                    padding: 15px;
+                }
+            """)
+            
+            combo_layout = QVBoxLayout(combo_frame)
+            
+            # En-tête : Numéro + Master + Samples
+            header_layout = QHBoxLayout()
+            
+            num_label = QLabel(f"<b>#{i+1}</b>")
+            num_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+            num_label.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
+            header_layout.addWidget(num_label)
+            
+            # Master
+            master_name = combo.get('master', 'N/A')
+            master_label = QLabel(f"Master: <b>{master_name}</b>")
+            master_label.setStyleSheet("font-size: 11pt;")
+            header_layout.addWidget(master_label)
+            
+            header_layout.addStretch()
+            
+            # Infos
+            nb_contexts = len(combo.get('contexts', []))
+            nb_samples = combo.get('nb_samples', 1)
+            
+            info_label = QLabel(f"<b>{nb_contexts}</b> contexte(s) • <b>{nb_samples}</b> sample(s)")
+            info_label.setStyleSheet(f"color: {Theme.SECONDARY_COLOR}; font-size: 10pt;")
+            header_layout.addWidget(info_label)
+            
+            combo_layout.addLayout(header_layout)
+            
+            # Séparateur
+            separator = QFrame()
+            separator.setFrameShape(QFrame.HLine)
+            separator.setStyleSheet("background-color: #E0E0E0; max-height: 1px;")
+            combo_layout.addWidget(separator)
+            
+            # Liste des contextes
+            contexts = combo.get('contexts', [])
+            for ctx_idx, ctx in enumerate(contexts):
+                ctx_layout = QHBoxLayout()
+                
+                # Niveau
+                level_label = QLabel(f"<b>{ctx.get('level', 'unknown').upper()}</b>")
+                level_label.setStyleSheet("color: #666; font-size: 9pt;")
+                level_label.setFixedWidth(80)
+                ctx_layout.addWidget(level_label)
+                
+                # Display
+                display_label = QLabel(ctx.get('display', 'N/A'))
+                display_label.setStyleSheet("font-size: 10pt;")
+                display_label.setWordWrap(True)
+                ctx_layout.addWidget(display_label)
+                
+                combo_layout.addLayout(ctx_layout)
+            
+            self.content_layout.addWidget(combo_frame)
+        
+        self.content_layout.addStretch()
+    
+    def mark_completed(self, index):
+        """Marque une combinaison comme complétée (appelé pendant la génération)"""
+        if 0 <= index < len(self.completed):
+            self.completed[index] = True
+
 
 class DatasetGenerationPanel(QWidget):
     """Panel principal de génération de datasets - Layout 3 colonnes"""
@@ -359,7 +1053,6 @@ class DatasetGenerationPanel(QWidget):
         self.conductor = None
         
         # Initialize database and project_manager
-        # Use passed instances or create new ones
         if database is not None:
             self.database = database
             self.db = database
@@ -388,8 +1081,14 @@ class DatasetGenerationPanel(QWidget):
         print("🚀 INITIALISATION DatasetGenerationPanel")
         print("=" * 60)
         logger.info("🚀 DatasetGenerationPanel initialisé")
-        
-        self._init_ui()
+
+        self.primary_color = Theme.PRIMARY_COLOR
+        self.secondary_color = Theme.SECONDARY_COLOR
+        self.base_height = 800
+
+        # ✅ CORRECTION ICI : D'abord l'UI, ENSUITE le bouton overlay
+        self._init_ui()            # Crée self.snippets_container
+        self._init_overlay_button() # Utilise self.snippets_container
         
         print("✅ UI initialisée")
         logger.info("✅ UI initialisée")
@@ -399,62 +1098,127 @@ class DatasetGenerationPanel(QWidget):
             self._load_projects()
         
     def _init_ui(self):
-        """Initialise l'interface utilisateur - 3 colonnes"""
+        """Initialise l'interface utilisateur - 3 colonnes RESPONSIVE + Panel Latéral"""
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(15)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Zone de scroll principale
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Container principal (Scroll + Panel)
+        h_container = QWidget()
+        h_layout = QHBoxLayout(h_container)
+        h_layout.setContentsMargins(0, 0, 0, 0)
+        h_layout.setSpacing(0)
+
+        # ✅ UTILISER UN QSPLITTER POUR LES 3 COLONNES RESPONSIVE
+        from PyQt5.QtWidgets import QSplitter
+
+        self.columns_splitter = QSplitter(Qt.Horizontal)
+        self.columns_splitter.setHandleWidth(1)
+        self.columns_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background: #E0E0E0;
+            }
+            QSplitter::handle:hover {
+                background: #4A90E2;
+            }
+        """)
+
+        # Zone scrollable pour chaque colonne
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+
         content = QWidget()
         content_layout = QHBoxLayout(content)
-        content_layout.setSpacing(15)
-        
-        # === COLONNE GAUCHE (25%) - Projet et Configuration ===
+        content_layout.setSpacing(0)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
+        # === COLONNE GAUCHE (Responsive) ===
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
         left_column = self._create_left_column()
-        content_layout.addWidget(left_column, 1)
-        
-        # === COLONNE CENTRALE (35%) - Éditeur de Prompt ===
+        left_scroll.setWidget(left_column)
+        self.columns_splitter.addWidget(left_scroll)
+
+        # === COLONNE CENTRALE (Responsive) ===
+        center_scroll = QScrollArea()
+        center_scroll.setWidgetResizable(True)
+        center_scroll.setFrameShape(QFrame.NoFrame)
+        center_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
         center_column = self._create_center_column()
-        content_layout.addWidget(center_column, 2)
-        
-        # === COLONNE DROITE (40%) - Visualiseur de Combinaisons ===
+        center_scroll.setWidget(center_column)
+        self.columns_splitter.addWidget(center_scroll)
+
+        # === COLONNE DROITE (Responsive) ===
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
         right_column = self._create_right_column()
-        content_layout.addWidget(right_column, 2)
-        
-        scroll.setWidget(content)
-        main_layout.addWidget(scroll)
-        
-        # Barre de progression
-        self.progress_bar = GradientProgressBar()
-        self.progress_bar.setVisible(False)
-        main_layout.addWidget(self.progress_bar)
-        
-        # Boutons d'action
+        right_scroll.setWidget(right_column)
+        self.columns_splitter.addWidget(right_scroll)
+
+        # ✅ DÉFINIR LES PROPORTIONS INITIALES (25% - 35% - 40%)
+        total_width = 1200  # Largeur de référence
+        self.columns_splitter.setSizes([
+            int(total_width * 0.25),  # Gauche: 25%
+            int(total_width * 0.35),  # Centre: 35%
+            int(total_width * 0.40)   # Droite: 40%
+        ])
+
+        # ✅ DÉFINIR LES LARGEURS MINIMALES POUR ÉVITER L'ÉCRASEMENT
+        left_scroll.setMinimumWidth(250)
+        center_scroll.setMinimumWidth(300)
+        right_scroll.setMinimumWidth(350)
+
+        h_layout.addWidget(self.columns_splitter)
+
+        # === PANNEAU DE SNIPPETS ===
+        self.snippets_container = QWidget()
+        self.snippets_container.setFixedWidth(0)
+        h_layout.addWidget(self.snippets_container)
+
+        main_layout.addWidget(h_container)
+
+        # ✅ BARRE D'ACTIONS EN BAS (sans progress bar)
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        bottom_layout.setContentsMargins(20, 10, 20, 20)
+
+        # ❌ PROGRESS BAR SUPPRIMÉE D'ICI - Maintenant dans la colonne 1
+
         actions = self._create_actions()
-        main_layout.addWidget(actions)
-        
+        bottom_layout.addWidget(actions)
+
+        main_layout.addWidget(bottom_widget)
+
     def _create_left_column(self):
-        """Crée la colonne gauche - Projet et Configuration"""
+        """Crée la colonne gauche - Projet, Configuration RESPONSIVE + Progress Bar"""
         column = QWidget()
         layout = QVBoxLayout(column)
         layout.setSpacing(15)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
+        layout.setContentsMargins(15, 15, 15, 15)  # ✅ Padding uniforme
+
         # Section Projet
         project_section = self._create_project_section()
         layout.addWidget(project_section)
-        
+
         # Section Configuration
         config_section = self._create_config_section()
         layout.addWidget(config_section)
-        
+
         # INFO: Affichage des infos du batch sélectionné
         self.batch_info_label = QLabel()
         self.batch_info_label.setWordWrap(True)
+        self.batch_info_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred
+        )
         self.batch_info_label.setStyleSheet("""
             QLabel {
                 background: #F0F8FF;
@@ -467,28 +1231,38 @@ class DatasetGenerationPanel(QWidget):
         """)
         self.batch_info_label.setVisible(False)
         layout.addWidget(self.batch_info_label)
-        
+
         layout.addStretch()
-        
+
+        # ✅ BARRE DE PROGRESSION EN BAS DE LA COLONNE 1
+        self.progress_bar = GradientProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setMinimumHeight(30)
+        self.progress_bar.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed
+        )
+        layout.addWidget(self.progress_bar)
+
         return column
         
     def _create_center_column(self):
-        """Crée la colonne centrale - Éditeur de Prompt (Global + Local)"""
+        """Crée la colonne centrale - Éditeur de Prompt RESPONSIVE + Bouton Combinaisons"""
         column = QWidget()
         layout = QVBoxLayout(column)
         layout.setSpacing(15)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(15, 15, 15, 15)  # ✅ Padding uniforme
 
-        # === CONTEXTE GLOBAL (Collapsible avec chevron) ===
+        # === CONTEXTE GLOBAL (Collapsible) ===
         self.global_section = CollapsibleSection("Contexte Global du Projet")
 
-        # Info
         global_info = QLabel("ℹ️ Contexte partagé pour tous les batches du projet")
         global_info.setFont(QFont("Segoe UI", 8))
         global_info.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        global_info.setWordWrap(True)  # ✅ Responsive text
         self.global_section.add_widget(global_info)
 
-        # Éditeur contexte global
+        # ✅ Éditeur contexte global - Hauteur adaptative
         self.global_context_editor = QTextEdit()
         self.global_context_editor.setPlaceholderText(
             "Définissez ici le contexte général du projet...\n\n"
@@ -498,8 +1272,12 @@ class DatasetGenerationPanel(QWidget):
             "- Contraintes générales\n"
             "- Style de sortie attendu"
         )
-        self.global_context_editor.setMinimumHeight(120)
-        self.global_context_editor.setMaximumHeight(180)
+        self.global_context_editor.setMinimumHeight(100)  # ✅ Min height
+        self.global_context_editor.setMaximumHeight(200)  # ✅ Max height
+        self.global_context_editor.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred
+        )
         self.global_context_editor.setStyleSheet(f"""
             QTextEdit {{
                 border: 2px solid #E0E0E0;
@@ -517,12 +1295,12 @@ class DatasetGenerationPanel(QWidget):
 
         layout.addWidget(self.global_section)
 
-        # === CONTEXTE LOCAL (Toujours visible - occupe toute la colonne) ===
+        # === CONTEXTE LOCAL ===
         local_header = QWidget()
         local_header_layout = QHBoxLayout(local_header)
         local_header_layout.setContentsMargins(0, 0, 0, 0)
 
-        local_title = QLabel("✍️ Prompt Local (Batch)")
+        local_title = QLabel("✏️ Prompt Local (Batch)")
         local_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         local_title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
         local_header_layout.addWidget(local_title)
@@ -530,18 +1308,25 @@ class DatasetGenerationPanel(QWidget):
         local_info = QLabel("Instructions spécifiques pour ce batch")
         local_info.setFont(QFont("Segoe UI", 8))
         local_info.setStyleSheet("color: #666; font-style: italic;")
+        local_info.setWordWrap(True)  # ✅ Responsive text
         local_header_layout.addWidget(local_info)
         local_header_layout.addStretch()
 
         layout.addWidget(local_header)
 
-        # Éditeur contexte local - OCCUPE TOUTE LA COLONNE
+        # ✅ Éditeur contexte local - Hauteur adaptative et responsive
         self.prompt_editor = QTextEdit()
         self.prompt_editor.setPlaceholderText(
             "Exemple:\n\n"
             "Générez des exemples d'entraînement basés sur les typologies suivantes:\n"
             "{typologie}\n\n"
             "Format attendu: {'input': '...', 'output': '...'}"
+        )
+        self.prompt_editor.setMinimumHeight(200)  # ✅ Min height
+        self.prompt_editor.setMaximumHeight(500)  # ✅ Max height augmentée
+        self.prompt_editor.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding
         )
         self.prompt_editor.setStyleSheet(f"""
             QTextEdit {{
@@ -556,34 +1341,27 @@ class DatasetGenerationPanel(QWidget):
                 border: 2px solid {Theme.PRIMARY_COLOR};
             }}
         """)
-        layout.addWidget(self.prompt_editor, 1)  # stretch factor = 1 pour occuper tout l'espace
+        layout.addWidget(self.prompt_editor, 1)  # ✅ Stretch pour utiliser l'espace
+
+        # ✅ BOUTON "VOIR LES COMBINAISONS" EN BAS DE LA COLONNE 2
+        self.view_combinations_btn = GradientButton("📋 Voir les Combinaisons")
+        self.view_combinations_btn.clicked.connect(self._show_combinations_popup)
+        self.view_combinations_btn.setEnabled(False)  # Désactivé par défaut
+        self.view_combinations_btn.setMinimumHeight(45)  # Hauteur fixe
+        layout.addWidget(self.view_combinations_btn)
 
         return column
         
     def _create_right_column(self):
-        """Crée la colonne droite - Visualiseur de Combinaisons"""
+        """Crée la colonne droite - Chart UNIQUEMENT (bouton déplacé en colonne 2)"""
         column = QWidget()
         layout = QVBoxLayout(column)
-        layout.setSpacing(10)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Titre avec compteur
-        title_layout = QHBoxLayout()
-        title = QLabel("Combinaisons à Générer")
-        title.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
-        title_layout.addWidget(title)
-        
-        self.combo_count_label = QLabel("(0)")
-        self.combo_count_label.setFont(QFont("Segoe UI", 10))
-        self.combo_count_label.setStyleSheet("color: #666;")
-        title_layout.addWidget(self.combo_count_label)
-        title_layout.addStretch()
-        
-        layout.addLayout(title_layout)
-        
-        # Visualiseur
-        self.visualizer = CombinationVisualizer()
+        layout.setSpacing(15)
+        layout.setContentsMargins(15, 15, 15, 15)  # ✅ Padding uniforme
+
+        # Visualiseur de représentativité (Camembert)
+        self.batch_chart = BatchRepresentativityChart()
+
         viz_container = QFrame()
         viz_container.setFrameShape(QFrame.StyledPanel)
         viz_container.setStyleSheet("""
@@ -593,17 +1371,31 @@ class DatasetGenerationPanel(QWidget):
                 border-radius: 8px;
             }
         """)
+
         viz_layout = QVBoxLayout(viz_container)
-        viz_layout.setContentsMargins(10, 10, 10, 10)
-        viz_layout.addWidget(self.visualizer)
-        
-        layout.addWidget(viz_container, 1)
-        
+        viz_layout.setContentsMargins(15, 15, 15, 15)
+
+        # ✅ Chart avec hauteur min/max
+        self.batch_chart.setMinimumHeight(300)
+        self.batch_chart.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding
+        )
+        viz_layout.addWidget(self.batch_chart)
+
+        layout.addWidget(viz_container, 1)  # ✅ Stretch pour utiliser l'espace
+
+        # ❌ BOUTON SUPPRIMÉ D'ICI - Maintenant dans la colonne 2
+
         return column
 
     def _create_project_section(self):
-        """Crée la section de sélection du projet"""
+        """Crée la section de sélection du projet - RESPONSIVE"""
         widget = QWidget()
+        widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred
+        )
         layout = QVBoxLayout(widget)
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -611,6 +1403,10 @@ class DatasetGenerationPanel(QWidget):
         # Groupe encadré
         group = QGroupBox("Sélection du Projet")
         group.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        group.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred
+        )
         group.setStyleSheet(f"""
             QGroupBox {{
                 border: 2px solid #E0E0E0;
@@ -629,35 +1425,50 @@ class DatasetGenerationPanel(QWidget):
 
         group_layout = QVBoxLayout(group)
 
-        # ✅ 1. COMBO PROJET
+        # ✅ 1. COMBO PROJET - RESPONSIVE
         project_label = QLabel("Projet:")
         project_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        project_label.setWordWrap(True)
         group_layout.addWidget(project_label)
 
         self.project_combo = QComboBox()
         self.project_combo.setMinimumHeight(40)
+        self.project_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed
+        )
         self.project_combo.currentTextChanged.connect(self._on_project_changed)
         self._apply_combo_style(self.project_combo)
         group_layout.addWidget(self.project_combo)
 
-        # ✅ 2. COMBO FAMILLE DE BATCH (NOUVEAU)
+        # ✅ 2. COMBO FAMILLE DE BATCH - RESPONSIVE
         family_label = QLabel("Famille de batch:")
         family_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        family_label.setWordWrap(True)
         group_layout.addWidget(family_label)
 
         self.batch_family_combo = QComboBox()
         self.batch_family_combo.setMinimumHeight(40)
+        self.batch_family_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed
+        )
         self.batch_family_combo.currentTextChanged.connect(self._on_batch_family_changed)
         self._apply_combo_style(self.batch_family_combo)
         group_layout.addWidget(self.batch_family_combo)
 
-        # ✅ 3. COMBO BATCH
+        # ✅ 3. COMBO BATCH - RESPONSIVE
         batch_label = QLabel("Batch:")
         batch_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        batch_label.setWordWrap(True)
         group_layout.addWidget(batch_label)
 
         self.batch_combo = QComboBox()
         self.batch_combo.setMinimumHeight(40)
+        self.batch_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed
+        )
         self.batch_combo.currentIndexChanged.connect(self._on_batch_changed)
         self._apply_combo_style(self.batch_combo)
         group_layout.addWidget(self.batch_combo)
@@ -667,8 +1478,12 @@ class DatasetGenerationPanel(QWidget):
         return widget
         
     def _create_config_section(self):
-        """Crée la section de configuration"""
+        """Crée la section de configuration - RESPONSIVE"""
         widget = QWidget()
+        widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred
+        )
         layout = QVBoxLayout(widget)
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -676,6 +1491,10 @@ class DatasetGenerationPanel(QWidget):
         # Groupe encadré
         group = QGroupBox("Configuration")
         group.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        group.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred
+        )
         group.setStyleSheet(f"""
             QGroupBox {{
                 border: 2px solid #E0E0E0;
@@ -694,35 +1513,46 @@ class DatasetGenerationPanel(QWidget):
 
         group_layout = QVBoxLayout(group)
 
-        # ⭐ MODIFICATION: Nombre de batches au lieu de samples
+        # ✅ LINEEDIT NOMBRE DE BATCHES - RESPONSIVE
         batches_label = QLabel("Nombre de batches à traiter:")
         batches_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        batches_label.setWordWrap(True)
         group_layout.addWidget(batches_label)
 
         self.batches_input = QtWidgets.QLineEdit()
         self.batches_input.setPlaceholderText("Nombre de batches...")
-        self.batches_input.setText("1")  # Valeur par défaut
+        self.batches_input.setText("1")
         self.batches_input.setMinimumHeight(40)
+        self.batches_input.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed
+        )
         self.batches_input.setValidator(QtGui.QIntValidator(1, 100))
         self.batches_input.setAlignment(Qt.AlignCenter)
         self._apply_lineedit_style(self.batches_input)
         group_layout.addWidget(self.batches_input)
 
-        # Info: les samples viennent de la BDD
+        # Info
         info_label = QLabel("ℹ️ Le nombre de samples par combinaison\nest défini dans le batch")
         info_label.setFont(QFont("Segoe UI", 8))
         info_label.setStyleSheet("color: #666; font-style: italic;")
         info_label.setAlignment(Qt.AlignCenter)
+        info_label.setWordWrap(True)
         group_layout.addWidget(info_label)
 
-        # Format de sortie
+        # ✅ COMBO FORMAT - RESPONSIVE
         format_label = QLabel("Format de sortie:")
         format_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        format_label.setWordWrap(True)
         group_layout.addWidget(format_label)
 
         self.format_combo = QComboBox()
         self.format_combo.addItems(["JSON", "CSV", "JSONL", "Parquet"])
         self.format_combo.setMinimumHeight(40)
+        self.format_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed
+        )
         self._apply_combo_style(self.format_combo)
         group_layout.addWidget(self.format_combo)
 
@@ -886,8 +1716,6 @@ class DatasetGenerationPanel(QWidget):
             self.current_batch_number = None
             self.current_batch_data = None
             self.combinations = []
-            self.visualizer.set_combinations([])
-            self.combo_count_label.setText("(0)")
             self.batch_family_combo.clear()
             self.batch_family_combo.addItem("-- Aucun projet sélectionné --", None)
             self.batch_combo.clear()
@@ -982,9 +1810,8 @@ class DatasetGenerationPanel(QWidget):
             self.current_batch_data = None
             self.current_master_typologie = None
             self.combinations = []
-            self.visualizer.set_combinations([])
-            self.combo_count_label.setText("(0)")
             self.batch_info_label.setVisible(False)
+            self.batch_chart.clear()
             logger.info("Reset des combinaisons")
             return
 
@@ -1013,8 +1840,6 @@ class DatasetGenerationPanel(QWidget):
             if not batch_data:
                 logger.error(f"❌ Le champ 'data' est vide")
                 self.combinations = []
-                self.visualizer.set_combinations([])
-                self.combo_count_label.setText("(0)")
                 return
 
             # ✅ EXTRACTION DE LA TYPOLOGIE MASTER COMPLÈTE
@@ -1063,8 +1888,6 @@ class DatasetGenerationPanel(QWidget):
             if not combinations:
                 logger.warning(f"⚠️ Aucune combinaison")
                 self.combinations = []
-                self.visualizer.set_combinations([])
-                self.combo_count_label.setText("(0)")
                 return
 
             logger.info(f"\n📊 {len(combinations)} combinaison(s) trouvée(s)")
@@ -1137,8 +1960,12 @@ class DatasetGenerationPanel(QWidget):
 
             # Mettre à jour l'affichage
             self.combinations = combinations
-            self.visualizer.set_combinations(display_combos)
-            self.combo_count_label.setText(f"({len(combinations)})")
+            self.view_combinations_btn.setEnabled(len(self.combinations) > 0)
+
+            # ✅ METTRE À JOUR LE CHART AVEC LES VRAIES DONNÉES
+            logger.info(f"\n📊 Mise à jour du chart de représentativité")
+            self.batch_chart.set_batch_combinations(display_combos)
+            logger.info(f"✅ Chart mis à jour avec {len(display_combos)} combinaisons")
 
             logger.info(f"\n✅ Batch {batch_number} chargé:")
             logger.info(f"  • Master: {master_name if master_typologie else 'N/A'}")
@@ -1165,11 +1992,11 @@ class DatasetGenerationPanel(QWidget):
         return count
 
     def _on_generate(self):
-        """Lance la génération du dataset - VERSION AVEC WORKER"""
+        """Lance la génération du dataset - VERSION AVEC WORKER + LOGGING"""
         logger.info("\n" + "=" * 80)
         logger.info("🎯 GÉNÉRATION DATASET - DÉMARRAGE")
         logger.info("=" * 80)
-
+    
         if not self.current_project or not self.combinations:
             QMessageBox.warning(
                 self, 
@@ -1177,7 +2004,7 @@ class DatasetGenerationPanel(QWidget):
                 "Veuillez d'abord sélectionner un projet et un batch"
             )
             return
-
+    
         # ✅ VÉRIFICATION TYPOLOGIE MASTER
         if not self.current_master_typologie:
             logger.error("❌ Pas de typologie master chargée!")
@@ -1188,7 +2015,7 @@ class DatasetGenerationPanel(QWidget):
                 "Impossible de générer le dataset."
             )
             return
-
+    
         # ✅ RÉCUPÉRATION DU NOMBRE DE BATCHES À TRAITER
         try:
             num_batches_to_process = int(self.batches_input.text())
@@ -1202,15 +2029,15 @@ class DatasetGenerationPanel(QWidget):
                 "Veuillez entrer un nombre entier valide (minimum 1)"
             )
             return
-
+    
         # ⭐ CALCUL DU TOTAL DE SAMPLES
         total_samples_per_batch = sum(combo.get('nb_samples', 0) for combo in self.combinations)
         total_samples_all_batches = total_samples_per_batch * num_batches_to_process
-
+    
         # ✅ RÉCUPÉRATION DES PROMPTS
         global_context = self.global_context_editor.toPlainText().strip()
         local_prompt = self.prompt_editor.toPlainText().strip()
-
+    
         if not local_prompt:
             QMessageBox.warning(
                 self,
@@ -1218,7 +2045,7 @@ class DatasetGenerationPanel(QWidget):
                 "Veuillez définir au moins un prompt local de génération"
             )
             return
-
+    
         # Combiner les contextes
         if global_context:
             combined_prompt = f"{global_context}\n\n---\n\n{local_prompt}"
@@ -1226,10 +2053,10 @@ class DatasetGenerationPanel(QWidget):
         else:
             combined_prompt = local_prompt
             logger.info("ℹ️ Utilisation du contexte local uniquement")
-
+    
         # 📦 PRÉPARER LA CONFIGURATION POUR LE WORKER
         batch_data = self.current_batch_data.get('data', {})
-
+    
         generation_config = {
             "metadata": {
                 "project_name": self.current_project_name,
@@ -1253,24 +2080,24 @@ class DatasetGenerationPanel(QWidget):
             },
             "combinations": []
         }
-
+    
         # 📋 CONSTRUIRE LES COMBINAISONS COMPLÈTES
         for i, combo in enumerate(self.combinations):
             contexts = combo.get('contexts', [])
             nb_samples = combo.get('nb_samples', 1)
-
+    
             # ✅ DEBUG : Vérifier ce qu'on envoie
             logger.debug(f"\n🔍 DEBUG Combination {i+1} preparation:")
             logger.debug(f"   Master typologie keys: {self.current_master_typologie.keys()}")
             logger.debug(f"   Master has taxonomy_clusters: {bool(self.current_master_typologie.get('taxonomy_clusters'))}")
-
+    
             if self.current_master_typologie.get('taxonomy_clusters'):
                 clusters = self.current_master_typologie['taxonomy_clusters']
                 logger.debug(f"   Master clusters count: {len(clusters)}")
                 if clusters:
                     logger.debug(f"   First cluster keys: {clusters[0].keys()}")
                     logger.debug(f"   First cluster name: {clusters[0].get('cluster_name', 'NO NAME')}")
-
+    
             combo_export = {
                 "combination_index": i + 1,
                 "nb_samples": nb_samples,
@@ -1280,23 +2107,26 @@ class DatasetGenerationPanel(QWidget):
                 },
                 "contexts": []
             }
-
+    
             for ctx_idx, ctx in enumerate(contexts):
                 ctx_data = ctx.get('data', {})
-
+    
                 # ✅ DEBUG : Vérifier chaque contexte
                 logger.debug(f"   Context {ctx_idx+1} data keys: {ctx_data.keys() if ctx_data else 'EMPTY'}")
                 logger.debug(f"   Context {ctx_idx+1} has taxonomy_clusters: {bool(ctx_data.get('taxonomy_clusters'))}")
-
+    
                 context_export = {
                     "level": ctx.get('level', 'unknown'),
                     "display": ctx.get('display', 'N/A'),
                     "full_data": ctx_data  # ✅ Doit contenir taxonomy_clusters
                 }
                 combo_export["contexts"].append(context_export)
-
+    
             generation_config["combinations"].append(combo_export)
-
+    
+        # 📝 EXPORTER LA CONFIGURATION COMPLÈTE DANS UN FICHIER DE LOG
+        config_filepath = self._export_generation_config_to_file(generation_config)
+    
         # ✅ CONFIRMATION
         msg = f"<b>🚀 Prêt à générer le dataset</b><br><br>"
         msg += f"<b>Configuration :</b><br>"
@@ -1307,9 +2137,11 @@ class DatasetGenerationPanel(QWidget):
         msg += f"• Batches à traiter : {num_batches_to_process}<br>"
         msg += f"• Samples par batch : {total_samples_per_batch}<br>"
         msg += f"• <b>Total samples : {total_samples_all_batches}</b><br>"
-        msg += f"• Format : {self.format_combo.currentText()}<br><br>"
-        msg += f"<b>Lancer la génération ?</b>"
-
+        msg += f"• Format : {self.format_combo.currentText()}<br>"
+        if config_filepath:
+            msg += f"<br>📝 <b>Config exportée :</b><br><small>{config_filepath}</small><br>"
+        msg += f"<br><b>Lancer la génération ?</b>"
+    
         reply = QMessageBox.question(
             self,
             "🚀 Confirmer la génération",
@@ -1317,17 +2149,17 @@ class DatasetGenerationPanel(QWidget):
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
         )
-
+    
         if reply != QMessageBox.Yes:
             logger.info("❌ Génération annulée par l'utilisateur")
             return
-
+    
         # 🎬 LANCER LE WORKER
         try:
             from ui.widgets.workers.gemini_dataset_worker import GeminiDatasetWorker
-
+    
             self.worker = GeminiDatasetWorker(generation_config)
-
+    
             # Connecter les signaux
             self.worker.progress_updated.connect(self._on_progress_updated)
             self.worker.combination_completed.connect(self._on_combination_completed)
@@ -1335,10 +2167,10 @@ class DatasetGenerationPanel(QWidget):
             self.worker.generation_completed.connect(self._on_generation_completed)
             self.worker.generation_failed.connect(self._on_generation_failed)
             self.worker.log_message.connect(self._on_log_message)
-
+    
             # Démarrer
             self.worker.start()
-
+    
             # UI : mode génération
             self.generate_btn.setEnabled(False)
             self.generate_btn.setText("⏳ Génération en cours...")
@@ -1346,9 +2178,9 @@ class DatasetGenerationPanel(QWidget):
             self.progress_bar.setVisible(True)
             self.progress_bar.setValue(0)
             self.progress_bar.setMaximum(total_samples_all_batches)
-
+    
             logger.info("✅ Worker lancé avec succès")
-
+    
         except Exception as e:
             logger.error(f"❌ Erreur lors du lancement: {str(e)}")
             import traceback
@@ -1410,7 +2242,7 @@ class DatasetGenerationPanel(QWidget):
             self.batch_family_combo.addItem("-- Erreur de chargement --", None)
 
     def _on_batch_family_changed(self, family_name):
-        """Gère le changement de famille de batch"""
+        """Gère le changement de famille de batch - VERSION AVEC CHART UPDATE"""
         family = self.batch_family_combo.currentData()
         logger.info(f"🔄 Changement de famille: {family_name} (data: {family})")
 
@@ -1418,18 +2250,89 @@ class DatasetGenerationPanel(QWidget):
         self.current_batch_number = None
         self.current_batch_data = None
         self.combinations = []
-        self.visualizer.set_combinations([])
-        self.combo_count_label.setText("(0)")
+        self.view_combinations_btn.setEnabled(False)
         self.batch_info_label.setVisible(False)
 
         if family is None:
             self.batch_combo.clear()
             self.batch_combo.addItem("-- Sélectionner une famille --", None)
+            self.batch_chart.set_batch_family_data([])  # ✅ Vider le chart
             logger.info("Reset des batches")
             return
 
         # Charger les batches de cette famille
         self._load_batches_by_family(family)
+
+        # ✅ METTRE À JOUR LE CHART DE REPRÉSENTATIVITÉ
+        try:
+            all_batches = self.database.get_all_batches(self.current_project_name)
+            batches_in_family = [b for b in all_batches if b.get('data', {}).get('batch_family', '') == family]
+
+            # Préparer les données pour le chart
+            chart_data = []
+            for batch in batches_in_family:
+                batch_num = batch.get('batch_number', 0)
+                batch_data_content = batch.get('data', {})
+                batch_name = batch_data_content.get('batch_name', f'Batch {batch_num}')
+                combinations = batch_data_content.get('combinations', [])
+                total_samples = sum(c.get('nb_samples', 0) for c in combinations)
+
+                chart_data.append({
+                    'batch_number': batch_num,
+                    'batch_name': batch_name,
+                    'batch_family': family,
+                    'combinations_count': len(combinations),
+                    'total_samples': total_samples
+                })
+
+            self.batch_chart.set_batch_family_data(chart_data)
+            logger.info(f"✅ Chart mis à jour avec {len(chart_data)} batches")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur mise à jour chart: {str(e)}")
+
+    def _show_combinations_popup(self):
+        """Affiche la popup avec les combinaisons à générer"""
+        if not self.combinations:
+            QMessageBox.warning(
+                self,
+                "Aucune combinaison",
+                "Aucune combinaison à afficher.\nVeuillez d'abord sélectionner un batch."
+            )
+            return
+        
+        # Construire les données d'affichage
+        display_combos = []
+        batch_data = self.current_batch_data.get('data', {})
+        master_typologie = batch_data.get('master_typologie', {})
+        master_name = master_typologie.get('name', 'N/A') if master_typologie else 'N/A'
+        
+        for i, combo in enumerate(self.combinations):
+            contexts = combo.get('contexts', [])
+            nb_samples = combo.get('nb_samples', 1)
+            
+            display_combo = {
+                'master': master_name,
+                'contexts': [],
+                'nb_samples': nb_samples
+            }
+            
+            for ctx in contexts:
+                display_combo['contexts'].append({
+                    'level': ctx.get('level', 'unknown'),
+                    'display': ctx.get('display', 'N/A')
+                })
+            
+            display_combos.append(display_combo)
+        
+        # Créer et afficher la popup
+        popup = CombinationsPopup(display_combos, self)
+        
+        # Si on a un worker en cours, connecter les signaux pour mettre à jour
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.combination_completed.connect(popup.mark_completed)
+        
+        popup.exec_()
 
     def _load_batches_by_family(self, family):
         """Charge les batches d'une famille spécifique"""
@@ -1499,7 +2402,6 @@ class DatasetGenerationPanel(QWidget):
 
     def _on_combination_completed(self, combo_idx: int, info: dict):
         """Marque une combinaison comme complétée"""
-        self.visualizer.mark_completed(combo_idx)
         samples_generated = info.get('samples_generated', 0)
         logger.info(f"✅ Combinaison {combo_idx + 1} complétée: {samples_generated} samples")
 
@@ -1523,6 +2425,15 @@ class DatasetGenerationPanel(QWidget):
         self.generate_btn.setText("Générer le Dataset")
         self.export_btn.setEnabled(True)
         self.progress_bar.setValue(self.progress_bar.maximum())
+
+        self._add_to_history(
+            self.current_project_name, 
+            self.current_batch_number, 
+            len(results)
+        )
+
+        if self.snippets_panel.width() == 0:
+            self._toggle_snippets_panel()
 
         # Message de succès
         QMessageBox.information(
@@ -1802,3 +2713,347 @@ class DatasetGenerationPanel(QWidget):
                 "Le module 'pandas' est requis pour exporter en Parquet.\n"
                 "Installez-le avec: pip install pandas pyarrow"
             )
+        
+    def resizeEvent(self, event):
+        """Repositionne le bouton toggle et gère le responsive"""
+        super().resizeEvent(event)
+
+        # ✅ Repositionner le bouton toggle snippets
+        if hasattr(self, 'toggle_snippets_button'):
+            self.update_button_position()
+
+        # ✅ Ajuster la hauteur du bouton toggle selon la fenêtre
+        if hasattr(self, 'toggle_snippets_button'):
+            button_height = min(140, int(self.height() * 0.15))
+            self.toggle_snippets_button.setMaximumHeight(button_height)
+
+        # ✅ Gérer les petites largeurs (mobile-like)
+        window_width = self.width()
+
+        if window_width < 800:
+            # Mode compact: ajuster les proportions
+            if hasattr(self, 'columns_splitter'):
+                self.columns_splitter.setSizes([
+                    int(window_width * 0.30),  # Gauche: 30%
+                    int(window_width * 0.35),  # Centre: 35%
+                    int(window_width * 0.35)   # Droite: 35%
+                ])
+        elif window_width < 1200:
+            # Mode moyen
+            if hasattr(self, 'columns_splitter'):
+                self.columns_splitter.setSizes([
+                    int(window_width * 0.27),  # Gauche: 27%
+                    int(window_width * 0.35),  # Centre: 35%
+                    int(window_width * 0.38)   # Droite: 38%
+                ])
+        else:
+            # Mode large: proportions par défaut
+            if hasattr(self, 'columns_splitter'):
+                self.columns_splitter.setSizes([
+                    int(window_width * 0.25),  # Gauche: 25%
+                    int(window_width * 0.35),  # Centre: 35%
+                    int(window_width * 0.40)   # Droite: 40%
+                ])
+
+    def _init_overlay_button(self):
+        """Initialise le bouton chevron et le panneau latéral (Style Snippet)"""
+        
+        # Pour simuler la fonction tr() si elle n'existe pas
+        def tr(text): return {"generated_code": "Historique"}.get(text, text)
+        
+        graph_container = self
+
+        self.toggle_snippets_button = QtWidgets.QWidget(self)
+        button_height = min(140, int(self.height() * 0.15))
+        self.toggle_snippets_button.setMinimumSize(36, 100)
+        self.toggle_snippets_button.setMaximumSize(36, button_height)
+        self.toggle_snippets_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.toggle_snippets_button.setStyleSheet(f"""
+            QWidget {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {self.primary_color}, 
+                    stop:1 {self.secondary_color});
+                border: none;
+                border-radius: 8px;
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 0px;
+            }}
+            QWidget:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {self.secondary_color}, 
+                    stop:1 {self.primary_color});
+            }}
+        """)
+
+        # Layout interne du bouton
+        button_layout = QtWidgets.QVBoxLayout(self.toggle_snippets_button)
+        button_layout.setContentsMargins(0, 12, 0, 12)
+        button_layout.setSpacing(8)
+        button_layout.setAlignment(Qt.AlignCenter)
+
+        # Icône chevron
+        self.chevron_icon_label = QtWidgets.QLabel()
+        self.chevron_icon_label.setAlignment(Qt.AlignCenter)
+        try:
+            self.chevron_icon_label.setPixmap(qta.icon('fa5s.chevron-left', color='white').pixmap(18, 18))
+        except:
+            self.chevron_icon_label.setText("<") # Fallback si qtawesome manque
+
+        button_layout.addWidget(self.chevron_icon_label)
+
+        # Texte vertical "HISTORIQUE"
+        self.toggle_button_text = QtWidgets.QLabel("H\nI\nS\nT\nO\nR\nI\nQ\nU\nE")
+        self.toggle_button_text.setAlignment(Qt.AlignCenter)
+        self.toggle_button_text.setStyleSheet("""
+            QLabel {
+                color: white;
+                font-size: 9px;
+                font-weight: bold;
+                letter-spacing: 1px;
+                background: transparent;
+                border: none;
+            }
+        """)
+        button_layout.addWidget(self.toggle_button_text)
+
+        # Rendre le widget cliquable
+        self.toggle_snippets_button.mousePressEvent = lambda event: self._toggle_snippets_panel()
+
+        # Position initiale (sera mis à jour par resizeEvent)
+        self.toggle_snippets_button.move(self.width() - 40, 80)
+        self.toggle_snippets_button.show()
+
+        # ===== PANNEAU DE SNIPPETS =====
+        # On utilise self.snippets_container créé dans _init_ui comme hôte
+        self.snippets_panel = self.snippets_container
+        self.snippets_panel.setStyleSheet("""
+            QWidget {
+                background-color: rgba(255, 255, 255, 0.97);
+                border-left: 3px solid #D0D0D0;
+                border-radius: 0px;
+            }
+        """)
+
+        snippets_panel_layout = QtWidgets.QVBoxLayout(self.snippets_panel)
+        snippets_panel_layout.setContentsMargins(15, 15, 15, 15)
+        snippets_panel_layout.setSpacing(10)
+
+        # En-tête du panneau
+        snippets_header = QtWidgets.QHBoxLayout()
+        snippets_title = QtWidgets.QLabel(f"💻 Historique")
+        snippets_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333; background-color: transparent; border: none;")
+        snippets_header.addWidget(snippets_title)
+        snippets_header.addStretch()
+
+        # Bouton Historique Global
+        self.global_history_button = QtWidgets.QPushButton()
+        try:
+            self.global_history_button.setIcon(qta.icon('fa5s.history', color='#4CAF50'))
+        except:
+            self.global_history_button.setText("H")
+            
+        self.global_history_button.setToolTip("Voir l'historique")
+        self.global_history_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.global_history_button.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                padding: 6px;
+                min-width: 32px;
+                max-width: 32px;
+                min-height: 32px;
+                max-height: 32px;
+            }
+            QPushButton:hover {
+                background: #f0f0f0;
+                border-radius: 4px;
+            }
+        """)
+        
+        # Menu Historique
+        history_menu = QtWidgets.QMenu(self)
+        view_current_action = QtWidgets.QAction("📜 Historique de la session", self)
+        view_current_action.triggered.connect(self._toggle_global_history)
+        history_menu.addAction(view_current_action)
+        self.global_history_button.setMenu(history_menu)
+        
+        snippets_header.addWidget(self.global_history_button)
+
+        # Badge compteur
+        self.snippets_count_badge = QtWidgets.QLabel("0")
+        self.snippets_count_badge.setStyleSheet(f"""
+            background-color: {self.primary_color};
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        """)
+        snippets_header.addWidget(self.snippets_count_badge)
+
+        snippets_panel_layout.addLayout(snippets_header)
+
+        # Accordéon Historique Global (Contenu)
+        self.global_history_accordion = QtWidgets.QWidget()
+        self.global_history_accordion.setVisible(True) # Toujours visible par défaut pour voir les résultats
+        
+        global_history_layout = QtWidgets.QVBoxLayout(self.global_history_accordion)
+        global_history_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Zone scrollable pour la liste des générations passées
+        self.history_scroll_area = QScrollArea()
+        self.history_scroll_area.setWidgetResizable(True)
+        self.history_scroll_area.setFrameShape(QFrame.NoFrame)
+        self.history_scroll_area.setStyleSheet("background: transparent; border: none;")
+        
+        self.history_content_widget = QWidget()
+        self.history_layout = QVBoxLayout(self.history_content_widget)
+        self.history_layout.setAlignment(Qt.AlignTop)
+        self.history_layout.setSpacing(10)
+        
+        self.history_scroll_area.setWidget(self.history_content_widget)
+        global_history_layout.addWidget(self.history_scroll_area)
+        
+        snippets_panel_layout.addWidget(self.global_history_accordion)
+
+    def _toggle_snippets_panel(self):
+        """Animation d'ouverture/fermeture du panneau latéral"""
+        width = self.snippets_panel.width()
+        target_width = 350 if width == 0 else 0
+        
+        # Changer l'icône du chevron
+        try:
+            icon_name = 'fa5s.chevron-right' if width == 0 else 'fa5s.chevron-left'
+            self.chevron_icon_label.setPixmap(qta.icon(icon_name, color='white').pixmap(18, 18))
+        except:
+            self.chevron_icon_label.setText(">" if width == 0 else "<")
+
+        # Animation du Panel
+        self.anim_panel = QPropertyAnimation(self.snippets_panel, b"minimumWidth")
+        self.anim_panel.setDuration(300)
+        self.anim_panel.setStartValue(width)
+        self.anim_panel.setEndValue(target_width)
+        self.anim_panel.setEasingCurve(QEasingCurve.InOutQuart)
+        
+        # Mettre à jour maximumWidth aussi pour forcer le layout
+        self.anim_panel.valueChanged.connect(lambda v: self.snippets_panel.setMaximumWidth(v))
+        
+        # Repositionner le bouton pendant l'animation
+        self.anim_panel.valueChanged.connect(lambda: self.update_button_position())
+        
+        self.anim_panel.start()
+
+    def update_button_position(self):
+        """Helper pour resizeEvent et animation"""
+        panel_width = self.snippets_panel.width()
+        x_pos = self.width() - panel_width - self.toggle_snippets_button.width()
+        self.toggle_snippets_button.move(x_pos, 80)
+
+    def _open_sessions_history(self):
+        pass # Placeholder
+
+    def _toggle_global_history(self):
+        """Affiche/Masque l'historique"""
+        # Dans cette implémentation simple, on peut juste s'assurer que le panneau est ouvert
+        if self.snippets_panel.width() == 0:
+            self._toggle_snippets_panel()
+
+    def _export_generation_config_to_file(self, generation_config: Dict[str, Any]) -> str:
+        """
+        Exporte la configuration complète de génération dans un fichier JSON
+        Retourne le chemin du fichier créé
+        """
+        try:
+            # Créer le dossier de logs s'il n'existe pas
+            logs_dir = Path("generation_logs")
+            logs_dir.mkdir(exist_ok=True)
+
+            # Nom du fichier avec timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            project_name = generation_config['metadata']['project_name']
+            batch_number = generation_config['metadata']['batch_number']
+            filename = f"generation_config_{project_name}_batch{batch_number}_{timestamp}.json"
+            filepath = logs_dir / filename
+
+            # Préparer les données à exporter (format lisible)
+            export_data = {
+                "export_info": {
+                    "exported_at": datetime.now().isoformat(),
+                    "purpose": "Vérification de la configuration de génération avant envoi à Gemini"
+                },
+                "metadata": generation_config['metadata'],
+                "prompts": generation_config['prompts'],
+                "master_typologie": {
+                    "name": generation_config['master_typologie']['name'],
+                    "full_structure": generation_config['master_typologie']['full_data']
+                },
+                "combinations_details": []
+            }
+
+            # Détailler chaque combinaison
+            for combo in generation_config['combinations']:
+                combo_detail = {
+                    "combination_index": combo['combination_index'],
+                    "nb_samples": combo['nb_samples'],
+                    "master": {
+                        "name": combo['master']['name'],
+                        "taxonomy_clusters": combo['master']['full_data'].get('taxonomy_clusters', [])
+                    },
+                    "contexts": []
+                }
+
+                for ctx in combo['contexts']:
+                    ctx_detail = {
+                        "level": ctx['level'],
+                        "display": ctx['display'],
+                        "taxonomy_clusters": ctx['full_data'].get('taxonomy_clusters', [])
+                    }
+                    combo_detail['contexts'].append(ctx_detail)
+
+                export_data['combinations_details'].append(combo_detail)
+
+            # Sauvegarder le fichier
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"✅ Configuration exportée : {filepath}")
+            return str(filepath)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur export config : {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return ""
+
+    def _add_to_history(self, project, batch, count):
+        """Ajoute une entrée dans l'historique après génération"""
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: 1px solid #E0E0E0;
+                border-radius: 6px;
+                padding: 10px;
+            }
+            QFrame:hover {
+                border-color: #4A90E2;
+                background: #F8FBFF;
+            }
+        """)
+        layout = QVBoxLayout(card)
+        
+        time_str = datetime.now().strftime("%H:%M")
+        
+        title = QLabel(f"<b>{project}</b>")
+        layout.addWidget(title)
+        
+        info = QLabel(f"Batch {batch} • {count} samples\n🕒 {time_str}")
+        info.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(info)
+        
+        # Insérer en haut
+        self.history_layout.insertWidget(0, card)
+        
+        # Mettre à jour le badge
+        current_count = int(self.snippets_count_badge.text())
+        self.snippets_count_badge.setText(str(current_count + 1))
