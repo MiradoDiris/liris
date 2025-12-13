@@ -1641,49 +1641,162 @@ class DatasetGenerationPanel(QWidget):
                 f.write(json.dumps(cleaned, ensure_ascii=False) + '\n')
 
     def _export_csv(self, filepath: str):
-        """Exporte en CSV avec données nettoyées"""
+        """
+        Exporte en CSV avec données nettoyées
+        Format aplati pour CSV : une ligne par combinaison
+        Gère la hiérarchie complète : label_root, label_parent, label_enfant, label_enfant_1, label_enfant_2, ...
+        """
         import csv
 
         if not self.generation_results:
             return
 
-        # ✅ Nettoyer les samples
-        cleaned_samples = [self._clean_sample_for_export(s) for s in self.generation_results]
+        # ✅ DÉTERMINER LE NOMBRE MAXIMUM DE NIVEAUX D'ENFANTS
+        max_enfant_levels = 0
+        for sample in self.generation_results:
+            combinaisons = sample.get('combinaisons', [])
+            for combo in combinaisons:
+                # Chercher les clés label_enfant_N
+                enfant_keys = [k for k in combo.keys() if k.startswith('label_enfant_') and k != 'label_enfant']
+                if enfant_keys:
+                    # Extraire le niveau max (label_enfant_1 -> 1, label_enfant_2 -> 2, etc.)
+                    levels = [int(k.split('_')[-1]) for k in enfant_keys if k.split('_')[-1].isdigit()]
+                    if levels:
+                        max_enfant_levels = max(max_enfant_levels, max(levels))
 
-        # Colonnes fixes dans l'ordre
-        fieldnames = ['sample_id', 'typologie_de_contexte', 'cluster', 'label', 'input', 'output']
+        # Construire les colonnes dynamiquement avec la hiérarchie complète
+        fieldnames = [
+            'sample_id', 'input', 'output',
+            'typologie_de_contexte', 'cluster', 
+            'label',           # Label simple (si pas de hiérarchie)
+            'label_root',      # Niveau 1 : ROOT
+            'label_parent',    # Niveau 2 : PARENT
+            'label_enfant'     # Niveau 3 : ENFANT/CHILD
+        ]
+
+        # Ajouter label_enfant_1, label_enfant_2, ... selon le max trouvé (Niveau 4+)
+        for i in range(1, max_enfant_levels + 1):
+            fieldnames.append(f'label_enfant_{i}')
 
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
 
-            for sample in cleaned_samples:
-                writer.writerow(sample)
+            for sample in self.generation_results:
+                sample_id = sample.get('sample_id')
+                input_text = sample.get('input', '')
+                output_text = sample.get('output', '')
+                combinaisons = sample.get('combinaisons', [])
+
+                # ✅ Une ligne par combinaison
+                if not combinaisons:
+                    # Si pas de combinaisons, écrire une ligne vide
+                    row = {
+                        'sample_id': sample_id,
+                        'input': input_text,
+                        'output': output_text
+                    }
+                    # Remplir les colonnes manquantes avec vide
+                    for field in fieldnames:
+                        if field not in row:
+                            row[field] = ''
+                    writer.writerow(row)
+                else:
+                    for combo in combinaisons:
+                        row = {
+                            'sample_id': sample_id,
+                            'input': input_text,
+                            'output': output_text,
+                            'typologie_de_contexte': combo.get('typologie_de_contexte', ''),
+                            'cluster': combo.get('cluster', ''),
+                            'label': combo.get('label', ''),           # Label simple
+                            'label_root': combo.get('label_root', ''),     # ROOT
+                            'label_parent': combo.get('label_parent', ''), # PARENT
+                            'label_enfant': combo.get('label_enfant', '')  # ENFANT
+                        }
+
+                        # Ajouter les label_enfant_N dynamiquement (sous-enfants)
+                        for i in range(1, max_enfant_levels + 1):
+                            row[f'label_enfant_{i}'] = combo.get(f'label_enfant_{i}', '')
+
+                        writer.writerow(row)
 
     def _clean_sample_for_export(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         """
         Nettoie un sample en ne gardant que les champs essentiels
+        FORMAT : sample_id, input, combinaisons[], output
         """
         return {
             'sample_id': sample.get('sample_id'),
-            'typologie_de_contexte': sample.get('typologie_de_contexte', ''),
-            'cluster': sample.get('cluster', ''),
-            'label': sample.get('label', ''),
             'input': sample.get('input', ''),
+            'combinaisons': sample.get('combinaisons', []),
             'output': sample.get('output', '')
         }
 
     def _export_parquet(self, filepath: str):
-        """Exporte en Parquet avec données nettoyées"""
+        """
+        Exporte en Parquet avec données nettoyées
+        Format aplati avec hiérarchie complète : label_root, label_parent, label_enfant, label_enfant_1, ...
+        """
         try:
             import pandas as pd
-
-            # ✅ Nettoyer les samples
-            cleaned_samples = [self._clean_sample_for_export(s) for s in self.generation_results]
-
-            df = pd.DataFrame(cleaned_samples)
+    
+            # ✅ DÉTERMINER LE NOMBRE MAXIMUM DE NIVEAUX D'ENFANTS
+            max_enfant_levels = 0
+            for sample in self.generation_results:
+                combinaisons = sample.get('combinaisons', [])
+                for combo in combinaisons:
+                    enfant_keys = [k for k in combo.keys() if k.startswith('label_enfant_') and k != 'label_enfant']
+                    if enfant_keys:
+                        levels = [int(k.split('_')[-1]) for k in enfant_keys if k.split('_')[-1].isdigit()]
+                        if levels:
+                            max_enfant_levels = max(max_enfant_levels, max(levels))
+    
+            # Aplatir les données
+            rows = []
+            for sample in self.generation_results:
+                sample_id = sample.get('sample_id')
+                input_text = sample.get('input', '')
+                output_text = sample.get('output', '')
+                combinaisons = sample.get('combinaisons', [])
+    
+                if not combinaisons:
+                    row = {
+                        'sample_id': sample_id,
+                        'input': input_text,
+                        'output': output_text,
+                        'typologie_de_contexte': '',
+                        'cluster': '',
+                        'label': '',
+                        'label_root': '',
+                        'label_parent': '',
+                        'label_enfant': ''
+                    }
+                    # Ajouter colonnes label_enfant_N vides
+                    for i in range(1, max_enfant_levels + 1):
+                        row[f'label_enfant_{i}'] = ''
+                    rows.append(row)
+                else:
+                    for combo in combinaisons:
+                        row = {
+                            'sample_id': sample_id,
+                            'input': input_text,
+                            'output': output_text,
+                            'typologie_de_contexte': combo.get('typologie_de_contexte', ''),
+                            'cluster': combo.get('cluster', ''),
+                            'label': combo.get('label', ''),
+                            'label_root': combo.get('label_root', ''),
+                            'label_parent': combo.get('label_parent', ''),
+                            'label_enfant': combo.get('label_enfant', '')
+                        }
+                        # Ajouter label_enfant_N dynamiquement
+                        for i in range(1, max_enfant_levels + 1):
+                            row[f'label_enfant_{i}'] = combo.get(f'label_enfant_{i}', '')
+                        rows.append(row)
+    
+            df = pd.DataFrame(rows)
             df.to_parquet(filepath, index=False)
-
+    
         except ImportError:
             raise Exception(
                 "Le module 'pandas' est requis pour exporter en Parquet.\n"
