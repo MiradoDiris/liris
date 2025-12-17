@@ -1,0 +1,134 @@
+{
+  "export_info": {
+    "exported_at": "2025-12-16T22:33:05.941982",
+    "purpose": "Vérification de la configuration de génération avant envoi à Gemini"
+  },
+  "metadata": {
+    "project_name": "Macompta.fr",
+    "batch_number": 9,
+    "batch_name": "Création_écritures comptables",
+    "batch_family": "Comptabilité",
+    "num_batches_to_process": 1,
+    "total_samples_per_batch": 50,
+    "total_samples_all_batches": 50,
+    "output_format": "JSONL"
+  },
+  "prompts": {
+    "global_context": "Macompta est une application pour aider l'utilisateur à propos de la comptabilité par une conversation avec l'IA, pour apprendre, guider et aider les utilisateurs dans la domaine de comptabilité, il peut aider aussi su l'utilisation de macompta elle même.",
+    "local_prompt": "Mets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes en te basant exclusivement sur les informations fournies. Les inputs doivent être formulés uniquement du point de vue de l’utilisateur, refléter des situations concrètes, inclure des formulations naturelles, parfois imprécises ou hésitantes, et ne contenir aucune réponse ou explication de l’IA. le Saisie simplifiée contient le label Factures fournisseurs",
+    "combined_prompt": "Macompta est une application pour aider l'utilisateur à propos de la comptabilité par une conversation avec l'IA, pour apprendre, guider et aider les utilisateurs dans la domaine de comptabilité, il peut aider aussi su l'utilisation de macompta elle même.\n\n---\n\nMets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes en te basant exclusivement sur les informations fournies. Les inputs doivent être formulés uniquement du point de vue de l’utilisateur, refléter des situations concrètes, inclure des formulations naturelles, parfois imprécises ou hésitantes, et ne contenir aucune réponse ou explication de l’IA. le Saisie simplifiée contient le label Factures fournisseurs"
+  },
+  "master_typologie": {
+    "name": "Compte",
+    "full_structure": {
+      "name": "Compte",
+      "description": "",
+      "taxonomy_clusters": [
+        {
+          "name": "Société",
+          "description": "",
+          "root_labels": []
+        }
+      ]
+    }
+  },
+  "combinations_details": [
+    {
+      "combination_index": 1,
+      "nb_samples": 50,
+      "master": {
+        "name": "Compte",
+        "taxonomy_clusters": [
+          {
+            "name": "Société",
+            "description": "",
+            "root_labels": []
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "parent",
+          "display": "Intention / Action / Création / Écritures comptables",
+          "taxonomy_clusters": [
+            {
+              "name": "Action",
+              "root_labels": [
+                {
+                  "name": "Création",
+                  "parent_labels": [
+                    {
+                      "name": "Écritures comptables",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "UX/UI / Modules / Comptabilité / Saisie simplifiée",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Comptabilité",
+                  "parent_labels": [
+                    {
+                      "name": "Saisie simplifiée",
+                      "description": "",
+                      "category": "default",
+                      "children": [
+                        {
+                          "name": "Banque",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Caisse",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Notes de frais",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Factures clients",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Factures fournisseurs",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Import OCR",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

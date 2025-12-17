@@ -67,7 +67,10 @@ class GeminiDatasetWorker(QThread):
         self.max_tokens = None
         self.client = None
         
-        logger.info("🤖 GeminiDatasetWorker initialisé (MODE STRICT)")
+        # ✅ NOUVEAU : Mode debug
+        self.debug_mode = generation_config.get('debug_mode', True)  # Activé par défaut
+        
+        logger.info("🤖 GeminiDatasetWorker initialisé (MODE STRICT + DEBUG)")
     
     def _load_gemini_config(self) -> bool:
         """Charge la configuration Gemini"""
@@ -216,6 +219,7 @@ class GeminiDatasetWorker(QThread):
     ) -> List[Dict[str, Any]]:
         """
         Génère les échantillons pour UNE combinaison spécifique
+        ✅ CORRIGÉ : sample_id utilise TOUJOURS le compteur global
         """
         samples = []
         nb_samples = combination.get('nb_samples', 1)
@@ -236,7 +240,7 @@ class GeminiDatasetWorker(QThread):
     
             if generated_data:
                 for idx, sample in enumerate(generated_data):
-                    self.global_sample_counter += 1
+                    self.global_sample_counter += 1  # ✅ Incrémentation AVANT utilisation
     
                     if 'combinaisons' in sample and sample['combinaisons']:
                         combinaisons = sample['combinaisons']
@@ -246,7 +250,7 @@ class GeminiDatasetWorker(QThread):
                         combinaisons = self._build_combinaisons_from_sample(sample, combination)
     
                     enriched_sample = {
-                        'sample_id': sample.get('sample_id', self.global_sample_counter),
+                        'sample_id': self.global_sample_counter,  # ✅ TOUJOURS le compteur global, jamais celui de Gemini
                         'input': sample.get('input', ''),
                         'combinaisons': combinaisons,
                         'output': sample.get('output', ''),
@@ -908,49 +912,295 @@ class GeminiDatasetWorker(QThread):
         return context
 
     def _call_gemini_api(self, prompt: str, nb_samples: int) -> Optional[List[Dict[str, Any]]]:
-        """Appelle l'API Gemini"""
+        """
+        ✅ VERSION CORRIGÉE avec diagnostics complets
+        """
         try:
             self._log("info", "   🌐 Appel API Gemini...")
             
+            # ✅ LOG DU PROMPT (premiers 500 chars)
+            if self.debug_mode:
+                self._log("debug", f"\n{'='*60}")
+                self._log("debug", f"PROMPT ENVOYÉ (premiers 500 chars):")
+                self._log("debug", prompt[:500] + "...")
+                self._log("debug", f"{'='*60}")
+            
+            # Configuration de génération
+            generation_config = {
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_output_tokens": self.max_tokens,
+            }
+            
+            # ✅ APPEL API AVEC GESTION D'ERREURS
             response = self.client.generate_content(
                 prompt,
-                generation_config={
-                    "temperature": 0.7,
-                    "top_p": 0.95,
-                    "top_k": 40,
-                    "max_output_tokens": self.max_tokens,
-                }
+                generation_config=generation_config
             )
             
-            if not response or not response.text:
+            # ✅ VÉRIFIER LES BLOQUAGES DE SÉCURITÉ
+            if hasattr(response, 'prompt_feedback'):
+                feedback = response.prompt_feedback
+                if hasattr(feedback, 'block_reason') and feedback.block_reason:
+                    reason = feedback.block_reason
+                    self._log("error", f"   ❌ PROMPT BLOQUÉ par Gemini!")
+                    self._log("error", f"   Raison: {reason}")
+                    if hasattr(feedback, 'safety_ratings'):
+                        self._log("error", f"   Safety ratings: {feedback.safety_ratings}")
+                    return None
+            
+            # ✅ VÉRIFIER LA PRÉSENCE DE CANDIDATS
+            if not hasattr(response, 'candidates') or not response.candidates:
+                self._log("error", "   ❌ Aucun candidat retourné par Gemini")
+                self._log("error", f"   Response type: {type(response)}")
+                self._log("error", f"   Response attributes: {dir(response)}")
                 return None
             
-            samples = self._parse_json_response(response.text.strip())
+            # ✅ VÉRIFIER LE STATUT DU PREMIER CANDIDAT
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'finish_reason'):
+                finish_reason = candidate.finish_reason
+                finish_reason_name = finish_reason.name if hasattr(finish_reason, 'name') else str(finish_reason)
+                
+                self._log("debug", f"   Finish reason: {finish_reason_name}")
+                
+                if finish_reason_name != "STOP":
+                    self._log("warning", f"   ⚠️ Génération incomplète: {finish_reason_name}")
+                    
+                    if finish_reason_name == "SAFETY":
+                        self._log("error", "   ❌ Contenu bloqué par les filtres de sécurité Gemini")
+                        if hasattr(candidate, 'safety_ratings'):
+                            self._log("error", f"   Safety ratings: {candidate.safety_ratings}")
+                        return None
+                    
+                    elif finish_reason_name == "MAX_TOKENS":
+                        self._log("warning", "   ⚠️ Limite de tokens atteinte, résultat peut être tronqué")
+                    
+                    elif finish_reason_name == "RECITATION":
+                        self._log("error", "   ❌ Contenu bloqué (récitation détectée)")
+                        return None
             
-            if samples and len(samples) != nb_samples:
-                self._log("warning", f"   ⚠️ {len(samples)}/{nb_samples} samples générés")
+            # ✅ EXTRAIRE LE TEXTE
+            if not hasattr(response, 'text') or not response.text:
+                self._log("error", "   ❌ Réponse vide de Gemini")
+                self._log("error", f"   Candidate content: {candidate}")
+                if hasattr(candidate, 'content'):
+                    self._log("error", f"   Content parts: {candidate.content.parts if hasattr(candidate.content, 'parts') else 'N/A'}")
+                return None
             
+            response_text = response.text.strip()
+            
+            # ✅ LOG DE LA RÉPONSE BRUTE (ESSENTIEL POUR DEBUG)
+            self._log("debug", f"\n{'='*60}")
+            self._log("debug", f"RÉPONSE BRUTE DE GEMINI:")
+            self._log("debug", f"Longueur: {len(response_text)} caractères")
+            self._log("debug", f"Premiers 1000 chars:\n{response_text[:1000]}")
+            if len(response_text) > 1000:
+                self._log("debug", f"... [tronqué] ...")
+                self._log("debug", f"Derniers 500 chars:\n{response_text[-500:]}")
+            self._log("debug", f"{'='*60}\n")
+            
+            # ✅ PARSER LE JSON
+            samples = self._parse_json_response(response_text)
+            
+            if not samples:
+                self._log("error", "   ❌ PARSING JSON ÉCHOUÉ")
+                self._log("error", "   💡 La réponse de Gemini n'est pas au format JSON attendu")
+                
+                # Sauvegarder la réponse pour analyse
+                self._save_failed_response(response_text, prompt)
+                return None
+            
+            # ✅ VALIDER LE NOMBRE DE SAMPLES
+            if len(samples) != nb_samples:
+                self._log("warning", f"   ⚠️ Attendu {nb_samples} samples, reçu {len(samples)}")
+            
+            self._log("info", f"   ✅ {len(samples)} sample(s) généré(s) et parsé(s)")
             return samples
             
         except Exception as e:
-            self._log("error", f"   ❌ Erreur API: {str(e)}")
+            error_type = type(e).__name__
+            self._log("error", f"   ❌ EXCEPTION dans _call_gemini_api ({error_type}): {str(e)}")
+            
+            # ✅ DIAGNOSTICS SPÉCIFIQUES
+            error_msg = str(e).lower()
+            if "quota" in error_msg or "rate" in error_msg:
+                self._log("error", "   💡 CAUSE PROBABLE: Quota API dépassé")
+                self._log("error", "   → Vérifiez votre quota sur https://makersuite.google.com/")
+            elif "timeout" in error_msg:
+                self._log("error", "   💡 CAUSE PROBABLE: Timeout réseau")
+            elif "invalid" in error_msg or "authentication" in error_msg:
+                self._log("error", "   💡 CAUSE PROBABLE: Clé API invalide")
+            elif "safety" in error_msg or "blocked" in error_msg:
+                self._log("error", "   💡 CAUSE PROBABLE: Contenu bloqué par les filtres")
+            
+            import traceback
+            self._log("debug", f"Traceback complet:\n{traceback.format_exc()}")
             return None
+        
+    def _save_failed_response(self, response_text: str, prompt: str):
+        """Sauvegarde une réponse qui a échoué pour analyse"""
+        try:
+            from pathlib import Path
+            
+            failed_dir = Path("generation_logs") / "failed_responses"
+            failed_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            filepath = failed_dir / f"failed_response_{timestamp}.json"
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "timestamp": datetime.now().isoformat(),
+                    "project": self.project_name,
+                    "batch": self.batch_number,
+                    "model": self.model_name,
+                    "prompt_length": len(prompt),
+                    "prompt_preview": prompt[:500],
+                    "response_length": len(response_text),
+                    "response_full": response_text
+                }, f, ensure_ascii=False, indent=2)
+            
+            self._log("info", f"   💾 Réponse échouée sauvegardée: {filepath}")
+            
+        except Exception as e:
+            self._log("error", f"   Erreur sauvegarde: {str(e)}")
     
     def _parse_json_response(self, text: str) -> Optional[List[Dict[str, Any]]]:
-        """Parse la réponse JSON"""
+        """
+        ✅ VERSION CORRIGÉE avec diagnostics détaillés
+        """
+        if not text:
+            self._log("error", "   ❌ Texte vide à parser")
+            return None
+        
         try:
+            # ✅ NETTOYAGE ROBUSTE
             cleaned = text.strip()
+            
+            self._log("debug", f"   Parsing: longueur = {len(cleaned)} chars")
+            
+            # Retirer les balises markdown
             if cleaned.startswith('```json'):
+                self._log("debug", "   → Retrait de ```json")
                 cleaned = cleaned[7:]
-            if cleaned.startswith('```'):
+            elif cleaned.startswith('```'):
+                self._log("debug", "   → Retrait de ```")
                 cleaned = cleaned[3:]
+            
             if cleaned.endswith('```'):
+                self._log("debug", "   → Retrait de ``` final")
                 cleaned = cleaned[:-3]
+            
             cleaned = cleaned.strip()
             
-            data = json.loads(cleaned)
-            return data if isinstance(data, list) else [data]
-        except:
+            # ✅ VÉRIFIER QUE ÇA COMMENCE PAR [ OU {
+            if not cleaned:
+                self._log("error", "   ❌ Texte vide après nettoyage")
+                return None
+            
+            first_char = cleaned[0]
+            self._log("debug", f"   Premier caractère: '{first_char}'")
+            
+            if first_char not in ('[', '{'):
+                self._log("error", f"   ❌ Ne commence pas par [ ou {{ (caractère: '{first_char}')")
+                self._log("error", f"   Premiers 200 chars: {cleaned[:200]}")
+                
+                # TENTATIVE DE RÉCUPÉRATION
+                json_start_bracket = cleaned.find('[')
+                json_start_brace = cleaned.find('{')
+                
+                if json_start_bracket > 0 or json_start_brace > 0:
+                    if json_start_bracket > 0 and (json_start_brace < 0 or json_start_bracket < json_start_brace):
+                        json_start = json_start_bracket
+                    else:
+                        json_start = json_start_brace
+                    
+                    self._log("warning", f"   🔧 Tentative récupération à partir du char {json_start}")
+                    self._log("debug", f"   Texte avant JSON: '{cleaned[:json_start]}'")
+                    cleaned = cleaned[json_start:]
+                else:
+                    self._log("error", "   ❌ Aucun caractère JSON trouvé dans toute la réponse")
+                    return None
+            
+            # ✅ PARSE JSON
+            try:
+                self._log("debug", "   Tentative de parsing JSON...")
+                data = json.loads(cleaned)
+                self._log("debug", f"   ✅ JSON parsé avec succès (type: {type(data)})")
+                
+            except json.JSONDecodeError as e:
+                self._log("error", f"   ❌ Erreur JSON: {str(e)}")
+                self._log("error", f"   Position: ligne {e.lineno}, col {e.colno}")
+                
+                # Afficher le contexte de l'erreur
+                error_pos = e.pos
+                context_start = max(0, error_pos - 100)
+                context_end = min(len(cleaned), error_pos + 100)
+                context = cleaned[context_start:context_end]
+                
+                self._log("error", f"   Contexte de l'erreur:")
+                self._log("error", f"   ...{context}...")
+                
+                # TENTATIVE DE RÉPARATION
+                self._log("warning", "   🔧 Tentative de réparation du JSON...")
+                
+                # Retirer les virgules traînantes
+                cleaned_v2 = cleaned.replace(',]', ']').replace(',}', '}')
+                
+                # Retirer les commentaires JavaScript
+                import re
+                cleaned_v2 = re.sub(r'//.*?\n', '\n', cleaned_v2)
+                cleaned_v2 = re.sub(r'/\*.*?\*/', '', cleaned_v2, flags=re.DOTALL)
+                
+                try:
+                    data = json.loads(cleaned_v2)
+                    self._log("info", "   ✅ JSON réparé avec succès!")
+                except Exception as repair_error:
+                    self._log("error", f"   ❌ Réparation échouée: {repair_error}")
+                    return None
+            
+            # ✅ CONVERTIR EN LISTE SI NÉCESSAIRE
+            if isinstance(data, dict):
+                self._log("debug", "   ℹ️ Objet JSON reçu, conversion en liste")
+                data = [data]
+            elif not isinstance(data, list):
+                self._log("error", f"   ❌ Type inattendu: {type(data)}")
+                self._log("error", f"   Valeur: {data}")
+                return None
+            
+            # ✅ VALIDER LA STRUCTURE
+            self._log("debug", f"   Validation de {len(data)} sample(s)...")
+            
+            valid_samples = []
+            for idx, sample in enumerate(data):
+                if not isinstance(sample, dict):
+                    self._log("error", f"   ❌ Sample {idx} n'est pas un objet JSON (type: {type(sample)})")
+                    continue
+                
+                # Vérifier les champs obligatoires
+                required_fields = ['input', 'output']
+                missing = [f for f in required_fields if f not in sample]
+                
+                if missing:
+                    self._log("warning", f"   ⚠️ Sample {idx}: champs manquants {missing}")
+                    self._log("debug", f"   Champs présents: {list(sample.keys())}")
+                
+                # Même avec des champs manquants, on garde le sample
+                valid_samples.append(sample)
+            
+            if not valid_samples:
+                self._log("error", "   ❌ Aucun sample valide après validation")
+                return None
+            
+            self._log("info", f"   ✅ {len(valid_samples)} sample(s) valide(s)")
+            return valid_samples
+            
+        except Exception as e:
+            self._log("error", f"   ❌ Exception dans _parse_json_response: {str(e)}")
+            import traceback
+            self._log("debug", traceback.format_exc())
             return None
     
     def _log_generation_summary(self):
@@ -971,6 +1221,8 @@ class GeminiDatasetWorker(QThread):
             logger.error(message)
         elif level == "warning":
             logger.warning(message)
+        elif level == "debug":
+            logger.debug(message)
         else:
             logger.info(message)
     

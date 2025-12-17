@@ -36,6 +36,18 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.current_batch_id = None
         self.is_batch_saved = False
         
+        # Navigation pour les taxonomies du master
+        self._master_navigation = {
+            'typologie': None,
+            'taxonomy': None,
+            'root': None,
+            'parent': None,
+            'child_path': []
+        }
+        
+        # Sélections des taxonomies du master (séparées des combinaisons)
+        self.master_selected_taxonomies = []
+        
         self._context_navigation = {
             'typologie': None,
             'taxonomy': None,
@@ -171,18 +183,19 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.master_combo.currentIndexChanged.connect(self._on_master_typologie_changed)
         layout.addWidget(self.master_combo)
 
-        stats_label = QtWidgets.QLabel("Statistiques")
-        stats_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 10px; margin-top: 6px;")
-        layout.addWidget(stats_label)
+        taxonomies_label = QtWidgets.QLabel("Taxonomies Sélectionnées")
+        taxonomies_label.setStyleSheet("font-weight: 600; color: #2c3e50; font-size: 10px; margin-top: 6px;")
+        layout.addWidget(taxonomies_label)
 
-        self.master_stats = QtWidgets.QTextEdit()
-        self.master_stats.setReadOnly(True)
-        self.master_stats.setMaximumHeight(80)
-        self.master_stats.setStyleSheet("""
+        self.master_taxonomies_display = QtWidgets.QTextEdit()
+        self.master_taxonomies_display.setReadOnly(True)
+        self.master_taxonomies_display.setMaximumHeight(100)
+        self.master_taxonomies_display.setPlaceholderText("Les taxonomies sélectionnées s'afficheront ici...")
+        self.master_taxonomies_display.setStyleSheet("""
             QTextEdit { border: 2px solid #e1e4e8; border-radius: 5px; padding: 6px;
                 background-color: #f8f9fa; font-size: 10px; color: #2c3e50; }
         """)
-        layout.addWidget(self.master_stats)
+        layout.addWidget(self.master_taxonomies_display)
         return group
 
     def _create_right_section(self):
@@ -274,6 +287,11 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.modify_selection_btn = self._create_mini_button("Modifier", self._modify_selected_row)
         self.modify_selection_btn.setEnabled(False)
         header_layout.addWidget(self.modify_selection_btn)
+        
+        # Bouton Annuler la modification (caché par défaut)
+        self.cancel_modification_btn = self._create_mini_button("Annuler", self._cancel_modification)
+        self.cancel_modification_btn.setVisible(False)
+        header_layout.addWidget(self.cancel_modification_btn)
 
         self.delete_selection_btn = self._create_mini_button("Supprimer", self._delete_selected_row)
         self.delete_selection_btn.setEnabled(False)
@@ -1693,7 +1711,8 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.context_typologie_tree.setCurrentItem(item)
 
         full_text = item.text(0)
-        typ_name = full_text.split(' (')[0] if ' (' in full_text else full_text
+        # Retirer le préfixe ⭐ et (MASTER) si présent
+        typ_name = full_text.replace('⭐ ', '').replace(' (MASTER)', '').split(' (')[0].strip()
 
         typologie = self._find_typologie_by_name(typ_name)
         if not typologie:
@@ -1738,7 +1757,26 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self._mark_current_selections()
 
     def _on_typologie_double_clicked(self, item, column):
-        """Double-clic sur typologie pour ajouter au batch"""
+        """Double-clic sur typologie pour ajouter au batch ou au master"""
+        full_text = item.text(0)
+        # Retirer le préfixe ⭐ et (MASTER) si présent
+        typ_name = full_text.replace('⭐ ', '').replace(' (MASTER)', '').split(' (')[0].strip()
+        
+        typologie = self._find_typologie_by_name(typ_name)
+        if not typologie:
+            return
+        
+        # Vérifier si on sélectionne pour le master
+        if self.selected_master_typologie and typ_name == self.selected_master_typologie.get('name'):
+            # On est sur la typologie master elle-même
+            self._add_to_master_selections({
+                'type': 'Typologie',
+                'name': typ_name,
+                'path': [typ_name]
+            })
+            return
+        
+        # Sinon, c'est une sélection pour les combinaisons
         if not self.selected_master_typologie:
             QtWidgets.QMessageBox.warning(
                 self, 
@@ -1747,14 +1785,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
             )
             return
     
-        full_text = item.text(0)
-        typ_name = full_text.split(' (')[0] if ' (' in full_text else full_text
-        
-        typologie = self._find_typologie_by_name(typ_name)
-        if not typologie:
-            return
-    
-        # Construire la sélection
+        # Construire la sélection pour les combinaisons
         selection = {
             'level': 'typologie',
             'typologie': typ_name,
@@ -1819,15 +1850,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self._update_labels_breadcrumb()
 
     def _on_taxonomy_double_clicked(self, item, column):
-        """Double-clic sur taxonomy pour ajouter au batch"""
-        if not self.selected_master_typologie:
-            QtWidgets.QMessageBox.warning(
-                self, 
-                "Attention", 
-                "Veuillez d'abord sélectionner une typologie master."
-            )
-            return
-
+        """Double-clic sur taxonomy pour ajouter au batch ou au master"""
         cluster = item.data(0, Qt.UserRole)
         if not cluster:
             return
@@ -1843,8 +1866,27 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
         typologie_name = nav['typologie'].get('name', '')
         cluster_name = cluster.get('name', '')
+        
+        # Vérifier si on sélectionne pour le master
+        if self.selected_master_typologie and typologie_name == self.selected_master_typologie.get('name'):
+            # On est dans la typologie master
+            self._add_to_master_selections({
+                'type': 'Cluster',
+                'name': cluster_name,
+                'path': [typologie_name, cluster_name]
+            })
+            return
 
-        # Construire la sélection
+        # Sinon, sélection pour les combinaisons
+        if not self.selected_master_typologie:
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Attention", 
+                "Veuillez d'abord sélectionner une typologie master."
+            )
+            return
+
+        # Construire la sélection pour les combinaisons
         selection = {
             'level': 'taxonomy',
             'typologie': typologie_name,
@@ -3180,7 +3222,50 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self._mark_current_selections()
 
     def _on_label_double_clicked(self, item, column):
-        """Double-clic sur label pour ajouter au batch"""
+        """Double-clic sur label pour ajouter au batch ou au master"""
+        item_data = item.data(0, Qt.UserRole)
+        if not item_data:
+            return
+
+        level = item_data.get('level', '')
+        
+        # Vérifier si on sélectionne pour le master
+        nav = self._context_navigation
+        typologie_name = nav.get('typologie', {}).get('name', '') if nav.get('typologie') else ''
+        
+        if self.selected_master_typologie and typologie_name == self.selected_master_typologie.get('name'):
+            # On est dans la typologie master - ajouter aux sélections du master
+            label_name = item_data.get('name', '')
+            cluster = item_data.get('cluster', {})
+            cluster_name = cluster.get('name', '') if cluster else ''
+            
+            # Construire le chemin complet
+            path = [typologie_name]
+            if cluster_name:
+                path.append(cluster_name)
+            
+            # Déterminer le type de taxonomie
+            tax_type = level.capitalize() if level else 'Label'
+            
+            if level == 'root':
+                root = item_data.get('data', {})
+                path.append(root.get('name', ''))
+            elif level == 'parent':
+                root = item_data.get('root', {})
+                parent = item_data.get('data', {})
+                path.extend([root.get('name', ''), parent.get('name', '')])
+            elif level == 'child':
+                child_path = item_data.get('path', [])
+                path.extend(child_path)
+            
+            self._add_to_master_selections({
+                'type': tax_type,
+                'name': label_name,
+                'path': path
+            })
+            return
+        
+        # Sinon, sélection pour les combinaisons
         if not self.selected_master_typologie:
             QtWidgets.QMessageBox.warning(
                 self, 
@@ -3188,12 +3273,6 @@ class DatasetRelationTab(QtWidgets.QWidget):
                 "Veuillez d'abord sélectionner une typologie master."
             )
             return
-
-        item_data = item.data(0, Qt.UserRole)
-        if not item_data:
-            return
-
-        level = item_data.get('level', '')
 
         # Construire la sélection selon le niveau
         selection = self._build_selection_from_item_data(item_data, level)
@@ -3540,7 +3619,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.current_batch_id = None
 
     def _on_checkbox_changed(self, item, level):
-        """Ajouter/retirer un contexte à la combinaison en cours"""
+        """Ajouter/retirer un contexte à la combinaison en cours ou aux sélections du master"""
         if not self.selected_master_typologie:
             checkbox = None
             if level == 'typologie':
@@ -3585,10 +3664,30 @@ class DatasetRelationTab(QtWidgets.QWidget):
             logger.warning("❌ Tentative de sélection sans typologie dans la navigation")
             return
 
+        # Vérifier si on est dans la typologie master
+        is_master_selection = False
+        if nav.get('typologie'):
+            typologie_name = nav['typologie'].get('name', '')
+            if self.selected_master_typologie and typologie_name == self.selected_master_typologie.get('name'):
+                is_master_selection = True
+        elif level == 'typologie':
+            # Pour le niveau typologie, vérifier directement
+            item_data = item.data(0, Qt.UserRole)
+            if item_data:
+                typ_name = item_data.get('name', item_data.get('nom', ''))
+                if typ_name == self.selected_master_typologie.get('name'):
+                    is_master_selection = True
+
         item_data = item.data(0, Qt.UserRole)
         if not item_data:
             return
 
+        # Si c'est une sélection master, gérer différemment
+        if is_master_selection:
+            self._handle_master_checkbox_selection(item, level, item_data)
+            return
+
+        # Sinon, traiter comme une sélection de combinaison normale
         selection = self._build_selection_from_item_data(item_data, level)
         if not selection:
             logger.error(f"❌ Impossible de construire la sélection pour level={level}")
@@ -3596,6 +3695,76 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
         # Ajouter/retirer le contexte à la combinaison en cours
         self._toggle_context_in_current_combination(selection, item, level)
+    
+    def _handle_master_checkbox_selection(self, item, level, item_data):
+        """Gérer la sélection par checkbox d'un élément du master"""
+        # Récupérer les informations selon le niveau
+        nav = self._context_navigation
+        typologie_name = self.selected_master_typologie.get('name', '')
+        
+        if level == 'typologie':
+            typ_name = item_data.get('name', item_data.get('nom', ''))
+            taxonomy_item = {
+                'type': 'Typologie',
+                'name': typ_name,
+                'path': [typ_name]
+            }
+        elif level == 'taxonomy':
+            cluster_name = item_data.get('name', '')
+            taxonomy_item = {
+                'type': 'Cluster',
+                'name': cluster_name,
+                'path': [typologie_name, cluster_name]
+            }
+        elif level == 'root':
+            root = item_data.get('data', {}) if 'data' in item_data else item_data
+            cluster = item_data.get('cluster', {})
+            cluster_name = cluster.get('name', '') if cluster else ''
+            root_name = root.get('name', '')
+            taxonomy_item = {
+                'type': 'Root',
+                'name': root_name,
+                'path': [typologie_name, cluster_name, root_name] if cluster_name else [typologie_name, root_name]
+            }
+        elif level == 'parent':
+            parent = item_data.get('data', {})
+            root = item_data.get('root', {})
+            cluster = item_data.get('cluster', {})
+            parent_name = parent.get('name', '')
+            root_name = root.get('name', '')
+            cluster_name = cluster.get('name', '')
+            taxonomy_item = {
+                'type': 'Parent',
+                'name': parent_name,
+                'path': [typologie_name, cluster_name, root_name, parent_name]
+            }
+        elif level == 'child':
+            child_path = item_data.get('path', [])
+            child_name = item_data.get('name', '')
+            taxonomy_item = {
+                'type': 'Child',
+                'name': child_name,
+                'path': [typologie_name] + child_path
+            }
+        else:
+            return
+        
+        # Ajouter ou retirer la taxonomie des sélections du master
+        self._add_to_master_selections(taxonomy_item)
+        
+        # Décocher la checkbox après l'action
+        checkbox = None
+        if level == 'typologie':
+            checkbox = self.context_typologie_tree.itemWidget(item, 1)
+        elif level == 'taxonomy':
+            checkbox = self.context_taxonomy_tree.itemWidget(item, 1)
+        elif level in ['root', 'parent', 'child']:
+            checkbox = self.dynamic_labels_tree.itemWidget(item, 1)
+        
+        if checkbox:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(False)
+            checkbox.blockSignals(False)
 
     def _toggle_context_in_current_combination(self, selection, item, level):
         """Ajouter ou retirer un contexte de la combinaison en cours"""
@@ -4012,7 +4181,12 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self.refresh_btn = self._create_action_button("Rafraîchir", self.refresh_data)
         btn_layout.addWidget(self.refresh_btn)
 
-        # ✅ NOUVEAU : Bouton Sauvegarder
+        # ✅ Bouton Sauvegarder la modification (caché par défaut)
+        self.save_modification_btn = self._create_action_button("Sauvegarder la modification", self._save_modification)
+        self.save_modification_btn.setVisible(False)
+        btn_layout.addWidget(self.save_modification_btn)
+
+        # ✅ Bouton Sauvegarder le batch
         self.save_batch_btn = self._create_action_button("Sauvegarder", self._save_batch)
         btn_layout.addWidget(self.save_batch_btn)
 
@@ -4157,9 +4331,9 @@ class DatasetRelationTab(QtWidgets.QWidget):
             logger.info(f"  - {nb_samples} samples")
     
         # ========================================
-        # EXTRACTION DE LA TYPOLOGIE MASTER COMPLÈTE
+        # EXTRACTION DES TAXONOMIES MASTER SÉLECTIONNÉES
         # ========================================
-        logger.info("\n📊 EXTRACTION TYPOLOGIE MASTER")
+        logger.info("\n📊 EXTRACTION TAXONOMIES MASTER SÉLECTIONNÉES")
         logger.info("-" * 80)
 
         if not self.selected_master_typologie:
@@ -4173,62 +4347,20 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
         master_name = self.selected_master_typologie.get('name', '')
         logger.info(f"Master typologie: {master_name}")
+        logger.info(f"Taxonomies sélectionnées: {len(self.master_selected_taxonomies)}")
 
-        # Extraire TOUTE la hiérarchie de la typologie master
-        master_full_data = {
-            'name': master_name,
-            'description': self.selected_master_typologie.get('description', ''),
-            'taxonomy_clusters': []
-        }
-
-        # Copier tous les clusters avec leur hiérarchie complète
-        clusters = self.selected_master_typologie.get('taxonomy_clusters', [])
-        logger.info(f"  - {len(clusters)} cluster(s) de taxonomie")
-
-        total_roots = 0
-        total_parents = 0
-        total_children = 0
-
-        for cluster in clusters:
-            cluster_data = {
-                'name': cluster.get('name', ''),
-                'description': cluster.get('description', ''),
-                'root_labels': []
+        # Extraire UNIQUEMENT les taxonomies sélectionnées
+        master_full_data = self._extract_selected_master_taxonomies()
+        
+        if not master_full_data:
+            logger.warning("⚠️ Aucune taxonomie master sélectionnée, utilisation de la typologie vide")
+            master_full_data = {
+                'name': master_name,
+                'description': self.selected_master_typologie.get('description', ''),
+                'taxonomy_clusters': []
             }
 
-            roots = cluster.get('root_labels', [])
-            total_roots += len(roots)
-
-            for root in roots:
-                root_data = {
-                    'name': root.get('name', ''),
-                    'description': root.get('description', ''),
-                    'category': root.get('category', 'default'),
-                    'parent_labels': []
-                }
-
-                parents = root.get('parent_labels', [])
-                total_parents += len(parents)
-
-                for parent in parents:
-                    parent_data = {
-                        'name': parent.get('name', ''),
-                        'description': parent.get('description', ''),
-                        'category': parent.get('category', 'default'),
-                        'children': self._extract_children_hierarchy(parent.get('children', []))
-                    }
-
-                    total_children += self._count_children_recursive(parent.get('children', []))
-                    root_data['parent_labels'].append(parent_data)
-
-                cluster_data['root_labels'].append(root_data)
-
-            master_full_data['taxonomy_clusters'].append(cluster_data)
-
-        logger.info(f"  - {total_roots} root labels")
-        logger.info(f"  - {total_parents} parent labels")
-        logger.info(f"  - {total_children} children labels")
-        logger.info(f"✅ Typologie master complète extraite")
+        logger.info(f"✅ Typologie master avec sélections extraite")
 
         # ========================================
         # EXTRACTION DES CONTEXTES (SEULEMENT SÉLECTION)
@@ -4419,6 +4551,213 @@ class DatasetRelationTab(QtWidgets.QWidget):
                 f"Impossible de sauvegarder le batch '{batch_name}'"
             )
 
+
+    def _extract_selected_master_taxonomies(self):
+        """
+        Extrait uniquement les taxonomies sélectionnées du master.
+        Construit une structure hiérarchique minimale basée sur self.master_selected_taxonomies.
+        """
+        if not self.master_selected_taxonomies:
+            logger.warning("Aucune taxonomie master sélectionnée")
+            return None
+        
+        master_name = self.selected_master_typologie.get('name', '')
+        
+        # Structure de base
+        master_data = {
+            'name': master_name,
+            'description': self.selected_master_typologie.get('description', ''),
+            'taxonomy_clusters': []
+        }
+        
+        # Organiser les sélections par cluster
+        clusters_dict = {}  # {cluster_name: {roots_dict, parents_dict, children_list}}
+        
+        for tax_item in self.master_selected_taxonomies:
+            tax_type = tax_item.get('type', '')
+            tax_name = tax_item.get('name', '')
+            tax_path = tax_item.get('path', [])
+            
+            logger.info(f"  Traitement sélection: [{tax_type}] {tax_name}")
+            
+            if tax_type == 'Typologie':
+                # Si toute la typologie est sélectionnée, retourner tout
+                return {
+                    'name': master_name,
+                    'description': self.selected_master_typologie.get('description', ''),
+                    'taxonomy_clusters': self.selected_master_typologie.get('taxonomy_clusters', [])
+                }
+            
+            elif tax_type == 'Cluster':
+                # Cluster entier sélectionné
+                cluster_name = tax_path[1] if len(tax_path) > 1 else tax_name
+                
+                # Trouver le cluster complet dans la typologie
+                for cluster in self.selected_master_typologie.get('taxonomy_clusters', []):
+                    if cluster.get('name') == cluster_name:
+                        master_data['taxonomy_clusters'].append(cluster)
+                        break
+            
+            elif tax_type in ['Root', 'Parent', 'Child']:
+                # Élément spécifique - construire la hiérarchie
+                self._add_taxonomy_to_hierarchy(clusters_dict, tax_item, tax_path)
+        
+        # Construire les clusters finaux depuis clusters_dict
+        if clusters_dict:
+            for cluster_name, cluster_data in clusters_dict.items():
+                cluster_obj = {
+                    'name': cluster_name,
+                    'description': cluster_data.get('description', ''),
+                    'root_labels': []
+                }
+                
+                # Construire les roots
+                for root_name, root_data in cluster_data.get('roots', {}).items():
+                    root_obj = {
+                        'name': root_name,
+                        'description': root_data.get('description', ''),
+                        'category': root_data.get('category', 'default'),
+                        'parent_labels': []
+                    }
+                    
+                    # Construire les parents
+                    for parent_name, parent_data in root_data.get('parents', {}).items():
+                        parent_obj = {
+                            'name': parent_name,
+                            'description': parent_data.get('description', ''),
+                            'category': parent_data.get('category', 'default'),
+                            'children': parent_data.get('children', [])
+                        }
+                        root_obj['parent_labels'].append(parent_obj)
+                    
+                    cluster_obj['root_labels'].append(root_obj)
+                
+                master_data['taxonomy_clusters'].append(cluster_obj)
+        
+        logger.info(f"✅ {len(master_data['taxonomy_clusters'])} cluster(s) extraits")
+        return master_data
+    
+    def _add_taxonomy_to_hierarchy(self, clusters_dict, tax_item, path):
+        """Ajoute une taxonomie sélectionnée à la structure hiérarchique"""
+        tax_type = tax_item.get('type', '')
+        tax_name = tax_item.get('name', '')
+        
+        if len(path) < 2:
+            return
+        
+        typologie_name = path[0]
+        cluster_name = path[1] if len(path) > 1 else None
+        
+        if not cluster_name:
+            return
+        
+        # Initialiser le cluster si nécessaire
+        if cluster_name not in clusters_dict:
+            # Trouver le cluster complet dans la typologie pour récupérer la description
+            cluster_full = None
+            for c in self.selected_master_typologie.get('taxonomy_clusters', []):
+                if c.get('name') == cluster_name:
+                    cluster_full = c
+                    break
+            
+            clusters_dict[cluster_name] = {
+                'description': cluster_full.get('description', '') if cluster_full else '',
+                'roots': {}
+            }
+        
+        if tax_type == 'Root' and len(path) >= 3:
+            root_name = path[2]
+            
+            # Trouver le root complet
+            root_full = self._find_element_in_master(cluster_name, root_name, 'root')
+            
+            if root_name not in clusters_dict[cluster_name]['roots']:
+                clusters_dict[cluster_name]['roots'][root_name] = {
+                    'description': root_full.get('description', '') if root_full else '',
+                    'category': root_full.get('category', 'default') if root_full else 'default',
+                    'parents': {}
+                }
+        
+        elif tax_type == 'Parent' and len(path) >= 4:
+            root_name = path[2]
+            parent_name = path[3]
+            
+            # Initialiser root si nécessaire
+            if root_name not in clusters_dict[cluster_name]['roots']:
+                root_full = self._find_element_in_master(cluster_name, root_name, 'root')
+                clusters_dict[cluster_name]['roots'][root_name] = {
+                    'description': root_full.get('description', '') if root_full else '',
+                    'category': root_full.get('category', 'default') if root_full else 'default',
+                    'parents': {}
+                }
+            
+            # Trouver le parent complet
+            parent_full = self._find_element_in_master(cluster_name, parent_name, 'parent', root_name)
+            
+            if parent_name not in clusters_dict[cluster_name]['roots'][root_name]['parents']:
+                clusters_dict[cluster_name]['roots'][root_name]['parents'][parent_name] = {
+                    'description': parent_full.get('description', '') if parent_full else '',
+                    'category': parent_full.get('category', 'default') if parent_full else 'default',
+                    'children': parent_full.get('children', []) if parent_full else []
+                }
+        
+        elif tax_type == 'Child' and len(path) >= 4:
+            # Pour les children, il faut les ajouter à leur parent
+            root_name = path[2]
+            parent_name = path[3]
+            
+            # Initialiser root si nécessaire
+            if root_name not in clusters_dict[cluster_name]['roots']:
+                root_full = self._find_element_in_master(cluster_name, root_name, 'root')
+                clusters_dict[cluster_name]['roots'][root_name] = {
+                    'description': root_full.get('description', '') if root_full else '',
+                    'category': root_full.get('category', 'default') if root_full else 'default',
+                    'parents': {}
+                }
+            
+            # Initialiser parent si nécessaire
+            if parent_name not in clusters_dict[cluster_name]['roots'][root_name]['parents']:
+                parent_full = self._find_element_in_master(cluster_name, parent_name, 'parent', root_name)
+                clusters_dict[cluster_name]['roots'][root_name]['parents'][parent_name] = {
+                    'description': parent_full.get('description', '') if parent_full else '',
+                    'category': parent_full.get('category', 'default') if parent_full else 'default',
+                    'children': []
+                }
+            
+            # Trouver le child complet et l'ajouter
+            child_full = self._find_child_in_hierarchy(parent_full, path[4:])
+            if child_full:
+                clusters_dict[cluster_name]['roots'][root_name]['parents'][parent_name]['children'].append(child_full)
+    
+    def _find_element_in_master(self, cluster_name, element_name, element_type, root_name=None):
+        """Trouve un élément dans la typologie master"""
+        for cluster in self.selected_master_typologie.get('taxonomy_clusters', []):
+            if cluster.get('name') == cluster_name:
+                if element_type == 'root':
+                    for root in cluster.get('root_labels', []):
+                        if root.get('name') == element_name:
+                            return root
+                elif element_type == 'parent' and root_name:
+                    for root in cluster.get('root_labels', []):
+                        if root.get('name') == root_name:
+                            for parent in root.get('parent_labels', []):
+                                if parent.get('name') == element_name:
+                                    return parent
+        return None
+    
+    def _find_child_in_hierarchy(self, parent, child_path):
+        """Trouve un enfant dans la hiérarchie d'un parent"""
+        if not parent or not child_path:
+            return None
+        
+        children = parent.get('children', [])
+        for child in children:
+            if child.get('name') == child_path[0]:
+                if len(child_path) == 1:
+                    return child
+                else:
+                    return self._find_child_in_hierarchy(child, child_path[1:])
+        return None
 
     def _extract_context_hierarchy(self, selection):
         """
@@ -4832,24 +5171,31 @@ class DatasetRelationTab(QtWidgets.QWidget):
                 if name:
                     self.master_combo.addItem(name)
         self.master_combo.blockSignals(False)
-        self.master_stats.clear()
+        self.master_taxonomies_display.clear()
 
     def _load_context_typologies(self):
-        """Charger les typologies - PAS de checkbox si ont des enfants"""
+        """Charger les typologies - INCLUT la typologie master, PAS de checkbox si ont des enfants"""
         self.context_typologie_tree.clear()
         master_name = self.selected_master_typologie.get('name', '') if self.selected_master_typologie else None
 
         for typ in self._typologies_cache:
             if isinstance(typ, dict):
                 name = typ.get('name', typ.get('nom', ''))
-                if name and name != master_name:
+                if name:
                     clusters = typ.get('taxonomy_clusters', [])
                     cluster_count = len(clusters)
 
-                    display_text = f"{name} ({cluster_count})"
+                    # Marquer visuellement la typologie master
+                    if name == master_name:
+                        display_text = f"⭐ {name} (MASTER) ({cluster_count})"
+                    else:
+                        display_text = f"{name} ({cluster_count})"
 
                     tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                     tree_item.setData(0, Qt.UserRole, typ)
+                    
+                    # Stocker si c'est le master pour référence
+                    tree_item.setData(0, Qt.UserRole + 1, name == master_name)
 
                     # ✅ MODIFICATION: Checkbox uniquement pour éléments sans enfants
                     has_children = bool(clusters)
@@ -4882,7 +5228,9 @@ class DatasetRelationTab(QtWidgets.QWidget):
     def _on_master_typologie_changed(self, index):
         if index <= 0:
             self.selected_master_typologie = None
-            self.master_stats.clear()
+            self.master_selected_taxonomies = []
+            self.master_taxonomies_display.clear()
+            self._reset_master_navigation()
             self._load_context_typologies()
             return
 
@@ -4892,14 +5240,86 @@ class DatasetRelationTab(QtWidgets.QWidget):
 
         typologie = self._typologies_cache[actual_idx]
         self.selected_master_typologie = typologie
-
-        clusters = typologie.get('taxonomy_clusters', [])
-        total_roots = sum(len(c.get('root_labels', [])) for c in clusters)
-        total_parents = sum(len(r.get('parent_labels', [])) for c in clusters for r in c.get('root_labels', []))
-        total_children = sum(self._count_children_recursive(p.get('children', [])) for c in clusters for r in c.get('root_labels', []) for p in r.get('parent_labels', []))
-
-        self.master_stats.setText(f"{typologie.get('name', 'N/A')}\n\nClusters: {len(clusters)}\nRoots: {total_roots}\nParents: {total_parents}\nEnfants: {total_children}")
+        
+        # Réinitialiser les sélections et la navigation pour le nouveau master
+        self.master_selected_taxonomies = []
+        self._reset_master_navigation()
+        
+        # Initialiser la navigation du master avec la typologie sélectionnée
+        self._master_navigation['typologie'] = typologie.get('name')
+        
+        # Afficher un message pour guider l'utilisateur
+        self.master_taxonomies_display.setText(
+            f"Typologie Master: {typologie.get('name', 'N/A')}\n\n"
+            "Utilisez la section de droite pour naviguer et double-cliquer\n"
+            "sur les taxonomies (clusters, labels, etc.) à sélectionner."
+        )
+        
         self._load_context_typologies()
+    
+    def _reset_master_navigation(self):
+        """Réinitialiser la navigation du master"""
+        self._master_navigation = {
+            'typologie': None,
+            'taxonomy': None,
+            'root': None,
+            'parent': None,
+            'child_path': []
+        }
+    
+    def _update_master_taxonomies_display(self):
+        """Mettre à jour l'affichage des taxonomies sélectionnées du master"""
+        if not self.master_selected_taxonomies:
+            if self.selected_master_typologie:
+                self.master_taxonomies_display.setText(
+                    f"Typologie Master: {self.selected_master_typologie.get('name', 'N/A')}\n\n"
+                    "Aucune taxonomie sélectionnée.\n"
+                    "Double-cliquez sur les éléments dans la section de droite."
+                )
+            else:
+                self.master_taxonomies_display.clear()
+            return
+        
+        # Construire l'affichage des sélections
+        display_text = f"Typologie Master: {self.selected_master_typologie.get('name', 'N/A')}\n\n"
+        display_text += "Taxonomies sélectionnées:\n"
+        
+        for i, tax in enumerate(self.master_selected_taxonomies, 1):
+            tax_type = tax.get('type', 'N/A')
+            tax_name = tax.get('name', 'N/A')
+            display_text += f"{i}. [{tax_type}] {tax_name}\n"
+        
+        self.master_taxonomies_display.setText(display_text)
+    
+    def _add_to_master_selections(self, taxonomy_item):
+        """Ajouter ou retirer une taxonomie des sélections du master"""
+        # Vérifier si la taxonomie est déjà sélectionnée
+        existing_index = -1
+        for i, tax in enumerate(self.master_selected_taxonomies):
+            if (tax.get('name') == taxonomy_item.get('name') and 
+                tax.get('type') == taxonomy_item.get('type')):
+                existing_index = i
+                break
+        
+        if existing_index >= 0:
+            # Déjà sélectionnée - retirer
+            self.master_selected_taxonomies.pop(existing_index)
+            QtWidgets.QMessageBox.information(
+                self,
+                "Taxonomie retirée",
+                f"{taxonomy_item.get('type')} '{taxonomy_item.get('name')}' a été retiré des sélections du master."
+            )
+        else:
+            # Pas encore sélectionnée - ajouter
+            self.master_selected_taxonomies.append(taxonomy_item)
+            QtWidgets.QMessageBox.information(
+                self,
+                "Taxonomie ajoutée",
+                f"{taxonomy_item.get('type')} '{taxonomy_item.get('name')}' a été ajouté aux sélections du master."
+            )
+        
+        # Mettre à jour l'affichage
+        self._update_master_taxonomies_display()
 
     def _count_children_recursive(self, children):
         """Count all children recursively"""
@@ -5230,7 +5650,7 @@ class DatasetRelationTab(QtWidgets.QWidget):
         self._load_context_typologies()
         self.selected_master_typologie = None
         self.master_combo.setCurrentIndex(0)
-        self.master_stats.clear()
+        self.master_taxonomies_display.clear()
 
     def update_combinations(self, project_data):
         if project_data and self.project_manager:

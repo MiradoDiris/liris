@@ -1,766 +1,1216 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+"""
+Historique de Génération de Datasets
+Affiche l'historique des générations avec DEUX camemberts de représentativité,
+filtres et recherche.
+"""
+
 import os
+import json
+import traceback
 from datetime import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtChart import QChart, QChartView, QPieSeries, QPieSlice
+from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QBrush
+
+from collections import defaultdict
 
 from utils.logger import logger
+from utils.dataset_database import DatasetDatabase
 from ui.localization.translator import tr
+from ui.styles.theme import Theme
 
 
-class PromptList(QtWidgets.QWidget):
+def get_dropdown_svg_path():
+    """Retourne le chemin vers l'icône dropdown SVG"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    ui_dir = os.path.dirname(current_dir)
+    svg_path = os.path.join(ui_dir, "resources", "icons", "dropdown.svg")
+    svg_path = os.path.normpath(svg_path)
+    return svg_path.replace('\\', '/')
+
+
+class ElidedLabel(QtWidgets.QLabel):
+    """Label personnalisé qui ajoute '...' si le texte est trop long"""
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        metrics = QFontMetrics(self.font())
+        elided = metrics.elidedText(self.text(), Qt.ElideRight, self.width())
+        painter.drawText(self.rect(), self.alignment(), elided)
+
+
+class DatasetHistoryWidget(QtWidgets.QWidget):
     """
-    Widget pour l'historique des prompts
+    Widget pour l'historique des générations de datasets
+    Layout en colonnes avec thème cohérent et DEUX camemberts
     """
 
-    # Signaux
-    prompt_selected = pyqtSignal(int)
-    prompt_deleted = pyqtSignal(int)
+    generation_selected = pyqtSignal(int)
+    generation_deleted = pyqtSignal(int)
+    
+    prompt_selected = generation_selected
+    prompt_deleted = generation_deleted
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.database = None
-        self.current_prompt_id = None
+        logger.info("INITIALISATION DatasetHistoryWidget")
 
-        # Couleurs du thème
-        self.primary_color = "#A23B2D"  # Rouge brique
-        self.secondary_color = "#D35A4A"  # Rouge brique clair
-        self.background_color = "#F5F0EF"  # Beige clair
-        self.text_color = "#333333"  # Gris foncé
-        self.accent_color = "#E38272"  # Rose pâle
+        try:
+            from utils.dataset_database import DatasetDatabase
+            self.database = DatasetDatabase()
+        except Exception as e:
+            logger.error(f"Erreur initialisation database: {e}")
+            self.database = None
 
-        self._init_style()
+        self.current_generation_id = None
+        self.generations = []
+        self.dropdown_svg = get_dropdown_svg_path()
+
         self._init_ui()
 
-    def _init_style(self):
-        """Configure le style global du widget"""
-        stylesheet = f"""
-        QWidget {{
-            background-color: {self.background_color};
-            color: {self.text_color};
-            font-family: 'Segoe UI', Arial, sans-serif;
-        }}
-
-        QPushButton {{
-            background-color: {self.primary_color};
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            font-weight: bold;
-            min-width: 120px;
-        }}
-
-        QPushButton:hover {{
-            background-color: {self.secondary_color};
-        }}
-
-        QPushButton:pressed {{
-            background-color: #922E23;
-        }}
-
-        QPushButton:disabled {{
-            background-color: #CCCCCC;
-        }}
-
-        QComboBox {{
-            padding: 8px;
-            border: 2px solid {self.accent_color};
-            border-radius: 6px;
-            background-color: white;
-            min-width: 120px;
-        }}
-
-        QComboBox:hover {{
-            border: 2px solid {self.primary_color};
-        }}
-
-        QComboBox::drop-down {{
-            border: none;
-        }}
-
-        QLineEdit {{
-            padding: 8px;
-            border: 2px solid {self.accent_color};
-            border-radius: 6px;
-            background-color: white;
-        }}
-
-        QLineEdit:focus {{
-            border: 2px solid {self.primary_color};
-        }}
-
-        QTableWidget {{
-            border: 2px solid {self.accent_color};
-            border-radius: 6px;
-            background-color: white;
-            gridline-color: #E0E0E0;
-            alternate-background-color: #FAF7F6;
-        }}
-
-        QTableWidget::item {{
-            padding: 5px;
-        }}
-
-        QTableWidget::item:selected {{
-            background-color: {self.accent_color};
-            color: white;
-        }}
-
-        QTableWidget::item:hover {{
-            background-color: #F2E3E1;
-        }}
-
-        QHeaderView::section {{
-            background-color: {self.primary_color};
-            color: white;
-            padding: 8px;
-            border: none;
-            font-weight: bold;
-        }}
-
-        QTextEdit {{
-            border: 2px solid {self.accent_color};
-            border-radius: 6px;
-            padding: 8px;
-            background-color: white;
-        }}
-
-        QTextEdit:focus {{
-            border: 2px solid {self.primary_color};
-        }}
-
-        QTabWidget::pane {{
-            border: 2px solid {self.accent_color};
-            top: -1px;
-            border-radius: 6px;
-            background-color: white;
-        }}
-
-        QTabBar::tab {{
-            background: #E8E0DF;
-            border: 1px solid {self.accent_color};
-            padding: 8px 20px;
-            margin-right: 4px;
-            border-top-left-radius: 6px;
-            border-top-right-radius: 6px;
-        }}
-
-        QTabBar::tab:selected {{
-            background: {self.primary_color};
-            color: white;
-            border-bottom-color: {self.primary_color};
-        }}
-
-        QTabBar::tab:hover {{
-            background: {self.secondary_color};
-            color: white;
-        }}
-
-        QLabel {{
-            color: {self.text_color};
-        }}
-
-        QFrame[frameShape="4"] {{
-            color: {self.accent_color};
-        }}
-
-        QSplitter::handle {{
-            background: {self.accent_color};
-        }}
-        """
-        self.setStyleSheet(stylesheet)
+        if self.database:
+            self.refresh_list()
 
     def _init_ui(self):
-        """Configure l'interface utilisateur"""
-        # Disposition principale
-        main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        """Initialise l'interface en layout colonnes"""
+        main_layout = QtWidgets.QHBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # En-tête avec logo
-        header_layout = QtWidgets.QHBoxLayout()
+        left_column = self._create_left_column()
+        main_layout.addWidget(left_column, 25)
 
-        # Logo
-        logo_label = QtWidgets.QLabel()
-        logo_path = os.path.join("ui", "resources", "icons", "logo")
-        if os.path.exists(logo_path):
-            pixmap = QtGui.QPixmap(logo_path)
-            scaled_pixmap = pixmap.scaled(50, 50, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            logo_label.setPixmap(scaled_pixmap)
-        header_layout.addWidget(logo_label)
+        right_column = self._create_right_column()
+        main_layout.addWidget(right_column, 75)
 
-        # Titre
-        self.title_label = QtWidgets.QLabel(tr("history.title"))
-        self.title_label.setStyleSheet(f"""
-            font-size: 24px;
-            font-weight: bold;
-            color: {self.primary_color};
-            margin-left: 10px;
+    def _create_left_column(self):
+        """Crée la colonne gauche avec filtres et liste"""
+        column = QtWidgets.QWidget()
+        column.setStyleSheet(f"""
+            QWidget {{
+                background: white;
+                border-right: 2px solid #E0E0E0;
+            }}
         """)
-        header_layout.addWidget(self.title_label)
+        layout = QtWidgets.QVBoxLayout(column)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        header = self._create_header()
+        layout.addWidget(header)
+
+        search_group = self._create_search_bar()
+        layout.addWidget(search_group)
+
+        filters_group = self._create_filters()
+        layout.addWidget(filters_group)
+
+        self.generations_list = QtWidgets.QListWidget()
+        self.generations_list.setAlternatingRowColors(True)
+        self.generations_list.setStyleSheet(f"""
+            QListWidget {{
+                border: 2px solid #E0E0E0;
+                border-radius: 6px;
+                background: white;
+                padding: 5px;
+            }}
+            QListWidget::item {{
+                padding: 12px;
+                border-radius: 4px;
+                margin: 2px 0;
+                color: #333333;
+            }}
+            QListWidget::item:selected {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+            }}
+            QListWidget::item:hover:!selected {{
+                background: #F8F9FA;
+                color: #333333;
+            }}
+        """)
+        self.generations_list.itemSelectionChanged.connect(self._on_selection_changed)
+        layout.addWidget(self.generations_list)
+
+        self.count_label = QtWidgets.QLabel("0 génération(s)")
+        self.count_label.setStyleSheet(f"""
+            color: {Theme.PRIMARY_COLOR};
+            font-weight: bold;
+            font-size: 11pt;
+            border: none;
+        """)
+        layout.addWidget(self.count_label)
+
+        return column
+
+    def _create_header(self):
+        """Crée l'en-tête avec titre et actions"""
+        header = QtWidgets.QWidget()
+        header.setStyleSheet("border: none;")
+        header_layout = QtWidgets.QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        title = QtWidgets.QLabel("Historique des Générations")
+        title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; border: none;")
+        header_layout.addWidget(title)
+
         header_layout.addStretch()
 
-        main_layout.addLayout(header_layout)
+        self.export_btn = QtWidgets.QPushButton("Exporter")
+        self.export_btn.setCursor(Qt.PointingHandCursor)
+        self.export_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {Theme.PRIMARY_COLOR};
+                border: 2px solid {Theme.PRIMARY_COLOR};
+                border-radius: 6px;
+                padding: 6px 15px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: #F5F5F5;
+            }}
+        """)
+        self.export_btn.clicked.connect(self._on_export_history)
+        header_layout.addWidget(self.export_btn)
 
-        # Barre d'outils
-        toolbar_layout = QtWidgets.QHBoxLayout()
-        toolbar_layout.setSpacing(10)
+        return header
 
-        self.refresh_button = QtWidgets.QPushButton(tr("history.refresh"))
-        self.refresh_button.clicked.connect(self.refresh_list)
-        toolbar_layout.addWidget(self.refresh_button)
-
-        self.delete_button = QtWidgets.QPushButton(tr("history.delete"))
-        self.delete_button.clicked.connect(self._on_delete)
-        self.delete_button.setEnabled(False)
-        toolbar_layout.addWidget(self.delete_button)
-
-        self.export_button = QtWidgets.QPushButton(tr("history.export"))
-        self.export_button.clicked.connect(self._on_export)
-        self.export_button.setEnabled(False)
-        toolbar_layout.addWidget(self.export_button)
-
-        # Filtre par plateforme
-        self.platform_label = QtWidgets.QLabel(tr("history.platform"))
-        self.platform_label.setStyleSheet("font-weight: bold;")
-        toolbar_layout.addWidget(self.platform_label)
-
-        self.platform_combo = QtWidgets.QComboBox()
-        self.platform_combo.addItem(tr("history.all"), "")
-        self.platform_combo.currentIndexChanged.connect(self._on_filter_changed)
-        toolbar_layout.addWidget(self.platform_combo)
-
-        # Filtre par type
-        self.type_label = QtWidgets.QLabel(tr("history.type"))
-        self.type_label.setStyleSheet("font-weight: bold;")
-        toolbar_layout.addWidget(self.type_label)
-
-        self.type_combo = QtWidgets.QComboBox()
-        self.type_combo.addItem(tr("history.all"), "")
-        self.type_combo.addItem(tr("history.standard"), "standard")
-        self.type_combo.addItem(tr("history.analyze"), "analyze")
-        self.type_combo.addItem(tr("history.generate"), "generate")
-        self.type_combo.addItem(tr("history.brainstorm"), "brainstorm")
-        self.type_combo.currentIndexChanged.connect(self._on_filter_changed)
-        toolbar_layout.addWidget(self.type_combo)
-
-        # Recherche
-        self.search_label = QtWidgets.QLabel(tr("history.search"))
-        self.search_label.setStyleSheet("font-weight: bold;")
-        toolbar_layout.addWidget(self.search_label)
+    def _create_search_bar(self):
+        """Crée la barre de recherche"""
+        group = QtWidgets.QGroupBox("Recherche")
+        group.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        group.setStyleSheet(f"""
+            QGroupBox {{
+                border: 2px solid #E0E0E0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 15px;
+                font-weight: bold;
+                color: {Theme.PRIMARY_COLOR};
+            }}
+        """)
+        layout = QtWidgets.QVBoxLayout(group)
 
         self.search_edit = QtWidgets.QLineEdit()
-        self.search_edit.setPlaceholderText(tr("history.search_placeholder"))
+        self.search_edit.setPlaceholderText("Rechercher par projet, batch, date...")
+        self.search_edit.setMinimumHeight(35)
         self.search_edit.textChanged.connect(self._on_filter_changed)
-        toolbar_layout.addWidget(self.search_edit)
+        self.search_edit.setStyleSheet(f"""
+            QLineEdit {{
+                border: 2px solid #E0E0E0;
+                border-radius: 6px;
+                padding: 5px 10px;
+                background: white;
+                font-size: 10pt;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+            }}
+        """)
+        layout.addWidget(self.search_edit)
 
-        # Ajouter la barre d'outils
-        main_layout.addLayout(toolbar_layout)
+        return group
 
-        # Séparateur
-        line = QtWidgets.QFrame()
-        line.setFrameShape(QtWidgets.QFrame.HLine)
-        line.setFrameShadow(QtWidgets.QFrame.Sunken)
-        main_layout.addWidget(line)
+    def _create_filters(self):
+        """Crée les filtres"""
+        group = QtWidgets.QGroupBox("Filtres")
+        group.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        group.setStyleSheet(f"""
+            QGroupBox {{
+                border: 2px solid #E0E0E0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 15px;
+                font-weight: bold;
+                color: {Theme.PRIMARY_COLOR};
+            }}
+        """)
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setSpacing(10)
 
-        # Splitter principal
-        splitter = QtWidgets.QSplitter(Qt.Vertical)
-        splitter.setHandleWidth(3)
-        main_layout.addWidget(splitter)
+        project_label = QtWidgets.QLabel("Projet:")
+        project_label.setStyleSheet("font-weight: bold; font-size: 9pt; border: none;")
+        layout.addWidget(project_label)
 
-        # Liste des prompts
-        list_widget = QtWidgets.QWidget()
-        list_widget.setStyleSheet("background-color: transparent;")
-        list_layout = QtWidgets.QVBoxLayout(list_widget)
-        list_layout.setSpacing(10)
+        self.project_filter = QtWidgets.QComboBox()
+        self.project_filter.addItem("Tous les projets", "")
+        self.project_filter.setMinimumHeight(35)
+        self.project_filter.currentIndexChanged.connect(self._on_filter_changed)
+        self._apply_combo_style(self.project_filter)
+        layout.addWidget(self.project_filter)
 
-        # Tableau des prompts
-        self.prompts_table = QtWidgets.QTableWidget()
-        self.prompts_table.setColumnCount(5)
-        self.prompts_table.setHorizontalHeaderLabels([
-            tr("history.id"),
-            tr("history.date"),
-            tr("history.platform"),
-            tr("history.type"),
-            tr("history.content")
-        ])
-        self.prompts_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        self.prompts_table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
-        self.prompts_table.horizontalHeader().setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-        self.prompts_table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
-        self.prompts_table.horizontalHeader().setSectionResizeMode(4, QtWidgets.QHeaderView.Stretch)
-        self.prompts_table.setSelectionBehavior(QtWidgets.QTableWidget.SelectRows)
-        self.prompts_table.setSelectionMode(QtWidgets.QTableWidget.SingleSelection)
-        self.prompts_table.verticalHeader().setVisible(False)
-        self.prompts_table.setAlternatingRowColors(True)
+        format_status_layout = QtWidgets.QHBoxLayout()
+        format_status_layout.setSpacing(10)
 
-        # Connexion de la sélection
-        self.prompts_table.itemSelectionChanged.connect(self._on_selection_changed)
-        self.prompts_table.cellDoubleClicked.connect(self._on_prompt_double_clicked)
+        format_column = QtWidgets.QVBoxLayout()
+        format_label = QtWidgets.QLabel("Format:")
+        format_label.setStyleSheet("font-weight: bold; font-size: 9pt; border: none;")
+        format_column.addWidget(format_label)
 
-        list_layout.addWidget(self.prompts_table)
+        self.format_filter = QtWidgets.QComboBox()
+        self.format_filter.addItems(["Tous les formats", "JSON", "CSV", "JSONL", "Parquet"])
+        self.format_filter.setMinimumHeight(35)
+        self.format_filter.currentIndexChanged.connect(self._on_filter_changed)
+        self._apply_combo_style(self.format_filter)
+        format_column.addWidget(self.format_filter)
 
-        # Détail du prompt
-        detail_widget = QtWidgets.QWidget()
-        detail_widget.setStyleSheet("background-color: transparent;")
-        detail_layout = QtWidgets.QVBoxLayout(detail_widget)
-        detail_layout.setSpacing(10)
+        status_column = QtWidgets.QVBoxLayout()
+        status_label = QtWidgets.QLabel("Statut:")
+        status_label.setStyleSheet("font-weight: bold; font-size: 9pt; border: none;")
+        status_column.addWidget(status_label)
 
-        # Tabs pour prompt et réponse
-        self.detail_tabs = QtWidgets.QTabWidget()
+        self.status_filter = QtWidgets.QComboBox()
+        self.status_filter.addItems(["Tous les statuts", "Complété", "Échoué", "En cours"])
+        self.status_filter.setMinimumHeight(35)
+        self.status_filter.currentIndexChanged.connect(self._on_filter_changed)
+        self._apply_combo_style(self.status_filter)
+        status_column.addWidget(self.status_filter)
 
-        # Onglet prompt
-        prompt_tab = QtWidgets.QWidget()
-        prompt_layout = QtWidgets.QVBoxLayout(prompt_tab)
+        format_status_layout.addLayout(format_column)
+        format_status_layout.addLayout(status_column)
 
-        self.prompt_edit = QtWidgets.QTextEdit()
-        self.prompt_edit.setReadOnly(True)
-        prompt_layout.addWidget(self.prompt_edit)
+        layout.addLayout(format_status_layout)
 
-        self.detail_tabs.addTab(prompt_tab, tr("history.prompt"))
+        return group
 
-        # Onglet réponse
-        response_tab = QtWidgets.QWidget()
-        response_layout = QtWidgets.QVBoxLayout(response_tab)
+    def _apply_combo_style(self, combo):
+        """Applique le style aux combobox avec gestion icône SVG"""
+        
+        arrow_style = ""
+        if self.dropdown_svg:
+            arrow_style = f"""
+            QComboBox::down-arrow {{
+                image: url({self.dropdown_svg});
+                width: 16px;
+                height: 16px;
+            }}
+            """
+        
+        combo.setStyleSheet(f"""
+            QComboBox {{
+                border: 2px solid #E0E0E0;
+                border-radius: 6px;
+                padding: 5px 10px;
+                padding-right: 35px;
+                background: white;
+                font-size: 10pt;
+            }}
+            QComboBox:hover {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 32px;
+                border: none;
+                border-left: 1px solid #E0E0E0;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+                background: #FAFAFA;
+            }}
+            {arrow_style}
+            QComboBox QAbstractItemView {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+                border-radius: 6px;
+                background: white;
+                selection-background-color: {Theme.PRIMARY_COLOR};
+                selection-color: white;
+                padding: 4px;
+                outline: none;
+            }}
+        """)
 
-        self.response_edit = QtWidgets.QTextEdit()
-        self.response_edit.setReadOnly(True)
-        response_layout.addWidget(self.response_edit)
+    def _create_right_column(self):
+        """Crée la colonne droite avec détails et DEUX visualisations"""
+        column = QtWidgets.QWidget()
+        column.setStyleSheet("background: white; border: none;")
+        layout = QtWidgets.QVBoxLayout(column)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
 
-        self.detail_tabs.addTab(response_tab, tr("history.response"))
+        # ✅ Container pour les DEUX camemberts côte à côte
+        charts_container = QtWidgets.QWidget()
+        charts_layout = QtWidgets.QHBoxLayout(charts_container)
+        charts_layout.setSpacing(10)
+        charts_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Onglet métadonnées
-        metadata_tab = QtWidgets.QWidget()
-        metadata_layout = QtWidgets.QVBoxLayout(metadata_tab)
+        # Camembert 1: Distribution des typologies
+        typologie_chart = self._create_typologie_chart_group()
+        charts_layout.addWidget(typologie_chart, 50)
 
-        self.metadata_table = QtWidgets.QTableWidget()
-        self.metadata_table.setColumnCount(2)
-        self.metadata_table.setHorizontalHeaderLabels([
-            tr("history.property"),
-            tr("history.value")
-        ])
-        self.metadata_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        self.metadata_table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-        self.metadata_table.verticalHeader().setVisible(False)
-        metadata_layout.addWidget(self.metadata_table)
+        # Camembert 2: Progression par batch
+        batch_chart = self._create_batch_chart_group()
+        charts_layout.addWidget(batch_chart, 50)
 
-        self.detail_tabs.addTab(metadata_tab, tr("history.metadata"))
+        layout.addWidget(charts_container, 70)
 
-        detail_layout.addWidget(self.detail_tabs)
+        # Section détails (RÉDUITE)
+        details_group = self._create_details_group()
+        layout.addWidget(details_group, 30)
 
-        # Ajouter les widgets au splitter
-        splitter.addWidget(list_widget)
-        splitter.addWidget(detail_widget)
+        return column
 
-        # Définir les tailles initiales
-        splitter.setSizes([400, 300])
+    def _create_typologie_chart_group(self):
+        """Crée le camembert de distribution des typologies"""
+        group = QtWidgets.QGroupBox("Distribution des Typologies")
+        group.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        group.setStyleSheet(f"""
+            QGroupBox {{
+                border: 2px solid #E0E0E0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 15px;
+                font-weight: bold;
+                color: {Theme.PRIMARY_COLOR};
+            }}
+        """)
+        layout = QtWidgets.QVBoxLayout(group)
 
-        # Statut
-        status_layout = QtWidgets.QHBoxLayout()
+        self.typologie_series = QPieSeries()
+        self.typologie_series.setHoleSize(0.0)
 
-        self.status_label = QtWidgets.QLabel(tr("history.status_ready"))
-        self.status_label.setStyleSheet(f"color: {self.primary_color}; font-weight: bold;")
-        status_layout.addWidget(self.status_label)
+        slice_default = self.typologie_series.append("Aucune donnée", 1)
+        slice_default.setColor(QColor("#E0E0E0"))
+        slice_default.setBorderColor(Qt.transparent)
+        slice_default.setLabelVisible(False)
 
-        self.count_label = QtWidgets.QLabel(tr("history.count", count=0))
-        self.count_label.setAlignment(Qt.AlignRight)
-        status_layout.addWidget(self.count_label)
+        self.typologie_chart = QChart()
+        self.typologie_chart.addSeries(self.typologie_series)
+        self.typologie_chart.setTitle("Sélectionnez une génération")
+        self.typologie_chart.setTitleFont(QFont("Segoe UI", 11, QFont.Bold))
+        self.typologie_chart.setTitleBrush(QBrush(QColor("#1e293b")))
 
-        main_layout.addLayout(status_layout)
+        self.typologie_chart.legend().setVisible(True)
+        self.typologie_chart.legend().setAlignment(Qt.AlignBottom)
+        self.typologie_chart.legend().setFont(QFont("Segoe UI", 8))
+        self.typologie_chart.legend().setLabelColor(QColor("#1e293b"))
+        self.typologie_chart.legend().setBackgroundVisible(False)
+        self.typologie_chart.legend().setBorderColor(Qt.transparent)
+
+        self.typologie_chart.setBackgroundVisible(False)
+        self.typologie_chart.setBackgroundRoundness(0)
+        self.typologie_chart.setMargins(QtCore.QMargins(10, 10, 10, 10))
+        self.typologie_chart.setAnimationOptions(QChart.SeriesAnimations)
+
+        self.typologie_chart_view = QChartView(self.typologie_chart)
+        self.typologie_chart_view.setRenderHint(QPainter.Antialiasing)
+        self.typologie_chart_view.setStyleSheet("background: transparent; border: none;")
+        layout.addWidget(self.typologie_chart_view)
+
+        self.typologie_info = QtWidgets.QLabel("Sélectionnez une génération")
+        self.typologie_info.setAlignment(Qt.AlignCenter)
+        self.typologie_info.setStyleSheet("color: #666; font-style: italic; border: none; font-size: 8pt;")
+        layout.addWidget(self.typologie_info)
+
+        return group
+
+    def _create_batch_chart_group(self):
+        """Crée le camembert de progression par batch"""
+        group = QtWidgets.QGroupBox("Progression par Batch")
+        group.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        group.setStyleSheet(f"""
+            QGroupBox {{
+                border: 2px solid #E0E0E0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 15px;
+                font-weight: bold;
+                color: {Theme.PRIMARY_COLOR};
+            }}
+        """)
+        layout = QtWidgets.QVBoxLayout(group)
+
+        self.batch_series = QPieSeries()
+        self.batch_series.setHoleSize(0.0)
+
+        slice_default = self.batch_series.append("Aucune donnée", 1)
+        slice_default.setColor(QColor("#E0E0E0"))
+        slice_default.setBorderColor(Qt.transparent)
+        slice_default.setLabelVisible(False)
+
+        self.batch_chart = QChart()
+        self.batch_chart.addSeries(self.batch_series)
+        self.batch_chart.setTitle("Sélectionnez une génération")
+        self.batch_chart.setTitleFont(QFont("Segoe UI", 11, QFont.Bold))
+        self.batch_chart.setTitleBrush(QBrush(QColor("#1e293b")))
+
+        self.batch_chart.legend().setVisible(True)
+        self.batch_chart.legend().setAlignment(Qt.AlignBottom)
+        self.batch_chart.legend().setFont(QFont("Segoe UI", 8))
+        self.batch_chart.legend().setLabelColor(QColor("#1e293b"))
+        self.batch_chart.legend().setBackgroundVisible(False)
+        self.batch_chart.legend().setBorderColor(Qt.transparent)
+
+        self.batch_chart.setBackgroundVisible(False)
+        self.batch_chart.setBackgroundRoundness(0)
+        self.batch_chart.setMargins(QtCore.QMargins(10, 10, 10, 10))
+        self.batch_chart.setAnimationOptions(QChart.SeriesAnimations)
+
+        self.batch_chart_view = QChartView(self.batch_chart)
+        self.batch_chart_view.setRenderHint(QPainter.Antialiasing)
+        self.batch_chart_view.setStyleSheet("background: transparent; border: none;")
+        layout.addWidget(self.batch_chart_view)
+
+        self.batch_info = QtWidgets.QLabel("Sélectionnez une génération")
+        self.batch_info.setAlignment(Qt.AlignCenter)
+        self.batch_info.setStyleSheet("color: #666; font-style: italic; border: none; font-size: 8pt;")
+        layout.addWidget(self.batch_info)
+
+        return group
+
+    def _create_details_group(self):
+        """Crée le groupe des détails (TRÈS COMPACT)"""
+        group = QtWidgets.QGroupBox("Détails de la Génération")
+        group.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        group.setStyleSheet(f"""
+            QGroupBox {{
+                border: 2px solid #E0E0E0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 12px;
+                font-weight: bold;
+                color: {Theme.PRIMARY_COLOR};
+            }}
+        """)
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setSpacing(4)
+
+        # Zone scrollable ultra-compacte
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setMaximumHeight(120)  # ✅ LIMITE DE HAUTEUR
+
+        details_widget = QtWidgets.QWidget()
+        
+        self.details_layout = QtWidgets.QGridLayout(details_widget)
+        self.details_layout.setAlignment(Qt.AlignTop)
+        self.details_layout.setSpacing(3)
+        self.details_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll.setWidget(details_widget)
+        layout.addWidget(scroll)
+
+        # Boutons d'action
+        actions_layout = QtWidgets.QHBoxLayout()
+        actions_layout.addStretch()
+
+        self.view_btn = QtWidgets.QPushButton("Voir tout")
+        self.view_btn.setMinimumHeight(28)
+        self.view_btn.setCursor(Qt.PointingHandCursor)
+        self.view_btn.setEnabled(False)
+        self.view_btn.clicked.connect(self._on_view_generation)
+        self._apply_button_style(self.view_btn)
+        actions_layout.addWidget(self.view_btn)
+
+        self.delete_btn = QtWidgets.QPushButton("Supprimer")
+        self.delete_btn.setMinimumHeight(28)
+        self.delete_btn.setCursor(Qt.PointingHandCursor)
+        self.delete_btn.setEnabled(False)
+        self.delete_btn.clicked.connect(self._on_delete_generation)
+        self._apply_button_style(self.delete_btn)
+        actions_layout.addWidget(self.delete_btn)
+
+        layout.addLayout(actions_layout)
+
+        return group
+
+    def _apply_button_style(self, button):
+        """Applique le style aux boutons"""
+        button.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-weight: bold;
+                min-width: 70px;
+                font-size: 8pt;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+            QPushButton:disabled {{
+                background: #CCCCCC;
+                color: #888888;
+            }}
+        """)
 
     def set_database(self, database):
-        """
-        Définit la connexion à la base de données
+        """Définit la connexion à la base de données avec validation"""
+        if database is None:
+            return
 
-        Args:
-            database: Instance de la base de données
-        """
-        self.database = database
+        from utils.dataset_database import DatasetDatabase
 
-    def update_status(self, message):
-        """
-        Met à jour le statut
-
-        Args:
-            message (str): Message de statut
-        """
-        self.status_label.setText(message)
+        if isinstance(database, DatasetDatabase) and hasattr(database, 'get_all_generations'):
+            self.database = database
+            self.refresh_list()
 
     def refresh_list(self):
-        """Actualise la liste des prompts"""
-        # Vérifier la disponibilité de la base de données
+        """Actualise la liste"""
         if not self.database:
-            self.update_status(tr("history.database_unavailable"))
             return
 
         try:
-            # Effacer la sélection actuelle
-            self.current_prompt_id = None
-            self.prompts_table.clearSelection()
-            self.prompt_edit.clear()
-            self.response_edit.clear()
-            self.metadata_table.setRowCount(0)
+            self.generations = self._fetch_generations()
 
-            # Effacer le tableau
-            self.prompts_table.setRowCount(0)
-
-            # Récupérer les filtres
-            platform = self.platform_combo.currentData()
-            prompt_type = self.type_combo.currentData()
-            search_text = self.search_edit.text()
-
-            # Récupérer la liste des prompts
-            prompts = None
-            # prompts = self.database.get_prompts(
-            #     platform=platform if platform else None,
-            #     operation_type=prompt_type if prompt_type else None,
-            #     search=search_text if search_text else None,
-            #     limit=1000  # Limiter le nombre de résultats
-            # )
-
-            if not prompts:
-                self.update_status(tr("history.no_prompts_found"))
-                self.count_label.setText(tr("history.count", count=0))
+            if not self.generations:
+                self.count_label.setText("0 génération(s)")
+                self.generations_list.clear()
+                self.project_filter.clear()
+                self.project_filter.addItem("Tous les projets", "")
                 return
 
-            # Mettre à jour les plateformes disponibles
-            self._update_platforms(prompts)
+            self._update_filters()
+            self._display_generations()
 
-            # Remplir le tableau
-            for prompt in prompts:
-                # Ajouter une ligne
-                row = self.prompts_table.rowCount()
-                self.prompts_table.insertRow(row)
-
-                # ID
-                id_item = QtWidgets.QTableWidgetItem(str(prompt.get('id', '')))
-                id_item.setFlags(id_item.flags() & ~Qt.ItemIsEditable)
-                self.prompts_table.setItem(row, 0, id_item)
-
-                # Date
-                timestamp = prompt.get('timestamp', '')
-                date_str = ""
-
-                if timestamp:
-                    try:
-                        date = datetime.fromisoformat(timestamp)
-                        date_str = date.strftime('%d/%m/%Y %H:%M')
-                    except:
-                        date_str = timestamp
-
-                date_item = QtWidgets.QTableWidgetItem(date_str)
-                date_item.setFlags(date_item.flags() & ~Qt.ItemIsEditable)
-                self.prompts_table.setItem(row, 1, date_item)
-
-                # Plateforme
-                platform_item = QtWidgets.QTableWidgetItem(prompt.get('platform', ''))
-                platform_item.setFlags(platform_item.flags() & ~Qt.ItemIsEditable)
-                self.prompts_table.setItem(row, 2, platform_item)
-
-                # Type
-                type_item = QtWidgets.QTableWidgetItem(prompt.get('operation_type', ''))
-                type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
-                self.prompts_table.setItem(row, 3, type_item)
-
-                # Contenu (aperçu)
-                content = prompt.get('content', '')
-                preview = content[:50].replace('\n', ' ')
-                if len(content) > 50:
-                    preview += "..."
-
-                content_item = QtWidgets.QTableWidgetItem(preview)
-                content_item.setFlags(content_item.flags() & ~Qt.ItemIsEditable)
-                content_item.setToolTip(content[:200] + "..." if len(content) > 200 else content)
-                self.prompts_table.setItem(row, 4, content_item)
-
-            # Mettre à jour le statut
-            count = self.prompts_table.rowCount()
-            self.update_status(tr("history.prompts_displayed", count=count))
-            self.count_label.setText(tr("history.count", count=count))
+            count = len(self.generations)
+            self.count_label.setText(f"{count} génération(s)")
 
         except Exception as e:
-            logger.error(f"Erreur lors de l'actualisation de la liste: {str(e)}")
-            self.update_status(tr("history.error", error=str(e)))
+            logger.error(f"Erreur lors du chargement: {str(e)}")
+            logger.error(traceback.format_exc())
 
-    def _update_platforms(self, prompts):
+    def _fetch_generations(self):
+        """Récupère les générations avec extraction des métadonnées ET calcul progression batch"""
+        if not self.database:
+            return []
+
+        try:
+            generations = self.database.get_all_generations(limit=100)
+            display_generations = []
+            
+            logger.info(f"\n📋 FETCH GENERATIONS - {len(generations) if generations else 0} trouvées")
+            
+            for idx, gen in enumerate(generations):
+                try:
+                    if not gen.get('id') or not gen.get('project_name'):
+                        continue
+                    
+                    gen_id = gen['id']
+                    logger.info(f"\n=== Génération #{gen_id} === ")
+                    
+                    metadata = self._safe_parse_metadata(gen.get('metadata'))
+                    logger.info(f"  Metadata keys: {list(metadata.keys()) if metadata else 'EMPTY'}")
+                    
+                    # Load the predefined batch composition
+                    batch = self.database.get_batch(gen['project_name'], gen.get('batch_number'))
+                    if batch:
+                        batch_data = batch.get('data', {})
+                        combinations = batch_data.get('combinations', [])
+                        master_typologie = batch_data.get('master_typologie', {})
+                        master_name = master_typologie.get('name', 'N/A')
+                        display_combos = []
+                        for combo in combinations:
+                            contexts = combo.get('contexts', [])
+                            nb_samples = combo.get('nb_samples', 1)
+                            display_combo = {
+                                'master': master_name,
+                                'contexts': [{'level': ctx.get('level'), 'display': ctx.get('display'), 'data': ctx.get('data', {})} for ctx in contexts],
+                                'nb_samples': nb_samples,
+                                'master_data': master_typologie
+                            }
+                            display_combos.append(display_combo)
+
+                        # Compute chart_data pour typologie
+                        typologie_counts = {}
+                        total_contexts = 0
+                        for combo in display_combos:
+                            master_name = combo.get('master', 'N/A')
+                            if master_name != 'N/A':
+                                if master_name not in typologie_counts:
+                                    typologie_counts[master_name] = {'count': 0, 'level': 'master', 'data': combo.get('master_data', {})}
+                                typologie_counts[master_name]['count'] += 1
+                                total_contexts += 1
+                            for ctx in combo['contexts']:
+                                display = ctx.get('display', 'Inconnu')
+                                level = ctx.get('level', 'unknown')
+                                if display != 'Inconnu' and display != 'N/A':
+                                    if display not in typologie_counts:
+                                        typologie_counts[display] = {'count': 0, 'level': level, 'data': ctx['data']}
+                                    typologie_counts[display]['count'] += 1
+                                    total_contexts += 1
+
+                        chart_data = []
+                        for name, info in typologie_counts.items():
+                            chart_data.append({
+                                'name': name,
+                                'samples': info['count'],
+                                'level': info['level'],
+                                'data': info['data']
+                            })
+                        logger.info(f"  Chart data (typologie): {len(chart_data)} entrées")
+                    else:
+                        chart_data = []
+                        logger.warning(f"  Batch not found for generation {gen_id}")
+
+                    # ✅ NOUVEAU: Calculer la progression par batch du projet
+                    batch_progression_data = self._calculate_batch_progression(gen)
+
+                    contexts_list = self._extract_contexts_from_generation(gen, metadata)
+                    
+                    status_map = {
+                        'completed': 'Complété',
+                        'failed': 'Échoué',
+                        'running': 'En cours',
+                        'pending': 'En attente'
+                    }
+                    status_raw = gen.get('status', 'unknown')
+                    status = status_map.get(status_raw, status_raw.capitalize())
+
+                    batch_number = gen.get('batch_number')
+                    batch_name = gen.get('batch_name') or f"Batch {batch_number}" if batch_number else "N/A"
+
+                    display_gen = {
+                        "id": gen['id'],
+                        "project": gen.get('project_name', 'Projet inconnu'),
+                        "batch": batch_name,
+                        "date": gen.get('started_at') or datetime.now().isoformat(),
+                        "format": gen.get('output_format', 'JSON'),
+                        "samples": gen.get('total_samples') or 0,
+                        "combinations": gen.get('total_combinations') or 0,
+                        "master": gen.get('master_typologie_name') or "N/A",
+                        "status": status,
+                        "status_raw": status_raw,
+                        "duration": gen.get('duration_seconds'),
+                        "output_file": gen.get('output_file_path'),
+                        "error": gen.get('error_message'),
+                        "contexts": contexts_list,
+                        "metadata": metadata,
+                        "chart_data": chart_data,
+                        "batch_progression": batch_progression_data  # ✅ NOUVEAU
+                    }
+
+                    logger.info(f"  ✅ Génération ajoutée: {display_gen['project']} - {display_gen['batch']}")
+                    display_generations.append(display_gen)
+
+                except Exception as gen_error:
+                    logger.error(f"❌ Erreur génération #{idx}: {gen_error}")
+                    logger.error(traceback.format_exc())
+                    continue
+            
+            logger.info(f"\n✅ Total générations traitées: {len(display_generations)}")
+            return display_generations
+
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération: {str(e)}")
+            logger.error(traceback.format_exc())
+            return []
+
+    def _calculate_batch_progression(self, gen):
         """
-        Met à jour la liste des plateformes disponibles
-
-        Args:
-            prompts (list): Liste des prompts
+        ✅ NOUVEAU: Calcule la progression de génération par batch du projet
+        Retourne les données pour le camembert de progression
         """
-        # Sauvegarder la sélection actuelle
-        current_platform = self.platform_combo.currentData()
+        try:
+            project_name = gen.get('project_name')
+            if not project_name:
+                return []
 
-        # Récupérer toutes les plateformes uniques
-        platforms = set()
+            # Récupérer TOUS les batches du projet
+            all_batches = self.database.get_all_batches(project_name)
+            
+            if not all_batches:
+                return []
 
-        for prompt in prompts:
-            platform = prompt.get('platform', '')
-            if platform:
-                platforms.add(platform)
+            # Récupérer TOUTES les générations du projet
+            all_project_gens = self.database.get_all_generations(project_name=project_name, limit=1000)
 
-        # Mettre à jour le combo
-        self.platform_combo.clear()
-        self.platform_combo.addItem(tr("history.all"), "")
+            # Compter les samples générés par batch
+            batch_stats = {}
+            for batch in all_batches:
+                batch_num = batch['batch_number']
+                batch_data = batch.get('data', {})
+                combinations = batch_data.get('combinations', [])
+                
+                # Calculer le total de samples prévus pour ce batch
+                total_expected = sum(combo.get('nb_samples', 1) for combo in combinations)
+                
+                # Chercher si ce batch a été généré
+                generated = 0
+                for pg in all_project_gens:
+                    if pg.get('batch_number') == batch_num and pg.get('status') == 'completed':
+                        generated = pg.get('total_samples', 0)
+                        break
+                
+                batch_stats[batch_num] = {
+                    'expected': total_expected,
+                    'generated': generated,
+                    'percentage': (generated / total_expected * 100) if total_expected > 0 else 0
+                }
 
-        for platform in sorted(platforms):
-            self.platform_combo.addItem(platform, platform)
+            # Créer les données pour le camembert
+            progression_data = []
+            for batch_num in sorted(batch_stats.keys()):
+                stats = batch_stats[batch_num]
+                progression_data.append({
+                    'batch_number': batch_num,
+                    'expected': stats['expected'],
+                    'generated': stats['generated'],
+                    'percentage': stats['percentage'],
+                    'status': 'completed' if stats['generated'] >= stats['expected'] else 'partial' if stats['generated'] > 0 else 'pending'
+                })
 
-        # Restaurer la sélection si possible
-        if current_platform:
-            index = self.platform_combo.findData(current_platform)
-            if index >= 0:
-                self.platform_combo.setCurrentIndex(index)
+            return progression_data
+
+        except Exception as e:
+            logger.error(f"Erreur calcul progression: {e}")
+            return []
+
+    def _extract_contexts_from_generation(self, gen, metadata):
+        """Extrait les contextes depuis une génération pour la vue détaillée"""
+        contexts = []
+
+        if 'combinations' in metadata and isinstance(metadata['combinations'], list):
+            for combo in metadata['combinations']:
+                if not isinstance(combo, dict):
+                    continue
+                
+                master_info = combo.get('master', {})
+                if isinstance(master_info, dict):
+                    master_name = master_info.get('name', 'N/A')
+                    contexts.append(f"Master: {master_name}")
+
+                combo_contexts = combo.get('contexts', [])
+                if isinstance(combo_contexts, list):
+                    for ctx in combo_contexts:
+                        if isinstance(ctx, dict):
+                            ctx_display = ctx.get('display') or ctx.get('level') or 'N/A'
+                            contexts.append(f"• {ctx_display}")
+                            
+        if not contexts and gen.get('master_typologie_name'):
+            contexts.append(f"Master: {gen['master_typologie_name']}")
+
+        if not contexts:
+            contexts.append("Aucun contexte disponible")
+
+        return contexts
+        
+    def _safe_parse_metadata(self, metadata_value):
+        """Parse les métadonnées de manière sécurisée avec logging"""
+        if not metadata_value:
+            logger.debug("  Metadata vide")
+            return {}
+
+        if isinstance(metadata_value, dict):
+            logger.debug(f"  Metadata dict avec {len(metadata_value)} clés")
+            return metadata_value
+
+        if isinstance(metadata_value, str):
+            try:
+                parsed = json.loads(metadata_value)
+                logger.debug(f"  Metadata parsée: {len(parsed)} clés")
+                return parsed
+            except json.JSONDecodeError as e:
+                logger.error(f"  ❌ Erreur JSON: {e}")
+                return {}
+
+        logger.warning(f"  ⚠️ Type metadata inconnu: {type(metadata_value)}")
+        return {}
+
+    def _update_filters(self):
+        """Met à jour les options de filtres"""
+        try:
+            projects = set()
+            for g in self.generations:
+                project_name = g.get("project")
+                if project_name and isinstance(project_name, str):
+                    projects.add(project_name)
+
+            current_project = self.project_filter.currentData()
+
+            self.project_filter.clear()
+            self.project_filter.addItem("Tous les projets", "")
+
+            for project in sorted(projects):
+                self.project_filter.addItem(project, project)
+
+            if current_project:
+                index = self.project_filter.findData(current_project)
+                if index >= 0:
+                    self.project_filter.setCurrentIndex(index)
+
+        except Exception as e:
+            logger.error(f"Erreur mise à jour filtres: {e}")
+
+    def _display_generations(self):
+        """Affiche les générations sans icônes"""
+        self.generations_list.clear()
+
+        filtered = self._apply_filters()
+
+        for gen in filtered:
+            item = QtWidgets.QListWidgetItem()
+            
+            date_str = datetime.fromisoformat(gen["date"]).strftime("%d/%m/%Y %H:%M")
+            
+            line1 = f"{gen['project']} - {gen['batch']}"
+            line2 = f"{gen['status']} - {date_str} - {gen['format']} - {gen['samples']} samples"
+            
+            text = f"{line1}\n{line2}"
+            
+            item.setText(text)
+            item.setData(Qt.UserRole, gen["id"])
+            
+            font = QFont("Segoe UI", 9)
+            item.setFont(font)
+            
+            self.generations_list.addItem(item)
+
+    def _apply_filters(self):
+        """Applique les filtres"""
+        filtered = self.generations
+
+        project = self.project_filter.currentData()
+        if project:
+            filtered = [g for g in filtered if g["project"] == project]
+
+        format_text = self.format_filter.currentText()
+        if format_text != "Tous les formats":
+            filtered = [g for g in filtered if g["format"] == format_text]
+
+        status_text = self.status_filter.currentText()
+        if status_text != "Tous les statuts":
+            status_map = {
+                "Complété": "completed",
+                "Échoué": "failed",
+                "En cours": "running"
+            }
+            status_filter = status_map.get(status_text)
+            if status_filter:
+                filtered = [g for g in filtered if g.get("status_raw") == status_filter]
+
+        search = self.search_edit.text().strip().lower()
+        if search:
+            filtered = [
+                g for g in filtered
+                if search in g["project"].lower()
+                or search in g["batch"].lower()
+                or search in g["date"].lower()
+                or search in g.get("master", "").lower()
+            ]
+
+        return filtered
 
     def _on_filter_changed(self):
         """Gère le changement des filtres"""
-        self.refresh_list()
+        self._display_generations()
 
     def _on_selection_changed(self):
         """Gère le changement de sélection"""
-        # Récupérer les indices sélectionnés
-        selected_rows = self.prompts_table.selectionModel().selectedRows()
-
-        if not selected_rows:
-            # Aucune sélection
-            self.current_prompt_id = None
-            self.prompt_edit.clear()
-            self.response_edit.clear()
-            self.metadata_table.setRowCount(0)
-            self.delete_button.setEnabled(False)
-            self.export_button.setEnabled(False)
+        selected = self.generations_list.selectedItems()
+        
+        if not selected:
+            self._clear_details()
+            self.view_btn.setEnabled(False)
+            self.delete_btn.setEnabled(False)
             return
 
-        # Récupérer l'ID du prompt sélectionné
-        row = selected_rows[0].row()
-        id_item = self.prompts_table.item(row, 0)
+        gen_id = selected[0].data(Qt.UserRole)
+        generation = next((g for g in self.generations if g["id"] == gen_id), None)
 
-        if not id_item:
+        if generation:
+            self.current_generation_id = gen_id
+            self._display_details(generation)
+            self._update_typologie_chart(generation)
+            self._update_batch_chart(generation)  # ✅ NOUVEAU
+            self.view_btn.setEnabled(True)
+            self.delete_btn.setEnabled(True)
+            self.generation_selected.emit(gen_id)
+
+    def _clear_details(self):
+        """Efface les détails"""
+        while self.details_layout.count():
+            item = self.details_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self.typologie_chart.removeAllSeries()
+        self.batch_chart.removeAllSeries()
+        self.typologie_info.setText("Sélectionnez une génération")
+        self.batch_info.setText("Sélectionnez une génération")
+
+    def _display_details(self, generation):
+        """Affiche les détails en mode ULTRA-COMPACT"""
+        while self.details_layout.count():
+            item = self.details_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Informations essentielles seulement
+        info_data = [
+            ("Projet", generation["project"]),
+            ("Batch", generation["batch"]),
+            ("Date", datetime.fromisoformat(generation["date"]).strftime("%d/%m/%Y")),
+            ("Samples", str(generation["samples"])),
+            ("Format", generation["format"]),
+            ("Statut", generation["status"])
+        ]
+        
+        row = 0
+        col = 0
+        max_cols = 3  # ✅ 3 colonnes pour plus de compacité
+
+        for label, value in info_data:
+            container = QtWidgets.QWidget()
+            h_layout = QtWidgets.QHBoxLayout(container)
+            h_layout.setContentsMargins(0, 0, 0, 0)
+            h_layout.setSpacing(4)
+
+            lbl = QtWidgets.QLabel(f"{label}:")
+            lbl.setStyleSheet("font-weight: bold; color: #333; font-size: 8pt; border: none;")
+            h_layout.addWidget(lbl)
+
+            val = ElidedLabel(value)
+            val.setStyleSheet("color: #555; font-size: 8pt; border: none;")
+            h_layout.addWidget(val, 1)
+
+            self.details_layout.addWidget(container, row, col)
+
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+
+        if generation.get("error"):
+            row += 1
+            error_label = QtWidgets.QLabel("Erreur:")
+            error_label.setStyleSheet("font-weight: bold; color: #D32F2F; font-size: 8pt; border: none;")
+            self.details_layout.addWidget(error_label, row, 0, 1, 3)
+            
+            row += 1
+            error_text = QtWidgets.QLabel(generation["error"][:100] + "...")  # ✅ Tronquer
+            error_text.setStyleSheet("color: #D32F2F; padding: 3px; background: #FFEBEE; border-radius: 3px; font-size: 8pt;")
+            error_text.setWordWrap(True)
+            self.details_layout.addWidget(error_text, row, 0, 1, 3)
+
+    def _update_typologie_chart(self, generation):
+        """Met à jour le camembert des typologies"""
+        self.typologie_chart.removeAllSeries()
+        self.typologie_series = QPieSeries()
+        self.typologie_series.setHoleSize(0.0)
+
+        chart_data = generation.get("chart_data", [])
+        total_samples = generation.get("samples", 0)
+
+        if not chart_data or total_samples == 0:
+            slice_default = self.typologie_series.append("Aucune donnée", 1)
+            slice_default.setColor(QColor("#E0E0E0"))
+            slice_default.setBorderColor(Qt.transparent)
+            slice_default.setLabelVisible(False)
+            self.typologie_chart.addSeries(self.typologie_series)
+            self.typologie_info.setText("Aucune donnée")
+            self.typologie_chart.setTitle("Aucune donnée")
             return
 
-        prompt_id = int(id_item.text())
-        self.current_prompt_id = prompt_id
+        colors = [
+            "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
+            "#FFEAA7", "#DFE6E9", "#74B9FF", "#A29BFE",
+            "#FD79A8", "#FDCB6E", "#6C5CE7", "#00B894"
+        ]
 
-        # Activer les boutons
-        self.delete_button.setEnabled(True)
-        self.export_button.setEnabled(True)
+        sorted_chart_data = sorted(chart_data, key=lambda x: x.get('samples', 0), reverse=True)
 
-        # Charger les détails
-        self._load_prompt_details(prompt_id)
+        for i, item in enumerate(sorted_chart_data):
+            samples = item.get('samples', 0)
+            name = item.get('name', 'Inconnu')
+            level = item.get('level', 'unknown')
 
-        # Émettre le signal
-        self.prompt_selected.emit(prompt_id)
+            slice_obj = self.typologie_series.append(name, samples)
+            color = QColor(colors[i % len(colors)])
+            slice_obj.setColor(color)
+            slice_obj.setBorderColor(Qt.transparent)
 
-    def _load_prompt_details(self, prompt_id):
+            percentage = (samples / total_samples) * 100 if total_samples > 0 else 0
+
+            slice_obj.setLabelVisible(True)
+            slice_obj.setLabelPosition(QPieSlice.LabelOutside)
+            slice_obj.setLabelArmLengthFactor(0.12)
+            slice_obj.setLabelColor(QColor("#1e293b"))
+            slice_obj.setLabelFont(QFont("Segoe UI", 8, QFont.Bold))
+
+            if level == 'master':
+                slice_obj.setLabel(f"⭐ {name} {percentage:.0f}%")
+                slice_obj.setExploded(True)
+                slice_obj.setExplodeDistanceFactor(0.04)
+            else:
+                slice_obj.setLabel(f"{name} {percentage:.0f}%")
+
+        self.typologie_chart.addSeries(self.typologie_series)
+        self.typologie_chart.setTitle(f"{len(sorted_chart_data)} typologie(s)")
+        self.typologie_info.setText(f"{total_samples} occurrences totales")
+
+    def _update_batch_chart(self, generation):
         """
-        Charge les détails d'un prompt
-
-        Args:
-            prompt_id (int): ID du prompt
+        ✅ NOUVEAU: Met à jour le camembert de progression par batch
         """
-        # Vérifier la disponibilité de la base de données
-        if not self.database:
+        self.batch_chart.removeAllSeries()
+        self.batch_series = QPieSeries()
+        self.batch_series.setHoleSize(0.0)
+
+        batch_progression = generation.get("batch_progression", [])
+
+        if not batch_progression:
+            slice_default = self.batch_series.append("Aucune donnée", 1)
+            slice_default.setColor(QColor("#E0E0E0"))
+            slice_default.setBorderColor(Qt.transparent)
+            slice_default.setLabelVisible(False)
+            self.batch_chart.addSeries(self.batch_series)
+            self.batch_info.setText("Aucune donnée de batch")
+            self.batch_chart.setTitle("Aucune donnée")
             return
 
-        try:
-            # Récupérer les informations
-            prompt = self.database.get_prompt(prompt_id)
+        # Couleurs selon le statut
+        status_colors = {
+            'completed': "#4CAF50",  # Vert
+            'partial': "#FFC107",     # Orange
+            'pending': "#9E9E9E"      # Gris
+        }
 
-            if not prompt:
-                return
+        total_expected = sum(b['expected'] for b in batch_progression)
+        total_generated = sum(b['generated'] for b in batch_progression)
 
-            # Mettre à jour les onglets
-            self.prompt_edit.setPlainText(prompt.get('content', ''))
-            self.response_edit.setPlainText(prompt.get('response', ''))
+        for batch_data in batch_progression:
+            batch_num = batch_data['batch_number']
+            generated = batch_data['generated']
+            expected = batch_data['expected']
+            status = batch_data['status']
+            percentage = batch_data['percentage']
 
-            # Mettre à jour les métadonnées
-            self.metadata_table.setRowCount(0)
+            if expected == 0:
+                continue
 
-            # Ajouter les métadonnées
-            metadata = [
-                (tr("history.id"), prompt.get('id', '')),
-                (tr("history.session"), prompt.get('session_id', '')),
-                (tr("history.platform"), prompt.get('platform', '')),
-                (tr("history.type"), prompt.get('operation_type', '')),
-                (tr("history.tokens"), prompt.get('token_count', '')),
-                (tr("history.date"), prompt.get('timestamp', '')),
-                (tr("history.status"), prompt.get('status', ''))
-            ]
+            slice_obj = self.batch_series.append(f"Batch {batch_num}", generated if generated > 0 else 1)
+            
+            color = QColor(status_colors.get(status, "#9E9E9E"))
+            slice_obj.setColor(color)
+            slice_obj.setBorderColor(Qt.transparent)
 
-            # Ajouter des métadonnées supplémentaires
-            for key, value in prompt.items():
-                if key not in ['id', 'session_id', 'platform', 'operation_type',
-                               'token_count', 'timestamp', 'status', 'content', 'response']:
-                    metadata.append((key, value))
+            slice_obj.setLabelVisible(True)
+            slice_obj.setLabelPosition(QPieSlice.LabelOutside)
+            slice_obj.setLabelArmLengthFactor(0.12)
+            slice_obj.setLabelColor(QColor("#1e293b"))
+            slice_obj.setLabelFont(QFont("Segoe UI", 8, QFont.Bold))
 
-            # Remplir le tableau
-            for key, value in metadata:
-                row = self.metadata_table.rowCount()
-                self.metadata_table.insertRow(row)
+            if status == 'completed':
+                slice_obj.setLabel(f"B{batch_num} ✓ {percentage:.0f}%")
+                slice_obj.setExploded(True)
+                slice_obj.setExplodeDistanceFactor(0.04)
+            elif status == 'partial':
+                slice_obj.setLabel(f"B{batch_num} ⚠ {percentage:.0f}%")
+            else:
+                slice_obj.setLabel(f"B{batch_num} ⏳ 0%")
 
-                # Clé
-                key_item = QtWidgets.QTableWidgetItem(str(key))
-                key_item.setFlags(key_item.flags() & ~Qt.ItemIsEditable)
-                self.metadata_table.setItem(row, 0, key_item)
+        self.batch_chart.addSeries(self.batch_series)
+        
+        overall_percentage = (total_generated / total_expected * 100) if total_expected > 0 else 0
+        self.batch_chart.setTitle(f"Progression: {overall_percentage:.1f}%")
+        self.batch_info.setText(f"{total_generated}/{total_expected} samples générés")
 
-                # Valeur
-                value_item = QtWidgets.QTableWidgetItem(str(value))
-                value_item.setFlags(value_item.flags() & ~Qt.ItemIsEditable)
-                self.metadata_table.setItem(row, 1, value_item)
-
-            # Ajuster les lignes
-            self.metadata_table.resizeRowsToContents()
-
-        except Exception as e:
-            logger.error(f"Erreur lors du chargement des détails: {str(e)}")
-
-    def _on_prompt_double_clicked(self, row, column):
-        """
-        Gère le double-clic sur un prompt
-
-        Args:
-            row (int): Index de ligne
-            column (int): Index de colonne
-        """
-        # Vérifier si un prompt est sélectionné
-        if not self.current_prompt_id:
+    def _on_view_generation(self):
+        """Affiche les détails complets"""
+        if not self.current_generation_id:
             return
 
-        # Afficher une boîte de dialogue avec les détails
-        try:
-            # Récupérer les informations
-            prompt = self.database.get_prompt(self.current_prompt_id)
-
-            if not prompt:
-                return
-
-            # Créer une boîte de dialogue
-            dialog = QtWidgets.QDialog(self)
-            dialog.setWindowTitle(tr("history.dialog_title", id=self.current_prompt_id))
-            dialog.resize(900, 700)
-
-            # Style pour la dialog
-            dialog.setStyleSheet(f"""
-                QDialog {{
-                    background-color: {self.background_color};
-                }}
-                QLabel {{
-                    color: {self.text_color};
-                }}
-                QPushButton {{
-                    background-color: {self.primary_color};
-                    color: white;
-                    border: none;
-                    padding: 8px 16px;
-                    border-radius: 6px;
-                    font-weight: bold;
-                    min-width: 80px;
-                }}
-                QPushButton:hover {{
-                    background-color: {self.secondary_color};
-                }}
-            """)
-
-            # Disposition
-            layout = QtWidgets.QVBoxLayout(dialog)
-
-            # Titre
-            title_label = QtWidgets.QLabel(tr("history.dialog_header",
-                                              id=self.current_prompt_id,
-                                              platform=prompt.get('platform')))
-            title_label.setStyleSheet(f"""
-                font-weight: bold;
-                font-size: 16px;
-                color: {self.primary_color};
-                margin-bottom: 10px;
-            """)
-            layout.addWidget(title_label)
-
-            # Info
-            info_layout = QtWidgets.QHBoxLayout()
-
-            info_label = QtWidgets.QLabel(tr("history.info_line",
-                                             type=prompt.get('operation_type', ''),
-                                             date=prompt.get('timestamp', ''),
-                                             tokens=prompt.get('token_count', '')
-                                             ))
-            info_layout.addWidget(info_label)
-
-            layout.addLayout(info_layout)
-
-            # Séparateur
-            line = QtWidgets.QFrame()
-            line.setFrameShape(QtWidgets.QFrame.HLine)
-            line.setFrameShadow(QtWidgets.QFrame.Sunken)
-            layout.addWidget(line)
-
-            # Contenu et réponse dans un splitter
-            splitter = QtWidgets.QSplitter(Qt.Vertical)
-            splitter.setHandleWidth(3)
-            layout.addWidget(splitter)
-
-            # Contenu
-            content_widget = QtWidgets.QWidget()
-            content_layout = QtWidgets.QVBoxLayout(content_widget)
-
-            content_label = QtWidgets.QLabel(tr("history.content_label"))
-            content_label.setStyleSheet(f"font-weight: bold; color: {self.primary_color};")
-            content_layout.addWidget(content_label)
-
-            content_edit = QtWidgets.QTextEdit()
-            content_edit.setPlainText(prompt.get('content', ''))
-            content_edit.setReadOnly(True)
-            content_layout.addWidget(content_edit)
-
-            splitter.addWidget(content_widget)
-
-            # Réponse
-            response_widget = QtWidgets.QWidget()
-            response_layout = QtWidgets.QVBoxLayout(response_widget)
-
-            response_label = QtWidgets.QLabel(tr("history.response_label"))
-            response_label.setStyleSheet(f"font-weight: bold; color: {self.primary_color};")
-            response_layout.addWidget(response_label)
-
-            response_edit = QtWidgets.QTextEdit()
-            response_edit.setPlainText(prompt.get('response', ''))
-            response_edit.setReadOnly(True)
-            response_layout.addWidget(response_edit)
-
-            splitter.addWidget(response_widget)
-
-            # Définir les tailles initiales
-            splitter.setSizes([300, 400])
-
-            # Boutons
-            buttons = QtWidgets.QDialogButtonBox(
-                QtWidgets.QDialogButtonBox.Close
-            )
-            buttons.rejected.connect(dialog.reject)
-            layout.addWidget(buttons)
-
-            # Afficher la boîte de dialogue
-            dialog.exec_()
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'affichage des détails: {str(e)}")
-
-    def _on_delete(self):
-        """Gère l'action de suppression"""
-        # Vérifier si un prompt est sélectionné
-        if not self.current_prompt_id:
+        generation = next((g for g in self.generations if g["id"] == self.current_generation_id), None)
+        if not generation:
             return
 
-        # Confirmation
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"Génération #{self.current_generation_id}")
+        dialog.resize(700, 500)
+        dialog.setStyleSheet(f"background: white;")
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        title = QtWidgets.QLabel(f"<h2>{generation['project']} - {generation['batch']}</h2>")
+        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; border: none;")
+        layout.addWidget(title)
+
+        details = QtWidgets.QTextEdit()
+        details.setReadOnly(True)
+        
+        details_text = f"""
+=== INFORMATIONS GÉNÉRALES ===
+Projet: {generation['project']}
+Batch: {generation['batch']}
+Master typologie: {generation['master']}
+Date: {generation['date']}
+Statut: {generation['status']}
+Format: {generation['format']}
+
+=== STATISTIQUES ===
+Total samples: {generation['samples']}
+Total combinaisons: {generation['combinations']}
+Durée: {generation.get('duration', 'N/A')}s
+
+=== ANALYSE DE REPRÉSENTATIVITÉ ===
+Données utilisées pour le graphique (Typologie de Contexte - Samples):
+{chr(10).join([f"- {d['name']}: {d['samples']}" for d in generation.get('chart_data', [])])}
+
+=== PROGRESSION PAR BATCH ===
+{chr(10).join([f"- Batch {b['batch_number']}: {b['generated']}/{b['expected']} ({b['percentage']:.1f}%)" for b in generation.get('batch_progression', [])])}
+
+=== CONTEXTES DÉTAILLÉS ===
+{chr(10).join(generation.get('contexts', ['Aucun contexte']))}
+
+=== FICHIER DE SORTIE ===
+{generation.get('output_file', 'Non disponible')}
+"""
+
+        if generation.get('error'):
+            details_text += f"\n=== ERREUR ===\n{generation['error']}\n"
+
+        details.setPlainText(details_text)
+        layout.addWidget(details)
+
+        buttons_layout = QtWidgets.QHBoxLayout()
+        
+        copy_btn = QtWidgets.QPushButton("Copier")
+        copy_btn.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(details_text))
+        self._apply_button_style(copy_btn)
+        buttons_layout.addWidget(copy_btn)
+        
+        buttons_layout.addStretch()
+        
+        close_btn = QtWidgets.QPushButton("Fermer")
+        close_btn.clicked.connect(dialog.close)
+        self._apply_button_style(close_btn)
+        buttons_layout.addWidget(close_btn)
+        
+        layout.addLayout(buttons_layout)
+
+        dialog.exec_()
+
+    def _on_delete_generation(self):
+        """Supprime une génération de l'historique"""
+        if not self.current_generation_id:
+            return
+
+        generation = next((g for g in self.generations if g["id"] == self.current_generation_id), None)
+        if not generation:
+            return
+
         reply = QtWidgets.QMessageBox.question(
             self,
-            tr("history.confirm_delete"),
-            tr("history.confirm_delete_message", id=self.current_prompt_id),
+            "Confirmer la suppression",
+            f"Voulez-vous vraiment supprimer cette génération ?\n\n"
+            f"Projet: {generation['project']}\n"
+            f"Batch: {generation['batch']}\n"
+            f"Cette action est irréversible !",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
             QtWidgets.QMessageBox.No
         )
@@ -769,288 +1219,83 @@ class PromptList(QtWidgets.QWidget):
             return
 
         try:
-            # Supprimer le prompt
-            success = self.database.delete_prompt(self.current_prompt_id)
+            cursor = self.database.connection.cursor()
+            cursor.execute("DELETE FROM dataset_generations WHERE id = ?", (self.current_generation_id,))
+            self.database.connection.commit()
 
-            if not success:
-                raise Exception(tr("history.deletion_failed", id=self.current_prompt_id))
-
-            # Émettre le signal
-            prompt_id = self.current_prompt_id
-            self.prompt_deleted.emit(prompt_id)
-
-            # Mettre à jour la liste
+            self.generation_deleted.emit(self.current_generation_id)
             self.refresh_list()
 
-            # Mettre à jour le statut
-            self.update_status(tr("history.prompt_deleted", id=prompt_id))
-
-        except Exception as e:
-            logger.error(f"Erreur lors de la suppression du prompt: {str(e)}")
-
-            # Message d'erreur
-            QtWidgets.QMessageBox.critical(
-                self,
-                tr("history.deletion_error"),
-                tr("history.deletion_error_message", error=str(e))
-            )
-
-    def _on_export(self):
-        """Gère l'action d'exportation"""
-        # Vérifier si un prompt est sélectionné
-        if not self.current_prompt_id:
-            return
-
-        try:
-            # Récupérer les informations
-            prompt = self.database.get_prompt(self.current_prompt_id)
-
-            if not prompt:
-                raise Exception(tr("history.prompt_not_found", id=self.current_prompt_id))
-
-            # Ouvrir un sélecteur de fichier
-            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                tr("history.export_prompt"),
-                os.path.expanduser(f"~/prompt_{self.current_prompt_id}.json"),
-                tr("history.export_file_filter")
-            )
-
-            if not file_path:
-                return
-
-            # Déterminer le format
-            is_json = file_path.lower().endswith('.json')
-
-            if is_json:
-                # Export JSON
-                import json
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(prompt, f, ensure_ascii=False, indent=2)
-            else:
-                # Export texte
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(tr("history.export_prompt_header", id=prompt.get('id', '')) + "\n")
-                    f.write(f"{'=' * 80}\n")
-                    f.write(tr("history.export_platform", platform=prompt.get('platform', '')) + "\n")
-                    f.write(tr("history.export_type", type=prompt.get('operation_type', '')) + "\n")
-                    f.write(tr("history.export_date", date=prompt.get('timestamp', '')) + "\n")
-                    f.write(f"{'=' * 80}\n\n")
-
-                    f.write(tr("history.export_content") + "\n")
-                    f.write(f"{'-' * 80}\n")
-                    f.write(prompt.get('content', '') + "\n\n")
-
-                    f.write(tr("history.export_response") + "\n")
-                    f.write(f"{'-' * 80}\n")
-                    f.write(prompt.get('response', ''))
-
-            # Mettre à jour le statut
-            self.update_status(tr("history.prompt_exported",
-                                  id=self.current_prompt_id,
-                                  file=os.path.basename(file_path)))
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'exportation du prompt: {str(e)}")
-
-            # Message d'erreur
-            QtWidgets.QMessageBox.critical(
-                self,
-                tr("history.export_error"),
-                tr("history.export_error_message", error=str(e))
-            )
-
-    def export_history(self):
-        """Exporte l'historique complet des prompts"""
-        # Vérifier la disponibilité de la base de données
-        if not self.database:
-            QtWidgets.QMessageBox.warning(
-                self,
-                tr("history.database_unavailable"),
-                tr("history.database_unavailable_message")
-            )
-            return
-
-        try:
-            # Récupérer les filtres actuels
-            platform = self.platform_combo.currentData()
-            prompt_type = self.type_combo.currentData()
-            search_text = self.search_edit.text()
-
-            # Récupérer les prompts (avec les filtres actuels)
-            prompts = None
-            # prompts = self.database.get_prompts(
-            #     platform=platform if platform else None,
-            #     operation_type=prompt_type if prompt_type else None,
-            #     search=search_text if search_text else None
-            # )
-
-            if not prompts:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    tr("history.no_prompt"),
-                    tr("history.no_prompt_message")
-                )
-                return
-
-            # Ouvrir un sélecteur de fichier
-            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                tr("history.export_history"),
-                os.path.expanduser(f"~/historique_prompts_{datetime.now().strftime('%Y%m%d')}.json"),
-                tr("history.export_history_filter")
-            )
-
-            if not file_path:
-                return
-
-            # Déterminer le format
-            if file_path.lower().endswith('.json'):
-                # Export JSON
-                import json
-
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(prompts, f, ensure_ascii=False, indent=2)
-
-            elif file_path.lower().endswith('.csv'):
-                # Export CSV
-                import csv
-
-                with open(file_path, 'w', encoding='utf-8', newline='') as f:
-                    writer = csv.writer(f)
-
-                    # En-têtes
-                    writer.writerow([
-                        tr("history.id"),
-                        tr("history.session"),
-                        tr("history.platform"),
-                        tr("history.type"),
-                        tr("history.date"),
-                        tr("history.tokens"),
-                        tr("history.status"),
-                        tr("history.content"),
-                        tr("history.response")
-                    ])
-
-                    # Données
-                    for prompt in prompts:
-                        writer.writerow([
-                            prompt.get('id', ''),
-                            prompt.get('session_id', ''),
-                            prompt.get('platform', ''),
-                            prompt.get('operation_type', ''),
-                            prompt.get('timestamp', ''),
-                            prompt.get('token_count', ''),
-                            prompt.get('status', ''),
-                            prompt.get('content', '')[:1000],  # Limiter la taille
-                            prompt.get('response', '')[:1000]  # Limiter la taille
-                        ])
-
-            else:
-                # Export texte
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(tr("history.history_header") + "\n")
-                    f.write(tr("history.export_date_line", date=datetime.now().strftime('%Y-%m-%d %H:%M:%S')) + "\n\n")
-
-                    # Filtres appliqués
-                    f.write(tr("history.applied_filters") + "\n")
-                    if platform:
-                        f.write(tr("history.filter_platform", platform=platform) + "\n")
-                    if prompt_type:
-                        f.write(tr("history.filter_type", type=prompt_type) + "\n")
-                    if search_text:
-                        f.write(tr("history.filter_search", search=search_text) + "\n")
-                    f.write(tr("history.total_count", count=len(prompts)) + "\n\n")
-
-                    # Prompts
-                    for prompt in prompts:
-                        f.write(tr("history.export_prompt_header", id=prompt.get('id', '')) + "\n")
-                        f.write(f"{'=' * 80}\n")
-                        f.write(tr("history.export_platform", platform=prompt.get('platform', '')) + "\n")
-                        f.write(tr("history.export_type", type=prompt.get('operation_type', '')) + "\n")
-                        f.write(tr("history.export_date", date=prompt.get('timestamp', '')) + "\n")
-                        f.write(f"{'=' * 80}\n\n")
-
-                        f.write(tr("history.export_content") + "\n")
-                        f.write(f"{'-' * 80}\n")
-                        f.write(prompt.get('content', '') + "\n\n")
-
-                        f.write(tr("history.export_response") + "\n")
-                        f.write(f"{'-' * 80}\n")
-                        f.write(prompt.get('response', '') + "\n\n")
-                        f.write(f"{'=' * 80}\n\n")
-
-            # Mettre à jour le statut
-            self.update_status(tr("history.history_exported",
-                                  count=len(prompts),
-                                  file=os.path.basename(file_path)))
-
-            # Message de confirmation
             QtWidgets.QMessageBox.information(
                 self,
-                tr("history.export_success"),
-                tr("history.export_success_message", file=file_path)
+                "Suppression réussie",
+                f"La génération #{self.current_generation_id} a été supprimée."
             )
 
         except Exception as e:
-            logger.error(f"Erreur lors de l'exportation de l'historique: {str(e)}")
-
-            # Message d'erreur
+            logger.error(f"Erreur lors de la suppression: {str(e)}")
             QtWidgets.QMessageBox.critical(
                 self,
-                tr("history.export_error"),
-                tr("history.export_error_message", error=str(e))
+                "Erreur",
+                f"Impossible de supprimer la génération:\n\n{str(e)}"
+            )
+
+    def _on_export_history(self):
+        """Exporte l'historique"""
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Exporter l'historique",
+            f"historique_generations_{datetime.now().strftime('%Y%m%d')}.json",
+            "JSON (*.json);;CSV (*.csv)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            if file_path.endswith('.json'):
+                export_data = self.generations
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(export_data, f, ensure_ascii=False, indent=2)
+            else:
+                import csv
+                with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=[
+                        'id', 'project', 'batch', 'date', 'format', 
+                        'samples', 'combinations', 'master', 'status'
+                    ])
+                    writer.writeheader()
+                    for gen in self.generations:
+                        row = {
+                            'id': gen['id'],
+                            'project': gen['project'],
+                            'batch': gen['batch'],
+                            'date': gen['date'],
+                            'format': gen['format'],
+                            'samples': gen['samples'],
+                            'combinations': gen['combinations'],
+                            'master': gen['master'],
+                            'status': gen['status']
+                        }
+                        writer.writerow(row)
+
+            QtWidgets.QMessageBox.information(
+                self,
+                "Export réussi",
+                f"Historique exporté vers:\n{file_path}"
+            )
+
+        except Exception as e:
+            logger.error(f"Erreur export: {str(e)}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Impossible d'exporter:\n{str(e)}"
             )
 
     def update_language(self):
-        """Met à jour tous les textes après un changement de langue"""
-        # Mettre à jour le titre
-        self.title_label.setText(tr("history.title"))
+        """Met à jour les textes après changement de langue"""
+        pass
 
-        # Mettre à jour les boutons
-        self.refresh_button.setText(tr("history.refresh"))
-        self.delete_button.setText(tr("history.delete"))
-        self.export_button.setText(tr("history.export"))
-
-        # Mettre à jour les labels
-        self.platform_label.setText(tr("history.platform"))
-        self.type_label.setText(tr("history.type"))
-        self.search_label.setText(tr("history.search"))
-        self.search_edit.setPlaceholderText(tr("history.search_placeholder"))
-
-        # Mettre à jour les en-têtes du tableau
-        self.prompts_table.setHorizontalHeaderLabels([
-            tr("history.id"),
-            tr("history.date"),
-            tr("history.platform"),
-            tr("history.type"),
-            tr("history.content")
-        ])
-
-        # Mettre à jour les onglets
-        self.detail_tabs.setTabText(0, tr("history.prompt"))
-        self.detail_tabs.setTabText(1, tr("history.response"))
-        self.detail_tabs.setTabText(2, tr("history.metadata"))
-
-        # Mettre à jour les en-têtes du tableau de métadonnées
-        self.metadata_table.setHorizontalHeaderLabels([
-            tr("history.property"),
-            tr("history.value")
-        ])
-
-        # Mettre à jour le statut
-        self.status_label.setText(tr("history.status_ready"))
-        self.count_label.setText(tr("history.count", count=0))
-
-        # Mettre à jour le combo des types
-        current_type_index = self.type_combo.currentIndex()
-        self.type_combo.setItemText(0, tr("history.all"))
-        self.type_combo.setItemText(1, tr("history.standard"))
-        self.type_combo.setItemText(2, tr("history.analyze"))
-        self.type_combo.setItemText(3, tr("history.generate"))
-        self.type_combo.setItemText(4, tr("history.brainstorm"))
-
-        # Mettre à jour le combo des plateformes
-        current_platform_index = self.platform_combo.currentIndex()
-        if self.platform_combo.count() > 0:
-            self.platform_combo.setItemText(0, tr("history.all"))
+PromptList = DatasetHistoryWidget

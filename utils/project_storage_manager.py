@@ -70,6 +70,7 @@ class ProjectStorageManager:
                     description TEXT,
                     updatedAt TIMESTAMP,
                     files TEXT,
+                    fileDescriptions TEXT,
                     fileContents TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -102,6 +103,7 @@ class ProjectStorageManager:
                     codeContent TEXT,
                     createdAt TIMESTAMP,
                     updatedAt TIMESTAMP,
+                    fileDescriptions TEXT,
                     files TEXT,
                     fileContents TEXT,
                     is_file_cluster BOOLEAN DEFAULT 0,
@@ -128,6 +130,7 @@ class ProjectStorageManager:
                     codeContent TEXT,
                     createdAt TIMESTAMP,
                     updatedAt TIMESTAMP,
+                    fileDescriptions TEXT,
                     files TEXT,
                     fileContents TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

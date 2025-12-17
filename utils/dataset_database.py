@@ -415,10 +415,53 @@ class DatasetDatabase:
                     UNIQUE(project_id, batch_number)
                 )
             ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS dataset_generations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    project_name TEXT NOT NULL,
+                    batch_number INTEGER,
+                    batch_name TEXT,
+                    batch_family TEXT,
+
+                    -- Métadonnées de génération
+                    num_batches_processed INTEGER DEFAULT 1,
+                    total_samples INTEGER NOT NULL,
+                    samples_per_batch INTEGER,
+                    total_combinations INTEGER,
+
+                    -- Configuration
+                    output_format TEXT DEFAULT 'JSON',
+                    master_typologie_name TEXT,
+
+                    -- Prompts utilisés
+                    global_context TEXT,
+                    local_prompt TEXT,
+
+                    -- Informations temporelles
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    duration_seconds INTEGER,
+
+                    -- Statut et résultats
+                    status TEXT DEFAULT 'pending',
+                    output_file_path TEXT,
+                    error_message TEXT,
+
+                    -- Métadonnées additionnelles (JSON)
+                    metadata TEXT,
+
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                )
+            ''')
             
             # Index pour optimiser les requêtes
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_batches_project ON batches(project_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_generations_project ON dataset_generations(project_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_generations_status ON dataset_generations(status)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_generations_date ON dataset_generations(started_at)')
 
             # Index pour optimiser les requêtes
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_typologies_project ON typologies(project_id)')
@@ -502,6 +545,404 @@ class DatasetDatabase:
             logger.error(f"Erreur lors de la récupération du batch: {str(e)}")
             return None
         
+    def save_generation_start(self, generation_config):
+        """
+        ✅ CORRIGÉ: Enregistre le début d'une génération avec validation
+        """
+        try:
+            cursor = self.connection.cursor()
+
+            # ✅ Extraire et valider les données
+            metadata = generation_config.get('metadata', {})
+            prompts = generation_config.get('prompts', {})
+            master = generation_config.get('master_typologie', {})
+
+            # Récupérer l'ID du projet
+            project_name = metadata.get('project_name')
+
+            if not project_name:
+                logger.error("❌ Nom de projet manquant dans la configuration")
+                return None
+
+            cursor.execute("SELECT id FROM projects WHERE name = ?", (project_name,))
+            project_row = cursor.fetchone()
+
+            if not project_row:
+                logger.error(f"❌ Projet '{project_name}' non trouvé")
+                return None
+
+            project_id = project_row['id']
+
+            # ✅ Sérialiser les métadonnées de manière sûre
+            try:
+                metadata_json = json.dumps(metadata, ensure_ascii=False)
+            except Exception as e:
+                logger.warning(f"⚠️  Erreur sérialisation métadonnées: {e}, utilisation de {{}}")
+                metadata_json = '{}'
+
+            # Insérer la génération
+            cursor.execute("""
+                INSERT INTO dataset_generations (
+                    project_id, project_name, batch_number, batch_name, batch_family,
+                    num_batches_processed, total_samples, samples_per_batch, total_combinations,
+                    output_format, master_typologie_name,
+                    global_context, local_prompt,
+                    status, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                project_id,
+                project_name,
+                metadata.get('batch_number'),
+                metadata.get('batch_name'),
+                metadata.get('batch_family'),
+                metadata.get('num_batches_to_process', 1),
+                metadata.get('total_samples_all_batches', 0),
+                metadata.get('total_samples_per_batch', 0),
+                len(generation_config.get('combinations', [])),
+                metadata.get('output_format', 'JSON'),
+                master.get('name'),
+                prompts.get('global_context'),
+                prompts.get('local_prompt'),
+                'running',
+                metadata_json
+            ))
+
+            self.connection.commit()
+            generation_id = cursor.lastrowid
+
+            logger.info(f"✅ Génération #{generation_id} enregistrée pour '{project_name}'")
+            logger.info(f"   • Batch: {metadata.get('batch_number')}")
+            logger.info(f"   • Samples: {metadata.get('total_samples_all_batches', 0)}")
+            logger.info(f"   • Combinaisons: {len(generation_config.get('combinations', []))}")
+
+            return generation_id
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'enregistrement du démarrage: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+        
+    def verify_database_integrity(self):
+        """
+        ✅ NOUVEAU: Vérifie l'intégrité de la base de données
+        Retourne un rapport de diagnostic
+        """
+        report = {
+            'status': 'ok',
+            'issues': [],
+            'statistics': {}
+        }
+
+        try:
+            cursor = self.connection.cursor()
+
+            # 1. Vérifier le nombre de générations
+            cursor.execute("SELECT COUNT(*) as count FROM dataset_generations")
+            total = cursor.fetchone()['count']
+            report['statistics']['total_generations'] = total
+
+            # 2. Vérifier les projets orphelins
+            cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM dataset_generations 
+                WHERE project_id NOT IN (SELECT id FROM projects)
+            """)
+            orphans = cursor.fetchone()['count']
+            if orphans > 0:
+                report['issues'].append(f"{orphans} génération(s) avec projet inexistant")
+                report['status'] = 'warning'
+
+            # 3. Vérifier les métadonnées invalides
+            cursor.execute("SELECT id, metadata FROM dataset_generations")
+            invalid_metadata = 0
+            for row in cursor.fetchall():
+                if row['metadata']:
+                    try:
+                        json.loads(row['metadata'])
+                    except json.JSONDecodeError:
+                        invalid_metadata += 1
+
+            if invalid_metadata > 0:
+                report['issues'].append(f"{invalid_metadata} métadonnées JSON invalides")
+                report['status'] = 'warning'
+
+            report['statistics']['invalid_metadata'] = invalid_metadata
+
+            # 4. Statistiques par statut
+            cursor.execute("""
+                SELECT status, COUNT(*) as count 
+                FROM dataset_generations 
+                GROUP BY status
+            """)
+            status_counts = {row['status']: row['count'] for row in cursor.fetchall()}
+            report['statistics']['by_status'] = status_counts
+
+            # 5. Vérifier les champs NULL importants
+            cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM dataset_generations 
+                WHERE project_name IS NULL OR project_name = ''
+            """)
+            null_projects = cursor.fetchone()['count']
+            if null_projects > 0:
+                report['issues'].append(f"{null_projects} génération(s) sans nom de projet")
+                report['status'] = 'error'
+
+            logger.info("\n" + "="*80)
+            logger.info("🔍 DIAGNOSTIC BASE DE DONNÉES")
+            logger.info("="*80)
+            logger.info(f"Statut: {report['status'].upper()}")
+            logger.info(f"\n📊 Statistiques:")
+            logger.info(f"  • Total générations: {total}")
+            logger.info(f"  • Métadonnées invalides: {invalid_metadata}")
+            logger.info(f"  • Projets orphelins: {orphans}")
+            logger.info(f"  • Projets NULL: {null_projects}")
+
+            if status_counts:
+                logger.info(f"\n📈 Par statut:")
+                for status, count in status_counts.items():
+                    logger.info(f"  • {status}: {count}")
+
+            if report['issues']:
+                logger.warning(f"\n⚠️  Problèmes détectés:")
+                for issue in report['issues']:
+                    logger.warning(f"  • {issue}")
+            else:
+                logger.info("\n✅ Aucun problème détecté")
+
+            logger.info("="*80 + "\n")
+
+            return report
+
+        except Exception as e:
+            logger.error(f"❌ Erreur diagnostic: {e}")
+            logger.error(traceback.format_exc())
+            report['status'] = 'error'
+            report['issues'].append(f"Erreur diagnostic: {str(e)}")
+            return report
+        
+    def fix_orphaned_generations(self, dry_run=True):
+        """
+        ✅ NOUVEAU: Corrige les générations orphelines
+        Si dry_run=True, simule seulement les actions
+        """
+        try:
+            cursor = self.connection.cursor()
+            
+            # Trouver les générations orphelines
+            cursor.execute("""
+                SELECT id, project_name
+                FROM dataset_generations 
+                WHERE project_id NOT IN (SELECT id FROM projects)
+            """)
+            
+            orphans = cursor.fetchall()
+            
+            if not orphans:
+                logger.info("✅ Aucune génération orpheline")
+                return True
+            
+            logger.info(f"⚠️  {len(orphans)} génération(s) orpheline(s) trouvée(s)")
+            
+            for row in orphans:
+                gen_id = row['id']
+                project_name = row['project_name']
+                
+                if not project_name:
+                    logger.warning(f"  • Génération #{gen_id}: nom de projet NULL, impossible à corriger")
+                    continue
+                
+                # Vérifier si le projet existe
+                cursor.execute("SELECT id FROM projects WHERE name = ?", (project_name,))
+                project = cursor.fetchone()
+                
+                if project:
+                    project_id = project['id']
+                    logger.info(f"  • Génération #{gen_id}: lié au projet '{project_name}' (ID {project_id})")
+                    
+                    if not dry_run:
+                        cursor.execute("""
+                            UPDATE dataset_generations 
+                            SET project_id = ?
+                            WHERE id = ?
+                        """, (project_id, gen_id))
+                else:
+                    logger.info(f"  • Génération #{gen_id}: projet '{project_name}' inexistant, création...")
+                    
+                    if not dry_run:
+                        cursor.execute("""
+                            INSERT INTO projects (name, description)
+                            VALUES (?, ?)
+                        """, (project_name, f"Projet recréé automatiquement"))
+                        
+                        project_id = cursor.lastrowid
+                        
+                        cursor.execute("""
+                            UPDATE dataset_generations 
+                            SET project_id = ?
+                            WHERE id = ?
+                        """, (project_id, gen_id))
+            
+            if not dry_run:
+                self.connection.commit()
+                logger.info(f"✅ {len(orphans)} génération(s) corrigée(s)")
+            else:
+                logger.info("ℹ️  Mode simulation (dry_run), aucune modification effectuée")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur correction: {e}")
+            logger.error(traceback.format_exc())
+            if not dry_run:
+                self.connection.rollback()
+            return False
+            
+    def update_generation_completion(self, generation_id, output_file_path=None, 
+                                 duration_seconds=None, error_message=None):
+        """
+        Met à jour une génération terminée (succès ou échec)
+        """
+        try:
+            cursor = self.connection.cursor()
+
+            status = 'completed' if error_message is None else 'failed'
+
+            cursor.execute("""
+                UPDATE dataset_generations 
+                SET status = ?,
+                    completed_at = CURRENT_TIMESTAMP,
+                    duration_seconds = ?,
+                    output_file_path = ?,
+                    error_message = ?
+                WHERE id = ?
+            """, (status, duration_seconds, output_file_path, error_message, generation_id))
+
+            self.connection.commit()
+
+            logger.info(f"✅ Génération #{generation_id} mise à jour: {status}")
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la mise à jour: {str(e)}")
+            return False
+        
+    def get_all_generations(self, project_name=None, limit=100):
+        """
+        ✅ CORRIGÉ: Récupère toutes les générations avec validation robuste
+        """
+        try:
+            cursor = self.connection.cursor()
+
+            if project_name:
+                cursor.execute("""
+                    SELECT * FROM dataset_generations
+                    WHERE project_name = ?
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                """, (project_name, limit))
+            else:
+                cursor.execute("""
+                    SELECT * FROM dataset_generations
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                """, (limit,))
+
+            generations = []
+            for row in cursor.fetchall():
+                try:
+                    # ✅ VALIDATION: Vérifier les champs essentiels
+                    if not row['id'] or not row['project_name']:
+                        logger.warning(f"⚠️  Génération #{row.get('id', '?')} incomplète, ignorée")
+                        continue
+                    
+                    # ✅ Parser les métadonnées de manière sécurisée
+                    metadata_value = row['metadata']
+                    metadata = {}
+
+                    if metadata_value:
+                        if isinstance(metadata_value, str):
+                            try:
+                                metadata = json.loads(metadata_value)
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"⚠️  Métadonnées JSON invalides pour génération #{row['id']}: {e}")
+                                metadata = {}
+                        elif isinstance(metadata_value, dict):
+                            metadata = metadata_value
+
+                    # Construire l'objet génération
+                    generation = {
+                        'id': row['id'],
+                        'project_name': row['project_name'],
+                        'batch_number': row['batch_number'],
+                        'batch_name': row['batch_name'],
+                        'batch_family': row['batch_family'],
+                        'num_batches_processed': row['num_batches_processed'],
+                        'total_samples': row['total_samples'] or 0,
+                        'samples_per_batch': row['samples_per_batch'],
+                        'total_combinations': row['total_combinations'] or 0,
+                        'output_format': row['output_format'] or 'JSON',
+                        'master_typologie_name': row['master_typologie_name'],
+                        'started_at': row['started_at'],
+                        'completed_at': row['completed_at'],
+                        'duration_seconds': row['duration_seconds'],
+                        'status': row['status'] or 'unknown',
+                        'output_file_path': row['output_file_path'],
+                        'error_message': row['error_message'],
+                        'metadata': metadata
+                    }
+
+                    generations.append(generation)
+
+                except Exception as row_error:
+                    logger.error(f"❌ Erreur traitement ligne DB génération #{row.get('id', '?')}: {row_error}")
+                    continue
+
+            logger.info(f"✅ {len(generations)} génération(s) récupérée(s) depuis la DB")
+            return generations
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la récupération des générations: {str(e)}")
+            logger.error(traceback.format_exc())
+            return []
+        
+    def get_generation_by_id(self, generation_id):
+        """Récupère une génération spécifique par son ID"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT * FROM dataset_generations WHERE id = ?", (generation_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                'id': row['id'],
+                'project_name': row['project_name'],
+                'batch_number': row['batch_number'],
+                'batch_name': row['batch_name'],
+                'batch_family': row['batch_family'],
+                'num_batches_processed': row['num_batches_processed'],
+                'total_samples': row['total_samples'],
+                'samples_per_batch': row['samples_per_batch'],
+                'total_combinations': row['total_combinations'],
+                'output_format': row['output_format'],
+                'master_typologie_name': row['master_typologie_name'],
+                'global_context': row['global_context'],
+                'local_prompt': row['local_prompt'],
+                'started_at': row['started_at'],
+                'completed_at': row['completed_at'],
+                'duration_seconds': row['duration_seconds'],
+                'status': row['status'],
+                'output_file_path': row['output_file_path'],
+                'error_message': row['error_message'],
+                'metadata': json.loads(row['metadata']) if row['metadata'] else {}
+            }
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération: {str(e)}")
+            return None
+        
     def get_all_batches(self, project_name):
         """Récupère tous les batches d'un projet"""
         try:
@@ -530,6 +971,29 @@ class DatasetDatabase:
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des batches: {str(e)}")
             return []
+        
+    def update_generation_output_path(self, generation_id, output_file_path):
+        """
+        Met à jour uniquement le chemin du fichier de sortie
+        Utilisé après l'export pour enregistrer où le fichier a été sauvegardé
+        """
+        try:
+            cursor = self.connection.cursor()
+
+            cursor.execute("""
+                UPDATE dataset_generations 
+                SET output_file_path = ?
+                WHERE id = ?
+            """, (output_file_path, generation_id))
+
+            self.connection.commit()
+
+            logger.info(f"✅ Chemin d'export mis à jour pour génération #{generation_id}: {output_file_path}")
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la mise à jour du chemin: {str(e)}")
+            return False
 
     def update_batch_status(self, project_name, batch_number, status):
         """Met à jour le statut d'un batch"""

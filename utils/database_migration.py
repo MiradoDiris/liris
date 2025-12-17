@@ -123,33 +123,104 @@ def migrate_database(database):
         return False
 
 
-def verify_database_integrity(database):
+def verify_database_integrity(self):
     """
-    Vérifie l'intégrité de la base de données
+    ✅ NOUVEAU: Vérifie l'intégrité de la base de données
+    Retourne un rapport de diagnostic
+    """
+    report = {
+        'status': 'ok',
+        'issues': [],
+        'statistics': {}
+    }
     
-    Args:
-        database: Instance de DatasetDatabase
-        
-    Returns:
-        bool: True si intègre
-    """
     try:
-        logger.info("Vérification intégrité...")
+        cursor = self.connection.cursor()
         
-        cursor = database.connection.cursor()
-        cursor.execute("PRAGMA integrity_check")
-        result = cursor.fetchone()
+        # 1. Vérifier le nombre de générations
+        cursor.execute("SELECT COUNT(*) as count FROM dataset_generations")
+        total = cursor.fetchone()['count']
+        report['statistics']['total_generations'] = total
         
-        if result[0] == "ok":
-            logger.info("✓ Intégrité vérifiée")
-            return True
+        # 2. Vérifier les projets orphelins
+        cursor.execute("""
+            SELECT COUNT(*) as count 
+            FROM dataset_generations 
+            WHERE project_id NOT IN (SELECT id FROM projects)
+        """)
+        orphans = cursor.fetchone()['count']
+        if orphans > 0:
+            report['issues'].append(f"{orphans} génération(s) avec projet inexistant")
+            report['status'] = 'warning'
+        
+        # 3. Vérifier les métadonnées invalides
+        cursor.execute("SELECT id, metadata FROM dataset_generations")
+        invalid_metadata = 0
+        for row in cursor.fetchall():
+            if row['metadata']:
+                try:
+                    json.loads(row['metadata'])
+                except json.JSONDecodeError:
+                    invalid_metadata += 1
+        
+        if invalid_metadata > 0:
+            report['issues'].append(f"{invalid_metadata} métadonnées JSON invalides")
+            report['status'] = 'warning'
+        
+        report['statistics']['invalid_metadata'] = invalid_metadata
+        
+        # 4. Statistiques par statut
+        cursor.execute("""
+            SELECT status, COUNT(*) as count 
+            FROM dataset_generations 
+            GROUP BY status
+        """)
+        status_counts = {row['status']: row['count'] for row in cursor.fetchall()}
+        report['statistics']['by_status'] = status_counts
+        
+        # 5. Vérifier les champs NULL importants
+        cursor.execute("""
+            SELECT COUNT(*) as count 
+            FROM dataset_generations 
+            WHERE project_name IS NULL OR project_name = ''
+        """)
+        null_projects = cursor.fetchone()['count']
+        if null_projects > 0:
+            report['issues'].append(f"{null_projects} génération(s) sans nom de projet")
+            report['status'] = 'error'
+        
+        logger.info("\n" + "="*80)
+        logger.info("🔍 DIAGNOSTIC BASE DE DONNÉES")
+        logger.info("="*80)
+        logger.info(f"Statut: {report['status'].upper()}")
+        logger.info(f"\n📊 Statistiques:")
+        logger.info(f"  • Total générations: {total}")
+        logger.info(f"  • Métadonnées invalides: {invalid_metadata}")
+        logger.info(f"  • Projets orphelins: {orphans}")
+        logger.info(f"  • Projets NULL: {null_projects}")
+        
+        if status_counts:
+            logger.info(f"\n📈 Par statut:")
+            for status, count in status_counts.items():
+                logger.info(f"  • {status}: {count}")
+        
+        if report['issues']:
+            logger.warning(f"\n⚠️  Problèmes détectés:")
+            for issue in report['issues']:
+                logger.warning(f"  • {issue}")
         else:
-            logger.error(f"✗ Problème d'intégrité: {result[0]}")
-            return False
-            
+            logger.info("\n✅ Aucun problème détecté")
+        
+        logger.info("="*80 + "\n")
+        
+        return report
+        
     except Exception as e:
-        logger.error(f"Erreur vérification: {str(e)}")
-        return False
+        logger.error(f"❌ Erreur diagnostic: {e}")
+        logger.error(traceback.format_exc())
+        report['status'] = 'error'
+        report['issues'].append(f"Erreur diagnostic: {str(e)}")
+        return report
 
 
 def get_database_statistics(database):

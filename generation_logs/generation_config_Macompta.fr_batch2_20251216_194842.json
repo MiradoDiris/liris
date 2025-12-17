@@ -1,0 +1,168 @@
+{
+  "export_info": {
+    "exported_at": "2025-12-16T19:48:42.544028",
+    "purpose": "Vérification de la configuration de génération avant envoi à Gemini"
+  },
+  "metadata": {
+    "project_name": "Macompta.fr",
+    "batch_number": 2,
+    "batch_name": "Synchronisation bancaire",
+    "batch_family": "Comptabilité",
+    "num_batches_to_process": 1,
+    "total_samples_per_batch": 100,
+    "total_samples_all_batches": 100,
+    "output_format": "JSONL"
+  },
+  "prompts": {
+    "global_context": "Macompta est une application pour aider l'utilisateur à propos de la comptabilité par une conversation avec l'IA, pour apprendre, guider et aider les utilisateurs dans la domaine de comptabilité, il peut aider aussi su l'utilisation de macompta elle même.",
+    "local_prompt": "Mets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes en te basant exclusivement sur les informations fournies. Les inputs doivent être formulés uniquement du point de vue de l’utilisateur, refléter des situations concrètes, inclure des formulations naturelles, parfois imprécises ou hésitantes, et ne contenir aucune réponse ou explication de l’IA.\ndans Modules\n└── Comptabilité\n     ├── Banque\nDonc pris en charge Banque, et dans Complexity\nNiveau 2 contient\n→ 3 à 5 opérations",
+    "combined_prompt": "Macompta est une application pour aider l'utilisateur à propos de la comptabilité par une conversation avec l'IA, pour apprendre, guider et aider les utilisateurs dans la domaine de comptabilité, il peut aider aussi su l'utilisation de macompta elle même.\n\n---\n\nMets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes en te basant exclusivement sur les informations fournies. Les inputs doivent être formulés uniquement du point de vue de l’utilisateur, refléter des situations concrètes, inclure des formulations naturelles, parfois imprécises ou hésitantes, et ne contenir aucune réponse ou explication de l’IA.\ndans Modules\n└── Comptabilité\n     ├── Banque\nDonc pris en charge Banque, et dans Complexity\nNiveau 2 contient\n→ 3 à 5 opérations"
+  },
+  "master_typologie": {
+    "name": "Compte",
+    "full_structure": {
+      "name": "Compte",
+      "description": "",
+      "taxonomy_clusters": [
+        {
+          "name": "Société",
+          "description": "",
+          "root_labels": []
+        }
+      ]
+    }
+  },
+  "combinations_details": [
+    {
+      "combination_index": 1,
+      "nb_samples": 100,
+      "master": {
+        "name": "Compte",
+        "taxonomy_clusters": [
+          {
+            "name": "Société",
+            "description": "",
+            "root_labels": []
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "root",
+          "display": "Intention / Action / Synchronisation",
+          "taxonomy_clusters": [
+            {
+              "name": "Action",
+              "root_labels": [
+                {
+                  "name": "Synchronisation",
+                  "description": "",
+                  "category": "default",
+                  "parent_labels": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "UX/UI / Modules / Comptabilité / Saisie simplifiée",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Comptabilité",
+                  "parent_labels": [
+                    {
+                      "name": "Saisie simplifiée",
+                      "description": "",
+                      "category": "default",
+                      "children": [
+                        {
+                          "name": "Banque",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Caisse",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Notes de frais",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Factures clients",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Factures fournisseurs",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        },
+                        {
+                          "name": "Import OCR",
+                          "description": "",
+                          "category": "default",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Débutant",
+          "taxonomy_clusters": [
+            {
+              "name": "Débutant",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Complexity / Niveau 2",
+          "taxonomy_clusters": [
+            {
+              "name": "Niveau 2",
+              "root_labels": [
+                {
+                  "name": "3 Opérations",
+                  "description": "",
+                  "category": "default",
+                  "parent_labels": []
+                },
+                {
+                  "name": "4 Opérations",
+                  "description": "",
+                  "category": "default",
+                  "parent_labels": []
+                },
+                {
+                  "name": "5 Opérations",
+                  "description": "",
+                  "category": "default",
+                  "parent_labels": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

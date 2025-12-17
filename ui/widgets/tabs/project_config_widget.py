@@ -12,7 +12,7 @@ from datetime import datetime
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QSize
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QFileDialog, QDialog, QVBoxLayout, QListWidgetItem, QHBoxLayout, QLabel, QPushButton, QInputDialog, QListWidget
+from PyQt5.QtWidgets import QFileDialog, QDialog, QVBoxLayout, QListWidgetItem, QHBoxLayout, QLabel, QPushButton, QInputDialog, QListWidget, QTextEdit, QDialogButtonBox
 from collections import defaultdict
 from utils.logger import logger
 from ui.styles.platform_config_style import PlatformConfigStyle
@@ -47,6 +47,81 @@ def log_initialization_info():
     logger.info(f"sys._MEIPASS: {getattr(sys, '_MEIPASS', 'N/A')}")
     logger.info(f"Database path: {get_database_path()}")
     logger.info("=" * 60)
+
+
+class FileDescriptionDialog(QDialog):
+    """
+    Dialog pour ajouter/modifier la description d'un fichier
+    """
+    def __init__(self, filename, current_description="", parent=None):
+        super().__init__(parent)
+        self.filename = filename
+        self.description = current_description
+        
+        self.setWindowTitle(f"Description - {filename}")
+        self.setMinimumSize(500, 300)
+        
+        self._init_ui()
+    
+    def _init_ui(self):
+        """Initialise l'interface du dialog"""
+        layout = QVBoxLayout(self)
+        
+        # Label avec le nom du fichier
+        file_label = QLabel(f"<b>Fichier:</b> {self.filename}")
+        layout.addWidget(file_label)
+        
+        # Label pour la description
+        desc_label = QLabel("Description:")
+        layout.addWidget(desc_label)
+        
+        # Zone de texte pour la description
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlaceholderText("Entrez la description du fichier...")
+        self.text_edit.setPlainText(self.description)
+        layout.addWidget(self.text_edit)
+        
+        # Boutons OK/Annuler
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #ffffff;
+            }
+            QLabel {
+                color: #2c3e50;
+                font-size: 12px;
+                padding: 5px;
+            }
+            QTextEdit {
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 12px;
+                background-color: #ffffff;
+            }
+            QTextEdit:focus {
+                border-color: #0078d4;
+            }
+            QDialogButtonBox QPushButton {
+                min-width: 80px;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QDialogButtonBox QPushButton:hover {
+                background-color: #e5f3ff;
+            }
+        """)
+    
+    def get_description(self):
+        """Retourne la description saisie"""
+        return self.text_edit.toPlainText().strip()
 
 class BackButton(QtWidgets.QPushButton):
     """
@@ -946,6 +1021,13 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         root_buttons_layout.addWidget(self.add_root_button)
         root_buttons_layout.addWidget(self.edit_root_button)
         root_buttons_layout.addWidget(self.remove_root_button)
+    
+        # Bouton Description
+        self.desc_root_button = QtWidgets.QPushButton("Description")
+        self.desc_root_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.desc_root_button.clicked.connect(self._manage_root_file_descriptions)
+        self.desc_root_button.setToolTip("Gérer les descriptions des fichiers")
+        root_buttons_layout.addWidget(self.desc_root_button)
         root_buttons_layout.addStretch()
         hierarchy_group_layout.addLayout(root_buttons_layout)
     
@@ -989,6 +1071,13 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         level1_buttons_layout.addWidget(self.add_level1_button)
         level1_buttons_layout.addWidget(self.edit_level1_button)
         level1_buttons_layout.addWidget(self.remove_level1_button)
+    
+        # Bouton Description
+        self.desc_level1_button = QtWidgets.QPushButton("Description")
+        self.desc_level1_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.desc_level1_button.clicked.connect(self._manage_level1_file_descriptions)
+        self.desc_level1_button.setToolTip("Gérer les descriptions des fichiers")
+        level1_buttons_layout.addWidget(self.desc_level1_button)
         level1_buttons_layout.addStretch()
         hierarchy_group_layout.addLayout(level1_buttons_layout)
     
@@ -1030,6 +1119,13 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         child_buttons_layout.addWidget(self.add_child_button)
         child_buttons_layout.addWidget(self.edit_child_button)
         child_buttons_layout.addWidget(self.remove_child_button)
+    
+        # Bouton Description
+        self.desc_child_button = QtWidgets.QPushButton("Description")
+        self.desc_child_button.setStyleSheet(PlatformConfigStyle.get_button_style())
+        self.desc_child_button.clicked.connect(self._manage_child_file_descriptions)
+        self.desc_child_button.setToolTip("Gérer les descriptions des fichiers")
+        child_buttons_layout.addWidget(self.desc_child_button)
         child_buttons_layout.addStretch()
         hierarchy_group_layout.addLayout(child_buttons_layout)
     
@@ -6700,6 +6796,110 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 self._save_label_and_children_recursive(
                     cursor, child, cluster_uid, label_uid, level + 1
                 )
+
+
+    def _manage_root_file_descriptions(self):
+        """Gère les descriptions des fichiers du label racine"""
+        if not self.current_root_data:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Aucun label sélectionné",
+                "Veuillez sélectionner un label racine pour gérer les descriptions de fichiers."
+            )
+            return
+        
+        self._show_file_description_manager(
+            self.current_root_data,
+            "Label Racine"
+        )
+    
+    def _manage_level1_file_descriptions(self):
+        """Gère les descriptions des fichiers du label niveau 1"""
+        if not self.current_level1_data:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Aucun label sélectionné",
+                "Veuillez sélectionner un label niveau 1 pour gérer les descriptions de fichiers."
+            )
+            return
+        
+        self._show_file_description_manager(
+            self.current_level1_data,
+            "Label Niveau 1"
+        )
+    
+    def _manage_child_file_descriptions(self):
+        """Gère les descriptions des fichiers du label enfant"""
+        if not self.current_level2_data:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Aucun label sélectionné",
+                "Veuillez sélectionner un label enfant pour gérer les descriptions de fichiers."
+            )
+            return
+        
+        self._show_file_description_manager(
+            self.current_level2_data,
+            "Label Enfant"
+        )
+    
+    def _show_file_description_manager(self, label_data, label_type):
+        """Affiche un dialog pour sélectionner un fichier et éditer sa description"""
+        files = label_data.get('files', [])
+        
+        if not files:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Aucun fichier",
+                f"Ce {label_type.lower()} n'a aucun fichier associé."
+            )
+            return
+        
+        # Initialiser le dictionnaire des descriptions s'il n'existe pas
+        if 'file_descriptions' not in label_data:
+            label_data['file_descriptions'] = {}
+        
+        file_descriptions = label_data['file_descriptions']
+        
+        # Si un seul fichier, ouvrir directement le dialog de description
+        if len(files) == 1:
+            file_path = files[0]
+            file_name = os.path.basename(file_path)
+            current_desc = file_descriptions.get(file_path, "")
+            
+            desc_dialog = FileDescriptionDialog(file_name, current_desc, self)
+            if desc_dialog.exec_() == QDialog.Accepted:
+                new_desc = desc_dialog.get_description()
+                file_descriptions[file_path] = new_desc
+                logger.info(f"Description mise à jour pour {file_name}")
+            return
+        
+        # Sinon, afficher une liste de sélection simple
+        file_names = [os.path.basename(f) for f in files]
+        
+        # Créer un dialog de sélection simple
+        item, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            f"Sélectionner un fichier - {label_data.get('label', 'Sans nom')}",
+            f"Choisissez un fichier pour éditer sa description ({len(files)} fichiers):",
+            file_names,
+            0,
+            False
+        )
+        
+        if ok and item:
+            # Trouver le chemin complet correspondant
+            selected_index = file_names.index(item)
+            file_path = files[selected_index]
+            file_name = os.path.basename(file_path)
+            current_desc = file_descriptions.get(file_path, "")
+            
+            # Ouvrir directement le dialog de description
+            desc_dialog = FileDescriptionDialog(file_name, current_desc, self)
+            if desc_dialog.exec_() == QDialog.Accepted:
+                new_desc = desc_dialog.get_description()
+                file_descriptions[file_path] = new_desc
+                logger.info(f"Description mise à jour pour {file_name}")
 
     def closeEvent(self, event):
         """Ferme proprement le connector lors de la fermeture du widget."""

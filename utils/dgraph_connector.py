@@ -159,6 +159,7 @@ type Cluster {
   relations
   files
   fileContents
+  fileDescriptions
 }
 
 type Label {
@@ -180,6 +181,7 @@ type Label {
   relations
   files
   fileContents
+  fileDescriptions
 }
 
 type Workspace {
@@ -191,6 +193,7 @@ type Workspace {
   description
   files
   fileContents
+  fileDescriptions
 }
 
 type ClusterManagement {
@@ -308,6 +311,7 @@ fileContents: string .
         relations
         files
         fileContents
+        fileDescriptions
       }
   
       type Label {
@@ -331,6 +335,7 @@ fileContents: string .
         classes
         methods
         variables
+        fileDescriptions
       }
   
       type Workspace {
@@ -342,6 +347,7 @@ fileContents: string .
         description
         files
         fileContents
+        fileDescriptions
       }
   
       type ClusterManagement {
@@ -427,6 +433,7 @@ fileContents: string .
       returns: string .
       bases: [string] .
       uses_vars: [string] .
+      fileDescriptions: string .
       var_type: string .
       scope: string .
   

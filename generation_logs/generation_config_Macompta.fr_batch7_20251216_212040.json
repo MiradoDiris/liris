@@ -1,0 +1,85 @@
+{
+  "export_info": {
+    "exported_at": "2025-12-16T21:20:40.223953",
+    "purpose": "Vérification de la configuration de génération avant envoi à Gemini"
+  },
+  "metadata": {
+    "project_name": "Macompta.fr",
+    "batch_number": 7,
+    "batch_name": "Création_devis",
+    "batch_family": "Facturation",
+    "num_batches_to_process": 1,
+    "total_samples_per_batch": 50,
+    "total_samples_all_batches": 50,
+    "output_format": "JSONL"
+  },
+  "prompts": {
+    "global_context": "Macompta est une application pour aider l'utilisateur à propos de la comptabilité par une conversation avec l'IA, pour apprendre, guider et aider les utilisateurs dans la domaine de comptabilité, il peut aider aussi su l'utilisation de macompta elle même.",
+    "local_prompt": "Mets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes en te basant exclusivement sur les informations fournies. Les inputs doivent être formulés uniquement du point de vue de l’utilisateur, refléter des situations concrètes, inclure des formulations naturelles, parfois imprécises ou hésitantes, et ne contenir aucune réponse ou explication de l’IA.",
+    "combined_prompt": "Macompta est une application pour aider l'utilisateur à propos de la comptabilité par une conversation avec l'IA, pour apprendre, guider et aider les utilisateurs dans la domaine de comptabilité, il peut aider aussi su l'utilisation de macompta elle même.\n\n---\n\nMets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes en te basant exclusivement sur les informations fournies. Les inputs doivent être formulés uniquement du point de vue de l’utilisateur, refléter des situations concrètes, inclure des formulations naturelles, parfois imprécises ou hésitantes, et ne contenir aucune réponse ou explication de l’IA."
+  },
+  "master_typologie": {
+    "name": "Compte",
+    "full_structure": {
+      "name": "Compte",
+      "description": "",
+      "taxonomy_clusters": []
+    }
+  },
+  "combinations_details": [
+    {
+      "combination_index": 1,
+      "nb_samples": 50,
+      "master": {
+        "name": "Compte",
+        "taxonomy_clusters": []
+      },
+      "contexts": [
+        {
+          "level": "parent",
+          "display": "Intention / Action / Création / Documents de vente",
+          "taxonomy_clusters": [
+            {
+              "name": "Action",
+              "root_labels": [
+                {
+                  "name": "Création",
+                  "parent_labels": [
+                    {
+                      "name": "Documents de vente",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "UX/UI / Modules / Facturation / Devis",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "parent_labels": [
+                    {
+                      "name": "Devis",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
