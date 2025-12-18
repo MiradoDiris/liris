@@ -13,6 +13,7 @@ from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
 
 from PyQt5.QtCore import QRectF, QPropertyAnimation, pyqtProperty
 from PyQt5.QtGui import QPainter, QColor, QFont, QLinearGradient
+from self import self
 
 from ui.widgets.brainstorming_panel import BrainstormingPanel
 from ui.widgets.coding_panel import CodingPanel
@@ -278,7 +279,7 @@ class MainWindow(QMainWindow):
         self.dataset_generation_tab = DatasetGenerationPanel()
 
         # Widget pour le dialogue de configuration (menu Config -> Configuration projets data science)
-        self.dataset_config_widget = None  # Sera créé à la demande dans _on_show_dataset_config
+        self.dataset_generation = None  # Sera créé à la demande dans _on_show_dataset_config
 
         # ✅ Instances de dialogues
         self.project_config_dialog_instance = None
@@ -1408,12 +1409,9 @@ class MainWindow(QMainWindow):
             if self.conductor:
                 platforms = self.conductor.get_available_platforms()
 
-                # ... code existant ...
-
-                # ✅ VÉRIFIER si dataset_generation existe
-                if self.dataset_generation:
-                    self.dataset_generation.set_conductor(self.conductor)
-                    self.dataset_generation.set_platforms(platforms)
+            if self.dataset_generation is not None:
+                self.dataset_generation.set_conductor(self.conductor)
+                self.dataset_generation.set_platforms(platforms)
 
             logger.info(f"Configuration des plateformes mise à jour: {platform_name}")
             self.update_status(f"Plateforme {platform_name} mise à jour")

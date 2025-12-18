@@ -42,6 +42,192 @@ class ElidedLabel(QtWidgets.QLabel):
         painter.drawText(self.rect(), self.alignment(), elided)
 
 
+
+
+class HierarchicalChartState:
+    """Gère l'état de navigation hiérarchique du camembert de typologie - VERSION PROGRESSIVE"""
+    
+    def __init__(self):
+        self.current_level = 0  # 0 = typologie, 1 = cluster, 2 = root, 3+ = enfants
+        self.navigation_stack = []  # Stack de navigation: [(name, data), ...]
+        self.full_data = []  # Données complètes brutes
+        self.total_samples = 0
+        
+    def reset(self, chart_data, total_samples):
+        """Réinitialise l'état avec de nouvelles données"""
+        self.current_level = 0
+        self.navigation_stack = []
+        self.full_data = chart_data
+        self.total_samples = total_samples
+        
+    def get_current_data(self):
+        """Retourne les données à afficher au niveau actuel"""
+        if self.current_level == 0:
+            # Niveau 0: Afficher uniquement les typologies (premier niveau)
+            return self._extract_typologies()
+        else:
+            # Niveaux supérieurs: Afficher les enfants du dernier élément
+            return self._extract_children()
+    
+    def _extract_typologies(self):
+        """Extrait uniquement le premier niveau (typologies) - Support multi-séparateurs"""
+        from utils.logger import logger
+        
+        typologie_map = {}
+        
+        logger.info(f"🔍 _extract_typologies: Traitement de {len(self.full_data)} items")
+        
+        for i, item in enumerate(self.full_data):
+            name = item.get('name', '')
+            samples = item.get('samples', 0)
+            
+            if i < 3:
+                logger.info(f"  Item {i}: name='{name}', samples={samples}")
+            
+            # Détecter le séparateur utilisé (/, >, →, \)
+            separator = None
+            if ' / ' in name:
+                separator = ' / '
+            elif ' > ' in name:
+                separator = ' > '
+            elif ' → ' in name or ' -> ' in name:
+                separator = ' → ' if ' → ' in name else ' -> '
+            elif '/' in name:
+                separator = '/'
+            elif '>' in name:
+                separator = '>'
+            
+            if separator:
+                # Extraire la première partie (typologie)
+                parts = name.split(separator)
+                typologie = parts[0].strip()
+                if i < 3:
+                    logger.info(f"    → Séparateur '{separator}' détecté, typologie='{typologie}'")
+            else:
+                # Pas de hiérarchie, c'est déjà une typologie seule
+                typologie = name
+                if i < 3:
+                    logger.info(f"    → Pas de séparateur, typologie='{typologie}'")
+            
+            if typologie:
+                if typologie not in typologie_map:
+                    typologie_map[typologie] = {
+                        'name': typologie,
+                        'samples': 0,
+                        'level': 0,
+                        'full_path': typologie,
+                        'has_children': False,
+                        'separator': separator  # Stocker le séparateur pour usage ultérieur
+                    }
+                
+                typologie_map[typologie]['samples'] += samples
+                
+                # Vérifier si cette typologie a des enfants
+                if separator:
+                    typologie_map[typologie]['has_children'] = True
+        
+        result = list(typologie_map.values())
+        logger.info(f"✅ Typologies extraites: {[(t['name'], t['samples'], t['has_children']) for t in result[:5]]}")
+        return sorted(result, key=lambda x: x['samples'], reverse=True)
+
+    def _extract_children(self):
+        """Extrait les éléments enfants du niveau actuel - Support multi-séparateurs"""
+        from utils.logger import logger
+        
+        if not self.navigation_stack:
+            return []
+        
+        current_path = self.navigation_stack[-1][0]
+        depth = len(self.navigation_stack)
+        
+        logger.info(f"🔍 _extract_children: current_path='{current_path}', depth={depth}")
+        
+        children_map = {}
+        
+        for item in self.full_data:
+            name = item.get('name', '')
+            samples = item.get('samples', 0)
+            
+            if not name:
+                continue
+            
+            # Vérifier si cet item appartient au chemin actuel
+            if not name.startswith(current_path):
+                continue
+            
+            # Détecter le séparateur utilisé
+            separator = None
+            if ' / ' in name:
+                separator = ' / '
+            elif ' > ' in name:
+                separator = ' > '
+            elif ' → ' in name or ' -> ' in name:
+                separator = ' → ' if ' → ' in name else ' -> '
+            elif '/' in name:
+                separator = '/'
+            elif '>' in name:
+                separator = '>'
+            
+            if not separator:
+                continue
+            
+            # Parser les niveaux
+            parts = [p.strip() for p in name.split(separator)]
+            
+            # On veut les enfants au niveau depth
+            if len(parts) > depth:
+                # Construire le chemin jusqu'au niveau enfant
+                child_full_path = separator.join(parts[:depth + 1])
+                child_name = parts[depth]
+                
+                if child_full_path not in children_map:
+                    children_map[child_full_path] = {
+                        'name': child_name,
+                        'samples': 0,
+                        'level': depth,
+                        'full_path': child_full_path,
+                        'has_children': False
+                    }
+                
+                children_map[child_full_path]['samples'] += samples
+                
+                # Vérifier s'il y a encore des niveaux plus profonds
+                if len(parts) > depth + 1:
+                    children_map[child_full_path]['has_children'] = True
+        
+        result = list(children_map.values())
+        logger.info(f"✅ Enfants extraits: {[(c['name'], c['samples'], c['has_children']) for c in result[:5]]}")
+        return sorted(result, key=lambda x: x['samples'], reverse=True)
+
+    def navigate_to(self, name, full_path):
+        """Navigue vers un élément enfant"""
+        self.navigation_stack.append((full_path, name))
+        self.current_level += 1
+        
+    def navigate_back(self):
+        """Retourne au niveau précédent"""
+        if self.navigation_stack:
+            self.navigation_stack.pop()
+            self.current_level -= 1
+            return True
+        return False
+    
+    def get_breadcrumb(self):
+        """Retourne le fil d'Ariane pour l'affichage"""
+        if not self.navigation_stack:
+            return "Typologie de Contexte"
+        
+        breadcrumb_parts = []
+        for full_path, name in self.navigation_stack:
+            breadcrumb_parts.append(name)
+        
+        return " > ".join(breadcrumb_parts)
+    
+    def can_go_back(self):
+        """Vérifie si on peut retourner en arrière"""
+        return len(self.navigation_stack) > 0
+
+
 class DatasetHistoryWidget(QtWidgets.QWidget):
     """
     Widget pour l'historique des générations de datasets
@@ -69,6 +255,9 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
         self.current_generation_id = None
         self.generations = []
         self.dropdown_svg = get_dropdown_svg_path()
+
+        # État hiérarchique pour le camembert de typologie
+        self.hierarchical_state = HierarchicalChartState()
 
         self._init_ui()
 
@@ -404,6 +593,61 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
         self.typologie_chart_view.setStyleSheet("background: transparent; border: none;")
         layout.addWidget(self.typologie_chart_view)
 
+        # Bouton de retour pour la navigation hiérarchique
+        self.typologie_back_btn = QtWidgets.QPushButton("← Retour")
+        self.typologie_back_btn.setEnabled(False)
+        self.typologie_back_btn.setCursor(Qt.PointingHandCursor)
+        self.typologie_back_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {Theme.PRIMARY_COLOR};
+                border: 1px solid #E0E0E0;
+                border-radius: 3px;
+                padding: 2px 8px;
+                font-weight: normal;
+                font-size: 8pt;
+            }}
+            QPushButton:hover:enabled {{
+                background: #F5F5F5;
+                border-color: {Theme.PRIMARY_COLOR};
+            }}
+            QPushButton:disabled {{
+                background: transparent;
+                color: #CCCCCC;
+                border-color: #E0E0E0;
+            }}
+        """)
+        self.typologie_back_btn.clicked.connect(self._on_typologie_back)
+        layout.addWidget(self.typologie_back_btn)
+
+
+        # Bouton de retour pour la navigation hiérarchique
+        self.typologie_back_btn = QtWidgets.QPushButton("← Retour")
+        self.typologie_back_btn.setEnabled(False)
+        self.typologie_back_btn.setCursor(Qt.PointingHandCursor)
+        self.typologie_back_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {Theme.PRIMARY_COLOR};
+                border: 1px solid #E0E0E0;
+                border-radius: 3px;
+                padding: 2px 8px;
+                font-weight: normal;
+                font-size: 8pt;
+            }}
+            QPushButton:hover:enabled {{
+                background: #F5F5F5;
+                border-color: {Theme.PRIMARY_COLOR};
+            }}
+            QPushButton:disabled {{
+                background: transparent;
+                color: #CCCCCC;
+                border-color: #E0E0E0;
+            }}
+        """)
+        self.typologie_back_btn.clicked.connect(self._on_typologie_back)
+        layout.addWidget(self.typologie_back_btn)
+        
         self.typologie_info = QtWidgets.QLabel("Sélectionnez une génération")
         self.typologie_info.setAlignment(Qt.AlignCenter)
         self.typologie_info.setStyleSheet("color: #666; font-style: italic; border: none; font-size: 8pt;")
@@ -998,15 +1242,25 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
             self.details_layout.addWidget(error_text, row, 0, 1, 3)
 
     def _update_typologie_chart(self, generation):
-        """Met à jour le camembert des typologies"""
+        """Met à jour le camembert des typologies avec navigation hiérarchique PROGRESSIVE"""
+        chart_data = generation.get("chart_data", [])
+        total_samples = generation.get("samples", 0)
+        
+        # Réinitialiser l'état hiérarchique avec les nouvelles données
+        self.hierarchical_state.reset(chart_data, total_samples)
+        
+        # Afficher le niveau initial (typologies uniquement)
+        self._render_typologie_chart()
+    
+    def _render_typologie_chart(self):
+        """Rend le camembert au niveau hiérarchique actuel - PROGRESSIF"""
         self.typologie_chart.removeAllSeries()
         self.typologie_series = QPieSeries()
         self.typologie_series.setHoleSize(0.0)
-
-        chart_data = generation.get("chart_data", [])
-        total_samples = generation.get("samples", 0)
-
-        if not chart_data or total_samples == 0:
+        
+        current_data = self.hierarchical_state.get_current_data()
+        
+        if not current_data:
             slice_default = self.typologie_series.append("Aucune donnée", 1)
             slice_default.setColor(QColor("#E0E0E0"))
             slice_default.setBorderColor(Qt.transparent)
@@ -1014,44 +1268,75 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
             self.typologie_chart.addSeries(self.typologie_series)
             self.typologie_info.setText("Aucune donnée")
             self.typologie_chart.setTitle("Aucune donnée")
+            if hasattr(self, 'typologie_back_btn'):
+                self.typologie_back_btn.setEnabled(False)
             return
-
+        
         colors = [
             "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
             "#FFEAA7", "#DFE6E9", "#74B9FF", "#A29BFE",
             "#FD79A8", "#FDCB6E", "#6C5CE7", "#00B894"
         ]
-
-        sorted_chart_data = sorted(chart_data, key=lambda x: x.get('samples', 0), reverse=True)
-
-        for i, item in enumerate(sorted_chart_data):
+        
+        for i, item in enumerate(current_data):
             samples = item.get('samples', 0)
             name = item.get('name', 'Inconnu')
-            level = item.get('level', 'unknown')
-
+            full_path = item.get('full_path', name)
+            has_children = item.get('has_children', False)
+            
             slice_obj = self.typologie_series.append(name, samples)
             color = QColor(colors[i % len(colors)])
             slice_obj.setColor(color)
             slice_obj.setBorderColor(Qt.transparent)
-
-            percentage = (samples / total_samples) * 100 if total_samples > 0 else 0
-
+            
+            percentage = (samples / self.hierarchical_state.total_samples) * 100 if self.hierarchical_state.total_samples > 0 else 0
+            
             slice_obj.setLabelVisible(True)
             slice_obj.setLabelPosition(QPieSlice.LabelOutside)
             slice_obj.setLabelArmLengthFactor(0.12)
             slice_obj.setLabelColor(QColor("#1e293b"))
             slice_obj.setLabelFont(QFont("Segoe UI", 8, QFont.Bold))
-
-            if level == 'master':
-                slice_obj.setLabel(f"⭐ {name} {percentage:.0f}%")
-                slice_obj.setExploded(True)
-                slice_obj.setExplodeDistanceFactor(0.04)
+            
+            # Indicateur visuel si l'élément a des enfants
+            if has_children:
+                slice_obj.setLabel(f"{name} {percentage:.1f}%")
+                # Connecter le clic uniquement si il y a des enfants
+                slice_obj.clicked.connect(lambda checked=False, n=name, fp=full_path: self._on_slice_clicked(n, fp))
+                slice_obj.hovered.connect(lambda state, s=slice_obj: self._on_slice_hovered(state, s))
             else:
-                slice_obj.setLabel(f"{name} {percentage:.0f}%")
-
+                slice_obj.setLabel(f"{name} {percentage:.1f}%")
+        
         self.typologie_chart.addSeries(self.typologie_series)
-        self.typologie_chart.setTitle(f"{len(sorted_chart_data)} typologie(s)")
-        self.typologie_info.setText(f"{total_samples} occurrences totales")
+        
+        # Mettre à jour le titre avec le fil d'Ariane
+        breadcrumb = self.hierarchical_state.get_breadcrumb()
+        self.typologie_chart.setTitle(breadcrumb)
+        
+        # Info avec nombre d'éléments affichés
+        level_name = ["Typologies", "Clusters", "Labels"][min(self.hierarchical_state.current_level, 2)]
+        self.typologie_info.setText(f"{len(current_data)} {level_name} - {self.hierarchical_state.total_samples} samples totaux")
+        
+        # Activer/désactiver le bouton retour
+        if hasattr(self, 'typologie_back_btn'):
+            self.typologie_back_btn.setEnabled(self.hierarchical_state.can_go_back())
+    
+    def _on_slice_clicked(self, name, full_path):
+        """Gère le clic sur une part du camembert - Navigation progressive"""
+        self.hierarchical_state.navigate_to(name, full_path)
+        self._render_typologie_chart()
+    
+    def _on_slice_hovered(self, state, slice_obj):
+        """Gère le survol d'une part"""
+        if state:
+            slice_obj.setExploded(True)
+            slice_obj.setExplodeDistanceFactor(0.06)
+        else:
+            slice_obj.setExploded(False)
+    
+    def _on_typologie_back(self):
+        """Retourne au niveau précédent dans la hiérarchie"""
+        if self.hierarchical_state.navigate_back():
+            self._render_typologie_chart()
 
     def _update_batch_chart(self, generation):
         """
@@ -1075,9 +1360,9 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
 
         # Couleurs selon le statut
         status_colors = {
-            'completed': "#4CAF50",  # Vert
-            'partial': "#FFC107",     # Orange
-            'pending': "#9E9E9E"      # Gris
+            'completed': "#9E9E9E",  # Gris (modifié depuis vert)
+            'partial': "#B0B0B0",     # Gris clair (modifié depuis orange)
+            'pending': "#CCCCCC"      # Gris très clair
         }
 
         total_expected = sum(b['expected'] for b in batch_progression)

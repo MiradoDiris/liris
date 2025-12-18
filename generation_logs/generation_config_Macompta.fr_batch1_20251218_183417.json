@@ -1,0 +1,396 @@
+{
+  "export_info": {
+    "exported_at": "2025-12-18T18:34:17.268695",
+    "purpose": "Vérification de la configuration de génération avant envoi à Gemini"
+  },
+  "metadata": {
+    "project_name": "Macompta.fr",
+    "batch_number": 1,
+    "batch_name": "Calcul de la TVA sur une facture",
+    "batch_family": "TVA",
+    "num_batches_to_process": 1,
+    "total_samples_per_batch": 90,
+    "total_samples_all_batches": 90,
+    "output_format": "JSONL"
+  },
+  "prompts": {
+    "global_context": "Mets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes en te basant exclusivement sur les informations fournies. Les inputs doivent être formulés uniquement du point de vue de l’utilisateur, refléter des situations concrètes, inclure des formulations naturelles, parfois imprécises ou hésitantes, et ne contenir aucune réponse ou explication de l’IA.",
+    "structure_explanation": "Voici la description de contexte:\n    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,\n    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.\n    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.\n    Ta tâche est de générer un dataset complet comme si tu étais à la place de l'utilisateur :\n    Crée des inputs réalistes correspondant aux différents labels que tu reçois.\n    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).\n    Fournis également l'output correspondant à cet input selon la classification.\n    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l'output associé,\n    en respectant la structure hiérarchique des labels.\n    Classification de donnée d'un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,\n    de les trier et de les structurer correctement. Le dataset est pour fine tuner un agent qui s'appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable.",
+    "local_prompt": "Les inputs doivent être formulés uniquement du point de vue de l’utilisateur final.\nLe ton doit être naturel, avec parfois des hésitations, formulations approximatives ou imprécises.\nLes inputs doivent refléter des actions ou des questions que ferait un utilisateur manipulant la TVA dans le logiciel.\nNe produis que des questions ou remarques utilisateur.\nNe sors jamais du contexte défini par la taxonomie TVA et les combinaisons associées (déclarations, taux, exonérations, factures, etc.).\nNe produis jamais de samples qui évoquent des concepts non présents dans la taxonomie définie.\nReste strictement fidèle aux éléments définis dans la combinaison Liris.\nObjectif :\nProduire un batch d’inputs réalistes et contextualisés exclusivement liés à la TVA dans macompta.fr, conformément aux taxonomies fournies.",
+    "combined_prompt": "Mets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes en te basant exclusivement sur les informations fournies. Les inputs doivent être formulés uniquement du point de vue de l’utilisateur, refléter des situations concrètes, inclure des formulations naturelles, parfois imprécises ou hésitantes, et ne contenir aucune réponse ou explication de l’IA.\n\n---\n\nVoici la description de contexte:\n    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,\n    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.\n    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.\n    Ta tâche est de générer un dataset complet comme si tu étais à la place de l'utilisateur :\n    Crée des inputs réalistes correspondant aux différents labels que tu reçois.\n    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).\n    Fournis également l'output correspondant à cet input selon la classification.\n    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l'output associé,\n    en respectant la structure hiérarchique des labels.\n    Classification de donnée d'un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,\n    de les trier et de les structurer correctement. Le dataset est pour fine tuner un agent qui s'appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable.\n\n---\n\nLes inputs doivent être formulés uniquement du point de vue de l’utilisateur final.\nLe ton doit être naturel, avec parfois des hésitations, formulations approximatives ou imprécises.\nLes inputs doivent refléter des actions ou des questions que ferait un utilisateur manipulant la TVA dans le logiciel.\nNe produis que des questions ou remarques utilisateur.\nNe sors jamais du contexte défini par la taxonomie TVA et les combinaisons associées (déclarations, taux, exonérations, factures, etc.).\nNe produis jamais de samples qui évoquent des concepts non présents dans la taxonomie définie.\nReste strictement fidèle aux éléments définis dans la combinaison Liris.\nObjectif :\nProduire un batch d’inputs réalistes et contextualisés exclusivement liés à la TVA dans macompta.fr, conformément aux taxonomies fournies."
+  },
+  "master_typologie": {
+    "name": "Intention",
+    "full_structure": {
+      "name": "Intention",
+      "description": "",
+      "taxonomy_clusters": [
+        {
+          "name": "Explications",
+          "description": "",
+          "root_labels": [
+            {
+              "name": "Question",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            },
+            {
+              "name": "Confusion",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "combinations_details": [
+    {
+      "combination_index": 1,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Question",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              },
+              {
+                "name": "Confusion",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "root",
+          "display": "UX/UI / Modules / Facturation",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "description": "",
+                  "category": "default",
+                  "parent_labels": [
+                    {
+                      "name": "Devis",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Bons de livraison",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Factures",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Avoirs",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Tous les documents",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Exports",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Débutant",
+          "taxonomy_clusters": [
+            {
+              "name": "Débutant",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Prestation de services",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Prestation de services",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 2,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Question",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              },
+              {
+                "name": "Confusion",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "root",
+          "display": "UX/UI / Modules / Facturation",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "description": "",
+                  "category": "default",
+                  "parent_labels": [
+                    {
+                      "name": "Devis",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Bons de livraison",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Factures",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Avoirs",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Tous les documents",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Exports",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Intermédiaire",
+          "taxonomy_clusters": [
+            {
+              "name": "Intermédiaire",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Prestation de services",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Prestation de services",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 3,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Question",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              },
+              {
+                "name": "Confusion",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "root",
+          "display": "UX/UI / Modules / Facturation",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "description": "",
+                  "category": "default",
+                  "parent_labels": [
+                    {
+                      "name": "Devis",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Bons de livraison",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Factures",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Avoirs",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Tous les documents",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    },
+                    {
+                      "name": "Exports",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Débutant",
+          "taxonomy_clusters": [
+            {
+              "name": "Débutant",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Prestation de services",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Prestation de services",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

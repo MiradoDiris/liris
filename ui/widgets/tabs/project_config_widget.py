@@ -37,6 +37,13 @@ from utils.resource_path import (
     is_frozen
 )
 
+from utils.project_cleaner import (
+    ProjectCleaner,
+    create_standard_cleaner,
+    create_strict_cleaner,
+    create_lenient_cleaner
+)
+
 def log_initialization_info():
     """Log les informations d'initialisation pour le débogage"""
     logger.info("=" * 60)
@@ -271,6 +278,7 @@ class ProjectConfigWidget(QtWidgets.QWidget):
         self.global_relations_config = RelationsConfig(self, "global")
         self.relations_graph = RelationsGraphWidget(self)  # Nouveau widget graphe
         self.code_dialogs = CodeDialogs(self)
+        self.custom_cleaner = None
 
         self.setMinimumSize(1400, 900)
 
@@ -3142,12 +3150,103 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     self._add_all_files_from_dir(item_path, base_dir, new_label, profile)
 
     def _scan_project_directory(self, directory):
+        """
+        ✅ VERSION AVEC NETTOYAGE AUTOMATIQUE ET VÉRIFICATION RENFORCÉE
+        Scanne un projet en filtrant automatiquement les fichiers inutiles
+        """
         project_name = os.path.basename(directory)
 
-        # ✅ RÉCUPÉRER LE PROFIL EXISTANT (si présent)
+        logger.info("=" * 80)
+        logger.info(f"🔍 SCAN DU PROJET : {project_name}")
+        logger.info("=" * 80)
+
+        # ✅ ÉTAPE 1 : INITIALISER LE NETTOYEUR
+        logger.info("\n🧹 Initialisation du nettoyeur de projet...")
+        cleaner = create_standard_cleaner()
+
+        # Afficher la config
+        logger.info(f"   📋 Configuration du nettoyage:")
+        logger.info(f"      • Exclure lockfiles: {cleaner.exclude_lockfiles}")
+        logger.info(f"      • Exclure tests: {cleaner.exclude_tests}")
+        logger.info(f"      • Taille max fichier: {cleaner.max_file_size_bytes / (1024*1024):.1f} MB")
+
+        # ✅ ÉTAPE 2 : OBTENIR LA LISTE DES FICHIERS FILTRÉS
+        logger.info(f"\n🔎 Analyse du répertoire: {directory}")
+
+        # 🔧 CORRECTION : Vérifier manuellement les exclusions critiques
+        logger.info(f"\n🛡️ Vérification des exclusions critiques...")
+        critical_dirs = {'.git', 'env', 'venv', '.venv', '.env', 'node_modules', '__pycache__'}
+        found_critical = set()
+
+        for root, dirs, files in os.walk(directory):
+            for d in dirs:
+                if d in critical_dirs:
+                    full_path = os.path.join(root, d)
+                    rel_path = os.path.relpath(full_path, directory)
+                    found_critical.add((d, rel_path))
+
+        if found_critical:
+            logger.info(f"   ⚠️ Dossiers critiques détectés (seront exclus):")
+            for dir_name, rel_path in sorted(found_critical):
+                logger.info(f"      • {rel_path}")
+        else:
+            logger.info(f"   ✅ Aucun dossier critique détecté")
+
+        # Obtenir les fichiers filtrés
+        filtered_files = cleaner.clean_directory_tree(directory)
+
+        if not filtered_files:
+            logger.warning("⚠️ Aucun fichier à inclure après nettoyage!")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Projet vide",
+                f"Aucun fichier de code trouvé dans '{project_name}'.\n\n"
+                f"Le projet ne contient que des dépendances, caches ou fichiers système."
+            )
+            return None
+
+        # 🔧 CORRECTION : Double vérification - filtrer manuellement les chemins interdits
+        logger.info(f"\n🔍 Double vérification des exclusions...")
+        safe_files = []
+        excluded_count = 0
+
+        for file_path in filtered_files:
+            rel_path = os.path.relpath(file_path, directory)
+            path_parts = Path(rel_path).parts
+
+            # Vérifier si le chemin contient un dossier interdit
+            is_safe = True
+            for part in path_parts:
+                if part in critical_dirs or part.startswith('.') and part != '.github':
+                    logger.debug(f"      🗑️ Exclusion manuelle: {rel_path} (contient '{part}')")
+                    excluded_count += 1
+                    is_safe = False
+                    break
+                
+            if is_safe:
+                safe_files.append(file_path)
+
+        if excluded_count > 0:
+            logger.info(f"   ⚠️ {excluded_count} fichiers supplémentaires exclus manuellement")
+
+        filtered_files = safe_files
+
+        if not filtered_files:
+            logger.warning("⚠️ Aucun fichier valide après double vérification!")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Projet vide",
+                f"Aucun fichier de code trouvé dans '{project_name}'.\n\n"
+                f"Tous les fichiers sont dans des dossiers système ou de dépendances."
+            )
+            return None
+
+        logger.info(f"\n✅ {len(filtered_files)} fichiers à traiter après nettoyage complet")
+
+        # ✅ ÉTAPE 3 : RÉCUPÉRER OU CRÉER LE PROFIL
         if project_name in self.project_profiles:
             profile = self.project_profiles[project_name]
-            logger.info(f"🔄 Mise à jour du projet existant : {project_name}")
+            logger.info(f"📄 Mise à jour du projet existant : {project_name}")
         else:
             profile = {
                 'name': project_name,
@@ -3157,27 +3256,54 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 'turing_ontology': {'clusters_detailed': []},
                 'pending_relations': {}
             }
-            logger.info(f"✅ Création nouveau projet : {project_name}")
+            logger.info(f"✨ Création nouveau projet : {project_name}")
 
-        # ✅ CRÉER UN INDEX DES CLUSTERS EXISTANTS
+        # ✅ ÉTAPE 4 : CRÉER UN INDEX DES CLUSTERS EXISTANTS
         existing_clusters = {
             cluster['name']: cluster 
             for cluster in profile['turing_ontology']['clusters_detailed']
         }
 
-        for item in sorted(os.listdir(directory)):
-            item_path = os.path.join(directory, item)
-            cluster_name = item
+        # ✅ ÉTAPE 5 : ORGANISER LES FICHIERS PAR DOSSIER PARENT (CORRECTION FINALE)
+        logger.info("\n📂 Organisation des fichiers par clusters...")
+        files_by_parent = {}
 
-            # ✅ MERGE AU LIEU DE CRÉER UN DOUBLON
+        for file_path in filtered_files:
+            # Calculer le chemin relatif
+            rel_path = os.path.relpath(file_path, directory)
+
+            # Déterminer le cluster (dossier parent direct)
+            path_parts = Path(rel_path).parts
+
+            # 🔧 CORRECTION FINALE : Fichiers racine vont directement dans le dossier parent
+            if len(path_parts) == 1:
+                # Fichier à la racine → Ne PAS créer de cluster
+                logger.debug(f"   📄 Fichier racine ignoré pour clusters: {rel_path}")
+                continue
+            else:
+                # Fichier dans un sous-dossier → cluster normal
+                cluster_name = path_parts[0]
+
+                if cluster_name not in files_by_parent:
+                    files_by_parent[cluster_name] = []
+
+                files_by_parent[cluster_name].append(file_path)
+
+        logger.info(f"   ✅ {len(files_by_parent)} cluster(s) détecté(s) (fichiers racine exclus)")
+
+        # ✅ ÉTAPE 6 : TRAITER CHAQUE CLUSTER (SANS FICHIERS RACINE)
+        for cluster_name, cluster_files in files_by_parent.items():
+            logger.info(f"\n📦 Traitement cluster: {cluster_name} ({len(cluster_files)} fichiers)")
+
+            # Récupérer ou créer le cluster
             if cluster_name in existing_clusters:
                 cluster = existing_clusters[cluster_name]
-                logger.info(f"🔄 Mise à jour cluster existant : {cluster_name}")
+                logger.info(f"   📄 Mise à jour cluster existant")
             else:
                 cluster = {
                     'name': cluster_name,
                     'uid': str(uuid.uuid4()),
-                    'description': f"{'Fichier' if os.path.isfile(item_path) else 'Dossier'}: {item}",
+                    'description': f"Dossier: {cluster_name}",
                     'files': [],
                     'file_contents': {},
                     'root_labels': [],
@@ -3185,29 +3311,39 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                 }
                 profile['turing_ontology']['clusters_detailed'].append(cluster)
                 existing_clusters[cluster_name] = cluster
-                logger.info(f"✅ Nouveau cluster : {cluster_name}")
+                logger.info(f"   ✨ Nouveau cluster créé")
 
-            # === CAS 1 : FICHIER DIRECT ===
-            if os.path.isfile(item_path):
-                rel_path = item
-                content = self._read_file_safe(item_path)
+            # Traiter les fichiers du cluster
+            for file_path in cluster_files:
+                rel_path = os.path.relpath(file_path, directory)
 
+                # Lire le contenu
+                content = self._read_file_safe(file_path)
+
+                if not content:
+                    logger.debug(f"      ⚠️ Fichier vide ignoré: {rel_path}")
+                    continue
+                
+                # Ajouter au profil global
                 if rel_path not in profile['files']:
                     profile['files'].append(rel_path)
                 profile['file_contents'][rel_path] = content
 
+                # Ajouter au cluster
                 if rel_path not in cluster['files']:
                     cluster['files'].append(rel_path)
                 cluster['file_contents'][rel_path] = content
-                cluster['is_file_cluster'] = True
 
-            # === CAS 2 : DOSSIER ===
-            elif os.path.isdir(item_path):
-                cluster['is_file_cluster'] = False
+                logger.debug(f"      ✅ {rel_path} ({len(content)} chars)")
 
-                # ✅ SCANNER RÉCURSIF (avec déduplication intégrée)
+            # Scanner la structure hiérarchique du cluster
+            logger.info(f"   🔍 Scan de la hiérarchie...")
+
+            cluster_path = os.path.join(directory, cluster_name)
+
+            if os.path.isdir(cluster_path):
                 self._scan_directory_recursive(
-                    item_path,
+                    cluster_path,
                     directory,
                     cluster,
                     profile,
@@ -3215,7 +3351,22 @@ class ProjectConfigWidget(QtWidgets.QWidget):
                     level=0
                 )
 
-        logger.info(f"✅ Scanné {len(profile['files'])} fichiers depuis {directory}")
+        # ✅ ÉTAPE 7 : STATISTIQUES FINALES
+        logger.info("\n" + "=" * 80)
+        logger.info("📊 RÉSUMÉ DU SCAN")
+        logger.info("=" * 80)
+        logger.info(f"✅ Fichiers traités: {len(profile['files'])}")
+        logger.info(f"✅ Clusters créés: {len(profile['turing_ontology']['clusters_detailed'])}")
+
+        # Afficher détails par cluster
+        for cluster in profile['turing_ontology']['clusters_detailed']:
+            c_name = cluster['name']
+            c_files = len(cluster.get('files', []))
+            c_labels = len(cluster.get('root_labels', []))
+            logger.info(f"   • {c_name}: {c_files} fichiers, {c_labels} labels")
+
+        logger.info("=" * 80 + "\n")
+
         return profile
     
     def _scan_directory_recursive(self, dir_path, base_dir, cluster, profile, 
@@ -3409,18 +3560,182 @@ class ProjectConfigWidget(QtWidgets.QWidget):
             return ""
 
     def _on_upload_local_project(self):
-        directory = QFileDialog.getExistingDirectory(self, "Sélectionner un dossier projet local")
-        if directory:
+        """
+        ✅ VERSION AVEC NETTOYAGE AUTOMATIQUE ET FEEDBACK UTILISATEUR
+        """
+        directory = QFileDialog.getExistingDirectory(
+            self, 
+            "Sélectionner un dossier projet local"
+        )
+
+        if not directory:
+            return
+
+        project_name = os.path.basename(directory)
+
+        # ✅ AFFICHER UN DIALOG DE PROGRESSION
+        progress = ModernProgressDialog(
+            title=f"Upload du projet : {project_name}",
+            parent=self,
+            show_log=True,
+            cancelable=False
+        )
+        progress.set_title(f"📂 Upload de {project_name}")
+        progress.set_indeterminate(True)
+        progress.show()
+
+        try:
+            # ÉTAPE 1 : Nettoyage
+            progress.set_status("🧹 Nettoyage des fichiers inutiles...")
+            progress.add_log(f"🔍 Analyse du projet: {directory}")
+            progress.add_log(f"   • Exclusion: node_modules, __pycache__, .git, etc.")
+
+            QtWidgets.QApplication.processEvents()
+
+            # ÉTAPE 2 : Scan avec nettoyage intégré
+            progress.set_status("📊 Scan du projet...")
+            progress.add_log(f"\n📊 Début du scan...")
+
             scanned_data = self._scan_project_directory(directory)
-            project_name = scanned_data['name']
+
+            if not scanned_data:
+                progress.finish(
+                    success=False,
+                    message="❌ Projet vide ou aucun fichier valide"
+                )
+                return
+
+            progress.add_log(f"   ✅ {len(scanned_data['files'])} fichiers scannés")
+
+            # ÉTAPE 3 : Enregistrement
+            progress.set_status("💾 Enregistrement du projet...")
+            progress.add_log(f"\n💾 Enregistrement...")
+
+            # Copie profonde pour éviter les problèmes
             self.project_profiles[project_name] = json.loads(json.dumps(scanned_data))
+
+            progress.add_log(f"   ✅ Profil enregistré en mémoire")
+
+            # ÉTAPE 4 : Mise à jour UI
+            progress.set_status("🎨 Mise à jour de l'interface...")
+            progress.add_log(f"\n🎨 Rafraîchissement UI...")
+
             self._update_project_combo()
             self.project_combo.setCurrentText(project_name)
             self._on_project_selected(self.project_combo.currentIndex())
 
+            progress.add_log(f"   ✅ Interface mise à jour")
+
+            # ÉTAPE 5 : Émission du signal
             self.project_created.emit(project_name)
 
-            logger.info(f"Upload local complété pour: {directory}")
+            # SUCCÈS
+            progress.finish(
+                success=True,
+                message=f"✅ Projet '{project_name}' uploadé avec succès!"
+            )
+
+            progress.add_log(f"\n" + "=" * 60)
+            progress.add_log(f"✅ UPLOAD TERMINÉ")
+            progress.add_log(f"=" * 60)
+
+            logger.info(f"✅ Upload local complété pour: {project_name}")
+
+            # Message de confirmation
+            QtWidgets.QMessageBox.information(
+                self,
+                "✅ Upload réussi",
+                f"Projet '{project_name}' uploadé avec succès!\n\n"
+                f"📊 Statistiques:\n"
+                f"   • {len(scanned_data['files'])} fichiers inclus\n"
+                f"   • {len(scanned_data['turing_ontology']['clusters_detailed'])} clusters créés\n\n"
+                f"💡 Les dépendances et fichiers système ont été automatiquement exclus."
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'upload: {e}")
+            import traceback
+            traceback.print_exc()
+
+            progress.finish(
+                success=False,
+                message=f"❌ Erreur: {str(e)}"
+            )
+
+            QtWidgets.QMessageBox.critical(
+                self,
+                "❌ Erreur",
+                f"Erreur lors de l'upload du projet:\n\n{str(e)}"
+            )
+
+    def _configure_cleaner_settings(self):
+        """
+        ✅ NOUVEAU : Permet à l'utilisateur de configurer le nettoyeur
+        (Optionnel - pour usage avancé)
+        """
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("⚙️ Configuration du nettoyage")
+        dialog.setMinimumSize(400, 300)
+        
+        layout = QtWidgets.QVBoxLayout(dialog)
+        
+        # Options
+        layout.addWidget(QtWidgets.QLabel("<b>Options de nettoyage:</b>"))
+        
+        exclude_lockfiles_cb = QtWidgets.QCheckBox("Exclure les lockfiles (package-lock.json, etc.)")
+        exclude_lockfiles_cb.setChecked(True)
+        layout.addWidget(exclude_lockfiles_cb)
+        
+        exclude_tests_cb = QtWidgets.QCheckBox("Exclure les répertoires de tests")
+        exclude_tests_cb.setChecked(False)
+        layout.addWidget(exclude_tests_cb)
+        
+        # Taille max
+        layout.addWidget(QtWidgets.QLabel("\nTaille maximale des fichiers:"))
+        size_spin = QtWidgets.QSpinBox()
+        size_spin.setRange(1, 100)
+        size_spin.setValue(10)
+        size_spin.setSuffix(" MB")
+        layout.addWidget(size_spin)
+        
+        # Exclusions personnalisées
+        layout.addWidget(QtWidgets.QLabel("\nExclusions personnalisées (une par ligne):"))
+        custom_text = QtWidgets.QTextEdit()
+        custom_text.setPlaceholderText("Exemple:\nmy_cache\ntemp_files\n*.tmp")
+        custom_text.setMaximumHeight(100)
+        layout.addWidget(custom_text)
+        
+        # Boutons
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            # Sauvegarder la config
+            custom_excludes = set()
+            for line in custom_text.toPlainText().strip().split('\n'):
+                line = line.strip()
+                if line:
+                    custom_excludes.add(line)
+            
+            # Créer un nettoyeur personnalisé
+            self.custom_cleaner = ProjectCleaner(
+                exclude_lockfiles=exclude_lockfiles_cb.isChecked(),
+                exclude_tests=exclude_tests_cb.isChecked(),
+                max_file_size_mb=size_spin.value(),
+                custom_excludes=custom_excludes if custom_excludes else None
+            )
+            
+            logger.info("✅ Configuration du nettoyeur mise à jour")
+            
+            QtWidgets.QMessageBox.information(
+                self,
+                "✅ Configuration enregistrée",
+                "Les nouveaux paramètres seront appliqués au prochain upload."
+            )
 
     def _on_add_new_project(self):
         """Crée un nouveau projet vide."""

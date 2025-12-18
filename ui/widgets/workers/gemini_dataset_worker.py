@@ -472,26 +472,12 @@ class GeminiDatasetWorker(QThread):
         # ✅ EXTRAIRE DES EXEMPLES CONCRETS
         exemple_structure = self._extract_structure_examples(master_data, contexts)
 
-        prompt = f"""# 🤖 GÉNÉRATION DE DATASET POUR IA CONVERSATIONNELLE
-
-    Voici le description de contexte:
-    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,
-    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.
-    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.
-    Ta tâche est de générer un dataset complet comme si tu étais à la place de l’utilisateur :
-    Crée des inputs réalistes correspondant aux différents labels que tu reçois.
-    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).
-    Fournis également l’output correspondant à cet input selon la classification.
-    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l’output associé,
-    en respectant la structure hiérarchique des labels.
-    Classification de donnée d’un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,
-    de les trier et de les structurer correctement Le detaset est pour fine tuner un agent qui s’appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable 
-    
-    
+        prompt = f"""# 🤖 GÉNÉRATION DE DATASET POUR IA CONVERSATIONNELLE  
     NB: La combinaison doit etre entre de typologie de contexte minimum, 1 master avec 1 ou plusieurs autre contextes
     
     ## 📚 TAXONOMIE DE RÉFÉRENCE
 
+    
     {master_section}
 
     ### CONTEXTES SPÉCIFIQUES

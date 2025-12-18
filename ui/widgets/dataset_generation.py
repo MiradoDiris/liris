@@ -7,6 +7,7 @@ Left: Project & Config | Center: Prompt Editor | Right: Combinations Visualizer
 """
 
 import json
+from operator import index
 import os
 from datetime import datetime
 from typing import Dict
@@ -15,12 +16,15 @@ from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QSpinBox, QComboBox, QProgressBar, QScrollArea,
-    QFrame, QGroupBox, QMessageBox, QFileDialog
+    QFrame, QGroupBox, QMessageBox, QFileDialog, QDialog
 )
 from PyQt5.QtGui import QFont, QColor, QLinearGradient, QPainter, QBrush
 import sys
 from pathlib import Path
 from typing import Dict, Any
+
+import self
+
 current_dir = Path(__file__).parent
 project_root = current_dir.parent.parent
 sys.path.insert(0, str(project_root))
@@ -59,7 +63,8 @@ class CollapsibleSection(QWidget):
             QtWidgets.QSizePolicy.Expanding,
             QtWidgets.QSizePolicy.Fixed
         )
-        self.header.setStyleSheet(f"""
+        # Style par défaut (gradient bleu)
+        self.default_style = f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
@@ -75,7 +80,26 @@ class CollapsibleSection(QWidget):
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
             }}
-        """)
+        """
+        
+        # Style alternatif (gris clair pour section d'ajout)
+        self.light_style = """
+            QPushButton {
+                background: #F5F5F5;
+                color: #333333;
+                border: none;
+                border-radius: 6px;
+                padding: 10px 15px;
+                text-align: left;
+                font-size: 11pt;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #E8E8E8;
+            }
+        """
+        
+        self.header.setStyleSheet(self.default_style)
         self.header.setCursor(Qt.PointingHandCursor)
         self.header.clicked.connect(self.toggle)
         self.update_header_text(title)
@@ -147,6 +171,10 @@ class CollapsibleSection(QWidget):
         """Définit le titre"""
         self.section_title = title
         self.update_header_text(title)
+    
+    def set_light_style(self):
+        """Applique le style gris clair au lieu du gradient bleu"""
+        self.header.setStyleSheet(self.light_style)
 
 
 class GradientProgressBar(QProgressBar):
@@ -223,6 +251,9 @@ class GradientButton(QPushButton):
 
 class CombinationVisualizer(QWidget):
     """Widget de visualisation - LISTE UNIQUEMENT (sans camembert)"""
+
+    combination_deleted = pyqtSignal(int)
+    combination_modified = pyqtSignal(int, dict)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -239,14 +270,211 @@ class CombinationVisualizer(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        
+
         self.combinations_widget = QWidget()
         self.combinations_layout = QVBoxLayout(self.combinations_widget)
         self.combinations_layout.setSpacing(8)
         self.combinations_layout.setAlignment(Qt.AlignTop)
         scroll.setWidget(self.combinations_widget)
-        
+
         layout.addWidget(scroll)
+
+        layout.addWidget(scroll)
+
+    def _request_add_context_to_combo(self, combo_idx):
+        """Ouvre l'interface pour ajouter un contexte à une combinaison existante"""
+        if combo_idx < 0 or combo_idx >= len(self.combinations):
+            return
+
+        # Stocker l'index de la combo en cours d'édition
+        self._editing_combo_idx = combo_idx
+
+        # Créer un dialog pour sélectionner un nouveau contexte
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Ajouter un contexte à la combinaison #{combo_idx + 1}")
+        dialog.setMinimumSize(600, 400)
+
+        layout = QVBoxLayout(dialog)
+
+        # Info
+        info = QLabel(f"<b>Combinaison #{combo_idx + 1}</b><br>"
+                      f"Ajoutez un nouveau contexte à cette combinaison")
+        info.setStyleSheet("padding: 10px; background: #F0F8FF; border-radius: 4px;")
+        layout.addWidget(info)
+
+        # Champ de recherche
+        search_label = QLabel("Rechercher une taxonomie:")
+        search_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        layout.addWidget(search_label)
+
+        search_input = QtWidgets.QLineEdit()
+        search_input.setPlaceholderText("Tapez pour rechercher...")
+        search_input.setMinimumHeight(32)
+        layout.addWidget(search_input)
+
+        # Liste des résultats
+        results_list = QtWidgets.QListWidget()
+        results_list.setMinimumHeight(200)
+        layout.addWidget(results_list)
+
+        # Fil d'ariane
+        breadcrumb = QLabel("Aucune sélection")
+        breadcrumb.setStyleSheet("background: #F8F9FA; border: 1px solid #E0E0E0; "
+                                 "border-radius: 4px; padding: 8px; font-size: 8pt;")
+        layout.addWidget(breadcrumb)
+
+        # Boutons
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.clicked.connect(dialog.reject)
+        buttons.addWidget(cancel_btn)
+
+        add_btn = QPushButton("Ajouter")
+        add_btn.setEnabled(False)
+        add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+            QPushButton:disabled {{
+                background: #CCCCCC;
+                color: #888888;
+            }}
+        """)
+        buttons.addWidget(add_btn)
+
+        layout.addLayout(buttons)
+
+        # Variable pour stocker la sélection
+        selected_taxonomy = None
+
+        def on_search(text):
+            results_list.clear()
+            if not text or len(text) < 2:
+                return
+
+            if not self.all_project_typologies:
+                results_list.addItem("⚠️ Aucune typologie disponible")
+                return
+
+            text_lower = text.lower()
+            results = []
+
+            # Recherche dans toutes les typologies
+            for typologie in self.all_project_typologies:
+                if not isinstance(typologie, dict):
+                    continue
+                
+                typologie_name = typologie.get('name', '')
+                clusters = typologie.get('taxonomy_clusters', [])
+
+                for cluster in clusters:
+                    cluster_name = cluster.get('name', '')
+
+                    if text_lower in cluster_name.lower():
+                        results.append({
+                            'display': f"Cluster: {cluster_name}",
+                            'path': f"{typologie_name} → {cluster_name}",
+                            'level': 'taxonomy',
+                            'typologie': typologie_name,
+                            'taxonomy': cluster_name,
+                            'data': cluster,
+                            'full_typologie': typologie
+                        })
+
+                    # Recherche dans root, parent, children...
+                    for root in cluster.get('root_labels', []):
+                        root_name = root.get('name', '')
+
+                        if text_lower in root_name.lower():
+                            results.append({
+                                'display': f"Label root: {root_name}",
+                                'path': f"{typologie_name} → {cluster_name} → {root_name}",
+                                'level': 'root',
+                                'typologie': typologie_name,
+                                'taxonomy': cluster_name,
+                                'root': root_name,
+                                'data': root,
+                                'full_typologie': typologie
+                            })
+
+                        for parent in root.get('parent_labels', []):
+                            parent_name = parent.get('name', '')
+
+                            if text_lower in parent_name.lower():
+                                results.append({
+                                    'display': f"Label parent: {parent_name}",
+                                    'path': f"{typologie_name} → {cluster_name} → {root_name} → {parent_name}",
+                                    'level': 'parent',
+                                    'typologie': typologie_name,
+                                    'taxonomy': cluster_name,
+                                    'root': root_name,
+                                    'parent': parent_name,
+                                    'data': parent,
+                                    'full_typologie': typologie
+                                })
+
+                            # Recherche dans children (récursif)
+                            self._search_in_children(
+                                parent.get('children', []), text_lower, results,
+                                typologie_name, cluster_name, root_name, parent_name, [], typologie
+                            )
+
+            # Afficher les résultats
+            if results:
+                for result in results[:15]:
+                    item = QtWidgets.QListWidgetItem(result['display'])
+                    item.setData(Qt.UserRole, result)
+                    item.setToolTip(result['path'])
+                    results_list.addItem(item)
+            else:
+                results_list.addItem("❌ Aucun résultat")
+
+        def on_select(item):
+            nonlocal selected_taxonomy
+            result = item.data(Qt.UserRole)
+
+            if not result or isinstance(result, str):
+                return
+
+            selected_taxonomy = result
+            breadcrumb.setText(f"✅ {result['path']}")
+            add_btn.setEnabled(True)
+
+        def on_add():
+            if not selected_taxonomy:
+                return
+
+            # Construire le nouveau contexte
+            new_context = {
+                'level': selected_taxonomy['level'],
+                'display': selected_taxonomy['path'],
+                'data': self._build_context_data_from_selection(selected_taxonomy)
+            }
+
+            # Ajouter à la combinaison
+            combo = self.combinations[combo_idx]
+            combo['contexts'].append(new_context)
+
+            dialog.accept()
+
+        # Connexions
+        search_input.textChanged.connect(on_search)
+        results_list.itemDoubleClicked.connect(on_select)
+        add_btn.clicked.connect(on_add)
+
+        dialog.exec_()
 
     def set_combinations(self, combinations):
         """Définit les combinaisons à afficher"""
@@ -261,103 +489,306 @@ class CombinationVisualizer(QWidget):
             self._update_display()
             
     def _update_display(self):
-        """Met à jour l'affichage - VERSION AVEC MASTER"""
+        """Met à jour l'affichage - VERSION AVEC ÉDITION DES CONTEXTES"""
         # Vider le layout
         while self.combinations_layout.count():
             item = self.combinations_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        
-        # Si aucune combinaison, afficher un message
+
         if not self.combinations:
             empty_label = QLabel("Aucune combinaison à afficher.\nSélectionnez un batch pour commencer.")
             empty_label.setAlignment(Qt.AlignCenter)
-            empty_label.setStyleSheet("color: #999; font-style: italic; padding: 50px;")
+            empty_label.setStyleSheet("color: #999; font-style: italic; padding: 30px; font-size: 9pt;")
             self.combinations_layout.addWidget(empty_label)
             return
-        
+
         # Afficher chaque combinaison
         for i, combo in enumerate(self.combinations):
             combo_frame = QFrame()
             combo_frame.setFrameShape(QFrame.StyledPanel)
-            
+            combo_frame.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+
             is_completed = self.completed[i] if i < len(self.completed) else False
-            
+
             if is_completed:
                 combo_frame.setStyleSheet(f"""
                     QFrame {{
                         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                             stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
-                        border-radius: 6px;
-                        padding: 10px;
+                        border-radius: 4px;
+                        padding: 6px;
                     }}
                 """)
                 text_color = "white"
             else:
                 combo_frame.setStyleSheet("""
                     QFrame {
-                        background: #F5F5F5;
-                        border-radius: 6px;
-                        padding: 10px;
+                        background: #F8F9FA;
+                        border: 1px solid #E0E0E0;
+                        border-radius: 4px;
+                        padding: 6px;
                     }
                 """)
                 text_color = "#333333"
-            
+
             combo_layout = QVBoxLayout(combo_frame)
-            
-            # En-tête : Numéro + Master + Samples
+            combo_layout.setSpacing(4)
+            combo_layout.setContentsMargins(4, 4, 4, 4)
+
+            # En-tête avec boutons d'action
             header_layout = QHBoxLayout()
-            
+            header_layout.setSpacing(4)
+            header_layout.setContentsMargins(0, 0, 0, 0)
+
             num_label = QLabel(f"#{i+1}")
-            num_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
-            num_label.setStyleSheet(f"color: {text_color};")
-            num_label.setFixedWidth(40)
+            num_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            num_label.setStyleSheet(f"color: {text_color}; min-width: 30px;")
+            num_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
             header_layout.addWidget(num_label)
-            
-            # AFFICHAGE DU MASTER
+
             master_name = combo.get('master', 'N/A')
-            master_label = QLabel(f"Master: {master_name}")
+            master_label = QLabel(f"{master_name}")
             master_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
-            master_label.setStyleSheet(f"color: {text_color}; text-decoration: underline;")
-            header_layout.addWidget(master_label)
-            
-            header_layout.addStretch()
-            
-            # Nombre de contextes et samples
+            master_label.setStyleSheet(f"color: {text_color};")
+            master_label.setWordWrap(True)
+            master_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+            header_layout.addWidget(master_label, 1)
+
+            # Info compacte
             nb_contexts = len(combo.get('contexts', []))
             nb_samples = combo.get('nb_samples', 1)
-            
-            info_label = QLabel(f"{nb_contexts} contexte(s) • {nb_samples} sample(s)")
-            info_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
-            info_label.setStyleSheet(f"color: {text_color};")
+
+            info_label = QLabel(f"{nb_contexts}ctx • {nb_samples}spl")
+            info_label.setFont(QFont("Segoe UI", 8))
+            info_label.setStyleSheet(f"color: {text_color}; padding: 0 5px;")
+            info_label.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
             header_layout.addWidget(info_label)
-            
-            # Icône de statut
+
+            if not is_completed:
+                # Bouton Modifier samples
+                edit_samples_btn = QPushButton("Modifier")
+                edit_samples_btn.setToolTip("Modifier le nombre de samples")
+                edit_samples_btn.setMinimumSize(40, 22)
+                edit_samples_btn.setMaximumHeight(22)
+                edit_samples_btn.setCursor(Qt.PointingHandCursor)
+                edit_samples_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: white;
+                        border: 1px solid {Theme.PRIMARY_COLOR};
+                        border-radius: 3px;
+                        font-size: 8pt;
+                        font-weight: bold;
+                        color: {Theme.PRIMARY_COLOR};
+                        padding: 2px 4px;
+                    }}
+                    QPushButton:hover {{
+                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                            stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                        color: white;
+                        border: none;
+                    }}
+                """)
+                edit_samples_btn.clicked.connect(lambda checked, idx=i: self._edit_samples(idx))
+                header_layout.addWidget(edit_samples_btn)
+
+                # Bouton Supprimer
+                delete_btn = QPushButton("Suppr")
+                delete_btn.setToolTip("Supprimer la combinaison")
+                delete_btn.setMinimumSize(45, 22)
+                delete_btn.setMaximumHeight(22)
+                delete_btn.setCursor(Qt.PointingHandCursor)
+                delete_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: white;
+                        border: 1px solid {Theme.PRIMARY_COLOR};
+                        border-radius: 3px;
+                        font-size: 8pt;
+                        font-weight: bold;
+                        color: {Theme.PRIMARY_COLOR};
+                        padding: 2px 4px;
+                    }}
+                    QPushButton:hover {{
+                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                            stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                        color: white;
+                        border: none;
+                    }}
+                """)
+                delete_btn.clicked.connect(lambda checked, idx=i: self.combination_deleted.emit(idx))
+                header_layout.addWidget(delete_btn)
+
+            # Statut
             status_label = QLabel("✓" if is_completed else "○")
-            status_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
+            status_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
             status_label.setStyleSheet(f"color: {text_color};")
             header_layout.addWidget(status_label)
-            
+
             combo_layout.addLayout(header_layout)
-            
+
             # Séparateur
             separator = QFrame()
             separator.setFrameShape(QFrame.HLine)
-            separator.setStyleSheet(f"background-color: {text_color}; max-height: 1px;")
+            separator.setStyleSheet(f"background-color: {text_color}; max-height: 1px; opacity: 0.3;")
             combo_layout.addWidget(separator)
-            
-            # Liste des contextes
+
+            # ✅ LISTE DES CONTEXTES AVEC BOUTONS SUPPRIMER
             contexts = combo.get('contexts', [])
             for ctx_idx, ctx in enumerate(contexts):
-                ctx_label = QLabel(f"  {ctx_idx + 1}. {ctx.get('display', 'N/A')}")
+                ctx_layout = QHBoxLayout()
+                ctx_layout.setSpacing(4)
+                ctx_layout.setContentsMargins(0, 2, 0, 2)
+
+                ctx_label = QLabel(f"{ctx_idx + 1}. {ctx.get('display', 'N/A')}")
                 ctx_label.setFont(QFont("Segoe UI", 8))
-                ctx_label.setStyleSheet(f"color: {text_color}; padding-left: 20px;")
+                ctx_label.setStyleSheet(f"color: {text_color}; padding-left: 15px;")
                 ctx_label.setWordWrap(True)
-                combo_layout.addWidget(ctx_label)
-            
+                ctx_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+                ctx_layout.addWidget(ctx_label, 1)
+
+                # ✅ Bouton supprimer contexte (uniquement si non complété)
+                if not is_completed:
+                    delete_ctx_btn = QPushButton("X")
+                    delete_ctx_btn.setToolTip("Supprimer ce contexte")
+                    delete_ctx_btn.setFixedSize(20, 20)
+                    delete_ctx_btn.setCursor(Qt.PointingHandCursor)
+                    delete_ctx_btn.setStyleSheet(f"""
+                        QPushButton {{
+                            background: transparent;
+                            border: 1px solid transparent;
+                            border-radius: 3px;
+                            font-size: 8pt;
+                            font-weight: bold;
+                            color: {Theme.PRIMARY_COLOR};
+                            padding: 0px;
+                            margin: 0px;
+                            min-width: 20px;
+                            max-width: 20px;
+                            min-height: 20px;
+                            max-height: 20px;
+                        }}
+                        QPushButton:hover {{
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                            color: white;
+                            border: 1px solid {Theme.PRIMARY_COLOR};
+                            border-radius: 3px;
+                            min-width: 20px;
+                            max-width: 20px;
+                            min-height: 20px;
+                            max-height: 20px;
+                        }}
+                    """)
+                    delete_ctx_btn.clicked.connect(lambda checked, combo_idx=i, ctx_i=ctx_idx: self._delete_context(combo_idx, ctx_i))
+                    ctx_layout.addWidget(delete_ctx_btn)
+
+                # ✅ IMPORTANT : Ajouter le layout DANS la boucle !
+                combo_layout.addLayout(ctx_layout)
+
+            # ✅ BOUTON AJOUTER CONTEXTE (uniquement si non complété)
+            if not is_completed:
+                add_ctx_btn = QPushButton("+ Contexte")
+                add_ctx_btn.setMinimumHeight(30)
+                add_ctx_btn.setMaximumHeight(30)
+                add_ctx_btn.setMaximumWidth(120)
+                add_ctx_btn.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
+                add_ctx_btn.setCursor(Qt.PointingHandCursor)
+                add_ctx_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: white;
+                        border: 1px solid {Theme.PRIMARY_COLOR};
+                        border-radius: 4px;
+                        padding: 4px 8px;
+                        font-size: 9pt;
+                        font-weight: bold;
+                        color: {Theme.PRIMARY_COLOR};
+                        margin-top: 6px;
+                    }}
+                    QPushButton:hover {{
+                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                            stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                        color: white;
+                        border: none;
+                    }}
+                """)
+                add_ctx_btn.clicked.connect(lambda checked, idx=i: self._add_context_to_combo(idx))
+                combo_layout.addWidget(add_ctx_btn)
+
+            # ✅ AJOUTER LE COMBO_FRAME POUR TOUTES LES COMBINAISONS
             self.combinations_layout.addWidget(combo_frame)
-        
+
+        # ✅ STRETCH EN DEHORS DE LA BOUCLE (UNE SEULE FOIS)
         self.combinations_layout.addStretch()
+
+
+    def _delete_context(self, combo_idx, ctx_idx):
+        """Supprime un contexte d'une combinaison"""
+        if combo_idx < 0 or combo_idx >= len(self.combinations):
+            return
+
+        combo = self.combinations[combo_idx]
+        contexts = combo.get('contexts', [])
+
+        if ctx_idx < 0 or ctx_idx >= len(contexts):
+            return
+
+        # Vérifier qu'il reste au moins 1 contexte
+        if len(contexts) <= 1:
+            QMessageBox.warning(
+                self,
+                "Impossible de supprimer",
+                "Une combinaison doit avoir au moins 1 contexte.\n"
+                "Supprimez plutôt toute la combinaison si nécessaire."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirmer la suppression",
+            f"Supprimer le contexte:\n\n{contexts[ctx_idx].get('display', 'N/A')} ?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            contexts.pop(ctx_idx)
+            combo['contexts'] = contexts
+            self.combination_modified.emit(combo_idx, combo)
+            self._update_display()
+
+    def _add_context_to_combo(self, combo_idx):
+        """Ouvre l'interface pour ajouter un contexte à une combinaison existante"""
+        if combo_idx < 0 or combo_idx >= len(self.combinations):
+            return
+
+        # Récupérer le panel parent
+        parent_panel = self.parent()
+        while parent_panel and not isinstance(parent_panel, DatasetGenerationPanel):
+            parent_panel = parent_panel.parent()
+
+        if parent_panel and isinstance(parent_panel, DatasetGenerationPanel):
+            # Appeler la méthode qui existe dans le panel
+            parent_panel._open_add_context_dialog(combo_idx)
+
+    def _edit_samples(self, combo_idx):
+        """Modifie le nombre de samples d'une combinaison"""
+        if combo_idx < 0 or combo_idx >= len(self.combinations):
+            return
+
+        combo = self.combinations[combo_idx]
+        current_samples = combo.get('nb_samples', 1)
+
+        new_samples, ok = QtWidgets.QInputDialog.getInt(
+            self,
+            "Modifier le nombre de samples",
+            f"Nombre de samples pour la combinaison #{combo_idx + 1}:",
+            current_samples, 1, 10000
+        )
+
+        if ok and new_samples != current_samples:
+            combo['nb_samples'] = new_samples
+            self.combination_modified.emit(combo_idx, combo)
+            self._update_display()
 
 
 class DatasetGenerationPanel(QWidget):
@@ -391,6 +822,8 @@ class DatasetGenerationPanel(QWidget):
         self.current_batch_number = None
         self.current_batch_data = None
         self.combinations = []
+        self.current_master_typologie = None
+        self.all_project_typologies = []  # ✅ Toutes les typologies du projet
         self.dropdown_svg = get_dropdown_svg_path()
 
         self.generation_results = []
@@ -407,9 +840,10 @@ class DatasetGenerationPanel(QWidget):
         self.secondary_color = Theme.SECONDARY_COLOR
         self.base_height = 800
 
-        # ✅ CORRECTION ICI : D'abord l'UI, ENSUITE le bouton overlay
-        self._init_ui()            # Crée self.snippets_container
-        self._init_overlay_button() # Utilise self.snippets_container
+        self._init_ui()
+        self._init_overlay_button()
+        self.visualizer.combination_deleted.connect(self._delete_combination)
+        self.visualizer.combination_modified.connect(self._handle_combination_modified)
         
         print("✅ UI initialisée")
         logger.info("✅ UI initialisée")
@@ -493,9 +927,9 @@ class DatasetGenerationPanel(QWidget):
         ])
 
         # ✅ DÉFINIR LES LARGEURS MINIMALES POUR ÉVITER L'ÉCRASEMENT
-        left_scroll.setMinimumWidth(250)
-        center_scroll.setMinimumWidth(300)
-        right_scroll.setMinimumWidth(350)
+        left_scroll.setMinimumWidth(200)
+        center_scroll.setMinimumWidth(250)
+        right_scroll.setMinimumWidth(280)
 
         h_layout.addWidget(self.columns_splitter)
 
@@ -572,7 +1006,7 @@ class DatasetGenerationPanel(QWidget):
         column = QWidget()
         layout = QVBoxLayout(column)
         layout.setSpacing(15)
-        layout.setContentsMargins(15, 15, 15, 15)  # ✅ Padding uniforme
+        layout.setContentsMargins(15, 15, 15, 15)
 
         # === CONTEXTE GLOBAL (Collapsible) ===
         self.global_section = CollapsibleSection("Contexte Global du Projet")
@@ -580,10 +1014,9 @@ class DatasetGenerationPanel(QWidget):
         global_info = QLabel("ℹ️ Contexte partagé pour tous les batches du projet")
         global_info.setFont(QFont("Segoe UI", 8))
         global_info.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
-        global_info.setWordWrap(True)  # ✅ Responsive text
+        global_info.setWordWrap(True)
         self.global_section.add_widget(global_info)
 
-        # ✅ Éditeur contexte global - Hauteur adaptative
         self.global_context_editor = QTextEdit()
         self.global_context_editor.setPlaceholderText(
             "Définissez ici le contexte général du projet...\n\n"
@@ -593,8 +1026,8 @@ class DatasetGenerationPanel(QWidget):
             "- Contraintes générales\n"
             "- Style de sortie attendu"
         )
-        self.global_context_editor.setMinimumHeight(100)  # ✅ Min height
-        self.global_context_editor.setMaximumHeight(200)  # ✅ Max height
+        self.global_context_editor.setMinimumHeight(100)
+        self.global_context_editor.setMaximumHeight(200)
         self.global_context_editor.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding,
             QtWidgets.QSizePolicy.Preferred
@@ -616,12 +1049,136 @@ class DatasetGenerationPanel(QWidget):
 
         layout.addWidget(self.global_section)
 
+        # === EXPLICATION DE STRUCTURE (Collapsible) ===
+        self.structure_section = CollapsibleSection("Explication de Structure")
+        self.structure_section.set_light_style()  # ✅ Appliquer le style gris clair
+        self.structure_section.is_collapsed = True
+        self.structure_section.content.setVisible(False)
+        self.structure_section.content.setMaximumHeight(0)
+
+        structure_info = QLabel("ℹ️ Description du contexte et de la structure taxonomique")
+        structure_info.setFont(QFont("Segoe UI", 8))
+        structure_info.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        structure_info.setWordWrap(True)
+        self.structure_section.add_widget(structure_info)
+
+        # Éditeur explication structure
+        self.structure_explanation_editor = QTextEdit()
+        self.structure_explanation_editor.setPlaceholderText(
+            "Décrivez la structure taxonomique utilisée...\n\n"
+            "Cette explication sera ajoutée au prompt envoyé à l'IA."
+        )
+
+        # Texte par défaut (non pré-rempli, juste stocké)
+        default_structure_text = """Voici la description de contexte:
+    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,
+    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.
+    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.
+    Ta tâche est de générer un dataset complet comme si tu étais à la place de l'utilisateur :
+    Crée des inputs réalistes correspondant aux différents labels que tu reçois.
+    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).
+    Fournis également l'output correspondant à cet input selon la classification.
+    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l'output associé,
+    en respectant la structure hiérarchique des labels.
+    Classification de donnée d'un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,
+    de les trier et de les structurer correctement. Le dataset est pour fine tuner un agent qui s'appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable."""
+
+        # ✅ INSÉRER LE TEXTE PAR DÉFAUT
+        self.structure_explanation_editor.setPlainText(default_structure_text)
+
+        self.structure_explanation_editor.setMinimumHeight(150)
+        self.structure_explanation_editor.setMaximumHeight(300)
+        self.structure_explanation_editor.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred
+        )
+        self.structure_explanation_editor.setStyleSheet(f"""
+            QTextEdit {{
+                border: 2px solid #E0E0E0;
+                border-radius: 6px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9pt;
+                background: white;
+            }}
+            QTextEdit:focus {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+            }}
+            QTextEdit:disabled {{
+                background: #F5F5F5;
+                color: #666666;
+                border: 2px solid #CCCCCC;
+            }}
+        """)
+
+        self.structure_section.add_widget(self.structure_explanation_editor)
+
+        # ✅ LAYOUT HORIZONTAL POUR LES BOUTONS
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(10)
+        buttons_layout.addStretch()
+
+        # Bouton Modifier (caché par défaut)
+        self.edit_structure_btn = QPushButton("Modifier")
+        self.edit_structure_btn.setVisible(False)
+        self.edit_structure_btn.setMinimumHeight(32)
+        self.edit_structure_btn.setMaximumWidth(120)
+        self.edit_structure_btn.setCursor(Qt.PointingHandCursor)
+        self.edit_structure_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {Theme.PRIMARY_COLOR};
+                border: 2px solid {Theme.PRIMARY_COLOR};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 9pt;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: #F0F8FF;
+            }}
+        """)
+        self.edit_structure_btn.clicked.connect(self._edit_structure_explanation)
+        buttons_layout.addWidget(self.edit_structure_btn)
+
+        # Bouton Enregistrer (visible par défaut)
+        self.save_structure_btn = QPushButton("Enregistrer")
+        self.save_structure_btn.setMinimumHeight(32)
+        self.save_structure_btn.setMaximumWidth(150)
+        self.save_structure_btn.setCursor(Qt.PointingHandCursor)
+        self.save_structure_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 9pt;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+        """)
+        self.save_structure_btn.clicked.connect(self._save_structure_explanation)
+        buttons_layout.addWidget(self.save_structure_btn)
+
+        self.structure_section.add_widget(self._create_widget_from_layout(buttons_layout))
+
+        # Stocker le texte sauvegardé
+        self.saved_structure_text = default_structure_text
+        self.structure_is_locked = False
+
+        layout.addWidget(self.structure_section)
+
         # === CONTEXTE LOCAL ===
         local_header = QWidget()
         local_header_layout = QHBoxLayout(local_header)
         local_header_layout.setContentsMargins(0, 0, 0, 0)
 
-        local_title = QLabel("✏️ Prompt Local (Batch)")
+        local_title = QLabel("Prompt Local (Batch)")
         local_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         local_title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
         local_header_layout.addWidget(local_title)
@@ -629,22 +1186,21 @@ class DatasetGenerationPanel(QWidget):
         local_info = QLabel("Instructions spécifiques pour ce batch")
         local_info.setFont(QFont("Segoe UI", 8))
         local_info.setStyleSheet("color: #666; font-style: italic;")
-        local_info.setWordWrap(True)  # ✅ Responsive text
+        local_info.setWordWrap(True)
         local_header_layout.addWidget(local_info)
         local_header_layout.addStretch()
 
         layout.addWidget(local_header)
 
-        # ✅ Éditeur contexte local - Hauteur adaptative et responsive
         self.prompt_editor = QTextEdit()
         self.prompt_editor.setPlaceholderText(
             "Exemple:\n\n"
-            "Générez des exemples d'entraînement basés sur les typologies suivantes:\n"
+            "Génère des exemples d'entraînement basés sur les typologies suivantes:\n"
             "{typologie}\n\n"
             "Format attendu: {'input': '...', 'output': '...'}"
         )
-        self.prompt_editor.setMinimumHeight(200)  # ✅ Min height
-        self.prompt_editor.setMaximumHeight(500)  # ✅ Max height augmentée
+        self.prompt_editor.setMinimumHeight(200)
+        self.prompt_editor.setMaximumHeight(500)
         self.prompt_editor.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding,
             QtWidgets.QSizePolicy.Expanding
@@ -662,18 +1218,268 @@ class DatasetGenerationPanel(QWidget):
                 border: 2px solid {Theme.PRIMARY_COLOR};
             }}
         """)
-        layout.addWidget(self.prompt_editor, 1)  # ✅ Stretch pour utiliser l'espace
+        layout.addWidget(self.prompt_editor, 1)
 
         return column
+    
+    def _handle_combination_modified(self, combo_idx: int, modified_combo: dict):
+        """Gère la sauvegarde d'une combinaison modifiée (logique extraite de visualizer)"""
+        if not self.current_project_name or not self.current_batch_number:
+            logger.warning("⚠️ Pas de projet/batch courant pour la modification")
+            return
+
+        try:
+            # Récupérer les données actuelles du batch
+            batch_result = self.database.get_batch(self.current_project_name, self.current_batch_number)
+            if not batch_result:
+                raise ValueError("Batch non trouvé en BDD")
+
+            batch_data = batch_result.get('data', {})
+            combinations = batch_data.get('combinations', [])
+
+            if combo_idx < 0 or combo_idx >= len(combinations):
+                raise IndexError(f"Index de combinaison invalide: {combo_idx}")
+
+            # Mettre à jour la combinaison
+            combinations[combo_idx] = {
+                'contexts': modified_combo.get('contexts', []),
+                'nb_samples': modified_combo.get('nb_samples', 1)
+            }
+
+            # Sauvegarder en BDD
+            cursor = self.database.connection.cursor()
+            cursor.execute("""
+                UPDATE batches 
+                SET data = ?
+                WHERE project_id = (SELECT id FROM projects WHERE name = ?) 
+                AND batch_number = ?
+            """, (json.dumps(batch_data), self.current_project_name, self.current_batch_number))
+            self.database.connection.commit()
+
+            logger.info(f"✅ Combinaison {combo_idx + 1} modifiée et sauvegardée en BDD")
+
+            # Recharger l'affichage (via le batch courant)
+            current_index = self.batch_combo.currentIndex()
+            self._on_batch_changed(current_index)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la modification de combinaison: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            QMessageBox.critical(self, "Erreur de Modification", f"Impossible de sauvegarder la modification:\n\n{str(e)}")
+    
+    def _open_add_context_dialog(self, combo_idx):
+        """Ouvre le dialogue pour ajouter un contexte à une combinaison existante"""
+        if combo_idx < 0 or combo_idx >= len(self.combinations):
+            return
+    
+        # Créer un dialog pour sélectionner un nouveau contexte
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Ajouter un contexte à la combinaison #{combo_idx + 1}")
+        dialog.setMinimumSize(600, 500)
+    
+        layout = QVBoxLayout(dialog)
+    
+        # Info
+        combo = self.combinations[combo_idx]
+        nb_contexts = len(combo.get('contexts', []))
+        info = QLabel(
+            f"<b>Combinaison #{combo_idx + 1}</b><br>"
+            f"Contextes actuels: {nb_contexts}<br>"
+            f"Ajoutez un nouveau contexte à cette combinaison"
+        )
+        info.setStyleSheet("padding: 10px; background: #F0F8FF; border-radius: 4px;")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+    
+        # Champ de recherche
+        search_label = QLabel("Rechercher une taxonomie:")
+        search_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        layout.addWidget(search_label)
+    
+        search_input = QtWidgets.QLineEdit()
+        search_input.setPlaceholderText("Tapez pour rechercher...")
+        search_input.setMinimumHeight(32)
+        layout.addWidget(search_input)
+    
+        # Liste des résultats
+        results_list = QtWidgets.QListWidget()
+        results_list.setMinimumHeight(250)
+        layout.addWidget(results_list)
+    
+        # Fil d'ariane
+        breadcrumb = QLabel("Aucune sélection")
+        breadcrumb.setStyleSheet(
+            "background: #F8F9FA; border: 1px solid #E0E0E0; "
+            "border-radius: 4px; padding: 8px; font-size: 8pt;"
+        )
+        breadcrumb.setWordWrap(True)
+        layout.addWidget(breadcrumb)
+    
+        # Boutons
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+    
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.clicked.connect(dialog.reject)
+        buttons.addWidget(cancel_btn)
+    
+        add_btn = QPushButton("Ajouter")
+        add_btn.setEnabled(False)
+        add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+            QPushButton:disabled {{
+                background: #CCCCCC;
+                color: #888888;
+            }}
+        """)
+        buttons.addWidget(add_btn)
+    
+        layout.addLayout(buttons)
+    
+        # Variable pour stocker la sélection
+        selected_taxonomy = None
+    
+        def on_search(text):
+            results_list.clear()
+            if not text or len(text) < 2:
+                return
+    
+            if not self.all_project_typologies:
+                results_list.addItem("⚠️ Aucune typologie disponible")
+                return
+    
+            text_lower = text.lower()
+            results = []
+    
+            # Recherche dans toutes les typologies
+            for typologie in self.all_project_typologies:
+                if not isinstance(typologie, dict):
+                    continue
+                
+                typologie_name = typologie.get('name', '')
+                clusters = typologie.get('taxonomy_clusters', [])
+    
+                for cluster in clusters:
+                    cluster_name = cluster.get('name', '')
+    
+                    if text_lower in cluster_name.lower():
+                        results.append({
+                            'display': f"Cluster: {cluster_name}",
+                            'path': f"{typologie_name} → {cluster_name}",
+                            'level': 'taxonomy',
+                            'typologie': typologie_name,
+                            'taxonomy': cluster_name,
+                            'data': cluster,
+                            'full_typologie': typologie
+                        })
+    
+                    # Recherche dans root, parent, children...
+                    for root in cluster.get('root_labels', []):
+                        root_name = root.get('name', '')
+    
+                        if text_lower in root_name.lower():
+                            results.append({
+                                'display': f"Label root: {root_name}",
+                                'path': f"{typologie_name} → {cluster_name} → {root_name}",
+                                'level': 'root',
+                                'typologie': typologie_name,
+                                'taxonomy': cluster_name,
+                                'root': root_name,
+                                'data': root,
+                                'full_typologie': typologie
+                            })
+    
+                        for parent in root.get('parent_labels', []):
+                            parent_name = parent.get('name', '')
+    
+                            if text_lower in parent_name.lower():
+                                results.append({
+                                    'display': f"Label parent: {parent_name}",
+                                    'path': f"{typologie_name} → {cluster_name} → {root_name} → {parent_name}",
+                                    'level': 'parent',
+                                    'typologie': typologie_name,
+                                    'taxonomy': cluster_name,
+                                    'root': root_name,
+                                    'parent': parent_name,
+                                    'data': parent,
+                                    'full_typologie': typologie
+                                })
+    
+                            # Recherche dans children (récursif)
+                            self._search_in_children(
+                                parent.get('children', []), text_lower, results,
+                                typologie_name, cluster_name, root_name, parent_name, [], typologie
+                            )
+    
+            # Afficher les résultats
+            if results:
+                for result in results[:15]:
+                    item = QtWidgets.QListWidgetItem(result['display'])
+                    item.setData(Qt.UserRole, result)
+                    item.setToolTip(result['path'])
+                    results_list.addItem(item)
+            else:
+                results_list.addItem("❌ Aucun résultat")
+    
+        def on_select(item):
+            nonlocal selected_taxonomy
+            result = item.data(Qt.UserRole)
+    
+            if not result or isinstance(result, str):
+                return
+    
+            selected_taxonomy = result
+            breadcrumb.setText(f"✅ {result['path']}")
+            add_btn.setEnabled(True)
+    
+        def on_add():
+            if not selected_taxonomy:
+                return
+
+            # Construire le nouveau contexte
+            new_context = {
+                'level': selected_taxonomy['level'],
+                'display': selected_taxonomy['path'],
+                'data': self._build_context_data_from_selection(selected_taxonomy)
+            }
+
+            # Ajouter à la combinaison
+            combo = self.combinations[combo_idx]
+            combo['contexts'].append(new_context)
+
+            # ✅ CHANGÉ : Émettre le signal au lieu d'appeler la méthode
+            self.visualizer.combination_modified.emit(combo_idx, combo)
+
+            dialog.accept()
+    
+        # Connexions
+        search_input.textChanged.connect(on_search)
+        results_list.itemDoubleClicked.connect(on_select)
+        add_btn.clicked.connect(on_add)
+    
+        dialog.exec_()
         
     def _create_right_column(self):
-        """Crée la colonne droite - Visualiseur de Combinaisons SANS CAMEMBERT"""
+        """Crée la colonne droite - Visualiseur + Gestion des Combinaisons"""
         column = QWidget()
         layout = QVBoxLayout(column)
         layout.setSpacing(10)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(15, 15, 15, 15)
 
-        # Titre avec compteur
+        # === EN-TÊTE AVEC TITRE ET COMPTEUR ===
         title_layout = QHBoxLayout()
         title = QLabel("Combinaisons à Générer")
         title.setFont(QFont("Segoe UI", 12, QFont.Bold))
@@ -688,7 +1494,11 @@ class DatasetGenerationPanel(QWidget):
 
         layout.addLayout(title_layout)
 
-        # Visualiseur (SANS CAMEMBERT - juste la liste)
+        # === SECTION AJOUT DE COMBINAISON ===
+        add_combo_section = self._create_add_combination_section()
+        layout.addWidget(add_combo_section)
+
+        # === VISUALISEUR (LISTE DES COMBINAISONS) ===
         self.visualizer = CombinationVisualizer()
         viz_container = QFrame()
         viz_container.setFrameShape(QFrame.StyledPanel)
@@ -706,6 +1516,735 @@ class DatasetGenerationPanel(QWidget):
         layout.addWidget(viz_container, 1)
 
         return column
+    
+    def _create_add_combination_section(self):
+        """Section pour ajouter une nouvelle combinaison - Design compact et uniforme"""
+        section = CollapsibleSection("Ajouter une Combinaison")
+        section.set_light_style()  # ✅ Appliquer le style gris clair
+
+        # Formulaire d'ajout
+        form_widget = QWidget()
+        form_layout = QVBoxLayout(form_widget)
+        form_layout.setSpacing(8)
+        form_layout.setContentsMargins(5, 5, 5, 5)
+
+        # === CHAMP DE RECHERCHE ===
+        search_label = QLabel("Rechercher une taxonomie")
+        search_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        search_label.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
+        form_layout.addWidget(search_label)
+
+        self.taxonomy_search = QtWidgets.QLineEdit()
+        self.taxonomy_search.setPlaceholderText("Tapez pour rechercher...")
+        self.taxonomy_search.setMinimumHeight(32)
+        self.taxonomy_search.textChanged.connect(self._on_taxonomy_search)
+        self.taxonomy_search.setStyleSheet(f"""
+            QLineEdit {{
+                border: 1px solid #E0E0E0;
+                border-radius: 4px;
+                padding: 6px 10px;
+                background: white;
+                font-size: 9pt;
+            }}
+            QLineEdit:hover {{
+                border: 1px solid {Theme.PRIMARY_COLOR};
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+                background: #FAFAFA;
+            }}
+        """)
+        form_layout.addWidget(self.taxonomy_search)
+
+        # === LISTE DES RÉSULTATS ===
+        self.search_results_list = QtWidgets.QListWidget()
+        self.search_results_list.setMaximumHeight(120)
+        self.search_results_list.setStyleSheet(f"""
+            QListWidget {{
+                border: 1px solid #E0E0E0;
+                border-radius: 4px;
+                background: white;
+                font-size: 9pt;
+            }}
+            QListWidget::item {{
+                padding: 6px;
+                border-bottom: 1px solid #F5F5F5;
+            }}
+            QListWidget::item:hover {{
+                background: #F8F9FA;
+            }}
+            QListWidget::item:selected {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+            }}
+        """)
+        self.search_results_list.itemDoubleClicked.connect(self._on_taxonomy_selected)
+        form_layout.addWidget(self.search_results_list)
+
+        # === FIL D'ARIANE (SÉLECTION ACTUELLE) ===
+        breadcrumb_label = QLabel("Sélection actuelle")
+        breadcrumb_label.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        breadcrumb_label.setStyleSheet("color: #666;")
+        form_layout.addWidget(breadcrumb_label)
+
+        self.breadcrumb_display = QLabel("Aucune sélection")
+        self.breadcrumb_display.setWordWrap(True)
+        self.breadcrumb_display.setMinimumHeight(35)
+        self.breadcrumb_display.setStyleSheet(f"""
+            QLabel {{
+                background: #F8F9FA;
+                border: 1px solid #E0E0E0;
+                border-radius: 4px;
+                padding: 6px 8px;
+                font-size: 8pt;
+                color: #666;
+            }}
+        """)
+        form_layout.addWidget(self.breadcrumb_display)
+
+        # === CONTEXTES AJOUTÉS (LISTE TEMPORAIRE) ===
+        contexts_label = QLabel("Contextes ajoutés à cette combinaison")
+        contexts_label.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        contexts_label.setStyleSheet("color: #666;")
+        form_layout.addWidget(contexts_label)
+        
+        self.temp_contexts_list = QtWidgets.QListWidget()
+        self.temp_contexts_list.setMaximumHeight(80)
+        self.temp_contexts_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #E0E0E0;
+                border-radius: 4px;
+                background: #FAFAFA;
+                font-size: 8pt;
+            }
+            QListWidget::item {
+                padding: 4px;
+                border-bottom: 1px solid #F0F0F0;
+            }
+        """)
+        form_layout.addWidget(self.temp_contexts_list)
+
+        # === BOUTONS D'ACTION CONTEXTES ===
+        ctx_buttons_layout = QHBoxLayout()
+        
+        # Bouton "Ajouter contexte"
+        self.add_context_btn = QPushButton("+ Contexte")
+        self.add_context_btn.setEnabled(False)
+        self.add_context_btn.setFixedHeight(28)
+        self.add_context_btn.setMaximumWidth(100)
+        self.add_context_btn.setCursor(Qt.PointingHandCursor)
+        self.add_context_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 8pt;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+            QPushButton:disabled {{
+                background: #CCCCCC;
+                color: #888888;
+            }}
+        """)
+        self.add_context_btn.clicked.connect(self._add_context_to_temp_list)
+        ctx_buttons_layout.addWidget(self.add_context_btn)
+        
+        # Bouton "Effacer contextes"
+        self.clear_contexts_btn = QPushButton("Effacer")
+        self.clear_contexts_btn.setEnabled(False)
+        self.clear_contexts_btn.setFixedHeight(28)
+        self.clear_contexts_btn.setMaximumWidth(80)
+        self.clear_contexts_btn.setCursor(Qt.PointingHandCursor)
+        self.clear_contexts_btn.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 8pt;
+                font-weight: bold;
+            }
+            QPushButton:disabled {
+                background: #CCCCCC;
+                color: #888888;
+            }
+        """)
+        self.clear_contexts_btn.clicked.connect(self._clear_temp_contexts)
+        ctx_buttons_layout.addWidget(self.clear_contexts_btn)
+        
+        ctx_buttons_layout.addStretch()
+        form_layout.addLayout(ctx_buttons_layout)
+
+        # === BOUTON AJOUTER - Layout horizontal pour alignement à droite ===
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()  # Pousse le bouton à droite
+        
+        self.add_combo_btn = QPushButton("Sauvegarder")
+        self.add_combo_btn.setEnabled(False)
+        self.add_combo_btn.setFixedHeight(28)  # Compact
+        self.add_combo_btn.setMaximumWidth(180)  # Limite la largeur
+        self.add_combo_btn.setCursor(Qt.PointingHandCursor)
+        self.add_combo_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 9pt;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+            QPushButton:disabled {{
+                background: #CCCCCC;
+                color: #888888;
+            }}
+        """)
+        self.add_combo_btn.clicked.connect(self._add_new_combination)
+        button_layout.addWidget(self.add_combo_btn)
+        
+        form_layout.addLayout(button_layout)
+
+        # Info
+        info = QLabel("Double-cliquez pour sélectionner, puis '+ Contexte' pour ajouter")
+        info.setFont(QFont("Segoe UI", 8))
+        info.setStyleSheet("color: #999; font-style: italic;")
+        info.setWordWrap(True)
+        form_layout.addWidget(info)
+
+        section.add_widget(form_widget)
+
+        # Initialiser les variables de sélection
+        self.current_selected_taxonomy = None
+        self.temp_contexts = []  # ✅ Liste temporaire des contextes
+
+        return section
+    
+    def _on_taxonomy_search(self, text):
+        """Recherche dans TOUTES les typologies du projet"""
+        self.search_results_list.clear()
+
+        if not text or len(text) < 2:
+            return
+
+        if not self.current_project_name:
+            self.search_results_list.addItem("⚠️ Sélectionnez d'abord un projet")
+            return
+
+        if not self.all_project_typologies:
+            self.search_results_list.addItem("⚠️ Aucune typologie disponible dans le projet")
+            return
+
+        text_lower = text.lower()
+        results = []
+
+        # ✅ RECHERCHE DANS TOUTES LES TYPOLOGIES DU PROJET
+        for typologie in self.all_project_typologies:
+            if not isinstance(typologie, dict):
+                continue
+                
+            typologie_name = typologie.get('name', '')
+            clusters = typologie.get('taxonomy_clusters', [])
+
+            for cluster in clusters:
+                cluster_name = cluster.get('name', '')
+
+                # Cluster match
+                if text_lower in cluster_name.lower():
+                    results.append({
+                        'display': f"Cluster: {cluster_name}",
+                        'path': f"{typologie_name} → {cluster_name}",
+                        'level': 'taxonomy',
+                        'typologie': typologie_name,
+                        'taxonomy': cluster_name,
+                        'data': cluster,
+                        'full_typologie': typologie
+                    })
+
+                # Root labels
+                for root in cluster.get('root_labels', []):
+                    root_name = root.get('name', '')
+
+                    if text_lower in root_name.lower():
+                        results.append({
+                            'display': f"Label root: {root_name}",
+                            'path': f"{typologie_name} → {cluster_name} → {root_name}",
+                            'level': 'root',
+                            'typologie': typologie_name,
+                            'taxonomy': cluster_name,
+                            'root': root_name,
+                            'data': root,
+                            'full_typologie': typologie
+                        })
+
+                    # Parent labels
+                    for parent in root.get('parent_labels', []):
+                        parent_name = parent.get('name', '')
+
+                        if text_lower in parent_name.lower():
+                            results.append({
+                                'display': f"Label parent: {parent_name}",
+                                'path': f"{typologie_name} → {cluster_name} → {root_name} → {parent_name}",
+                                'level': 'parent',
+                                'typologie': typologie_name,
+                                'taxonomy': cluster_name,
+                                'root': root_name,
+                                'parent': parent_name,
+                                'data': parent,
+                                'full_typologie': typologie
+                            })
+
+                        # Children
+                        children = parent.get('children', [])
+                        self._search_in_children(
+                            children, text_lower, results,
+                            typologie_name, cluster_name, root_name, parent_name, [], typologie
+                        )
+
+        # Afficher les résultats (max 15)
+        if results:
+            for result in results[:15]:
+                item = QtWidgets.QListWidgetItem(result['display'])
+                item.setData(Qt.UserRole, result)
+                
+                # Construire le tooltip avec les informations structurées
+                tooltip_lines = [f"Typologie de contexte: {result['typologie']}"]
+                tooltip_lines.append(f"Cluster: {result['taxonomy']}")
+                
+                if 'root' in result:
+                    tooltip_lines.append(f"Label root: {result['root']}")
+                if 'parent' in result:
+                    tooltip_lines.append(f"Label parent: {result['parent']}")
+                if 'child_path' in result and result['child_path']:
+                    for i, child in enumerate(result['child_path'], 1):
+                        tooltip_lines.append(f"Label enfant {i}: {child}")
+                
+                item.setToolTip("\n".join(tooltip_lines))
+                self.search_results_list.addItem(item)
+        else:
+            self.search_results_list.addItem("❌ Aucun résultat")
+
+    def _search_in_children(self, children, text_lower, results, typologie, cluster, root, parent, path, full_typologie):
+        """Recherche récursive dans les enfants"""
+        for child in children:
+            child_name = child.get('name', '')
+            current_path = path + [child_name]
+
+            if text_lower in child_name.lower():
+                # Déterminer le niveau de l'enfant (enfant 1, enfant 2, etc.)
+                child_level = len(current_path)
+                results.append({
+                    'display': f"Label enfant {child_level}: {child_name}",
+                    'path': f"{typologie} → {cluster} → {root} → {parent} → {' → '.join(current_path)}",
+                    'level': 'child',
+                    'typologie': typologie,
+                    'taxonomy': cluster,
+                    'root': root,
+                    'parent': parent,
+                    'child_path': current_path,
+                    'data': child,
+                    'full_typologie': full_typologie
+                })
+
+            # Récursion
+            self._search_in_children(
+                child.get('children', []), text_lower, results,
+                typologie, cluster, root, parent, current_path, full_typologie
+            )
+
+    def _create_widget_from_layout(self, layout):
+        """Helper pour convertir un layout en widget"""
+        widget = QWidget()
+        widget.setLayout(layout)
+        return widget
+    
+    def _save_structure_explanation(self):
+        """Enregistre et verrouille l'explication de structure"""
+        current_text = self.structure_explanation_editor.toPlainText().strip()
+
+        if not current_text:
+            QMessageBox.warning(
+                self,
+                "⚠️ Champ vide",
+                "Veuillez saisir une explication de structure avant d'enregistrer."
+            )
+            return
+
+        self.saved_structure_text = current_text
+        self.structure_is_locked = True
+
+        # ✅ VERROUILLER LE CHAMP
+        self.structure_explanation_editor.setReadOnly(True)
+        self.structure_explanation_editor.setStyleSheet(f"""
+            QTextEdit {{
+                border: 2px solid #CCCCCC;
+                border-radius: 6px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9pt;
+                background: #F5F5F5;
+                color: #666666;
+            }}
+        """)
+
+        # ✅ INVERSER LES BOUTONS
+        self.save_structure_btn.setVisible(False)
+        self.edit_structure_btn.setVisible(True)
+
+        QMessageBox.information(
+            self,
+            "✅ Enregistré",
+            "L'explication de structure a été enregistrée et verrouillée.\n"
+            "Elle sera incluse dans les prochaines générations.\n\n"
+            "Cliquez sur 'Modifier' pour déverrouiller."
+        )
+        logger.info("✅ Explication de structure enregistrée et verrouillée")
+
+    def _edit_structure_explanation(self):
+        """Déverrouille l'explication de structure pour modification"""
+        self.structure_is_locked = False
+
+        # ✅ DÉVERROUILLER LE CHAMP
+        self.structure_explanation_editor.setReadOnly(False)
+        self.structure_explanation_editor.setStyleSheet(f"""
+            QTextEdit {{
+                border: 2px solid #E0E0E0;
+                border-radius: 6px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9pt;
+                background: white;
+            }}
+            QTextEdit:focus {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+            }}
+        """)
+
+        # ✅ INVERSER LES BOUTONS
+        self.save_structure_btn.setVisible(True)
+        self.edit_structure_btn.setVisible(False)
+
+        # Focus sur le champ pour faciliter l'édition
+        self.structure_explanation_editor.setFocus()
+
+        logger.info("✏️ Explication de structure déverrouillée pour modification")
+
+    def _delete_combination(self, index):
+        """Supprime une combinaison de la base de données"""
+        if index < 0 or index >= len(self.combinations):
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirmer la suppression",
+            f"Supprimer la combinaison #{index + 1} ?\n\n"
+            "Cette action est irréversible.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            # Récupérer les données actuelles
+            batch_result = self.database.get_batch(self.current_project_name, self.current_batch_number)
+            batch_data = batch_result.get('data', {})
+            combinations = batch_data.get('combinations', [])
+
+            # Supprimer la combinaison
+            if index < len(combinations):
+                deleted = combinations.pop(index)
+
+                # Mettre à jour le count
+                batch_data['count'] = len(combinations)
+
+                # Sauvegarder
+                cursor = self.database.connection.cursor()
+                cursor.execute("""
+                    UPDATE batches 
+                    SET data = ?
+                    WHERE project_id = (SELECT id FROM projects WHERE name = ?)
+                    AND batch_number = ?
+                """, (json.dumps(batch_data), self.current_project_name, self.current_batch_number))
+
+                self.database.connection.commit()
+
+                logger.info(f"✅ Combinaison {index + 1} supprimée")
+
+                # Recharger
+                self._on_batch_changed(self.batch_combo.currentIndex())
+
+                QMessageBox.information(self, "✅ Suppression", "Combinaison supprimée avec succès!")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur: {str(e)}")
+            QMessageBox.critical(self, "Erreur", f"Impossible de supprimer:\n\n{str(e)}")
+
+    def _on_taxonomy_selected(self, item):
+        """Double-clic sur un résultat"""
+        result = item.data(Qt.UserRole)
+
+        if not result or isinstance(result, str):
+            return
+
+        # Stocker la sélection
+        self.current_selected_taxonomy = result
+
+        # Afficher le fil d'ariane
+        self.breadcrumb_display.setText(f"✅ {result['path']}")
+
+        # Activer le bouton "+ Contexte"
+        self.add_context_btn.setEnabled(True)
+
+        logger.info(f"✅ Taxonomie sélectionnée: {result['display']}")
+    
+    def _add_context_to_temp_list(self):
+        """Ajoute le contexte sélectionné à la liste temporaire"""
+        if not self.current_selected_taxonomy:
+            return
+        
+        # Ajouter à la liste temporaire
+        self.temp_contexts.append(self.current_selected_taxonomy)
+        
+        # Afficher dans la liste
+        display_text = f"{len(self.temp_contexts)}. {self.current_selected_taxonomy['path']}"
+        self.temp_contexts_list.addItem(display_text)
+        
+        # Activer les boutons
+        self.clear_contexts_btn.setEnabled(True)
+        self.add_combo_btn.setEnabled(True)
+        
+        # Réinitialiser la sélection
+        self.current_selected_taxonomy = None
+        self.breadcrumb_display.setText("Aucune sélection")
+        self.add_context_btn.setEnabled(False)
+        self.taxonomy_search.clear()
+        
+        logger.info(f"✅ Contexte ajouté à la liste temporaire (total: {len(self.temp_contexts)})")
+    
+    def _clear_temp_contexts(self):
+        """Efface la liste temporaire des contextes"""
+        self.temp_contexts.clear()
+        self.temp_contexts_list.clear()
+        self.clear_contexts_btn.setEnabled(False)
+        self.add_combo_btn.setEnabled(False)
+        logger.info("🗑️ Liste temporaire des contextes effacée")
+
+
+    def _add_new_combination(self):
+        """Ajoute une nouvelle combinaison avec TOUS les contextes de la liste temporaire"""
+        if not self.temp_contexts:
+            QMessageBox.warning(self, "Attention", "Aucun contexte ajouté")
+            return
+
+        if not self.current_batch_number:
+            QMessageBox.warning(self, "Attention", "Aucun batch sélectionné")
+            return
+
+        try:
+            # Récupérer les données actuelles du batch
+            batch_result = self.database.get_batch(self.current_project_name, self.current_batch_number)
+
+            if not batch_result:
+                QMessageBox.critical(self, "Erreur", "Impossible de charger le batch")
+                return
+
+            batch_data = batch_result.get('data', {})
+            combinations = batch_data.get('combinations', [])
+
+            # Demander le nombre de samples
+            nb_samples, ok = QtWidgets.QInputDialog.getInt(
+                self,
+                "Nombre de samples",
+                f"Combien de samples pour cette combinaison ({len(self.temp_contexts)} contexte(s)) ?",
+                1, 1, 1000
+            )
+
+            if not ok:
+                return
+
+            # ✅ CONSTRUIRE LA NOUVELLE COMBINAISON AVEC TOUS LES CONTEXTES
+            contexts_list = []
+            for ctx in self.temp_contexts:
+                new_context = {
+                    'level': ctx['level'],
+                    'display': ctx['path'],
+                    'data': self._build_context_data_from_selection(ctx)
+                }
+                contexts_list.append(new_context)
+
+            new_combination = {
+                'contexts': contexts_list,
+                'nb_samples': nb_samples
+            }
+
+            # Ajouter à la liste
+            combinations.append(new_combination)
+
+            # Mettre à jour le count
+            batch_data['count'] = len(combinations)
+
+            # Sauvegarder dans la base
+            batch_result['data'] = batch_data
+
+            cursor = self.database.connection.cursor()
+            cursor.execute("""
+                UPDATE batches 
+                SET data = ?
+                WHERE project_id = (SELECT id FROM projects WHERE name = ?)
+                AND batch_number = ?
+            """, (json.dumps(batch_data), self.current_project_name, self.current_batch_number))
+
+            self.database.connection.commit()
+
+            logger.info(f"✅ Nouvelle combinaison avec {len(contexts_list)} contexte(s) ajoutée au batch {self.current_batch_number}")
+
+            # Recharger le batch pour mettre à jour l'affichage
+            self._on_batch_changed(self.batch_combo.currentIndex())
+
+            # Réinitialiser le formulaire
+            self._clear_temp_contexts()
+            self.taxonomy_search.clear()
+            self.breadcrumb_display.setText("Aucune sélection")
+            self.current_selected_taxonomy = None
+
+            QMessageBox.information(
+                self,
+                "✅ Succès",
+                f"Combinaison ajoutée avec succès!\n\n"
+                f"Contextes: {len(contexts_list)}\n"
+                f"Samples: {nb_samples}"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Erreur: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            QMessageBox.critical(self, "Erreur", f"Impossible d'ajouter la combinaison:\n\n{str(e)}")
+
+    def _build_context_data_from_selection(self, selected):
+        """Construit les données du contexte depuis la sélection - UTILISE LA TYPOLOGIE COMPLÈTE"""
+        level = selected['level']
+        typologie_name = selected['typologie']
+        
+        # ✅ UTILISER LA TYPOLOGIE COMPLÈTE DE LA SÉLECTION
+        typologie = selected.get('full_typologie', {})
+        
+        if not typologie:
+            logger.error("❌ Pas de typologie complète dans la sélection")
+            return {}
+
+        if level == 'taxonomy':
+            # Retourner le cluster complet
+            for cluster in typologie.get('taxonomy_clusters', []):
+                if cluster.get('name') == selected['taxonomy']:
+                    return {
+                        'name': typologie_name,
+                        'taxonomy_clusters': [cluster]
+                    }
+
+        elif level == 'root':
+            # Retourner root + sa hiérarchie
+            for cluster in typologie.get('taxonomy_clusters', []):
+                if cluster.get('name') == selected['taxonomy']:
+                    for root in cluster.get('root_labels', []):
+                        if root.get('name') == selected['root']:
+                            return {
+                                'name': typologie_name,
+                                'taxonomy_clusters': [{
+                                    'name': selected['taxonomy'],
+                                    'root_labels': [root]
+                                }]
+                            }
+
+        elif level == 'parent':
+            # Retourner parent + sa hiérarchie
+            for cluster in typologie.get('taxonomy_clusters', []):
+                if cluster.get('name') == selected['taxonomy']:
+                    for root in cluster.get('root_labels', []):
+                        if root.get('name') == selected['root']:
+                            for parent in root.get('parent_labels', []):
+                                if parent.get('name') == selected['parent']:
+                                    return {
+                                        'name': typologie_name,
+                                        'taxonomy_clusters': [{
+                                            'name': selected['taxonomy'],
+                                            'root_labels': [{
+                                                'name': selected['root'],
+                                                'parent_labels': [parent]
+                                            }]
+                                        }]
+                                    }
+
+        elif level == 'child':
+            # Retourner le chemin complet vers l'enfant
+            child_path = selected.get('child_path', [])
+
+            for cluster in typologie.get('taxonomy_clusters', []):
+                if cluster.get('name') == selected['taxonomy']:
+                    for root in cluster.get('root_labels', []):
+                        if root.get('name') == selected['root']:
+                            for parent in root.get('parent_labels', []):
+                                if parent.get('name') == selected['parent']:
+                                    # Extraire la hiérarchie enfant
+                                    child_hierarchy = self._extract_child_from_path(
+                                        parent.get('children', []),
+                                        child_path
+                                    )
+
+                                    return {
+                                        'name': typologie_name,
+                                        'taxonomy_clusters': [{
+                                            'name': selected['taxonomy'],
+                                            'root_labels': [{
+                                                'name': selected['root'],
+                                                'parent_labels': [{
+                                                    'name': selected['parent'],
+                                                    'children': child_hierarchy
+                                                }]
+                                            }]
+                                        }]
+                                    }
+
+        return {}
+    
+    def _extract_child_from_path(self, children, target_path):
+        """Extrait un enfant spécifique depuis un chemin"""
+        if not target_path:
+            return children
+
+        target_name = target_path[0]
+        remaining_path = target_path[1:]
+
+        for child in children:
+            if child.get('name') == target_name:
+                if not remaining_path:
+                    return [child]
+                else:
+                    sub_children = self._extract_child_from_path(
+                        child.get('children', []),
+                        remaining_path
+                    )
+                    return [{
+                        'name': child.get('name'),
+                        'description': child.get('description', ''),
+                        'category': child.get('category', 'default'),
+                        'children': sub_children
+                    }]
+
+        return []
 
     def _create_project_section(self):
         """Crée la section de sélection du projet - RESPONSIVE + REFRESH"""
@@ -1325,6 +2864,9 @@ class DatasetGenerationPanel(QWidget):
                 logger.warning(f"⚠️ Pas de typologie master dans le batch")
                 self.current_master_typologie = None
 
+            # ✅ CHARGER TOUTES LES TYPOLOGIES DU PROJET
+            self._load_all_project_typologies()
+
             # Extraire les informations du batch
             batch_name = batch_data.get('batch_name', 'Sans nom')
             batch_family = batch_data.get('batch_family', '')
@@ -1437,12 +2979,43 @@ class DatasetGenerationPanel(QWidget):
             count += self._count_children_recursive(child.get('children', []))
         return count
 
+    def _load_all_project_typologies(self):
+        """Charge toutes les typologies du projet depuis la base de données"""
+        self.all_project_typologies = []
+        
+        if not self.current_project_name:
+            logger.warning("⚠️ Pas de projet sélectionné")
+            return
+        
+        try:
+            # ✅ CHARGER DEPUIS LA BASE DE DONNÉES DIRECTEMENT
+            project_data = self.database.get_dataset_projet(self.current_project_name)
+            
+            if project_data:
+                typologies = project_data.get('typologies', [])
+                self.all_project_typologies = typologies if isinstance(typologies, list) else []
+                logger.info(f"✅ {len(self.all_project_typologies)} typologies chargées du projet")
+                
+                # Debug : Afficher les noms des typologies
+                for typ in self.all_project_typologies:
+                    if isinstance(typ, dict):
+                        typ_name = typ.get('name', 'Sans nom')
+                        clusters_count = len(typ.get('taxonomy_clusters', []))
+                        logger.debug(f"  - {typ_name} ({clusters_count} clusters)")
+            else:
+                logger.warning("⚠️ Pas de données projet")
+        except Exception as e:
+            logger.error(f"❌ Erreur chargement typologies: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+
     def _on_generate(self):
         """Lance la génération du dataset - VERSION AVEC WORKER + LOGGING"""
         logger.info("\n" + "=" * 80)
         logger.info("🎯 GÉNÉRATION DATASET - DÉMARRAGE")
         logger.info("=" * 80)
-    
+
         if not self.current_project or not self.combinations:
             QMessageBox.warning(
                 self, 
@@ -1450,7 +3023,7 @@ class DatasetGenerationPanel(QWidget):
                 "Veuillez d'abord sélectionner un projet et un batch"
             )
             return
-    
+
         # ✅ VÉRIFICATION TYPOLOGIE MASTER
         if not self.current_master_typologie:
             logger.error("❌ Pas de typologie master chargée!")
@@ -1461,7 +3034,7 @@ class DatasetGenerationPanel(QWidget):
                 "Impossible de générer le dataset."
             )
             return
-    
+
         # ✅ RÉCUPÉRATION DU NOMBRE DE BATCHES À TRAITER
         try:
             num_batches_to_process = int(self.batches_input.text())
@@ -1475,15 +3048,16 @@ class DatasetGenerationPanel(QWidget):
                 "Veuillez entrer un nombre entier valide (minimum 1)"
             )
             return
-    
+
         # ⭐ CALCUL DU TOTAL DE SAMPLES
         total_samples_per_batch = sum(combo.get('nb_samples', 0) for combo in self.combinations)
         total_samples_all_batches = total_samples_per_batch * num_batches_to_process
-    
+
         # ✅ RÉCUPÉRATION DES PROMPTS
         global_context = self.global_context_editor.toPlainText().strip()
+        structure_explanation = self.saved_structure_text.strip()  # ✅ UTILISER LE TEXTE SAUVEGARDÉ
         local_prompt = self.prompt_editor.toPlainText().strip()
-    
+
         if not local_prompt:
             QMessageBox.warning(
                 self,
@@ -1491,18 +3065,23 @@ class DatasetGenerationPanel(QWidget):
                 "Veuillez définir au moins un prompt local de génération"
             )
             return
-    
-        # Combiner les contextes
+
+        # Combiner les contextes avec l'explication de structure
+        combined_prompt = ""
         if global_context:
-            combined_prompt = f"{global_context}\n\n---\n\n{local_prompt}"
-            logger.info("✅ Contexte global et local combinés")
-        else:
-            combined_prompt = local_prompt
-            logger.info("ℹ️ Utilisation du contexte local uniquement")
-    
+            combined_prompt += f"{global_context}\n\n---\n\n"
+            logger.info("✅ Contexte global ajouté")
+
+        if structure_explanation:
+            combined_prompt += f"{structure_explanation}\n\n---\n\n"
+            logger.info("✅ Explication de structure ajoutée")
+
+        combined_prompt += local_prompt
+        logger.info("✅ Prompt local ajouté")
+
         # 📦 PRÉPARER LA CONFIGURATION POUR LE WORKER
         batch_data = self.current_batch_data.get('data', {})
-    
+
         generation_config = {
             "metadata": {
                 "project_name": self.current_project_name,
@@ -1516,6 +3095,7 @@ class DatasetGenerationPanel(QWidget):
             },
             "prompts": {
                 "global_context": global_context or None,
+                "structure_explanation": structure_explanation or None,  # ✅ NOUVEAU
                 "local_prompt": local_prompt,
                 "combined_prompt": combined_prompt
             },
@@ -1526,7 +3106,7 @@ class DatasetGenerationPanel(QWidget):
             },
             "combinations": []
         }
-    
+
         # 📋 CONSTRUIRE LES COMBINAISONS COMPLÈTES
         for i, combo in enumerate(self.combinations):
             contexts = combo.get('contexts', [])
