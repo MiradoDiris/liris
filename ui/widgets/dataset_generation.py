@@ -1007,16 +1007,141 @@ class DatasetGenerationPanel(QWidget):
         layout = QVBoxLayout(column)
         layout.setSpacing(15)
         layout.setContentsMargins(15, 15, 15, 15)
-
-        # === CONTEXTE GLOBAL (Collapsible) ===
+    
+        # === EXPLICATION DE STRUCTURE (Collapsible) - MAINTENANT EN HAUT AVEC DÉGRADÉ ===
+        self.structure_section = CollapsibleSection("Explication de Structure")
+        # ✅ Ne plus appliquer set_light_style() - garde le style dégradé par défaut
+        self.structure_section.is_collapsed = True
+        self.structure_section.content.setVisible(False)
+        self.structure_section.content.setMaximumHeight(0)
+    
+        structure_info = QLabel("ℹ️ Description du contexte et de la structure taxonomique")
+        structure_info.setFont(QFont("Segoe UI", 8))
+        structure_info.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        structure_info.setWordWrap(True)
+        self.structure_section.add_widget(structure_info)
+    
+        # Éditeur explication structure
+        self.structure_explanation_editor = QTextEdit()
+        self.structure_explanation_editor.setPlaceholderText(
+            "Décrivez la structure taxonomique utilisée...\n\n"
+            "Cette explication sera ajoutée au prompt envoyé à l'IA."
+        )
+    
+        # Texte par défaut (non pré-rempli, juste stocké)
+        default_structure_text = """Voici la description de contexte:
+    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,
+    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.
+    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.
+    Ta tâche est de générer un dataset complet comme si tu étais à la place de l'utilisateur :
+    Crée des inputs réalistes correspondant aux différents labels que tu reçois.
+    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).
+    Fournis également l'output correspondant à cet input selon la classification.
+    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l'output associé,
+    en respectant la structure hiérarchique des labels.
+    Classification de donnée d'un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,
+    de les trier et de les structurer correctement. Le dataset est pour fine tuner un agent qui s'appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable."""
+    
+        # ✅ INSÉRER LE TEXTE PAR DÉFAUT
+        self.structure_explanation_editor.setPlainText(default_structure_text)
+    
+        self.structure_explanation_editor.setMinimumHeight(150)
+        self.structure_explanation_editor.setMaximumHeight(300)
+        self.structure_explanation_editor.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred
+        )
+        self.structure_explanation_editor.setStyleSheet(f"""
+            QTextEdit {{
+                border: 2px solid #E0E0E0;
+                border-radius: 6px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9pt;
+                background: white;
+            }}
+            QTextEdit:focus {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+            }}
+            QTextEdit:disabled {{
+                background: #F5F5F5;
+                color: #666666;
+                border: 2px solid #CCCCCC;
+            }}
+        """)
+    
+        self.structure_section.add_widget(self.structure_explanation_editor)
+    
+        # ✅ LAYOUT HORIZONTAL POUR LES BOUTONS
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(10)
+        buttons_layout.addStretch()
+    
+        # Bouton Modifier (caché par défaut)
+        self.edit_structure_btn = QPushButton("Modifier")
+        self.edit_structure_btn.setVisible(False)
+        self.edit_structure_btn.setMinimumHeight(32)
+        self.edit_structure_btn.setMaximumWidth(120)
+        self.edit_structure_btn.setCursor(Qt.PointingHandCursor)
+        self.edit_structure_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                color: {Theme.PRIMARY_COLOR};
+                border: 2px solid {Theme.PRIMARY_COLOR};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 9pt;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: #F0F8FF;
+            }}
+        """)
+        self.edit_structure_btn.clicked.connect(self._edit_structure_explanation)
+        buttons_layout.addWidget(self.edit_structure_btn)
+    
+        # Bouton Enregistrer (visible par défaut)
+        self.save_structure_btn = QPushButton("Enregistrer")
+        self.save_structure_btn.setMinimumHeight(32)
+        self.save_structure_btn.setMaximumWidth(150)
+        self.save_structure_btn.setCursor(Qt.PointingHandCursor)
+        self.save_structure_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 9pt;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+        """)
+        self.save_structure_btn.clicked.connect(self._save_structure_explanation)
+        buttons_layout.addWidget(self.save_structure_btn)
+    
+        self.structure_section.add_widget(self._create_widget_from_layout(buttons_layout))
+    
+        # Stocker le texte sauvegardé
+        self.saved_structure_text = default_structure_text
+        self.structure_is_locked = False
+    
+        layout.addWidget(self.structure_section)
+    
+        # === CONTEXTE GLOBAL (Collapsible) - MAINTENANT EN BAS AVEC STYLE GRIS ===
         self.global_section = CollapsibleSection("Contexte Global du Projet")
-
+        self.global_section.set_light_style()  # ✅ Appliquer le style gris clair
+    
         global_info = QLabel("ℹ️ Contexte partagé pour tous les batches du projet")
         global_info.setFont(QFont("Segoe UI", 8))
         global_info.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
         global_info.setWordWrap(True)
         self.global_section.add_widget(global_info)
-
+    
         self.global_context_editor = QTextEdit()
         self.global_context_editor.setPlaceholderText(
             "Définissez ici le contexte général du projet...\n\n"
@@ -1046,152 +1171,28 @@ class DatasetGenerationPanel(QWidget):
             }}
         """)
         self.global_section.add_widget(self.global_context_editor)
-
+    
         layout.addWidget(self.global_section)
-
-        # === EXPLICATION DE STRUCTURE (Collapsible) ===
-        self.structure_section = CollapsibleSection("Explication de Structure")
-        self.structure_section.set_light_style()  # ✅ Appliquer le style gris clair
-        self.structure_section.is_collapsed = True
-        self.structure_section.content.setVisible(False)
-        self.structure_section.content.setMaximumHeight(0)
-
-        structure_info = QLabel("ℹ️ Description du contexte et de la structure taxonomique")
-        structure_info.setFont(QFont("Segoe UI", 8))
-        structure_info.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
-        structure_info.setWordWrap(True)
-        self.structure_section.add_widget(structure_info)
-
-        # Éditeur explication structure
-        self.structure_explanation_editor = QTextEdit()
-        self.structure_explanation_editor.setPlaceholderText(
-            "Décrivez la structure taxonomique utilisée...\n\n"
-            "Cette explication sera ajoutée au prompt envoyé à l'IA."
-        )
-
-        # Texte par défaut (non pré-rempli, juste stocké)
-        default_structure_text = """Voici la description de contexte:
-    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,
-    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.
-    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.
-    Ta tâche est de générer un dataset complet comme si tu étais à la place de l'utilisateur :
-    Crée des inputs réalistes correspondant aux différents labels que tu reçois.
-    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).
-    Fournis également l'output correspondant à cet input selon la classification.
-    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l'output associé,
-    en respectant la structure hiérarchique des labels.
-    Classification de donnée d'un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,
-    de les trier et de les structurer correctement. Le dataset est pour fine tuner un agent qui s'appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable."""
-
-        # ✅ INSÉRER LE TEXTE PAR DÉFAUT
-        self.structure_explanation_editor.setPlainText(default_structure_text)
-
-        self.structure_explanation_editor.setMinimumHeight(150)
-        self.structure_explanation_editor.setMaximumHeight(300)
-        self.structure_explanation_editor.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding,
-            QtWidgets.QSizePolicy.Preferred
-        )
-        self.structure_explanation_editor.setStyleSheet(f"""
-            QTextEdit {{
-                border: 2px solid #E0E0E0;
-                border-radius: 6px;
-                padding: 10px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9pt;
-                background: white;
-            }}
-            QTextEdit:focus {{
-                border: 2px solid {Theme.PRIMARY_COLOR};
-            }}
-            QTextEdit:disabled {{
-                background: #F5F5F5;
-                color: #666666;
-                border: 2px solid #CCCCCC;
-            }}
-        """)
-
-        self.structure_section.add_widget(self.structure_explanation_editor)
-
-        # ✅ LAYOUT HORIZONTAL POUR LES BOUTONS
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(10)
-        buttons_layout.addStretch()
-
-        # Bouton Modifier (caché par défaut)
-        self.edit_structure_btn = QPushButton("Modifier")
-        self.edit_structure_btn.setVisible(False)
-        self.edit_structure_btn.setMinimumHeight(32)
-        self.edit_structure_btn.setMaximumWidth(120)
-        self.edit_structure_btn.setCursor(Qt.PointingHandCursor)
-        self.edit_structure_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: white;
-                color: {Theme.PRIMARY_COLOR};
-                border: 2px solid {Theme.PRIMARY_COLOR};
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 9pt;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background: #F0F8FF;
-            }}
-        """)
-        self.edit_structure_btn.clicked.connect(self._edit_structure_explanation)
-        buttons_layout.addWidget(self.edit_structure_btn)
-
-        # Bouton Enregistrer (visible par défaut)
-        self.save_structure_btn = QPushButton("Enregistrer")
-        self.save_structure_btn.setMinimumHeight(32)
-        self.save_structure_btn.setMaximumWidth(150)
-        self.save_structure_btn.setCursor(Qt.PointingHandCursor)
-        self.save_structure_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 9pt;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
-            }}
-        """)
-        self.save_structure_btn.clicked.connect(self._save_structure_explanation)
-        buttons_layout.addWidget(self.save_structure_btn)
-
-        self.structure_section.add_widget(self._create_widget_from_layout(buttons_layout))
-
-        # Stocker le texte sauvegardé
-        self.saved_structure_text = default_structure_text
-        self.structure_is_locked = False
-
-        layout.addWidget(self.structure_section)
-
+    
         # === CONTEXTE LOCAL ===
         local_header = QWidget()
         local_header_layout = QHBoxLayout(local_header)
         local_header_layout.setContentsMargins(0, 0, 0, 0)
-
+    
         local_title = QLabel("Prompt Local (Batch)")
         local_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         local_title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR};")
         local_header_layout.addWidget(local_title)
-
+    
         local_info = QLabel("Instructions spécifiques pour ce batch")
         local_info.setFont(QFont("Segoe UI", 8))
         local_info.setStyleSheet("color: #666; font-style: italic;")
         local_info.setWordWrap(True)
         local_header_layout.addWidget(local_info)
         local_header_layout.addStretch()
-
+    
         layout.addWidget(local_header)
-
+    
         self.prompt_editor = QTextEdit()
         self.prompt_editor.setPlaceholderText(
             "Exemple:\n\n"
@@ -1219,7 +1220,7 @@ class DatasetGenerationPanel(QWidget):
             }}
         """)
         layout.addWidget(self.prompt_editor, 1)
-
+    
         return column
     
     def _handle_combination_modified(self, combo_idx: int, modified_combo: dict):

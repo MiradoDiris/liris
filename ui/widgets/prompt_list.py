@@ -1341,13 +1341,14 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
     def _update_batch_chart(self, generation):
         """
         ✅ NOUVEAU: Met à jour le camembert de progression par batch
+        Affiche les combinaisons générées vs restant à générer
         """
         self.batch_chart.removeAllSeries()
         self.batch_series = QPieSeries()
-        self.batch_series.setHoleSize(0.0)
-
+        self.batch_series.setHoleSize(0.0)  # Camembert plein
+    
         batch_progression = generation.get("batch_progression", [])
-
+    
         if not batch_progression:
             slice_default = self.batch_series.append("Aucune donnée", 1)
             slice_default.setColor(QColor("#E0E0E0"))
@@ -1357,53 +1358,61 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
             self.batch_info.setText("Aucune donnée de batch")
             self.batch_chart.setTitle("Aucune donnée")
             return
-
-        # Couleurs selon le statut
-        status_colors = {
-            'completed': "#9E9E9E",  # Gris (modifié depuis vert)
-            'partial': "#B0B0B0",     # Gris clair (modifié depuis orange)
-            'pending': "#CCCCCC"      # Gris très clair
-        }
-
+    
+        # Calculer le total de combinaisons générées et restantes
         total_expected = sum(b['expected'] for b in batch_progression)
         total_generated = sum(b['generated'] for b in batch_progression)
-
-        for batch_data in batch_progression:
-            batch_num = batch_data['batch_number']
-            generated = batch_data['generated']
-            expected = batch_data['expected']
-            status = batch_data['status']
-            percentage = batch_data['percentage']
-
-            if expected == 0:
-                continue
-
-            slice_obj = self.batch_series.append(f"Batch {batch_num}", generated if generated > 0 else 1)
+        total_remaining = total_expected - total_generated
+    
+        # Créer les deux parts principales
+        if total_generated > 0:
+            slice_generated = self.batch_series.append(
+                f"Générées ({total_generated})", 
+                total_generated
+            )
+            slice_generated.setColor(QColor("#757575"))  # Gris foncé pour générées
+            slice_generated.setBorderColor(Qt.transparent)
+            slice_generated.setLabelVisible(True)
+            slice_generated.setLabelPosition(QPieSlice.LabelOutside)
+            slice_generated.setLabelArmLengthFactor(0.15)
+            slice_generated.setLabelColor(QColor("#1e293b"))
+            slice_generated.setLabelFont(QFont("Segoe UI", 9, QFont.Bold))
             
-            color = QColor(status_colors.get(status, "#9E9E9E"))
-            slice_obj.setColor(color)
-            slice_obj.setBorderColor(Qt.transparent)
-
-            slice_obj.setLabelVisible(True)
-            slice_obj.setLabelPosition(QPieSlice.LabelOutside)
-            slice_obj.setLabelArmLengthFactor(0.12)
-            slice_obj.setLabelColor(QColor("#1e293b"))
-            slice_obj.setLabelFont(QFont("Segoe UI", 8, QFont.Bold))
-
-            if status == 'completed':
-                slice_obj.setLabel(f"B{batch_num} ✓ {percentage:.0f}%")
-                slice_obj.setExploded(True)
-                slice_obj.setExplodeDistanceFactor(0.04)
-            elif status == 'partial':
-                slice_obj.setLabel(f"B{batch_num} ⚠ {percentage:.0f}%")
-            else:
-                slice_obj.setLabel(f"B{batch_num} ⏳ 0%")
-
+            percentage_generated = (total_generated / total_expected * 100) if total_expected > 0 else 0
+            slice_generated.setLabel(f"Générées\n{total_generated} ({percentage_generated:.1f}%)")
+            
+            # Effet de surbrillance
+            slice_generated.setExploded(True)
+            slice_generated.setExplodeDistanceFactor(0.05)
+    
+        if total_remaining > 0:
+            slice_remaining = self.batch_series.append(
+                f"Restantes ({total_remaining})", 
+                total_remaining
+            )
+            slice_remaining.setColor(QColor("#BDBDBD"))  # Gris clair pour restantes
+            slice_remaining.setBorderColor(Qt.transparent)
+            slice_remaining.setLabelVisible(True)
+            slice_remaining.setLabelPosition(QPieSlice.LabelOutside)
+            slice_remaining.setLabelArmLengthFactor(0.15)
+            slice_remaining.setLabelColor(QColor("#1e293b"))
+            slice_remaining.setLabelFont(QFont("Segoe UI", 9, QFont.Bold))
+            
+            percentage_remaining = (total_remaining / total_expected * 100) if total_expected > 0 else 0
+            slice_remaining.setLabel(f"Restantes\n{total_remaining} ({percentage_remaining:.1f}%)")
+    
         self.batch_chart.addSeries(self.batch_series)
         
         overall_percentage = (total_generated / total_expected * 100) if total_expected > 0 else 0
-        self.batch_chart.setTitle(f"Progression: {overall_percentage:.1f}%")
-        self.batch_info.setText(f"{total_generated}/{total_expected} samples générés")
+        self.batch_chart.setTitle(f"Progression Globale: {overall_percentage:.1f}%")
+        
+        # Info détaillée par batch
+        batch_details = []
+        for b in batch_progression:
+            status_icon = "✓" if b['status'] == 'completed' else "⚠" if b['status'] == 'partial' else "⏳"
+            batch_details.append(f"B{b['batch_number']}: {b['generated']}/{b['expected']} {status_icon}")
+        
+        self.batch_info.setText(" | ".join(batch_details) if batch_details else "Aucune donnée")
 
     def _on_view_generation(self):
         """Affiche les détails complets"""

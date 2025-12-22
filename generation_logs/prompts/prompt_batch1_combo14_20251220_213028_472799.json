@@ -1,0 +1,729 @@
+{
+  "timestamp": "2025-12-20T21:30:28.472824",
+  "batch_number": 1,
+  "combination_index": 14,
+  "nb_samples_requested": 30,
+  "combination_details": {
+    "master": {
+      "name": "Intention",
+      "taxonomy_clusters": [
+        {
+          "name": "Explications",
+          "description": "",
+          "root_labels": [
+            {
+              "name": "Incomprehension",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            },
+            {
+              "name": "Hesitation",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            },
+            {
+              "name": "Confusion",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            },
+            {
+              "name": "Question",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            }
+          ]
+        },
+        {
+          "name": "Action",
+          "description": "",
+          "root_labels": [
+            {
+              "name": "Configuration",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            },
+            {
+              "name": "Enregistrement",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            }
+          ]
+        }
+      ]
+    },
+    "contexts": [
+      {
+        "level": "parent",
+        "display": "UX/UI → Modules → Déclarations fiscales → États de contrôle TVA",
+        "taxonomy_clusters": [
+          {
+            "name": "Modules",
+            "root_labels": [
+              {
+                "name": "Déclarations fiscales",
+                "parent_labels": [
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "États de contrôle TVA"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "level": "taxonomy",
+        "display": "Level Scorer → Intermédiaire",
+        "taxonomy_clusters": [
+          {
+            "description": "",
+            "name": "Intermédiaire",
+            "root_labels": []
+          }
+        ]
+      },
+      {
+        "level": "taxonomy",
+        "display": "Compte → Société",
+        "taxonomy_clusters": [
+          {
+            "description": "",
+            "name": "Société",
+            "root_labels": [
+              {
+                "category": "default",
+                "description": "",
+                "name": "Impôts sur les sociétés",
+                "parent_labels": [
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Agence immobilière"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Agent commercial"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Agent général d'assurance"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Architecture"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Auto école"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Avocat"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bar restaurant"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bâtiment"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bijoux – Fabrication et vente"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Boulangerie, pâtisserie"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bureau d'études, géomètres, experts"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Coiffure"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Commerce – plan standard"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Consultant (informatique, marketing, gestion)"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Événementiel"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Fleuriste"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Formation"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Garage, carrosserie, réparations"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Holding"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Informatique – vente et réparation"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Lavage voitures"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Laverie automatique"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Location d'immeuble"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Location gérance de fonds de commerce"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Loueur en meublé"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Médecin"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Paramédicaux"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Presse – diffuseur"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Presse – édition"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Prestataire de services – plan standard"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Secrétariat et assistance administrative"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Services à la personne"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Studio photographique"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Tabac – presse – jeux"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Taxi"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Traduction / Interprétariat"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Traiteur"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Transport, déménagement"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Commerce de biens d’occasion (TVA sur marge)"
+                  }
+                ]
+              },
+              {
+                "category": "default",
+                "description": "",
+                "name": "Bénéfices Industriels et Commerciaux",
+                "parent_labels": [
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bar restaurant"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bâtiment"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bijoux – Fabrication et vente"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Boulangerie, pâtisserie"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Coiffure"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Commerce – plan standard"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Événementiel"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Garage, carrosserie, réparations"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Informatique – vente et réparation"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Lavage voitures"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Laverie automatique"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Loueur en meublé"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Presse – diffuseur"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Presse – édition"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Prestataire de services – plan standard"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Secrétariat et assistance administrative"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Services à la personne"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Tabac – presse – jeux"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Taxi"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Traiteur"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Transport, déménagement"
+                  }
+                ]
+              },
+              {
+                "category": "default",
+                "description": "",
+                "name": "Bénéfices Non Commerciaux",
+                "parent_labels": [
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Agent commercial"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Agent général d'assurance"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Architecte"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Artiste – Franchise de TVA"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Auto école"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Avocat"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bureau d'études, géomètres, experts"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Formateur"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Médecin"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Prestataire de services"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Professeur de sport"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Secrétaire"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Studio photographique"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Traducteur Interprète"
+                  }
+                ]
+              },
+              {
+                "category": "default",
+                "description": "",
+                "name": "Revenus Fonciers",
+                "parent_labels": [
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "SCI location d'immeubles"
+                  }
+                ]
+              },
+              {
+                "category": "default",
+                "description": "",
+                "name": "Revenus Agricoles",
+                "parent_labels": [
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Centre équestre"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Culture"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Culture, élevage"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Élevage"
+                  }
+                ]
+              },
+              {
+                "category": "default",
+                "description": "",
+                "name": "BNC SCM",
+                "parent_labels": [
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Agent commerciale"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Agent général d'assurance"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Architecte"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Artiste – Franchise de TVA"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Auto école"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Avocat"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bureau d'études, géomètres, experts"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Formateur"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Médecin"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Prestataire de services"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Professeur de sport"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Secrétaire"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Studio photographique"
+                  },
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Traducteur Interprète"
+                  }
+                ]
+              },
+              {
+                "category": "default",
+                "description": "",
+                "name": "IS",
+                "parent_labels": [
+                  {
+                    "category": "default",
+                    "children": [],
+                    "description": "",
+                    "name": "Bâtiment"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "prompt_sent_to_gemini": "# 🤖 GÉNÉRATION DE DATASET POUR IA CONVERSATIONNELLE  \n    NB: La combinaison doit etre entre de typologie de contexte minimum, 1 master avec 1 ou plusieurs autre contextes\n    \n    ## 📚 TAXONOMIE DE RÉFÉRENCE\n\n    \n    \n### TYPOLOGIE MASTER : Intention\n**Nom de la typologie:** Intention\n**⚠️ UTILISEZ CE NOM comme 'typologie_de_contexte' dans vos échantillons**\n\n**Structure (2 cluster(s) disponibles):**\n\n\n#### 📦 CLUSTER 1: **Explications**\n   **⚠️ Utilisez 'Explications' comme valeur de 'cluster'**\n\n   ├─ 🔹 ROOT: **Incomprehension**\n   │  └─ ⚠️ Root 'Incomprehension' sans parents\n   │     💡 **Exemple de label:** \"Incomprehension\"\n   ├─ 🔹 ROOT: **Hesitation**\n   │  └─ ⚠️ Root 'Hesitation' sans parents\n   │     💡 **Exemple de label:** \"Hesitation\"\n   ├─ 🔹 ROOT: **Confusion**\n   │  └─ ⚠️ Root 'Confusion' sans parents\n   │     💡 **Exemple de label:** \"Confusion\"\n   ├─ 🔹 ROOT: **Question**\n   │  └─ ⚠️ Root 'Question' sans parents\n   │     💡 **Exemple de label:** \"Question\"\n\n#### 📦 CLUSTER 2: **Action**\n   **⚠️ Utilisez 'Action' comme valeur de 'cluster'**\n\n   ├─ 🔹 ROOT: **Configuration**\n   │  └─ ⚠️ Root 'Configuration' sans parents\n   │     💡 **Exemple de label:** \"Configuration\"\n   ├─ 🔹 ROOT: **Enregistrement**\n   │  └─ ⚠️ Root 'Enregistrement' sans parents\n   │     💡 **Exemple de label:** \"Enregistrement\"\n\n📊 **STATISTIQUES DE CETTE TYPOLOGIE:**\n   • Clusters: 2\n   • Roots: 6\n   • Parents: 0\n   • Children (tous niveaux): 0\n\n\n    ### CONTEXTES SPÉCIFIQUES\n    \n### CONTEXTE 1 (parent): UX/UI → Modules → Déclarations fiscales → États de contrôle TVA\n\n### Typologie du contexte\n**Nom de la typologie:** UX/UI\n**⚠️ UTILISEZ CE NOM comme 'typologie_de_contexte' dans vos échantillons**\n\n**Structure (1 cluster(s) disponibles):**\n\n\n#### 📦 CLUSTER 1: **Modules**\n   **⚠️ Utilisez 'Modules' comme valeur de 'cluster'**\n\n   ├─ 🔹 ROOT: **Déclarations fiscales**\n   │  └─ PARENT: **États de contrôle TVA**\n   │     💡 **Exemple de label:** \"Déclarations fiscales > États de contrôle TVA\"\n\n\n📊 **STATISTIQUES DE CETTE TYPOLOGIE:**\n   • Clusters: 1\n   • Roots: 1\n   • Parents: 1\n   • Children (tous niveaux): 0\n\n### CONTEXTE 2 (taxonomy): Level Scorer → Intermédiaire\n\n### Typologie du contexte\n**Nom de la typologie:** Level Scorer\n**⚠️ UTILISEZ CE NOM comme 'typologie_de_contexte' dans vos échantillons**\n\n**Structure (1 cluster(s) disponibles):**\n\n\n#### 📦 CLUSTER 1: **Intermédiaire**\n   **⚠️ Utilisez 'Intermédiaire' comme valeur de 'cluster'**\n\n   ⚠️ Cluster 'Intermédiaire' VIDE (aucun root)\n\n\n📊 **STATISTIQUES DE CETTE TYPOLOGIE:**\n   • Clusters: 1\n   • Roots: 0\n   • Parents: 0\n   • Children (tous niveaux): 0\n\n### CONTEXTE 3 (taxonomy): Compte → Société\n\n### Typologie du contexte\n**Nom de la typologie:** Compte\n**⚠️ UTILISEZ CE NOM comme 'typologie_de_contexte' dans vos échantillons**\n\n**Structure (1 cluster(s) disponibles):**\n\n\n#### 📦 CLUSTER 1: **Société**\n   **⚠️ Utilisez 'Société' comme valeur de 'cluster'**\n\n   ├─ 🔹 ROOT: **Impôts sur les sociétés**\n   │  ├─ PARENT: **Agence immobilière**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Agence immobilière\"\n   │  ├─ PARENT: **Agent commercial**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Agent commercial\"\n   │  ├─ PARENT: **Agent général d'assurance**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Agent général d'assurance\"\n   │  ├─ PARENT: **Architecture**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Architecture\"\n   │  ├─ PARENT: **Auto école**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Auto école\"\n   │  ├─ PARENT: **Avocat**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Avocat\"\n   │  ├─ PARENT: **Bar restaurant**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Bar restaurant\"\n   │  ├─ PARENT: **Bâtiment**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Bâtiment\"\n   │  ├─ PARENT: **Bijoux – Fabrication et vente**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Bijoux – Fabrication et vente\"\n   │  ├─ PARENT: **Boulangerie, pâtisserie**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Boulangerie, pâtisserie\"\n   │  ├─ PARENT: **Bureau d'études, géomètres, experts**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Bureau d'études, géomètres, experts\"\n   │  ├─ PARENT: **Coiffure**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Coiffure\"\n   │  ├─ PARENT: **Commerce – plan standard**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Commerce – plan standard\"\n   │  ├─ PARENT: **Consultant (informatique, marketing, gestion)**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Consultant (informatique, marketing, gestion)\"\n   │  ├─ PARENT: **Événementiel**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Événementiel\"\n   │  ├─ PARENT: **Fleuriste**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Fleuriste\"\n   │  ├─ PARENT: **Formation**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Formation\"\n   │  ├─ PARENT: **Garage, carrosserie, réparations**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Garage, carrosserie, réparations\"\n   │  ├─ PARENT: **Holding**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Holding\"\n   │  ├─ PARENT: **Informatique – vente et réparation**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Informatique – vente et réparation\"\n   │  ├─ PARENT: **Lavage voitures**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Lavage voitures\"\n   │  ├─ PARENT: **Laverie automatique**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Laverie automatique\"\n   │  ├─ PARENT: **Location d'immeuble**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Location d'immeuble\"\n   │  ├─ PARENT: **Location gérance de fonds de commerce**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Location gérance de fonds de commerce\"\n   │  ├─ PARENT: **Loueur en meublé**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Loueur en meublé\"\n   │  ├─ PARENT: **Médecin**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Médecin\"\n   │  ├─ PARENT: **Paramédicaux**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Paramédicaux\"\n   │  ├─ PARENT: **Presse – diffuseur**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Presse – diffuseur\"\n   │  ├─ PARENT: **Presse – édition**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Presse – édition\"\n   │  ├─ PARENT: **Prestataire de services – plan standard**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Prestataire de services – plan standard\"\n   │  ├─ PARENT: **Secrétariat et assistance administrative**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Secrétariat et assistance administrative\"\n   │  ├─ PARENT: **Services à la personne**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Services à la personne\"\n   │  ├─ PARENT: **Studio photographique**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Studio photographique\"\n   │  ├─ PARENT: **Tabac – presse – jeux**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Tabac – presse – jeux\"\n   │  ├─ PARENT: **Taxi**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Taxi\"\n   │  ├─ PARENT: **Traduction / Interprétariat**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Traduction / Interprétariat\"\n   │  ├─ PARENT: **Traiteur**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Traiteur\"\n   │  ├─ PARENT: **Transport, déménagement**\n   │  │  💡 **Exemple de label:** \"Impôts sur les sociétés > Transport, déménagement\"\n   │  └─ PARENT: **Commerce de biens d’occasion (TVA sur marge)**\n   │     💡 **Exemple de label:** \"Impôts sur les sociétés > Commerce de biens d’occasion (TVA sur marge)\"\n\n   ├─ 🔹 ROOT: **Bénéfices Industriels et Commerciaux**\n   │  ├─ PARENT: **Bar restaurant**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Bar restaurant\"\n   │  ├─ PARENT: **Bâtiment**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Bâtiment\"\n   │  ├─ PARENT: **Bijoux – Fabrication et vente**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Bijoux – Fabrication et vente\"\n   │  ├─ PARENT: **Boulangerie, pâtisserie**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Boulangerie, pâtisserie\"\n   │  ├─ PARENT: **Coiffure**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Coiffure\"\n   │  ├─ PARENT: **Commerce – plan standard**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Commerce – plan standard\"\n   │  ├─ PARENT: **Événementiel**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Événementiel\"\n   │  ├─ PARENT: **Garage, carrosserie, réparations**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Garage, carrosserie, réparations\"\n   │  ├─ PARENT: **Informatique – vente et réparation**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Informatique – vente et réparation\"\n   │  ├─ PARENT: **Lavage voitures**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Lavage voitures\"\n   │  ├─ PARENT: **Laverie automatique**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Laverie automatique\"\n   │  ├─ PARENT: **Loueur en meublé**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Loueur en meublé\"\n   │  ├─ PARENT: **Presse – diffuseur**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Presse – diffuseur\"\n   │  ├─ PARENT: **Presse – édition**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Presse – édition\"\n   │  ├─ PARENT: **Prestataire de services – plan standard**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Prestataire de services – plan standard\"\n   │  ├─ PARENT: **Secrétariat et assistance administrative**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Secrétariat et assistance administrative\"\n   │  ├─ PARENT: **Services à la personne**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Services à la personne\"\n   │  ├─ PARENT: **Tabac – presse – jeux**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Tabac – presse – jeux\"\n   │  ├─ PARENT: **Taxi**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Taxi\"\n   │  ├─ PARENT: **Traiteur**\n   │  │  💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Traiteur\"\n   │  └─ PARENT: **Transport, déménagement**\n   │     💡 **Exemple de label:** \"Bénéfices Industriels et Commerciaux > Transport, déménagement\"\n\n   ├─ 🔹 ROOT: **Bénéfices Non Commerciaux**\n   │  ├─ PARENT: **Agent commercial**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Agent commercial\"\n   │  ├─ PARENT: **Agent général d'assurance**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Agent général d'assurance\"\n   │  ├─ PARENT: **Architecte**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Architecte\"\n   │  ├─ PARENT: **Artiste – Franchise de TVA**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Artiste – Franchise de TVA\"\n   │  ├─ PARENT: **Auto école**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Auto école\"\n   │  ├─ PARENT: **Avocat**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Avocat\"\n   │  ├─ PARENT: **Bureau d'études, géomètres, experts**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Bureau d'études, géomètres, experts\"\n   │  ├─ PARENT: **Formateur**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Formateur\"\n   │  ├─ PARENT: **Médecin**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Médecin\"\n   │  ├─ PARENT: **Prestataire de services**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Prestataire de services\"\n   │  ├─ PARENT: **Professeur de sport**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Professeur de sport\"\n   │  ├─ PARENT: **Secrétaire**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Secrétaire\"\n   │  ├─ PARENT: **Studio photographique**\n   │  │  💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Studio photographique\"\n   │  └─ PARENT: **Traducteur Interprète**\n   │     💡 **Exemple de label:** \"Bénéfices Non Commerciaux > Traducteur Interprète\"\n\n   ├─ 🔹 ROOT: **Revenus Fonciers**\n   │  └─ PARENT: **SCI location d'immeubles**\n   │     💡 **Exemple de label:** \"Revenus Fonciers > SCI location d'immeubles\"\n\n   ├─ 🔹 ROOT: **Revenus Agricoles**\n   │  ├─ PARENT: **Centre équestre**\n   │  │  💡 **Exemple de label:** \"Revenus Agricoles > Centre équestre\"\n   │  ├─ PARENT: **Culture**\n   │  │  💡 **Exemple de label:** \"Revenus Agricoles > Culture\"\n   │  ├─ PARENT: **Culture, élevage**\n   │  │  💡 **Exemple de label:** \"Revenus Agricoles > Culture, élevage\"\n   │  └─ PARENT: **Élevage**\n   │     💡 **Exemple de label:** \"Revenus Agricoles > Élevage\"\n\n   ├─ 🔹 ROOT: **BNC SCM**\n   │  ├─ PARENT: **Agent commerciale**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Agent commerciale\"\n   │  ├─ PARENT: **Agent général d'assurance**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Agent général d'assurance\"\n   │  ├─ PARENT: **Architecte**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Architecte\"\n   │  ├─ PARENT: **Artiste – Franchise de TVA**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Artiste – Franchise de TVA\"\n   │  ├─ PARENT: **Auto école**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Auto école\"\n   │  ├─ PARENT: **Avocat**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Avocat\"\n   │  ├─ PARENT: **Bureau d'études, géomètres, experts**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Bureau d'études, géomètres, experts\"\n   │  ├─ PARENT: **Formateur**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Formateur\"\n   │  ├─ PARENT: **Médecin**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Médecin\"\n   │  ├─ PARENT: **Prestataire de services**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Prestataire de services\"\n   │  ├─ PARENT: **Professeur de sport**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Professeur de sport\"\n   │  ├─ PARENT: **Secrétaire**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Secrétaire\"\n   │  ├─ PARENT: **Studio photographique**\n   │  │  💡 **Exemple de label:** \"BNC SCM > Studio photographique\"\n   │  └─ PARENT: **Traducteur Interprète**\n   │     💡 **Exemple de label:** \"BNC SCM > Traducteur Interprète\"\n\n   ├─ 🔹 ROOT: **IS**\n   │  └─ PARENT: **Bâtiment**\n   │     💡 **Exemple de label:** \"IS > Bâtiment\"\n\n\n📊 **STATISTIQUES DE CETTE TYPOLOGIE:**\n   • Clusters: 1\n   • Roots: 7\n   • Parents: 94\n   • Children (tous niveaux): 0\n\n\n    ## 📋 FORMAT DE SORTIE OBLIGATOIRE\n\n    ⚠️ **IMPORTANT** : Vous DEVEZ générer UNIQUEMENT du JSON pur, sans texte avant/après.\n\n    Chaque échantillon doit suivre cette structure JSON **EXACTEMENT** :\n\n    ```json\n    {\n      \"sample_id\": <numéro>,\n      \"input\": \"<question_utilisateur_naturelle>\",\n      \"combinaisons\": [\n        {\n          \"typologie_de_contexte\": \"<typologie_depuis_taxonomie>\",\n          \"cluster\": \"<cluster_depuis_taxonomie>\",\n          \"label\": \"<label_hiérarchique_SANS_le_cluster>\"\n        }\n      ],\n      \"output\": \"<réponse_chatbot_actionnable>\"\n    }\n    🔍 COMPRENDRE LA STRUCTURE HIÉRARCHIQUE\n    ⚠️ RÈGLE CRITIQUE : Dans votre taxonomie, la hiérarchie est :\n\n    typologie_de_contexte : Le nom de la typologie (ex: \"UX/UI\", \"Intention\")\n    cluster : Le PREMIER niveau sous la typologie (ex: \"Paramètres\", \"Modules\", \"Explications\")\n    label : La hiérarchie COMPLÈTE en dessous du cluster (ex: \"Affichage > Thème > Mode sombre\")\n\n    \n### 💡 EXEMPLES DE VOTRE TAXONOMIE\nCes exemples montrent comment SÉPARER correctement cluster et label :\n\n**Exemple : UX/UI > Modules**\n```json\n{\n  \"typologie_de_contexte\": \"UX/UI\",\n  \"cluster\": \"Modules\",\n  \"label\": \"Déclarations fiscales > États de contrôle TVA\"\n}\n```\n⚠️ Notez bien : le cluster \"Modules\" n'apparaît PAS dans le label !\n\n    📊 RÈGLES POUR REMPLIR LES CHAMPS\n\n    typologie_de_contexte :\n    Utilisez le NOM de la typologie (visible en haut de chaque section)\n\n    cluster :\n    Utilisez le nom du 📦 CLUSTER (premier niveau sous la typologie)\n    ⚠️ NE PAS écrire \"Cluster\" comme valeur !\n\n    label :\n    La hiérarchie COMPLÈTE en dessous du cluster\n    Utilisez \" > \" (espace-chevron-espace) pour séparer les niveaux\n    ⚠️ N'incluez PAS le cluster dans le label !\n\n\n    📋 INSTRUCTIONS UTILISATEUR\n    Contexte Global du Projet :\n    Mets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes liés au paramétrage de la TVA, en te basant exclusivement sur les informations fournies, en formulant les inputs uniquement du point de vue de l’utilisateur, dans un langage naturel reflétant des situations concrètes, parfois imprécises ou hésitantes selon le niveau indiqué, sans inclure de réponse ou d’explication de l’IA et sans jamais sortir du contexte.\n    Instructions Spécifiques pour ce Batch :\n    Alors générer le dataset et ne sort jamais le domaine de la taxonomie des combinaisons et soit claire.pour les input et output générer\n    🎯 GÉNÉRATION\n    ⚠️ CONTRAINTE CRITIQUE : Générez EXACTEMENT 30 échantillon(s), ni plus ni moins.\n    Retournez UNIQUEMENT un array JSON contenant EXACTEMENT 30 objet(s) :\n    JSON[\n      {\n        \"sample_id\": 1,\n        \"input\": \"...\",\n        \"combinaisons\": [\n          {\n            \"typologie_de_contexte\": \"...\",\n            \"cluster\": \"...\",\n            \"label\": \"...\"\n          }\n        ],\n        \"output\": \"...\"\n      }\n    ]\n    ⚠️ RÈGLES STRICTES :\n\n    Générez EXACTEMENT 30 échantillon(s)\n    cluster doit être le nom du 📦 CLUSTER, PAS \"Cluster\" !\n    label ne doit PAS contenir le cluster\n    NE PAS écrire de texte explicatif avant le JSON\n    NE PAS utiliser de balises markdown ```json\n    Retournez DIRECTEMENT l'array JSON commençant par [\n\n    COMMENCEZ MAINTENANT.\n    ",
+  "model": "gemini-2.5-flash",
+  "generation_config": {
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "top_k": 40,
+    "max_output_tokens": 50000
+  }
+}
