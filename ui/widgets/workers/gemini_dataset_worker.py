@@ -3,9 +3,7 @@
 
 """
 Gemini Dataset Worker - Générateur STRICT aux combinaisons définies
-❌ INTERDIT : Générer du contenu hors des combinaisons master + contextes
-✅ OBLIGATOIRE : Respecter UNIQUEMENT les éléments de la taxonomie fournie
-VERSION CORRIGÉE : Inclut TOUTE la structure master dans le prompt
+✅ VERSION CORRIGÉE : Utilise le nouveau système de stockage robuste
 """
 
 import json
@@ -16,13 +14,12 @@ import google.generativeai as genai
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from utils.logger import logger
-from utils.keyring_helper import KeyringHelper
 
 
 class GeminiDatasetWorker(QThread):
     """
     Worker thread pour générer des datasets via Gemini API
-    GÉNÉRATION STRICTE : Uniquement les combinaisons définies
+    ✅ Utilise le nouveau système de stockage multi-plateforme
     """
     
     # Signaux
@@ -67,35 +64,125 @@ class GeminiDatasetWorker(QThread):
         self.max_tokens = None
         self.client = None
         
-        # ✅ NOUVEAU : Mode debug
-        self.debug_mode = generation_config.get('debug_mode', True)  # Activé par défaut
+        # Mode debug
+        self.debug_mode = generation_config.get('debug_mode', True)
         
-        logger.info("🤖 GeminiDatasetWorker initialisé (MODE STRICT + DEBUG)")
+        logger.info("🤖 GeminiDatasetWorker initialisé (MODE STRICT + STORAGE ROBUSTE)")
     
     def _load_gemini_config(self) -> bool:
-        """Charge la configuration Gemini"""
+        """
+        ✅ VERSION CORRIGÉE : Charge la configuration avec fallback intelligent
+        Supporte le nouveau système SecureStorage + anciens systèmes
+        """
         try:
             self._log("info", "📋 Chargement config Gemini...")
+            
+            # 🔄 MÉTHODE 1 : Nouveau système (AIPlatformManager)
+            config = self._try_new_platform_manager()
+            
+            if config and config.get('api_key'):
+                self.api_key = config['api_key']
+                self.model_name = config.get('model', 'gemini-2.0-flash-exp')
+                self.max_tokens = config.get('max_tokens', 8192)
+                self._log("info", f"✅ Config chargée (nouveau système): {self.model_name}")
+                return True
+            
+            # 🔄 MÉTHODE 2 : KeyringHelper (ancien système)
+            config = self._try_keyring_helper()
+            
+            if config and config.get('api_key'):
+                self.api_key = config['api_key']
+                self.model_name = config.get('model', 'gemini-2.0-flash-exp')
+                self.max_tokens = config.get('max_tokens', 8192)
+                self._log("warning", f"⚠️ Config chargée (keyring legacy): {self.model_name}")
+                return True
+            
+            # 🔄 MÉTHODE 3 : Variable d'environnement
+            import os
+            env_key = os.getenv('GEMINI_API_KEY')
+            
+            if env_key:
+                self.api_key = env_key
+                self.model_name = 'gemini-2.0-flash-exp'
+                self.max_tokens = 8192
+                self._log("warning", "⚠️ Config chargée depuis variable d'environnement (.env)")
+                self._log("warning", "💡 Conseil: Configurez via l'interface pour plus de sécurité")
+                return True
+            
+            # ❌ Échec total
+            self._log("error", "❌ AUCUNE clé API Gemini trouvée")
+            self._log("error", "💡 Veuillez configurer Gemini via:")
+            self._log("error", "   1. Interface de configuration (recommandé)")
+            self._log("error", "   2. Variable d'environnement GEMINI_API_KEY")
+            return False
+            
+        except Exception as e:
+            self._log("error", f"❌ Erreur chargement config: {str(e)}")
+            import traceback
+            self._log("debug", traceback.format_exc())
+            return False
+    
+    def _try_new_platform_manager(self) -> Optional[Dict[str, Any]]:
+        """
+        Essaie de charger depuis le nouveau AIPlatformManager
+        """
+        try:
+            from utils.ai_platform_manager import AIPlatformManager
+            
+            manager = AIPlatformManager()
+            platform = manager.get_platform('gemini')
+            
+            if not platform:
+                self._log("debug", "   Platform 'gemini' non trouvée dans manager")
+                return None
+            
+            if not platform.is_configured:
+                self._log("debug", "   Platform 'gemini' non configurée")
+                return None
+            
+            config = platform.config
+            
+            # Vérifier la validité
+            if not config.get('api_key'):
+                self._log("debug", "   Config sans api_key")
+                return None
+            
+            self._log("info", f"   ✅ Chargé depuis {platform.key_source}")
+            return config
+            
+        except ImportError:
+            self._log("debug", "   AIPlatformManager non disponible (normal si ancien système)")
+            return None
+        except Exception as e:
+            self._log("debug", f"   Erreur nouveau système: {str(e)}")
+            return None
+    
+    def _try_keyring_helper(self) -> Optional[Dict[str, Any]]:
+        """
+        Essaie de charger depuis KeyringHelper (ancien système)
+        """
+        try:
+            from utils.keyring_helper import KeyringHelper
+            
             config = KeyringHelper.get_platform_config("Gemini")
             
             if not config:
-                self._log("error", "❌ Config Gemini introuvable")
-                return False
+                self._log("debug", "   Aucune config dans KeyringHelper")
+                return None
             
-            self.api_key = config.get('api_key')
-            self.model_name = config.get('model', 'gemini-2.0-flash-exp')
-            self.max_tokens = config.get('max_tokens', 8192)
+            if not config.get('api_key'):
+                self._log("debug", "   Config KeyringHelper sans api_key")
+                return None
             
-            if not self.api_key:
-                self._log("error", "❌ Clé API manquante")
-                return False
+            self._log("info", "   ✅ Chargé depuis KeyringHelper (legacy)")
+            return config
             
-            self._log("info", f"✅ Config OK: {self.model_name}")
-            return True
-            
+        except ImportError:
+            self._log("debug", "   KeyringHelper non disponible")
+            return None
         except Exception as e:
-            self._log("error", f"❌ Erreur config: {str(e)}")
-            return False
+            self._log("debug", f"   Erreur KeyringHelper: {str(e)}")
+            return None
     
     def _initialize_gemini_client(self) -> bool:
         """Initialise le client Gemini"""
@@ -106,7 +193,16 @@ class GeminiDatasetWorker(QThread):
             self._log("info", f"✅ Client OK: {self.model_name}")
             return True
         except Exception as e:
-            self._log("error", f"❌ Erreur init: {str(e)}")
+            self._log("error", f"❌ Erreur init client: {str(e)}")
+            
+            # Diagnostics supplémentaires
+            error_msg = str(e).lower()
+            if "invalid" in error_msg or "authentication" in error_msg:
+                self._log("error", "💡 CAUSE: Clé API invalide")
+                self._log("error", "   → Vérifiez votre clé sur https://makersuite.google.com/")
+            elif "quota" in error_msg or "rate" in error_msg:
+                self._log("error", "💡 CAUSE: Quota API dépassé")
+            
             return False
     
     def run(self):
@@ -115,16 +211,16 @@ class GeminiDatasetWorker(QThread):
         self.should_stop = False
         
         logger.info("\n" + "=" * 80)
-        logger.info("🚀 GÉNÉRATION DATASET (MODE STRICT)")
+        logger.info("🚀 GÉNÉRATION DATASET (MODE STRICT + STORAGE ROBUSTE)")
         logger.info("=" * 80)
         
         try:
             if not self._load_gemini_config():
-                self.generation_failed.emit("Config Gemini invalide")
+                self.generation_failed.emit("❌ Configuration Gemini invalide ou manquante")
                 return
             
             if not self._initialize_gemini_client():
-                self.generation_failed.emit("Init client impossible")
+                self.generation_failed.emit("❌ Impossible d'initialiser le client Gemini")
                 return
             
             self._log_generation_summary()
@@ -182,6 +278,8 @@ class GeminiDatasetWorker(QThread):
             
         except Exception as e:
             self._log("error", f"❌ Erreur critique: {str(e)}")
+            import traceback
+            self._log("debug", traceback.format_exc())
             self.generation_failed.emit(str(e))
         finally:
             self.is_running = False
@@ -219,7 +317,6 @@ class GeminiDatasetWorker(QThread):
     ) -> List[Dict[str, Any]]:
         """
         Génère les échantillons pour UNE combinaison spécifique
-        ✅ CORRIGÉ : sample_id utilise TOUJOURS le compteur global
         """
         samples = []
         nb_samples = combination.get('nb_samples', 1)
@@ -240,7 +337,7 @@ class GeminiDatasetWorker(QThread):
     
             if generated_data:
                 for idx, sample in enumerate(generated_data):
-                    self.global_sample_counter += 1  # ✅ Incrémentation AVANT utilisation
+                    self.global_sample_counter += 1
     
                     if 'combinaisons' in sample and sample['combinaisons']:
                         combinaisons = sample['combinaisons']
@@ -250,7 +347,7 @@ class GeminiDatasetWorker(QThread):
                         combinaisons = self._build_combinaisons_from_sample(sample, combination)
     
                     enriched_sample = {
-                        'sample_id': self.global_sample_counter,  # ✅ TOUJOURS le compteur global, jamais celui de Gemini
+                        'sample_id': self.global_sample_counter,
                         'input': sample.get('input', ''),
                         'combinaisons': combinaisons,
                         'output': sample.get('output', ''),
@@ -391,7 +488,6 @@ class GeminiDatasetWorker(QThread):
     def _build_flexible_prompt(self, context: Dict[str, Any], nb_samples: int) -> str:
         """
         ⭐ PROMPT FLEXIBLE : Génération libre basée sur la taxonomie fournie
-        CORRECTION : Inclure TOUTE la structure master (clusters, labels, hiérarchie)
         """
         master_name = context['master_name']
         master_data = context['master_typologie']
@@ -412,12 +508,10 @@ class GeminiDatasetWorker(QThread):
         global_context = prompts.get('global_context', '')
         local_prompt = prompts.get('local_prompt', '')
 
-        # ✅ VÉRIFICATION : La typologie master contient-elle bien les clusters ?
         if not master_data or not master_data.get('taxonomy_clusters'):
             self._log("error", f"⚠️ ATTENTION : Typologie master '{master_name}' VIDE ou SANS clusters !")
             self._log("error", f"   master_data keys: {master_data.keys() if master_data else 'NONE'}")
 
-            # FALLBACK : essayer de récupérer depuis generation_config
             if 'master_typologie' in self.generation_config:
                 fallback_master = self.generation_config['master_typologie'].get('full_data', {})
                 if fallback_master and fallback_master.get('taxonomy_clusters'):
@@ -425,13 +519,11 @@ class GeminiDatasetWorker(QThread):
                     master_data = fallback_master
                 else:
                     self._log("error", "   ❌ Impossible de récupérer la structure master !")
-                    ### CORRECTION : Blocage si fallback échoue
                     raise ValueError(f"Structure master invalide pour '{master_name}' - Génération impossible.")
         else:
             clusters_count = len(master_data.get('taxonomy_clusters', []))
             self._log("info", f"   ✅ Typologie master '{master_name}' : {clusters_count} cluster(s)")
 
-            ### CORRECTION : Log détaillé des premiers noms pour debug
             if clusters_count > 0:
                 first_cluster = master_data['taxonomy_clusters'][0]
                 cluster_name = first_cluster.get('cluster_name') or first_cluster.get('name', 'MISSING')
@@ -440,21 +532,17 @@ class GeminiDatasetWorker(QThread):
                 else:
                     self._log("debug", f"   Premier cluster: '{cluster_name}'")
 
-        # ✅ FORMATER LA TYPOLOGIE MASTER COMPLÈTE
         master_section = self._format_typologie_detailed(master_data, f"TYPOLOGIE MASTER : {master_name}")
 
-        # ✅ VÉRIFICATION : Le master_section contient-il vraiment les clusters ?
         if "📦 CLUSTER" not in master_section:
             self._log("error", f"❌ master_section ne contient AUCUN cluster !")
             self._log("error", f"   Longueur : {len(master_section)} caractères")
             self._log("error", f"   Extrait : {master_section[:500]}")
             raise ValueError("master_section invalide - aucun cluster formaté")
 
-        # Compter les clusters dans le texte
         cluster_count = master_section.count("📦 CLUSTER")
         self._log("debug", f"   ✅ master_section contient {cluster_count} cluster(s) formatés")
 
-        # Formater les contextes
         context_sections = []
         for idx, ctx in enumerate(contexts):
             ctx_section = f"\n### CONTEXTE {idx + 1} ({ctx['level']}): {ctx['display']}\n"
@@ -469,106 +557,82 @@ class GeminiDatasetWorker(QThread):
             ctx_section += self._format_typologie_detailed(ctx_data, "Typologie du contexte")
             context_sections.append(ctx_section)
 
-        # ✅ EXTRAIRE DES EXEMPLES CONCRETS
         exemple_structure = self._extract_structure_examples(master_data, contexts)
 
         prompt = f"""# 🤖 GÉNÉRATION DE DATASET POUR IA CONVERSATIONNELLE  
-    NB: La combinaison doit etre entre de typologie de contexte minimum, 1 master avec 1 ou plusieurs autre contextes
-    
-    ## 📚 TAXONOMIE DE RÉFÉRENCE
+NB: La combinaison doit etre entre de typologie de contexte minimum, 1 master avec 1 ou plusieurs autre contextes
 
-    
-    {master_section}
+## 📚 TAXONOMIE DE RÉFÉRENCE
 
-    ### CONTEXTES SPÉCIFIQUES
-    {''.join(context_sections)}
+{master_section}
 
-    ## 📋 FORMAT DE SORTIE OBLIGATOIRE
+### CONTEXTES SPÉCIFIQUES
+{''.join(context_sections)}
 
-    ⚠️ **IMPORTANT** : Vous DEVEZ générer UNIQUEMENT du JSON pur, sans texte avant/après.
+## 📋 FORMAT DE SORTIE OBLIGATOIRE
 
-    Chaque échantillon doit suivre cette structure JSON **EXACTEMENT** :
+⚠️ **IMPORTANT** : Vous DEVEZ générer UNIQUEMENT du JSON pur, sans texte avant/après.
 
-    ```json
+Chaque échantillon doit suivre cette structure JSON **EXACTEMENT** :
+
+```json
+{{
+  "sample_id": <numéro>,
+  "input": "<question_utilisateur_naturelle>",
+  "combinaisons": [
     {{
-      "sample_id": <numéro>,
-      "input": "<question_utilisateur_naturelle>",
-      "combinaisons": [
-        {{
-          "typologie_de_contexte": "<typologie_depuis_taxonomie>",
-          "cluster": "<cluster_depuis_taxonomie>",
-          "label": "<label_hiérarchique_SANS_le_cluster>"
-        }}
-      ],
-      "output": "<réponse_chatbot_actionnable>"
+      "typologie_de_contexte": "<typologie_depuis_taxonomie>",
+      "cluster": "<cluster_depuis_taxonomie>",
+      "label": "<label_hiérarchique_SANS_le_cluster>"
     }}
-    🔍 COMPRENDRE LA STRUCTURE HIÉRARCHIQUE
-    ⚠️ RÈGLE CRITIQUE : Dans votre taxonomie, la hiérarchie est :
+  ],
+  "output": "<réponse_chatbot_actionnable>"
+}}
+```
 
-    typologie_de_contexte : Le nom de la typologie (ex: "UX/UI", "Intention")
-    cluster : Le PREMIER niveau sous la typologie (ex: "Paramètres", "Modules", "Explications")
-    label : La hiérarchie COMPLÈTE en dessous du cluster (ex: "Affichage > Thème > Mode sombre")
+{exemple_structure}
 
-    {exemple_structure}
-    📊 RÈGLES POUR REMPLIR LES CHAMPS
+📋 INSTRUCTIONS UTILISATEUR
+Contexte Global du Projet :
+{global_context if global_context else "(Aucun contexte global défini)"}
+Instructions Spécifiques pour ce Batch :
+{local_prompt}
 
-    typologie_de_contexte :
-    Utilisez le NOM de la typologie (visible en haut de chaque section)
-
-    cluster :
-    Utilisez le nom du 📦 CLUSTER (premier niveau sous la typologie)
-    ⚠️ NE PAS écrire "Cluster" comme valeur !
-
-    label :
-    La hiérarchie COMPLÈTE en dessous du cluster
-    Utilisez " > " (espace-chevron-espace) pour séparer les niveaux
-    ⚠️ N'incluez PAS le cluster dans le label !
-
-
-    📋 INSTRUCTIONS UTILISATEUR
-    Contexte Global du Projet :
-    {global_context if global_context else "(Aucun contexte global défini)"}
-    Instructions Spécifiques pour ce Batch :
-    {local_prompt}
-    🎯 GÉNÉRATION
-    ⚠️ CONTRAINTE CRITIQUE : Générez EXACTEMENT {nb_samples} échantillon(s), ni plus ni moins.
-    Retournez UNIQUEMENT un array JSON contenant EXACTEMENT {nb_samples} objet(s) :
-    JSON[
+🎯 GÉNÉRATION
+⚠️ CONTRAINTE CRITIQUE : Générez EXACTEMENT {nb_samples} échantillon(s), ni plus ni moins.
+Retournez UNIQUEMENT un array JSON contenant EXACTEMENT {nb_samples} objet(s) :
+[
+  {{
+    "sample_id": 1,
+    "input": "...",
+    "combinaisons": [
       {{
-        "sample_id": 1,
-        "input": "...",
-        "combinaisons": [
-          {{
-            "typologie_de_contexte": "...",
-            "cluster": "...",
-            "label": "..."
-          }}
-        ],
-        "output": "..."
+        "typologie_de_contexte": "...",
+        "cluster": "...",
+        "label": "..."
       }}
-    ]
-    ⚠️ RÈGLES STRICTES :
+    ],
+    "output": "..."
+  }}
+]
 
-    Générez EXACTEMENT {nb_samples} échantillon(s)
-    cluster doit être le nom du 📦 CLUSTER, PAS "Cluster" !
-    label ne doit PAS contenir le cluster
-    NE PAS écrire de texte explicatif avant le JSON
-    NE PAS utiliser de balises markdown ```json
-    Retournez DIRECTEMENT l'array JSON commençant par [
+⚠️ RÈGLES STRICTES :
+- Générez EXACTEMENT {nb_samples} échantillon(s)
+- cluster doit être le nom du 📦 CLUSTER, PAS "Cluster" !
+- label ne doit PAS contenir le cluster
+- NE PAS écrire de texte explicatif avant le JSON
+- NE PAS utiliser de balises markdown ```json
+- Retournez DIRECTEMENT l'array JSON commençant par [
 
-    COMMENCEZ MAINTENANT.
-    """
+COMMENCEZ MAINTENANT.
+"""
         return prompt
     
     def _format_typologie_detailed(self, typologie_data: Dict[str, Any], title: str) -> str:
-        """
-        Formate une typologie en texte ULTRA-DÉTAILLÉ avec TOUTE la structure
-        VERSION ENRICHIE : affiche TOUS les niveaux hiérarchiques
-        """
+        """Formate une typologie en texte ULTRA-DÉTAILLÉ avec TOUTE la structure"""
         if not typologie_data:
             return f"\n### {title}\n(Vide)\n"
 
-        ### CORRECTION : Ajout de logs debug pour tracer la structure brute
         self._log("debug", f"🔍 DEBUG {title} - Keys globales: {list(typologie_data.keys())}")
         clusters = typologie_data.get('taxonomy_clusters', [])
         self._log("debug", f"   Nombre de clusters: {len(clusters)}")
@@ -592,12 +656,9 @@ class GeminiDatasetWorker(QThread):
 
         output.append(f"**Structure ({len(clusters)} cluster(s) disponibles):**\n")
 
-        # ✅ AFFICHER CHAQUE CLUSTER EN DÉTAIL
         for cluster_idx, cluster in enumerate(clusters):
-            # ✅ SUPPORT DES DEUX FORMATS : "cluster_name" OU "name"
             cluster_name = cluster.get('cluster_name') or cluster.get('name', f'Cluster{cluster_idx+1}')
 
-            ### CORRECTION : Warning si fallback activé
             if cluster_name == f'Cluster{cluster_idx+1}':
                 self._log("warning", f"⚠️ Fallback cluster name pour {title}: '{cluster_name}' - Vérifiez 'name' dans full_data !")
 
@@ -610,12 +671,9 @@ class GeminiDatasetWorker(QThread):
                 output.append(f"   ⚠️ Cluster '{cluster_name}' VIDE (aucun root)\n")
                 continue
             
-            # ✅ AFFICHER CHAQUE ROOT
             for root_idx, root in enumerate(roots):
-                # ✅ SUPPORT DES DEUX FORMATS : "root_name" OU "name"
                 root_name = root.get('root_name') or root.get('name', f'Root{root_idx+1}')
 
-                ### CORRECTION : Warning si fallback pour root
                 if root_name == f'Root{root_idx+1}':
                     self._log("warning", f"⚠️ Fallback root name dans {title}: '{root_name}' - Vérifiez structure root_labels")
 
@@ -628,12 +686,9 @@ class GeminiDatasetWorker(QThread):
                     output.append(f"   │     💡 **Exemple de label:** \"{root_name}\"")
                     continue
                 
-                # ✅ AFFICHER CHAQUE PARENT
                 for parent_idx, parent in enumerate(parents):
-                    # ✅ SUPPORT DES DEUX FORMATS : "parent_name" OU "name"
                     parent_name = parent.get('parent_name') or parent.get('name', f'Parent{parent_idx+1}')
 
-                    ### CORRECTION : Warning si fallback pour parent
                     if parent_name == f'Parent{parent_idx+1}':
                         self._log("warning", f"⚠️ Fallback parent name dans {title}: '{parent_name}'")
 
@@ -655,7 +710,6 @@ class GeminiDatasetWorker(QThread):
 
                 output.append("")
 
-        # ✅ STATISTIQUES GLOBALES
         total_clusters = len(clusters)
         total_roots = sum(len(c.get('root_labels', [])) for c in clusters)
         total_parents = sum(
@@ -682,7 +736,6 @@ class GeminiDatasetWorker(QThread):
     def _format_children_recursive(self, children: List[Dict], output: list, indent: str, root_name: str, parent_name: str):
         """Formate récursivement TOUS les enfants et sous-enfants"""
         for child_idx, child in enumerate(children):
-            # ✅ SUPPORT DES DEUX FORMATS : "child_name" OU "name"
             child_name = child.get('child_name') or child.get('name', f'Child{child_idx+1}')
             is_last = (child_idx == len(children) - 1)
             
@@ -722,28 +775,24 @@ class GeminiDatasetWorker(QThread):
             clusters = typo_data.get('taxonomy_clusters', [])
             
             for cluster in clusters[:2]:
-                # ✅ SUPPORT DES DEUX FORMATS
                 cluster_name = cluster.get('cluster_name') or cluster.get('name', '')
                 if not cluster_name:
                     continue
                 
                 roots = cluster.get('root_labels', [])
                 for root in roots[:1]:
-                    # ✅ SUPPORT DES DEUX FORMATS
                     root_name = root.get('root_name') or root.get('name', '')
                     if not root_name:
                         continue
                     
                     parents = root.get('parent_labels', [])
                     for parent in parents[:1]:
-                        # ✅ SUPPORT DES DEUX FORMATS
                         parent_name = parent.get('parent_name') or parent.get('name', '')
                         if not parent_name:
                             continue
                         
                         children = parent.get('children', [])
                         if children:
-                            # ✅ SUPPORT DES DEUX FORMATS
                             child_name = children[0].get('child_name') or children[0].get('name', '')
                             label_hierarchy = f"{root_name} > {parent_name} > {child_name}"
                         else:
@@ -799,7 +848,6 @@ class GeminiDatasetWorker(QThread):
             filename = f"prompt_batch{batch_number}_combo{combo_idx + 1}_{timestamp}.json"
             filepath = logs_dir / filename
 
-            # ✅ CORRECTION : Inclure TOUTE la structure master
             master_full_data = combination['master'].get('full_data', {})
 
             export_data = {
@@ -810,7 +858,7 @@ class GeminiDatasetWorker(QThread):
                 "combination_details": {
                     "master": {
                         "name": combination['master']['name'],
-                        "taxonomy_clusters": master_full_data.get('taxonomy_clusters', [])  # ✅ Structure complète
+                        "taxonomy_clusters": master_full_data.get('taxonomy_clusters', [])
                     },
                     "contexts": [
                         {
@@ -842,7 +890,6 @@ class GeminiDatasetWorker(QThread):
     def _build_context(self, combination: Dict[str, Any]) -> Dict[str, Any]:
         """Construit le contexte complet de la combinaison"""
 
-        # ✅ LOG DÉTAILLÉ
         self._log("debug", f"\n{'='*60}")
         self._log("debug", f"🔍 _build_context - Combo {combination.get('combination_index', '?')}")
 
@@ -853,7 +900,6 @@ class GeminiDatasetWorker(QThread):
         self._log("debug", f"📦 Master name : {master_name}")
         self._log("debug", f"📦 master_full_data keys : {list(master_full_data.keys())}")
 
-        # ✅ VÉRIFICATION CRITIQUE
         if not master_full_data:
             raise ValueError(f"❌ master_full_data est VIDE pour master '{master_name}'")
 
@@ -868,7 +914,6 @@ class GeminiDatasetWorker(QThread):
         if len(clusters) == 0:
             raise ValueError(f"❌ taxonomy_clusters est VIDE pour master '{master_name}'")
 
-        # Vérifier le premier cluster
         first_cluster = clusters[0]
         cluster_name = first_cluster.get('name') or first_cluster.get('cluster_name', 'MISSING')
         self._log("debug", f"   Premier cluster : '{cluster_name}'")
@@ -879,7 +924,6 @@ class GeminiDatasetWorker(QThread):
             'contexts': []
         }
 
-        # Traiter les contextes
         for ctx in combination.get('contexts', []):
             ctx_full = ctx.get('full_data', {})
 
@@ -898,20 +942,16 @@ class GeminiDatasetWorker(QThread):
         return context
 
     def _call_gemini_api(self, prompt: str, nb_samples: int) -> Optional[List[Dict[str, Any]]]:
-        """
-        ✅ VERSION CORRIGÉE avec diagnostics complets
-        """
+        """✅ VERSION CORRIGÉE avec diagnostics complets"""
         try:
             self._log("info", "   🌐 Appel API Gemini...")
             
-            # ✅ LOG DU PROMPT (premiers 500 chars)
             if self.debug_mode:
                 self._log("debug", f"\n{'='*60}")
                 self._log("debug", f"PROMPT ENVOYÉ (premiers 500 chars):")
                 self._log("debug", prompt[:500] + "...")
                 self._log("debug", f"{'='*60}")
             
-            # Configuration de génération
             generation_config = {
                 "temperature": 0.7,
                 "top_p": 0.95,
@@ -919,13 +959,11 @@ class GeminiDatasetWorker(QThread):
                 "max_output_tokens": self.max_tokens,
             }
             
-            # ✅ APPEL API AVEC GESTION D'ERREURS
             response = self.client.generate_content(
                 prompt,
                 generation_config=generation_config
             )
             
-            # ✅ VÉRIFIER LES BLOQUAGES DE SÉCURITÉ
             if hasattr(response, 'prompt_feedback'):
                 feedback = response.prompt_feedback
                 if hasattr(feedback, 'block_reason') and feedback.block_reason:
@@ -936,14 +974,11 @@ class GeminiDatasetWorker(QThread):
                         self._log("error", f"   Safety ratings: {feedback.safety_ratings}")
                     return None
             
-            # ✅ VÉRIFIER LA PRÉSENCE DE CANDIDATS
             if not hasattr(response, 'candidates') or not response.candidates:
                 self._log("error", "   ❌ Aucun candidat retourné par Gemini")
                 self._log("error", f"   Response type: {type(response)}")
-                self._log("error", f"   Response attributes: {dir(response)}")
                 return None
             
-            # ✅ VÉRIFIER LE STATUT DU PREMIER CANDIDAT
             candidate = response.candidates[0]
             if hasattr(candidate, 'finish_reason'):
                 finish_reason = candidate.finish_reason
@@ -956,28 +991,19 @@ class GeminiDatasetWorker(QThread):
                     
                     if finish_reason_name == "SAFETY":
                         self._log("error", "   ❌ Contenu bloqué par les filtres de sécurité Gemini")
-                        if hasattr(candidate, 'safety_ratings'):
-                            self._log("error", f"   Safety ratings: {candidate.safety_ratings}")
                         return None
-                    
                     elif finish_reason_name == "MAX_TOKENS":
                         self._log("warning", "   ⚠️ Limite de tokens atteinte, résultat peut être tronqué")
-                    
                     elif finish_reason_name == "RECITATION":
                         self._log("error", "   ❌ Contenu bloqué (récitation détectée)")
                         return None
             
-            # ✅ EXTRAIRE LE TEXTE
             if not hasattr(response, 'text') or not response.text:
                 self._log("error", "   ❌ Réponse vide de Gemini")
-                self._log("error", f"   Candidate content: {candidate}")
-                if hasattr(candidate, 'content'):
-                    self._log("error", f"   Content parts: {candidate.content.parts if hasattr(candidate.content, 'parts') else 'N/A'}")
                 return None
             
             response_text = response.text.strip()
             
-            # ✅ LOG DE LA RÉPONSE BRUTE (ESSENTIEL POUR DEBUG)
             self._log("debug", f"\n{'='*60}")
             self._log("debug", f"RÉPONSE BRUTE DE GEMINI:")
             self._log("debug", f"Longueur: {len(response_text)} caractères")
@@ -987,18 +1013,14 @@ class GeminiDatasetWorker(QThread):
                 self._log("debug", f"Derniers 500 chars:\n{response_text[-500:]}")
             self._log("debug", f"{'='*60}\n")
             
-            # ✅ PARSER LE JSON
             samples = self._parse_json_response(response_text)
             
             if not samples:
                 self._log("error", "   ❌ PARSING JSON ÉCHOUÉ")
                 self._log("error", "   💡 La réponse de Gemini n'est pas au format JSON attendu")
-                
-                # Sauvegarder la réponse pour analyse
                 self._save_failed_response(response_text, prompt)
                 return None
             
-            # ✅ VALIDER LE NOMBRE DE SAMPLES
             if len(samples) != nb_samples:
                 self._log("warning", f"   ⚠️ Attendu {nb_samples} samples, reçu {len(samples)}")
             
@@ -1009,7 +1031,6 @@ class GeminiDatasetWorker(QThread):
             error_type = type(e).__name__
             self._log("error", f"   ❌ EXCEPTION dans _call_gemini_api ({error_type}): {str(e)}")
             
-            # ✅ DIAGNOSTICS SPÉCIFIQUES
             error_msg = str(e).lower()
             if "quota" in error_msg or "rate" in error_msg:
                 self._log("error", "   💡 CAUSE PROBABLE: Quota API dépassé")
@@ -1054,20 +1075,16 @@ class GeminiDatasetWorker(QThread):
             self._log("error", f"   Erreur sauvegarde: {str(e)}")
     
     def _parse_json_response(self, text: str) -> Optional[List[Dict[str, Any]]]:
-        """
-        ✅ VERSION CORRIGÉE avec diagnostics détaillés
-        """
+        """✅ VERSION CORRIGÉE avec diagnostics détaillés"""
         if not text:
             self._log("error", "   ❌ Texte vide à parser")
             return None
         
         try:
-            # ✅ NETTOYAGE ROBUSTE
             cleaned = text.strip()
             
             self._log("debug", f"   Parsing: longueur = {len(cleaned)} chars")
             
-            # Retirer les balises markdown
             if cleaned.startswith('```json'):
                 self._log("debug", "   → Retrait de ```json")
                 cleaned = cleaned[7:]
@@ -1081,7 +1098,6 @@ class GeminiDatasetWorker(QThread):
             
             cleaned = cleaned.strip()
             
-            # ✅ VÉRIFIER QUE ÇA COMMENCE PAR [ OU {
             if not cleaned:
                 self._log("error", "   ❌ Texte vide après nettoyage")
                 return None
@@ -1093,7 +1109,6 @@ class GeminiDatasetWorker(QThread):
                 self._log("error", f"   ❌ Ne commence pas par [ ou {{ (caractère: '{first_char}')")
                 self._log("error", f"   Premiers 200 chars: {cleaned[:200]}")
                 
-                # TENTATIVE DE RÉCUPÉRATION
                 json_start_bracket = cleaned.find('[')
                 json_start_brace = cleaned.find('{')
                 
@@ -1104,13 +1119,11 @@ class GeminiDatasetWorker(QThread):
                         json_start = json_start_brace
                     
                     self._log("warning", f"   🔧 Tentative récupération à partir du char {json_start}")
-                    self._log("debug", f"   Texte avant JSON: '{cleaned[:json_start]}'")
                     cleaned = cleaned[json_start:]
                 else:
-                    self._log("error", "   ❌ Aucun caractère JSON trouvé dans toute la réponse")
+                    self._log("error", "   ❌ Aucun caractère JSON trouvé")
                     return None
             
-            # ✅ PARSE JSON
             try:
                 self._log("debug", "   Tentative de parsing JSON...")
                 data = json.loads(cleaned)
@@ -1120,7 +1133,6 @@ class GeminiDatasetWorker(QThread):
                 self._log("error", f"   ❌ Erreur JSON: {str(e)}")
                 self._log("error", f"   Position: ligne {e.lineno}, col {e.colno}")
                 
-                # Afficher le contexte de l'erreur
                 error_pos = e.pos
                 context_start = max(0, error_pos - 100)
                 context_end = min(len(cleaned), error_pos + 100)
@@ -1129,13 +1141,10 @@ class GeminiDatasetWorker(QThread):
                 self._log("error", f"   Contexte de l'erreur:")
                 self._log("error", f"   ...{context}...")
                 
-                # TENTATIVE DE RÉPARATION
                 self._log("warning", "   🔧 Tentative de réparation du JSON...")
                 
-                # Retirer les virgules traînantes
                 cleaned_v2 = cleaned.replace(',]', ']').replace(',}', '}')
                 
-                # Retirer les commentaires JavaScript
                 import re
                 cleaned_v2 = re.sub(r'//.*?\n', '\n', cleaned_v2)
                 cleaned_v2 = re.sub(r'/\*.*?\*/', '', cleaned_v2, flags=re.DOTALL)
@@ -1147,33 +1156,27 @@ class GeminiDatasetWorker(QThread):
                     self._log("error", f"   ❌ Réparation échouée: {repair_error}")
                     return None
             
-            # ✅ CONVERTIR EN LISTE SI NÉCESSAIRE
             if isinstance(data, dict):
                 self._log("debug", "   ℹ️ Objet JSON reçu, conversion en liste")
                 data = [data]
             elif not isinstance(data, list):
                 self._log("error", f"   ❌ Type inattendu: {type(data)}")
-                self._log("error", f"   Valeur: {data}")
                 return None
             
-            # ✅ VALIDER LA STRUCTURE
             self._log("debug", f"   Validation de {len(data)} sample(s)...")
             
             valid_samples = []
             for idx, sample in enumerate(data):
                 if not isinstance(sample, dict):
-                    self._log("error", f"   ❌ Sample {idx} n'est pas un objet JSON (type: {type(sample)})")
+                    self._log("error", f"   ❌ Sample {idx} n'est pas un objet JSON")
                     continue
                 
-                # Vérifier les champs obligatoires
                 required_fields = ['input', 'output']
                 missing = [f for f in required_fields if f not in sample]
                 
                 if missing:
                     self._log("warning", f"   ⚠️ Sample {idx}: champs manquants {missing}")
-                    self._log("debug", f"   Champs présents: {list(sample.keys())}")
                 
-                # Même avec des champs manquants, on garde le sample
                 valid_samples.append(sample)
             
             if not valid_samples:
@@ -1198,7 +1201,7 @@ class GeminiDatasetWorker(QThread):
         self._log("info", f"   • Format: {self.output_format}")
         self._log("info", f"   • Combinaisons: {len(self.combinations)}")
         self._log("info", f"   • Total samples: {self.total_samples_all_batches}")
-        self._log("info", f"   • MODE: STRICT (validation auto)")
+        self._log("info", f"   • MODE: STRICT + STORAGE ROBUSTE")
     
     def _log(self, level: str, message: str):
         """Log vers interface et logger"""

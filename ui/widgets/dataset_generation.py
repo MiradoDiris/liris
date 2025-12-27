@@ -790,6 +790,138 @@ class CombinationVisualizer(QWidget):
             self.combination_modified.emit(combo_idx, combo)
             self._update_display()
 
+class AISelectionDialog(QDialog):
+    """Dialog pour sélectionner l'IA à utiliser en mode API"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.selected_ai = None
+        self._init_ui()
+        
+    def _init_ui(self):
+        """Interface de sélection d'IA"""
+        self.setWindowTitle("Sélection de l'IA")
+        self.setMinimumSize(450, 300)
+        self.setMaximumSize(450, 300)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(20)
+        layout.setContentsMargins(25, 25, 25, 25)
+        
+        # Titre
+        title = QLabel("Choisissez l'IA à utiliser")
+        title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; padding: 10px;")
+        layout.addWidget(title)
+        
+        # Description
+        desc = QLabel("Sélectionnez le modèle d'IA pour la génération du dataset")
+        desc.setFont(QFont("Segoe UI", 9))
+        desc.setStyleSheet("color: #666; padding: 5px;")
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+        
+        # Boutons de sélection
+        buttons_layout = QVBoxLayout()
+        buttons_layout.setSpacing(15)
+        
+        # Option Gemini
+        self.gemini_button = self._create_ai_button(
+            "Gemini",
+            "Google Gemini - Modèle par défaut\nPerformant et fiable",
+            "gemini"
+        )
+        buttons_layout.addWidget(self.gemini_button)
+        
+        # Option OSS
+        self.oss_button = self._create_ai_button(
+            "Modèle Open Source",
+            "Llama, Mistral ou autre modèle OSS\nFlexible et personnalisable",
+            "oss"
+        )
+        buttons_layout.addWidget(self.oss_button)
+        
+        layout.addLayout(buttons_layout)
+        layout.addStretch()
+        
+        # Bouton Annuler
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.setMinimumHeight(40)
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: #F5F5F5;
+                border: 2px solid #E0E0E0;
+                border-radius: 6px;
+                padding: 10px;
+                font-size: 10pt;
+                font-weight: bold;
+                color: #666;
+            }
+            QPushButton:hover {
+                background: #EEEEEE;
+                border-color: #CCCCCC;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        layout.addWidget(cancel_btn)
+        
+    def _create_ai_button(self, title, description, ai_type):
+        """Crée un bouton de sélection d'IA"""
+        button = QPushButton()
+        button.setMinimumHeight(80)
+        button.setCursor(Qt.PointingHandCursor)
+        button.setStyleSheet(f"""
+            QPushButton {{
+                background: white;
+                border: 2px solid #E0E0E0;
+                border-radius: 8px;
+                padding: 15px;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                border: 2px solid {Theme.PRIMARY_COLOR};
+                background: #F8FBFF;
+            }}
+            QPushButton:pressed {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                border: none;
+            }}
+        """)
+        
+        # Layout interne du bouton
+        btn_layout = QVBoxLayout(button)
+        btn_layout.setSpacing(5)
+        
+        # Titre
+        title_label = QLabel(title)
+        title_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        title_label.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; background: transparent; border: none;")
+        btn_layout.addWidget(title_label)
+        
+        # Description
+        desc_label = QLabel(description)
+        desc_label.setFont(QFont("Segoe UI", 8))
+        desc_label.setStyleSheet("color: #666; background: transparent; border: none;")
+        desc_label.setWordWrap(True)
+        btn_layout.addWidget(desc_label)
+        
+        # Connexion
+        button.clicked.connect(lambda: self._select_ai(ai_type))
+        
+        return button
+    
+    def _select_ai(self, ai_type):
+        """Confirme la sélection et ferme le dialog"""
+        self.selected_ai = ai_type
+        self.accept()
+    
+    def get_selected_ai(self):
+        """Retourne l'IA sélectionnée"""
+        return self.selected_ai
 
 class DatasetGenerationPanel(QWidget):
     """Panel principal de génération de datasets - Layout 3 colonnes"""
@@ -825,6 +957,9 @@ class DatasetGenerationPanel(QWidget):
         self.current_master_typologie = None
         self.all_project_typologies = []  # ✅ Toutes les typologies du projet
         self.dropdown_svg = get_dropdown_svg_path()
+
+        self.is_browser_mode = True
+        self.selected_ai_model = 'gemini'
 
         self.generation_results = []
         self.generation_metadata = {}
@@ -953,21 +1088,110 @@ class DatasetGenerationPanel(QWidget):
         main_layout.addWidget(bottom_widget)
 
     def _create_left_column(self):
-        """Crée la colonne gauche - Projet, Configuration RESPONSIVE + Progress Bar"""
+        """Crée la colonne gauche - Projet, Configuration RESPONSIVE + Switch Mode + Progress Bar"""
         column = QWidget()
         layout = QVBoxLayout(column)
         layout.setSpacing(15)
-        layout.setContentsMargins(15, 15, 15, 15)  # ✅ Padding uniforme
+        layout.setContentsMargins(15, 15, 15, 15)
 
-        # Section Projet
+        # ===== ✅ EN-TÊTE AVEC SWITCH MODE - VERSION ULTRA RESPONSIVE =====
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(4)
+
+        # Titre + Icône (plus compact)
+        title_container = QHBoxLayout()
+        title_container.setSpacing(6)
+
+        title_icon = QLabel()
+        title_icon.setPixmap(qta.icon('fa5s.database', color='#666').pixmap(20, 20))
+        title_icon.setAlignment(Qt.AlignCenter)
+        title_icon.setFixedSize(20, 20)
+        title_container.addWidget(title_icon)
+
+        title_label = QLabel("Dataset")
+        title_label.setStyleSheet("""
+            font-size: 16px; 
+            font-weight: bold; 
+            color: #333; 
+            background-color: transparent;
+        """)
+        title_label.setAlignment(Qt.AlignVCenter)
+        title_container.addWidget(title_label)
+
+        header_layout.addLayout(title_container)
+        header_layout.addStretch()  # ✅ STRETCH POUR POUSSER LE SWITCH À DROITE
+
+        # ===== BOUTON SWITCH MODE (RESPONSIVE DYNAMIQUE) =====
+        self.mode_switch_container = QtWidgets.QWidget()
+        # ✅ UNIQUEMENT MIN WIDTH, PAS DE MAX POUR PERMETTRE LA CONTRACTION
+        self.mode_switch_container.setMinimumWidth(140)
+        self.mode_switch_container.setFixedHeight(36)
+        # ✅ POLICY POUR PERMETTRE LE SHRINK
+        self.mode_switch_container.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred,
+            QtWidgets.QSizePolicy.Fixed
+        )
+
+        switch_layout = QHBoxLayout(self.mode_switch_container)
+        switch_layout.setContentsMargins(3, 3, 3, 3)
+        switch_layout.setSpacing(3)
+
+        self.mode_switch_container.setStyleSheet("""
+            QWidget {
+                background-color: #E8E8E8;
+                border-radius: 18px;
+            }
+        """)
+
+        # Boutons - ✅ TAILLES DYNAMIQUES AVEC MINIMUM
+        self.browser_mode_button = QPushButton("Nav. Auto")
+        self.api_mode_button = QPushButton("API")
+
+        # ✅ MINIMUM WIDTH AU LIEU DE FIXED SIZE
+        self.browser_mode_button.setMinimumWidth(60)
+        self.browser_mode_button.setMaximumWidth(100)
+        self.browser_mode_button.setFixedHeight(30)
+
+        self.api_mode_button.setMinimumWidth(40)
+        self.api_mode_button.setMaximumWidth(60)
+        self.api_mode_button.setFixedHeight(30)
+
+        # ✅ POLICY POUR PERMETTRE LE SHRINK
+        self.browser_mode_button.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred,
+            QtWidgets.QSizePolicy.Fixed
+        )
+        self.api_mode_button.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred,
+            QtWidgets.QSizePolicy.Fixed
+        )
+
+        self.browser_mode_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.api_mode_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.browser_mode_button.clicked.connect(lambda: self._switch_mode(True))
+        self.api_mode_button.clicked.connect(lambda: self._switch_mode(False))
+
+        switch_layout.addWidget(self.browser_mode_button)
+        switch_layout.addWidget(self.api_mode_button)
+
+        # Appliquer le style initial
+        self._update_switch_style()
+
+        header_layout.addWidget(self.mode_switch_container)
+
+        layout.addLayout(header_layout)
+        # ===== FIN EN-TÊTE =====
+
+        # Section Projet (code existant inchangé)
         project_section = self._create_project_section()
         layout.addWidget(project_section)
 
-        # Section Configuration
+        # Section Configuration (code existant inchangé)
         config_section = self._create_config_section()
         layout.addWidget(config_section)
 
-        # INFO: Affichage des infos du batch sélectionné
+        # INFO: Affichage des infos du batch sélectionné (code existant inchangé)
         self.batch_info_label = QLabel()
         self.batch_info_label.setWordWrap(True)
         self.batch_info_label.setSizePolicy(
@@ -989,7 +1213,7 @@ class DatasetGenerationPanel(QWidget):
 
         layout.addStretch()
 
-        # ✅ BARRE DE PROGRESSION EN BAS DE LA COLONNE 1
+        # ✅ BARRE DE PROGRESSION EN BAS DE LA COLONNE 1 (code existant inchangé)
         self.progress_bar = GradientProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setMinimumHeight(30)
@@ -1000,6 +1224,109 @@ class DatasetGenerationPanel(QWidget):
         layout.addWidget(self.progress_bar)
 
         return column
+
+    def _switch_mode(self, is_browser_mode):
+        """Change le mode entre Navigation Auto et Mode API avec sélection d'IA"""
+        if self.is_browser_mode == is_browser_mode:
+            return
+
+        # Si on passe en mode API, afficher le dialog de sélection
+        if not is_browser_mode:
+            dialog = AISelectionDialog(self)
+            result = dialog.exec_()
+
+            if result == QDialog.Accepted:
+                selected_ai = dialog.get_selected_ai()
+
+                if selected_ai:
+                    self.is_browser_mode = False
+                    self.selected_ai_model = selected_ai  # Stocker le choix
+                    self._update_switch_style()
+
+                    # Message de confirmation
+                    ai_names = {
+                        'gemini': 'Google Gemini',
+                        'oss': 'Modèle Open Source'
+                    }
+
+                    QMessageBox.information(
+                        self,
+                        "✅ Mode API activé",
+                        f"Mode API activé avec {ai_names.get(selected_ai, selected_ai)}.\n\n"
+                        f"Les générations utiliseront ce modèle."
+                    )
+
+                    logger.info(f"🔑 Mode API activé avec {selected_ai}")
+                else:
+                    # Pas de sélection, annuler le changement
+                    return
+            else:
+                # Dialog annulé, rester en mode Navigation Auto
+                return
+        else:
+            # Retour au mode Navigation Auto
+            self.is_browser_mode = True
+            self.selected_ai_model = None
+            self._update_switch_style()
+
+            QMessageBox.information(
+                self,
+                "Mode changé",
+                "✅ Mode Navigation Automatique activé\n\n"
+                "Cette fonctionnalité sera implémentée prochainement."
+            )
+
+            logger.info("🌐 Mode Navigation Auto activé")
+
+    def _update_switch_style(self):
+        """Met à jour le style visuel du switch selon le mode actif"""
+
+        # Style actif : Gradient avec border-radius pour arrondir
+        active_style = f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, 
+                    stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 5px 4px;
+                margin: 0px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, 
+                    stop:1 {Theme.PRIMARY_COLOR});
+            }}
+        """
+
+        # Style inactif : Transparent avec arrondi
+        inactive_style = """
+            QPushButton {
+                background-color: transparent;
+                color: #333333;
+                border: none;
+                border-radius: 15px;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 5px 8px;
+                margin: 0px;
+            }
+            QPushButton:hover {
+                background-color: rgba(200, 200, 200, 0.3);
+            }
+        """
+
+        if self.is_browser_mode:
+            # Navigation Auto actif (par défaut)
+            self.browser_mode_button.setStyleSheet(active_style)
+            self.api_mode_button.setStyleSheet(inactive_style)
+        else:
+            # Mode API actif
+            self.browser_mode_button.setStyleSheet(inactive_style)
+            self.api_mode_button.setStyleSheet(active_style)
         
     def _create_center_column(self):
         """Crée la colonne centrale - Éditeur de Prompt RESPONSIVE + Bouton Combinaisons"""
@@ -3012,11 +3339,11 @@ class DatasetGenerationPanel(QWidget):
 
 
     def _on_generate(self):
-        """Lance la génération du dataset - VERSION AVEC WORKER + LOGGING"""
+        """Lance la génération du dataset - VERSION AVEC SÉLECTION API"""
         logger.info("\n" + "=" * 80)
         logger.info("🎯 GÉNÉRATION DATASET - DÉMARRAGE")
         logger.info("=" * 80)
-
+    
         if not self.current_project or not self.combinations:
             QMessageBox.warning(
                 self, 
@@ -3024,7 +3351,7 @@ class DatasetGenerationPanel(QWidget):
                 "Veuillez d'abord sélectionner un projet et un batch"
             )
             return
-
+    
         # ✅ VÉRIFICATION TYPOLOGIE MASTER
         if not self.current_master_typologie:
             logger.error("❌ Pas de typologie master chargée!")
@@ -3035,7 +3362,7 @@ class DatasetGenerationPanel(QWidget):
                 "Impossible de générer le dataset."
             )
             return
-
+    
         # ✅ RÉCUPÉRATION DU NOMBRE DE BATCHES À TRAITER
         try:
             num_batches_to_process = int(self.batches_input.text())
@@ -3049,16 +3376,16 @@ class DatasetGenerationPanel(QWidget):
                 "Veuillez entrer un nombre entier valide (minimum 1)"
             )
             return
-
+    
         # ⭐ CALCUL DU TOTAL DE SAMPLES
         total_samples_per_batch = sum(combo.get('nb_samples', 0) for combo in self.combinations)
         total_samples_all_batches = total_samples_per_batch * num_batches_to_process
-
+    
         # ✅ RÉCUPÉRATION DES PROMPTS
         global_context = self.global_context_editor.toPlainText().strip()
-        structure_explanation = self.saved_structure_text.strip()  # ✅ UTILISER LE TEXTE SAUVEGARDÉ
+        structure_explanation = self.saved_structure_text.strip()
         local_prompt = self.prompt_editor.toPlainText().strip()
-
+    
         if not local_prompt:
             QMessageBox.warning(
                 self,
@@ -3066,23 +3393,23 @@ class DatasetGenerationPanel(QWidget):
                 "Veuillez définir au moins un prompt local de génération"
             )
             return
-
+    
         # Combiner les contextes avec l'explication de structure
         combined_prompt = ""
         if global_context:
             combined_prompt += f"{global_context}\n\n---\n\n"
             logger.info("✅ Contexte global ajouté")
-
+    
         if structure_explanation:
             combined_prompt += f"{structure_explanation}\n\n---\n\n"
             logger.info("✅ Explication de structure ajoutée")
-
+    
         combined_prompt += local_prompt
         logger.info("✅ Prompt local ajouté")
-
+    
         # 📦 PRÉPARER LA CONFIGURATION POUR LE WORKER
         batch_data = self.current_batch_data.get('data', {})
-
+    
         generation_config = {
             "metadata": {
                 "project_name": self.current_project_name,
@@ -3096,65 +3423,49 @@ class DatasetGenerationPanel(QWidget):
             },
             "prompts": {
                 "global_context": global_context or None,
-                "structure_explanation": structure_explanation or None,  # ✅ NOUVEAU
+                "structure_explanation": structure_explanation or None,
                 "local_prompt": local_prompt,
                 "combined_prompt": combined_prompt
             },
-            "prompt": combined_prompt,  # Pour le worker
+            "prompt": combined_prompt,
             "master_typologie": {
                 "name": self.current_master_typologie.get('name', 'N/A'),
                 "full_data": self.current_master_typologie
             },
-            "combinations": []
+            "combinations": [],
+            "debug_mode": True
         }
-
+    
         # 📋 CONSTRUIRE LES COMBINAISONS COMPLÈTES
         for i, combo in enumerate(self.combinations):
             contexts = combo.get('contexts', [])
             nb_samples = combo.get('nb_samples', 1)
-    
-            # ✅ DEBUG : Vérifier ce qu'on envoie
-            logger.debug(f"\n🔍 DEBUG Combination {i+1} preparation:")
-            logger.debug(f"   Master typologie keys: {self.current_master_typologie.keys()}")
-            logger.debug(f"   Master has taxonomy_clusters: {bool(self.current_master_typologie.get('taxonomy_clusters'))}")
-    
-            if self.current_master_typologie.get('taxonomy_clusters'):
-                clusters = self.current_master_typologie['taxonomy_clusters']
-                logger.debug(f"   Master clusters count: {len(clusters)}")
-                if clusters:
-                    logger.debug(f"   First cluster keys: {clusters[0].keys()}")
-                    logger.debug(f"   First cluster name: {clusters[0].get('cluster_name', 'NO NAME')}")
     
             combo_export = {
                 "combination_index": i + 1,
                 "nb_samples": nb_samples,
                 "master": {
                     "name": self.current_master_typologie.get('name', 'N/A'),
-                    "full_data": self.current_master_typologie  # ✅ Doit contenir taxonomy_clusters
+                    "full_data": self.current_master_typologie
                 },
                 "contexts": []
             }
     
             for ctx_idx, ctx in enumerate(contexts):
                 ctx_data = ctx.get('data', {})
-    
-                # ✅ DEBUG : Vérifier chaque contexte
-                logger.debug(f"   Context {ctx_idx+1} data keys: {ctx_data.keys() if ctx_data else 'EMPTY'}")
-                logger.debug(f"   Context {ctx_idx+1} has taxonomy_clusters: {bool(ctx_data.get('taxonomy_clusters'))}")
-    
                 context_export = {
                     "level": ctx.get('level', 'unknown'),
                     "display": ctx.get('display', 'N/A'),
-                    "full_data": ctx_data  # ✅ Doit contenir taxonomy_clusters
+                    "full_data": ctx_data
                 }
                 combo_export["contexts"].append(context_export)
     
             generation_config["combinations"].append(combo_export)
     
-        # 📝 EXPORTER LA CONFIGURATION COMPLÈTE DANS UN FICHIER DE LOG
+        # 📝 EXPORTER LA CONFIGURATION COMPLÈTE
         config_filepath = self._export_generation_config_to_file(generation_config)
         generation_id = self.database.save_generation_start(generation_config)
-
+    
         if not generation_id:
             logger.error("❌ Impossible d'enregistrer la génération dans l'historique")
             QMessageBox.warning(
@@ -3163,10 +3474,36 @@ class DatasetGenerationPanel(QWidget):
                 "Impossible d'enregistrer la génération dans l'historique"
             )
             return
-
+    
         logger.info(f"📝 Génération #{generation_id} enregistrée dans l'historique")
-
         self.current_generation_id = generation_id
+    
+        # ⭐ DÉTERMINER QUEL MODÈLE UTILISER
+        if self.is_browser_mode:
+            # Mode Navigation Auto (non implémenté)
+            QMessageBox.information(
+                self,
+                "Mode non disponible",
+                "Le mode Navigation Automatique n'est pas encore implémenté.\n\n"
+                "Veuillez utiliser le Mode API."
+            )
+            return
+        
+        # Mode API : déterminer Gemini ou OSS
+        ai_model_name = "Unknown"
+        if self.selected_ai_model == 'gemini':
+            ai_model_name = "Google Gemini"
+            worker_class_name = "GeminiDatasetWorker"
+        elif self.selected_ai_model == 'oss':
+            ai_model_name = "Modèle Open Source"
+            worker_class_name = "OSSDatasetWorker"
+        else:
+            QMessageBox.warning(
+                self,
+                "Modèle non sélectionné",
+                "Veuillez sélectionner un modèle d'IA via le Mode API"
+            )
+            return
     
         # ✅ CONFIRMATION
         msg = f"<b>🚀 Prêt à générer le dataset</b><br><br>"
@@ -3179,6 +3516,7 @@ class DatasetGenerationPanel(QWidget):
         msg += f"• Samples par batch : {total_samples_per_batch}<br>"
         msg += f"• <b>Total samples : {total_samples_all_batches}</b><br>"
         msg += f"• Format : {self.format_combo.currentText()}<br>"
+        msg += f"• <b>🤖 Modèle IA : {ai_model_name}</b><br>"
         if config_filepath:
             msg += f"<br>📝 <b>Config exportée :</b><br><small>{config_filepath}</small><br>"
         msg += f"<br><b>Lancer la génération ?</b>"
@@ -3195,13 +3533,26 @@ class DatasetGenerationPanel(QWidget):
             logger.info("❌ Génération annulée par l'utilisateur")
             return
     
-        # 🎬 LANCER LE WORKER
+        # 🎬 LANCER LE WORKER APPROPRIÉ
         try:
-            from ui.widgets.workers.gemini_dataset_worker import GeminiDatasetWorker
+            if self.selected_ai_model == 'gemini':
+                # 🟢 WORKER GEMINI
+                logger.info("🟢 Chargement de GeminiDatasetWorker...")
+                from ui.widgets.workers.gemini_dataset_worker import GeminiDatasetWorker
+                self.worker = GeminiDatasetWorker(generation_config)
+                logger.info("✅ GeminiDatasetWorker initialisé")
+                
+            elif self.selected_ai_model == 'oss':
+                # 🔵 WORKER OSS
+                logger.info("🔵 Chargement de OSSDatasetWorker...")
+                from ui.widgets.workers.oss_dataset_worker import OSSDatasetWorker
+                self.worker = OSSDatasetWorker(generation_config)
+                logger.info("✅ OSSDatasetWorker initialisé")
+            
+            else:
+                raise ValueError(f"Modèle IA non reconnu: {self.selected_ai_model}")
     
-            self.worker = GeminiDatasetWorker(generation_config)
-    
-            # Connecter les signaux
+            # Connecter les signaux (identiques pour les deux workers)
             self.worker.progress_updated.connect(self._on_progress_updated)
             self.worker.combination_completed.connect(self._on_combination_completed)
             self.worker.batch_completed.connect(self._on_batch_completed)
@@ -3214,14 +3565,26 @@ class DatasetGenerationPanel(QWidget):
     
             # UI : mode génération
             self.generate_btn.setEnabled(False)
-            self.generate_btn.setText("⏳ Génération en cours...")
+            self.generate_btn.setText(f"⏳ Génération en cours ({ai_model_name})...")
             self.export_btn.setEnabled(False)
             self.progress_bar.setVisible(True)
             self.progress_bar.setValue(0)
             self.progress_bar.setMaximum(total_samples_all_batches)
     
-            logger.info("✅ Worker lancé avec succès")
+            logger.info(f"✅ Worker lancé avec succès ({worker_class_name})")
+            logger.info(f"🤖 Modèle : {ai_model_name}")
     
+        except ImportError as e:
+            error_msg = f"❌ Impossible de charger le worker {worker_class_name}\n\n{str(e)}"
+            logger.error(error_msg)
+            QMessageBox.critical(
+                self,
+                "Erreur de chargement",
+                f"Le module du worker n'a pas pu être chargé:\n\n{str(e)}\n\n"
+                f"Vérifiez que le fichier existe:\n"
+                f"ui/widgets/workers/{worker_class_name.lower()}.py"
+            )
+            
         except Exception as e:
             logger.error(f"❌ Erreur lors du lancement: {str(e)}")
             import traceback
@@ -3231,7 +3594,7 @@ class DatasetGenerationPanel(QWidget):
                 "Erreur",
                 f"Impossible de lancer la génération:\n\n{str(e)}"
             )
-
+    
     def _load_batch_families(self):
         """Charge les familles de batch du projet actuel"""
         self.batch_family_combo.clear()
@@ -3753,41 +4116,38 @@ class DatasetGenerationPanel(QWidget):
         """Repositionne le bouton toggle et gère le responsive"""
         super().resizeEvent(event)
 
-        # ✅ Repositionner le bouton toggle snippets
+        # ✅ Repositionner le bouton toggle snippets (code existant)
         if hasattr(self, 'toggle_snippets_button'):
             self.update_button_position()
 
-        # ✅ Ajuster la hauteur du bouton toggle selon la fenêtre
+        # ✅ Ajuster la hauteur du bouton toggle selon la fenêtre (code existant)
         if hasattr(self, 'toggle_snippets_button'):
             button_height = min(200, int(self.height() * 0.20))
             self.toggle_snippets_button.setMaximumHeight(button_height)
 
-        # ✅ Gérer les petites largeurs (mobile-like)
+        # ✅ Gérer les colonnes splitter (code existant inchangé)
         window_width = self.width()
 
         if window_width < 800:
-            # Mode compact: ajuster les proportions
             if hasattr(self, 'columns_splitter'):
                 self.columns_splitter.setSizes([
-                    int(window_width * 0.30),  # Gauche: 30%
-                    int(window_width * 0.35),  # Centre: 35%
-                    int(window_width * 0.35)   # Droite: 35%
+                    int(window_width * 0.30),
+                    int(window_width * 0.35),
+                    int(window_width * 0.35)
                 ])
         elif window_width < 1200:
-            # Mode moyen
             if hasattr(self, 'columns_splitter'):
                 self.columns_splitter.setSizes([
-                    int(window_width * 0.27),  # Gauche: 27%
-                    int(window_width * 0.35),  # Centre: 35%
-                    int(window_width * 0.38)   # Droite: 38%
+                    int(window_width * 0.27),
+                    int(window_width * 0.35),
+                    int(window_width * 0.38)
                 ])
         else:
-            # Mode large: proportions par défaut
             if hasattr(self, 'columns_splitter'):
                 self.columns_splitter.setSizes([
-                    int(window_width * 0.25),  # Gauche: 25%
-                    int(window_width * 0.35),  # Centre: 35%
-                    int(window_width * 0.40)   # Droite: 40%
+                    int(window_width * 0.25),
+                    int(window_width * 0.35),
+                    int(window_width * 0.40)
                 ])
 
     def _init_overlay_button(self):

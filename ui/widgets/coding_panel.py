@@ -40,7 +40,7 @@ class CodingPanel(QtWidgets.QWidget):
         self.orchestrator = None
         self.dgraph_connector = LirisDgraphConnector(auto_reset=False)
         self.api_config = APIConfigManager()
-        self.platform_manager = AIPlatformManager(self.api_config)
+        self.platform_manager = AIPlatformManager()
         self.conversation_history = ConversationHistory(
             max_messages=10,
             max_age_hours=24

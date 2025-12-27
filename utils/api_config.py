@@ -1,23 +1,41 @@
-# api_config.py - Gestionnaire de configuration des API
+# api_config.py - Gestionnaire de configuration des API (Cross-platform)
 import os
+import sys
 import json
 from pathlib import Path
 from cryptography.fernet import Fernet
 from utils.logger import logger
 
 class APIConfigManager:
-    """Gestionnaire sécurisé des clés API"""
+    """Gestionnaire sécurisé des clés API - Compatible Windows/Linux/macOS"""
     
     def __init__(self):
-        self.config_dir = Path.home() / ".liris_coding"
+        # Configuration des chemins selon l'OS
+        self.config_dir = self._get_config_directory()
         self.config_file = self.config_dir / "api_config.enc"
-        self.key_file = self.config_dir / ".key"
+        self.key_file = self.config_dir / ".encryption_key"
         
         # Créer le répertoire si nécessaire
-        self.config_dir.mkdir(exist_ok=True)
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         
         # Charger ou créer la clé de chiffrement
         self._init_encryption()
+    
+    def _get_config_directory(self) -> Path:
+        """Retourne le répertoire de configuration selon l'OS"""
+        if sys.platform == "win32":
+            # Windows: utilise APPDATA
+            base_dir = Path(os.getenv('APPDATA', Path.home()))
+            return base_dir / "LirisCoding"
+        elif sys.platform == "darwin":
+            # macOS: utilise ~/Library/Application Support
+            return Path.home() / "Library" / "Application Support" / "LirisCoding"
+        else:
+            # Linux/Unix: utilise ~/.config ou XDG_CONFIG_HOME
+            xdg_config = os.getenv('XDG_CONFIG_HOME')
+            if xdg_config:
+                return Path(xdg_config) / "liris_coding"
+            return Path.home() / ".config" / "liris_coding"
     
     def _init_encryption(self):
         """Initialise le système de chiffrement"""
@@ -28,10 +46,32 @@ class APIConfigManager:
             self.key = Fernet.generate_key()
             with open(self.key_file, 'wb') as f:
                 f.write(self.key)
-            # Rendre le fichier accessible uniquement par l'utilisateur
-            os.chmod(self.key_file, 0o600)
+            
+            # Sécuriser le fichier selon l'OS
+            self._secure_file(self.key_file)
         
         self.cipher = Fernet(self.key)
+    
+    def _secure_file(self, filepath: Path):
+        """Sécurise un fichier selon l'OS"""
+        try:
+            if sys.platform == "win32":
+                # Windows: utilise icacls pour restreindre l'accès
+                import subprocess
+                username = os.getenv('USERNAME')
+                cmd = [
+                    'icacls', str(filepath),
+                    '/inheritance:r',  # Supprimer l'héritage
+                    '/grant:r', f'{username}:F'  # Accès complet pour l'utilisateur
+                ]
+                subprocess.run(cmd, capture_output=True, check=False)
+                logger.debug(f"Fichier sécurisé (Windows): {filepath}")
+            else:
+                # Unix/Linux/macOS: chmod classique
+                os.chmod(filepath, 0o600)
+                logger.debug(f"Fichier sécurisé (Unix): {filepath}")
+        except Exception as e:
+            logger.warning(f"Impossible de sécuriser {filepath}: {e}")
     
     def save_api_key(self, provider: str, api_key: str):
         """Sauvegarde une clé API de manière sécurisée"""
@@ -47,7 +87,7 @@ class APIConfigManager:
             with open(self.config_file, 'wb') as f:
                 f.write(encrypted_data)
             
-            os.chmod(self.config_file, 0o600)
+            self._secure_file(self.config_file)
             logger.info(f"API key for {provider} saved securely")
             return True
             
@@ -109,3 +149,12 @@ class APIConfigManager:
             env_var = f"{provider.upper()}_API_KEY"
             os.environ[env_var] = key
             logger.debug(f"Exported {env_var} to environment")
+    
+    def get_config_info(self) -> dict:
+        """Retourne les informations de configuration"""
+        return {
+            "config_dir": str(self.config_dir),
+            "platform": sys.platform,
+            "config_exists": self.config_file.exists(),
+            "key_exists": self.key_file.exists()
+        }

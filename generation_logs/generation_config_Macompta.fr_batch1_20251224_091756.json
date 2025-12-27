@@ -1,0 +1,316 @@
+{
+  "export_info": {
+    "exported_at": "2025-12-24T09:17:56.274073",
+    "purpose": "Vérification de la configuration de génération avant envoi à Gemini"
+  },
+  "metadata": {
+    "project_name": "Macompta.fr",
+    "batch_number": 1,
+    "batch_name": "Calcul de la TVA sur une facture",
+    "batch_family": "TVA",
+    "num_batches_to_process": 1,
+    "total_samples_per_batch": 90,
+    "total_samples_all_batches": 90,
+    "output_format": "JSONL"
+  },
+  "prompts": {
+    "global_context": null,
+    "structure_explanation": "Voici la description de contexte:\n    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,\n    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.\n    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.\n    Ta tâche est de générer un dataset complet comme si tu étais à la place de l'utilisateur :\n    Crée des inputs réalistes correspondant aux différents labels que tu reçois.\n    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).\n    Fournis également l'output correspondant à cet input selon la classification.\n    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l'output associé,\n    en respectant la structure hiérarchique des labels.\n    Classification de donnée d'un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,\n    de les trier et de les structurer correctement. Le dataset est pour fine tuner un agent qui s'appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable.",
+    "local_prompt": "Mets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes liés au calcul de la TVA sur une facture, en te basant exclusivement sur les informations fournies, en formulant les inputs uniquement du point de vue de l’utilisateur, dans un langage naturel reflétant des situations concrètes, parfois imprécises ou hésitantes selon le niveau indiqué, sans inclure de réponse ou d’explication de l’IA et sans jamais sortir du contexte.",
+    "combined_prompt": "Voici la description de contexte:\n    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,\n    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.\n    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.\n    Ta tâche est de générer un dataset complet comme si tu étais à la place de l'utilisateur :\n    Crée des inputs réalistes correspondant aux différents labels que tu reçois.\n    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).\n    Fournis également l'output correspondant à cet input selon la classification.\n    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l'output associé,\n    en respectant la structure hiérarchique des labels.\n    Classification de donnée d'un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,\n    de les trier et de les structurer correctement. Le dataset est pour fine tuner un agent qui s'appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable.\n\n---\n\nMets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes liés au calcul de la TVA sur une facture, en te basant exclusivement sur les informations fournies, en formulant les inputs uniquement du point de vue de l’utilisateur, dans un langage naturel reflétant des situations concrètes, parfois imprécises ou hésitantes selon le niveau indiqué, sans inclure de réponse ou d’explication de l’IA et sans jamais sortir du contexte."
+  },
+  "master_typologie": {
+    "name": "Intention",
+    "full_structure": {
+      "name": "Intention",
+      "description": "",
+      "taxonomy_clusters": [
+        {
+          "name": "Explications",
+          "description": "",
+          "root_labels": [
+            {
+              "name": "Question",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            },
+            {
+              "name": "Confusion",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "combinations_details": [
+    {
+      "combination_index": 1,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Question",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              },
+              {
+                "name": "Confusion",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Débutant",
+          "taxonomy_clusters": [
+            {
+              "name": "Débutant",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Prestation de services",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Prestation de services",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "child",
+          "display": "UX/UI → Modules → Comptabilité → Saisie simplifiée → Factures clients",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Comptabilité",
+                  "parent_labels": [
+                    {
+                      "name": "Saisie simplifiée",
+                      "children": [
+                        {
+                          "category": "default",
+                          "children": [],
+                          "description": "",
+                          "name": "Factures clients"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 2,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Question",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              },
+              {
+                "name": "Confusion",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Intermédiaire",
+          "taxonomy_clusters": [
+            {
+              "name": "Intermédiaire",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Prestation de services",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Prestation de services",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "child",
+          "display": "UX/UI → Modules → Comptabilité → Saisie simplifiée → Factures clients",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Comptabilité",
+                  "parent_labels": [
+                    {
+                      "name": "Saisie simplifiée",
+                      "children": [
+                        {
+                          "category": "default",
+                          "children": [],
+                          "description": "",
+                          "name": "Factures clients"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 3,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Question",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              },
+              {
+                "name": "Confusion",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Prestation de services",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Prestation de services",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer → Avancé",
+          "taxonomy_clusters": [
+            {
+              "description": "",
+              "name": "Avancé",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "child",
+          "display": "UX/UI → Modules → Comptabilité → Saisie simplifiée → Factures clients",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Comptabilité",
+                  "parent_labels": [
+                    {
+                      "name": "Saisie simplifiée",
+                      "children": [
+                        {
+                          "category": "default",
+                          "children": [],
+                          "description": "",
+                          "name": "Factures clients"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
