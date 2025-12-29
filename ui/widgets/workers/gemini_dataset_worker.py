@@ -618,10 +618,12 @@ Retournez UNIQUEMENT un array JSON contenant EXACTEMENT {nb_samples} objet(s) :
 
 ⚠️ RÈGLES STRICTES :
 - Générez EXACTEMENT {nb_samples} échantillon(s)
+- Générer toujours en langue Française et si possible une question simple et claire pour l'imput.
 - cluster doit être le nom du 📦 CLUSTER, PAS "Cluster" !
 - label ne doit PAS contenir le cluster
 - NE PAS écrire de texte explicatif avant le JSON
 - NE PAS utiliser de balises markdown ```json
+- Chaque imput ou output ne doit pas dépasser de 10 mots.
 - Retournez DIRECTEMENT l'array JSON commençant par [
 
 COMMENCEZ MAINTENANT.
