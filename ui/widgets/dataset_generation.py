@@ -524,7 +524,7 @@ class CombinationVisualizer(QWidget):
             else:
                 combo_frame.setStyleSheet("""
                     QFrame {
-                        background: #F8F9FA;
+                        background: white;
                         border: 1px solid #E0E0E0;
                         border-radius: 4px;
                         padding: 6px;
@@ -1337,7 +1337,7 @@ class DatasetGenerationPanel(QWidget):
     
         # === EXPLICATION DE STRUCTURE (Collapsible) - MAINTENANT EN HAUT AVEC DÉGRADÉ ===
         self.structure_section = CollapsibleSection("Explication de Structure")
-        # ✅ Ne plus appliquer set_light_style() - garde le style dégradé par défaut
+        self.structure_section.set_light_style()
         self.structure_section.is_collapsed = True
         self.structure_section.content.setVisible(False)
         self.structure_section.content.setMaximumHeight(0)
@@ -1388,7 +1388,7 @@ class DatasetGenerationPanel(QWidget):
                 background: white;
             }}
             QTextEdit:focus {{
-                border: 2px solid {Theme.PRIMARY_COLOR};
+                border: 2px solid
             }}
             QTextEdit:disabled {{
                 background: #F5F5F5;
@@ -1833,12 +1833,12 @@ class DatasetGenerationPanel(QWidget):
         viz_container.setStyleSheet("""
             QFrame {
                 background: white;
-                border: 2px solid #E0E0E0;
-                border-radius: 8px;
+                border: none;
+                border-radius: 0px;
             }
         """)
         viz_layout = QVBoxLayout(viz_container)
-        viz_layout.setContentsMargins(10, 10, 10, 10)
+        viz_layout.setContentsMargins(0, 0, 0, 0)
         viz_layout.addWidget(self.visualizer)
 
         layout.addWidget(viz_container, 1)
@@ -2753,11 +2753,11 @@ class DatasetGenerationPanel(QWidget):
             
             if not projects:
                 logger.warning("   ⚠️ Aucun projet trouvé")
-                self.project_combo.addItem("-- Aucun projet disponible --", None)
+                self.project_combo.addItem("Aucune", None)
             else:
                 logger.info(f"   ✅ {len(projects)} projet(s) trouvé(s)")
                 
-                self.project_combo.addItem("-- Sélectionner un projet --", None)
+                self.project_combo.addItem("Projet", None)
                 
                 for project in projects:
                     if isinstance(project, dict):
@@ -2939,11 +2939,11 @@ class DatasetGenerationPanel(QWidget):
                 color: {Theme.PRIMARY_COLOR};
             }}
             QLineEdit:hover {{
-                border: 2px solid {Theme.PRIMARY_COLOR};
+                border: 2px solid #E0E0E0;
             }}
             QLineEdit:focus {{
-                border: 2px solid {Theme.SECONDARY_COLOR};
-                background: #FAFAFA;
+                border: 2px solid #E0E0E0;
+                background: white;
             }}
             QLineEdit::placeholder {{
                 color: #AAAAAA;
@@ -2986,7 +2986,7 @@ class DatasetGenerationPanel(QWidget):
                 font-size: 10pt;
             }}
             QComboBox:hover {{
-                border: 2px solid {Theme.PRIMARY_COLOR};
+                border: 2px solid #E0E0E0;
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
@@ -3056,7 +3056,7 @@ class DatasetGenerationPanel(QWidget):
             logger.info(f"📦 {len(projects) if projects else 0} projet(s) trouvé(s)")
             
             self.project_combo.clear()
-            self.project_combo.addItem("-- Sélectionner un projet --", None)
+            self.project_combo.addItem("Projet", None)
             
             for project in projects:
                 if isinstance(project, dict):
@@ -3076,16 +3076,16 @@ class DatasetGenerationPanel(QWidget):
         logger.info(f"🔄 Changement de projet: {project_name}")
 
         # Reset si sélection vide
-        if project_name == "-- Sélectionner un projet --" or not project_name:
+        if project_name == "Sélectionner" or not project_name:
             self.current_project = None
             self.current_project_name = None
             self.current_batch_number = None
             self.current_batch_data = None
             self.combinations = []
             self.batch_family_combo.clear()
-            self.batch_family_combo.addItem("-- Aucun projet sélectionné --", None)
+            self.batch_family_combo.addItem("Aucun projet", None)
             self.batch_combo.clear()
-            self.batch_combo.addItem("-- Aucun projet sélectionné --", None)
+            self.batch_combo.addItem("Aucun projet", None)
             self.batch_info_label.setVisible(False)
             logger.info("Reset de la sélection")
             return
@@ -3096,11 +3096,6 @@ class DatasetGenerationPanel(QWidget):
 
             if not project_data:
                 logger.error(f"❌ Projet '{project_name}' non trouvé")
-                QMessageBox.warning(
-                    self, 
-                    "Projet introuvable", 
-                    f"Le projet '{project_name}' n'a pas pu être chargé."
-                )
                 return
 
             self.current_project = project_data
@@ -3598,7 +3593,7 @@ class DatasetGenerationPanel(QWidget):
     def _load_batch_families(self):
         """Charge les familles de batch du projet actuel"""
         self.batch_family_combo.clear()
-        self.batch_family_combo.addItem("-- Sélectionner une famille --", None)
+        self.batch_family_combo.addItem("famille", None)
 
         if not self.current_project_name:
             logger.warning("Aucun projet actuel")
@@ -3610,7 +3605,7 @@ class DatasetGenerationPanel(QWidget):
 
             if not batches or len(batches) == 0:
                 logger.info(f"⚠️ Aucun batch trouvé")
-                self.batch_family_combo.addItem("-- Aucune famille disponible --", None)
+                self.batch_family_combo.addItem("Aucune famille", None)
                 return
 
             # Extraire les familles uniques
@@ -3623,7 +3618,7 @@ class DatasetGenerationPanel(QWidget):
 
             if not families:
                 logger.info(f"⚠️ Aucune famille définie")
-                self.batch_family_combo.addItem("-- Aucune famille définie --", None)
+                self.batch_family_combo.addItem("Aucune famille", None)
                 return
 
             # Trier et ajouter les familles
@@ -3658,7 +3653,7 @@ class DatasetGenerationPanel(QWidget):
 
         if family is None:
             self.batch_combo.clear()
-            self.batch_combo.addItem("-- Sélectionner une famille --", None)
+            self.batch_combo.addItem("famille", None)
             logger.info("Reset des batches")
             return
 
@@ -3695,7 +3690,7 @@ class DatasetGenerationPanel(QWidget):
     def _load_batches_by_family(self, family):
         """Charge les batches d'une famille spécifique"""
         self.batch_combo.clear()
-        self.batch_combo.addItem("-- Sélectionner un batch --", None)
+        self.batch_combo.addItem("batch", None)
 
         if not self.current_project_name or not family:
             logger.warning("Projet ou famille manquant")
@@ -3707,7 +3702,7 @@ class DatasetGenerationPanel(QWidget):
 
             if not all_batches:
                 logger.info(f"⚠️ Aucun batch trouvé")
-                self.batch_combo.addItem("-- Aucun batch disponible --", None)
+                self.batch_combo.addItem("Aucun batch", None)
                 return
 
             # Filtrer par famille
@@ -3715,7 +3710,7 @@ class DatasetGenerationPanel(QWidget):
 
             if not batches:
                 logger.info(f"⚠️ Aucun batch dans cette famille")
-                self.batch_combo.addItem("-- Aucun batch dans cette famille --", None)
+                self.batch_combo.addItem("Aucun batch", None)
                 return
 
             logger.info(f"📦 {len(batches)} batch(es) trouvé(s) dans {family}")
@@ -4235,7 +4230,7 @@ class DatasetGenerationPanel(QWidget):
 
         # En-tête du panneau
         snippets_header = QtWidgets.QHBoxLayout()
-        snippets_title = QtWidgets.QLabel(f"💻 Dataset")
+        snippets_title = QtWidgets.QLabel(f"💻 Dataset généré")
         snippets_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333; background-color: transparent; border: none;")
         snippets_header.addWidget(snippets_title)
         snippets_header.addStretch()

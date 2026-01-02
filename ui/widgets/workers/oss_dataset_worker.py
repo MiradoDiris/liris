@@ -27,7 +27,7 @@ class OSSDatasetWorker(QThread):
     generation_failed = pyqtSignal(str)
     log_message = pyqtSignal(str, str)
     
-    API_BASE_URL = "http://localhost:8084"
+    API_BASE_URL = "https://airistech.ai/generator"
     
     def __init__(self, generation_config: Dict[str, Any], parent=None):
         super().__init__(parent)

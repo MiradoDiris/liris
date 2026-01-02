@@ -616,15 +616,28 @@ Retournez UNIQUEMENT un array JSON contenant EXACTEMENT {nb_samples} objet(s) :
   }}
 ]
 
-⚠️ RÈGLES STRICTES :
-- Générez EXACTEMENT {nb_samples} échantillon(s)
-- Générer toujours en langue Française et si possible une question simple et claire pour l'imput.
-- cluster doit être le nom du 📦 CLUSTER, PAS "Cluster" !
-- label ne doit PAS contenir le cluster
-- NE PAS écrire de texte explicatif avant le JSON
-- NE PAS utiliser de balises markdown ```json
-- Chaque imput ou output ne doit pas dépasser de 10 mots.
-- Retournez DIRECTEMENT l'array JSON commençant par [
+⚠️ RÈGLES STRICTES ET NON NÉGOCIABLES :
+
+1-Générer EXACTEMENT {nb_samples} échantillon(s).
+2-Générer UNIQUEMENT en langue française.
+3-Chaque input doit être une question humaine, naturelle et complète, avec au minimum un sujet et un verbe.
+4-Chaque output doit être une réponse courte, claire et grammaticale, avec sujet + verbe, jamais télégraphique.
+5-Interdiction absolue de réponses robotiques, mathématiques brutes ou phrases incomplètes.
+6-Aucun input ni output ne doit dépasser 10 mots.
+7-Interdiction d’utiliser :
+8-Deux points :
+  Points de suspension
+  Abréviations techniques ou formules sèches
+9-Le champ cluster doit contenir uniquement le nom exact du 📦 CLUSTER, jamais le mot “Cluster”.
+10-Le champ label ne doit jamais contenir le nom du cluster.
+11-Les inputs doivent exprimer une intention réaliste d’utilisateur humain, avec hésitation, question ou besoin clair.
+12-Les outputs doivent répondre directement à la question, sans explication supplémentaire.
+13-Ne produire AUCUN texte avant ou après la réponse.
+14-Ne pas utiliser de balises markdown.
+15-Retourner uniquement un array JSON valide, commençant immédiatement par [.
+
+🔒 CONTRAINTE QUALITATIVE OBLIGATOIRE
+Si une phrase semble artificielle, mécanique ou incomplète, elle est considérée comme invalide et doit être reformulée avant génération.
 
 COMMENCEZ MAINTENANT.
 """

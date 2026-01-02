@@ -52,6 +52,68 @@ class HierarchicalChartState:
         self.navigation_stack = []  # Stack de navigation: [(name, data), ...]
         self.full_data = []  # Données complètes brutes
         self.total_samples = 0
+
+
+class BatchProgressionState:
+    """Gère l'état de navigation hiérarchique du camembert de progression des batches"""
+    
+    def __init__(self):
+        self.current_level = 0  # 0 = familles, 1 = batches individuels
+        self.selected_family = None  # Famille actuellement sélectionnée
+        self.family_data = []  # Données de progression par famille
+        self.batch_details = []  # Détails des batches individuels de la famille sélectionnée
+        
+    def reset(self, family_data):
+        """Réinitialise l'état avec de nouvelles données de familles"""
+        self.current_level = 0
+        self.selected_family = None
+        self.family_data = family_data
+        self.batch_details = []
+        
+    def navigate_to_family(self, family_name, batch_details):
+        """Navigue vers les détails d'une famille spécifique"""
+        self.current_level = 1
+        self.selected_family = family_name
+        self.batch_details = batch_details
+        
+    def navigate_back(self):
+        """Retourne au niveau des familles"""
+        if self.current_level > 0:
+            self.current_level = 0
+            self.selected_family = None
+            self.batch_details = []
+            return True
+        return False
+        
+    def get_current_data(self):
+        """Retourne les données à afficher au niveau actuel"""
+        if self.current_level == 0:
+            # Niveau 0: Afficher les familles
+            return self.family_data
+        else:
+            # Niveau 1: Afficher les batches de la famille sélectionnée
+            return self.batch_details
+            
+    def can_go_back(self):
+        """Vérifie si on peut retourner en arrière"""
+        return self.current_level > 0
+        
+    def get_breadcrumb(self):
+        """Retourne le fil d'Ariane"""
+        if self.current_level == 0:
+            return "Progression par Famille"
+        else:
+            return f"Progression par Famille > {self.selected_family}"
+
+
+class HierarchicalChartState:
+    """Gère l'état de navigation hiérarchique du camembert de typologie - VERSION PROGRESSIVE"""
+    
+    def __init__(self):
+        self.current_level = 0  # 0 = typologie, 1 = cluster, 2 = root, 3+ = enfants
+        self.navigation_stack = []  # Stack de navigation: [(name, data), ...]
+        self.full_data = []  # Données complètes brutes
+        self.total_samples = 0
         
     def reset(self, chart_data, total_samples):
         """Réinitialise l'état avec de nouvelles données"""
@@ -255,9 +317,13 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
         self.current_generation_id = None
         self.generations = []
         self.dropdown_svg = get_dropdown_svg_path()
+        self.current_project_name = None  # Pour le camembert de progression
 
         # État hiérarchique pour le camembert de typologie
         self.hierarchical_state = HierarchicalChartState()
+        
+        # État hiérarchique pour le camembert de progression des batches
+        self.batch_progression_state = BatchProgressionState()
 
         self._init_ui()
 
@@ -702,6 +768,33 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
         self.batch_chart_view.setStyleSheet("background: transparent; border: none;")
         layout.addWidget(self.batch_chart_view)
 
+        # Bouton de retour pour la navigation hiérarchique
+        self.batch_back_btn = QtWidgets.QPushButton("← Retour")
+        self.batch_back_btn.setEnabled(False)
+        self.batch_back_btn.setCursor(Qt.PointingHandCursor)
+        self.batch_back_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {Theme.PRIMARY_COLOR};
+                border: 1px solid #E0E0E0;
+                border-radius: 3px;
+                padding: 2px 8px;
+                font-weight: normal;
+                font-size: 8pt;
+            }}
+            QPushButton:hover:enabled {{
+                background: #F5F5F5;
+                border-color: {Theme.PRIMARY_COLOR};
+            }}
+            QPushButton:disabled {{
+                background: transparent;
+                color: #CCCCCC;
+                border-color: #E0E0E0;
+            }}
+        """)
+        self.batch_back_btn.clicked.connect(self._on_batch_back)
+        layout.addWidget(self.batch_back_btn)
+
         self.batch_info = QtWidgets.QLabel("Sélectionnez une génération")
         self.batch_info.setAlignment(Qt.AlignCenter)
         self.batch_info.setStyleSheet("color: #666; font-style: italic; border: none; font-size: 8pt;")
@@ -921,6 +1014,7 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
                     display_gen = {
                         "id": gen['id'],
                         "project": gen.get('project_name', 'Projet inconnu'),
+                        "project_name": gen.get('project_name'),  # ✅ AJOUT pour le camembert de progression
                         "batch": batch_name,
                         "date": gen.get('started_at') or datetime.now().isoformat(),
                         "format": gen.get('output_format', 'JSON'),
@@ -956,7 +1050,7 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
 
     def _calculate_batch_progression(self, gen):
         """
-        ✅ NOUVEAU: Calcule la progression de génération par batch du projet
+        ✅ CORRIGÉ: Calcule la progression de génération par FAMILLE de batch
         Retourne les données pour le camembert de progression
         """
         try:
@@ -966,52 +1060,90 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
 
             # Récupérer TOUS les batches du projet
             all_batches = self.database.get_all_batches(project_name)
-            
+
             if not all_batches:
                 return []
 
             # Récupérer TOUTES les générations du projet
             all_project_gens = self.database.get_all_generations(project_name=project_name, limit=1000)
 
-            # Compter les samples générés par batch
-            batch_stats = {}
+            # Organiser par famille de batch
+            family_stats = {}
+
             for batch in all_batches:
                 batch_num = batch['batch_number']
                 batch_data = batch.get('data', {})
+
+                # ✅ NOUVEAU: Récupérer la famille de batch
+                batch_family = batch_data.get('batch_family', 'Sans famille')
+                if not batch_family or batch_family.strip() == '':
+                    batch_family = 'Sans famille'
+
                 combinations = batch_data.get('combinations', [])
-                
+
                 # Calculer le total de samples prévus pour ce batch
                 total_expected = sum(combo.get('nb_samples', 1) for combo in combinations)
-                
+
                 # Chercher si ce batch a été généré
                 generated = 0
                 for pg in all_project_gens:
                     if pg.get('batch_number') == batch_num and pg.get('status') == 'completed':
                         generated = pg.get('total_samples', 0)
                         break
-                
-                batch_stats[batch_num] = {
-                    'expected': total_expected,
-                    'generated': generated,
-                    'percentage': (generated / total_expected * 100) if total_expected > 0 else 0
-                }
+                    
+                # Agréger par famille
+                if batch_family not in family_stats:
+                    family_stats[batch_family] = {
+                        'expected': 0,
+                        'generated': 0,
+                        'batch_count': 0,
+                        'completed_batches': 0,
+                        'batch_numbers': []
+                    }
+
+                family_stats[batch_family]['expected'] += total_expected
+                family_stats[batch_family]['generated'] += generated
+                family_stats[batch_family]['batch_count'] += 1
+                family_stats[batch_family]['batch_numbers'].append(batch_num)
+
+                if generated >= total_expected and total_expected > 0:
+                    family_stats[batch_family]['completed_batches'] += 1
 
             # Créer les données pour le camembert
             progression_data = []
-            for batch_num in sorted(batch_stats.keys()):
-                stats = batch_stats[batch_num]
+            for family_name in sorted(family_stats.keys()):
+                stats = family_stats[family_name]
+                percentage = (stats['generated'] / stats['expected'] * 100) if stats['expected'] > 0 else 0
+
+                # Déterminer le statut de la famille
+                if stats['completed_batches'] == stats['batch_count'] and stats['batch_count'] > 0:
+                    status = 'completed'
+                elif stats['generated'] > 0:
+                    status = 'partial'
+                else:
+                    status = 'pending'
+
                 progression_data.append({
-                    'batch_number': batch_num,
+                    'family_name': family_name,
                     'expected': stats['expected'],
                     'generated': stats['generated'],
-                    'percentage': stats['percentage'],
-                    'status': 'completed' if stats['generated'] >= stats['expected'] else 'partial' if stats['generated'] > 0 else 'pending'
+                    'percentage': percentage,
+                    'batch_count': stats['batch_count'],
+                    'completed_batches': stats['completed_batches'],
+                    'batch_numbers': stats['batch_numbers'],
+                    'status': status
                 })
+
+            logger.info(f"📊 Progression par famille calculée: {len(progression_data)} famille(s)")
+            for fam in progression_data:
+                logger.info(f"  • {fam['family_name']}: {fam['generated']}/{fam['expected']} "
+                           f"({fam['completed_batches']}/{fam['batch_count']} batches) - {fam['status']}")
 
             return progression_data
 
         except Exception as e:
             logger.error(f"Erreur calcul progression: {e}")
+            logger.error(traceback.format_exc())
             return []
 
     def _extract_contexts_from_generation(self, gen, metadata):
@@ -1273,9 +1405,9 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
             return
         
         colors = [
-            "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
-            "#FFEAA7", "#DFE6E9", "#74B9FF", "#A29BFE",
-            "#FD79A8", "#FDCB6E", "#6C5CE7", "#00B894"
+            "#e63946", "#f77f00", "#fcbf49", "#06d6a0", "#118ab2",
+            "#073b4c", "#d62828", "#f77f00", "#3a86ff", "#8338ec",
+            "#ff6b6b", "#ee5a6f", "#fca311", "#e85d04", "#4ecdc4"
         ]
         
         for i, item in enumerate(current_data):
@@ -1340,16 +1472,51 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
 
     def _update_batch_chart(self, generation):
         """
-        ✅ NOUVEAU: Met à jour le camembert de progression par batch
-        Affiche les combinaisons générées vs restant à générer
+        ✅ CORRIGÉ: Met à jour le camembert de progression avec navigation hiérarchique
+        Niveau 0: Affiche les familles
+        Niveau 1: Affiche les batches individuels de la famille sélectionnée
+        """
+        from utils.logger import logger
+        
+        batch_progression = generation.get("batch_progression", [])
+        
+        # Réinitialiser l'état avec les nouvelles données
+        self.batch_progression_state.reset(batch_progression)
+        
+        # Récupérer le projet pour les détails des batches
+        project_name = generation.get('project_name')
+        
+        logger.info(f"📊 _update_batch_chart: project_name from generation = '{project_name}' (type: {type(project_name)})")
+        logger.info(f"📊 _update_batch_chart: generation keys = {list(generation.keys())}")
+        
+        # Validation et nettoyage
+        if project_name is None or project_name == 'None' or project_name == '':
+            logger.error(f"❌ project_name invalide: '{project_name}'")
+            # Essayer de récupérer depuis self.current_generation_id
+            if self.current_generation_id:
+                for gen in self.generations:
+                    if gen.get('id') == self.current_generation_id:
+                        project_name = gen.get('project_name')
+                        logger.info(f"📊 project_name récupéré depuis generations: '{project_name}'")
+                        break
+        
+        self.current_project_name = project_name if project_name and project_name != 'None' else None
+        logger.info(f"✅ self.current_project_name défini: '{self.current_project_name}'")
+        
+        # Rendre le camembert
+        self._render_batch_chart()
+    
+    def _render_batch_chart(self):
+        """
+        Rend le camembert de progression selon le niveau hiérarchique actuel
         """
         self.batch_chart.removeAllSeries()
         self.batch_series = QPieSeries()
-        self.batch_series.setHoleSize(0.0)  # Camembert plein
-    
-        batch_progression = generation.get("batch_progression", [])
-    
-        if not batch_progression:
+        self.batch_series.setHoleSize(0.0)
+        
+        current_data = self.batch_progression_state.get_current_data()
+        
+        if not current_data:
             slice_default = self.batch_series.append("Aucune donnée", 1)
             slice_default.setColor(QColor("#E0E0E0"))
             slice_default.setBorderColor(Qt.transparent)
@@ -1357,62 +1524,281 @@ class DatasetHistoryWidget(QtWidgets.QWidget):
             self.batch_chart.addSeries(self.batch_series)
             self.batch_info.setText("Aucune donnée de batch")
             self.batch_chart.setTitle("Aucune donnée")
+            if hasattr(self, 'batch_back_btn'):
+                self.batch_back_btn.setEnabled(False)
             return
+
+        # Palette de couleurs (gris clair)
+        status_colors = {
+            'completed': ["#B0BEC5", "#CFD8DC"],  # Gris clair, gris très clair
+            'partial': ["#90A4AE", "#B0BEC5"],     # Gris moyen, gris clair
+            'pending': ["#757575", "#BDBDBD"]      # Gris foncé, gris clair
+        }
+        
+        if self.batch_progression_state.current_level == 0:
+            # Niveau 0: Afficher les familles
+            self._render_family_level(current_data, status_colors)
+        else:
+            # Niveau 1: Afficher les batches individuels
+            self._render_batch_level(current_data, status_colors)
+        
+        # Activer/désactiver le bouton retour
+        if hasattr(self, 'batch_back_btn'):
+            self.batch_back_btn.setEnabled(self.batch_progression_state.can_go_back())
     
-        # Calculer le total de combinaisons générées et restantes
-        total_expected = sum(b['expected'] for b in batch_progression)
-        total_generated = sum(b['generated'] for b in batch_progression)
-        total_remaining = total_expected - total_generated
-    
-        # Créer les deux parts principales
-        if total_generated > 0:
-            slice_generated = self.batch_series.append(
-                f"Générées ({total_generated})", 
-                total_generated
+    def _render_family_level(self, family_data, status_colors):
+        """Rend le camembert au niveau des familles"""
+        # Calculer le total pour les proportions
+        total_expected = sum(f['expected'] for f in family_data)
+        total_generated = sum(f['generated'] for f in family_data)
+
+        # Créer une part pour chaque famille
+        for idx, family_info in enumerate(family_data):
+            family_name = family_info['family_name']
+            generated = family_info['generated']
+            expected = family_info['expected']
+            percentage = family_info['percentage']
+            batch_count = family_info['batch_count']
+            completed = family_info['completed_batches']
+            status = family_info['status']
+            batch_numbers = family_info.get('batch_numbers', [])
+
+            # Choisir la couleur selon le statut
+            colors = status_colors.get(status, status_colors['pending'])
+            color = QColor(colors[idx % len(colors)])
+
+            # Valeur pour la part
+            slice_value = generated if generated > 0 else (expected * 0.05)
+
+            # Créer la part
+            slice_obj = self.batch_series.append(family_name, slice_value)
+
+            slice_obj.setColor(color)
+            slice_obj.setBorderColor(Qt.transparent)
+            slice_obj.setLabelVisible(True)
+            slice_obj.setLabelPosition(QPieSlice.LabelOutside)
+            slice_obj.setLabelArmLengthFactor(0.15)
+            slice_obj.setLabelColor(QColor("#1e293b"))
+            slice_obj.setLabelFont(QFont("Segoe UI", 8, QFont.Bold))
+
+            # Label avec informations détaillées
+            slice_obj.setLabel(
+                f"{family_name}\n"
+                f"{percentage:.0f}% ({generated}/{expected})\n"
+                f"{completed}/{batch_count} batches"
             )
-            slice_generated.setColor(QColor("#757575"))  # Gris foncé pour générées
-            slice_generated.setBorderColor(Qt.transparent)
-            slice_generated.setLabelVisible(True)
-            slice_generated.setLabelPosition(QPieSlice.LabelOutside)
-            slice_generated.setLabelArmLengthFactor(0.15)
-            slice_generated.setLabelColor(QColor("#1e293b"))
-            slice_generated.setLabelFont(QFont("Segoe UI", 9, QFont.Bold))
-            
-            percentage_generated = (total_generated / total_expected * 100) if total_expected > 0 else 0
-            slice_generated.setLabel(f"Générées\n{total_generated} ({percentage_generated:.1f}%)")
-            
-            # Effet de surbrillance
-            slice_generated.setExploded(True)
-            slice_generated.setExplodeDistanceFactor(0.05)
-    
-        if total_remaining > 0:
-            slice_remaining = self.batch_series.append(
-                f"Restantes ({total_remaining})", 
-                total_remaining
+
+            # Mettre en surbrillance les familles complétées
+            if status == 'completed':
+                slice_obj.setExploded(True)
+                slice_obj.setExplodeDistanceFactor(0.05)
+
+            # Effet au survol
+            slice_obj.hovered.connect(
+                lambda state, s=slice_obj: self._on_batch_slice_hovered(state, s)
             )
-            slice_remaining.setColor(QColor("#BDBDBD"))  # Gris clair pour restantes
-            slice_remaining.setBorderColor(Qt.transparent)
-            slice_remaining.setLabelVisible(True)
-            slice_remaining.setLabelPosition(QPieSlice.LabelOutside)
-            slice_remaining.setLabelArmLengthFactor(0.15)
-            slice_remaining.setLabelColor(QColor("#1e293b"))
-            slice_remaining.setLabelFont(QFont("Segoe UI", 9, QFont.Bold))
             
-            percentage_remaining = (total_remaining / total_expected * 100) if total_expected > 0 else 0
-            slice_remaining.setLabel(f"Restantes\n{total_remaining} ({percentage_remaining:.1f}%)")
-    
+            # Gestionnaire de clic pour naviguer vers les batches de la famille
+            slice_obj.clicked.connect(
+                lambda checked=False, fi=family_info: self._on_family_clicked(fi)
+            )
+
         self.batch_chart.addSeries(self.batch_series)
-        
+
+        # Calculer la progression globale
         overall_percentage = (total_generated / total_expected * 100) if total_expected > 0 else 0
-        self.batch_chart.setTitle(f"Progression Globale: {overall_percentage:.1f}%")
+
+        # Compter les familles par statut
+        completed_families = sum(1 for f in family_data if f['status'] == 'completed')
+        total_families = len(family_data)
+
+        # Titre avec fil d'Ariane
+        breadcrumb = self.batch_progression_state.get_breadcrumb()
+        self.batch_chart.setTitle(breadcrumb)
+
+        # Info détaillée par famille
+        family_details = []
+        for f in family_data:
+            status_icon = "✅" if f['status'] == 'completed' else "🔄" if f['status'] == 'partial' else "⏳"
+            family_details.append(
+                f"{f['family_name']}: {f['generated']}/{f['expected']} "
+                f"({f['completed_batches']}/{f['batch_count']}B) {status_icon}"
+            )
+
+        self.batch_info.setText(" | ".join(family_details) if family_details else "Aucune donnée")
+    
+    def _render_batch_level(self, batch_details, status_colors):
+        """Rend le camembert au niveau des batches individuels"""
+        from utils.logger import logger
         
+        logger.info(f"🎨 _render_batch_level: {len(batch_details)} batches à afficher")
+        
+        if not batch_details:
+            logger.warning("⚠️  batch_details est vide!")
+            return
+        
+        # Créer une part pour chaque batch
+        for idx, batch_info in enumerate(batch_details):
+            batch_number = batch_info['batch_number']
+            generated = batch_info['generated']
+            expected = batch_info['expected']
+            status = batch_info['status']
+            percentage = (generated / expected * 100) if expected > 0 else 0
+            
+            logger.info(f"  • Batch {batch_number}: {generated}/{expected} ({percentage:.0f}%) - {status}")
+
+            # Choisir la couleur selon le statut
+            colors = status_colors.get(status, status_colors['pending'])
+            color = QColor(colors[idx % len(colors)])
+
+            # Valeur pour la part
+            slice_value = generated if generated > 0 else (expected * 0.05)
+
+            # Créer la part
+            slice_obj = self.batch_series.append(f"Batch {batch_number}", slice_value)
+
+            slice_obj.setColor(color)
+            slice_obj.setBorderColor(Qt.transparent)
+            slice_obj.setLabelVisible(True)
+            slice_obj.setLabelPosition(QPieSlice.LabelOutside)
+            slice_obj.setLabelArmLengthFactor(0.15)
+            slice_obj.setLabelColor(QColor("#1e293b"))
+            slice_obj.setLabelFont(QFont("Segoe UI", 8, QFont.Bold))
+
+            # Label avec informations
+            status_icon = "✅" if status == 'completed' else "🔄" if status == 'partial' else "⏳"
+            slice_obj.setLabel(
+                f"Batch {batch_number}\n"
+                f"{percentage:.0f}% ({generated}/{expected})\n"
+                f"{status_icon}"
+            )
+
+            # Mettre en surbrillance les batches complétés
+            if status == 'completed':
+                slice_obj.setExploded(True)
+                slice_obj.setExplodeDistanceFactor(0.05)
+
+            # Effet au survol
+            slice_obj.hovered.connect(
+                lambda state, s=slice_obj: self._on_batch_slice_hovered(state, s)
+            )
+
+        self.batch_chart.addSeries(self.batch_series)
+
+        # Titre avec fil d'Ariane
+        breadcrumb = self.batch_progression_state.get_breadcrumb()
+        self.batch_chart.setTitle(breadcrumb)
+
         # Info détaillée par batch
-        batch_details = []
-        for b in batch_progression:
-            status_icon = "✓" if b['status'] == 'completed' else "⚠" if b['status'] == 'partial' else "⏳"
-            batch_details.append(f"B{b['batch_number']}: {b['generated']}/{b['expected']} {status_icon}")
+        batch_details_text = []
+        for b in batch_details:
+            status_icon = "✅" if b['status'] == 'completed' else "🔄" if b['status'] == 'partial' else "⏳"
+            percentage_text = f"{(b['generated']/b['expected']*100):.0f}%" if b['expected'] > 0 else "0%"
+            batch_details_text.append(
+                f"B{b['batch_number']}: {b['generated']}/{b['expected']} ({percentage_text}) {status_icon}"
+            )
+
+        self.batch_info.setText(" | ".join(batch_details_text) if batch_details_text else "Aucune donnée")
+
+    def _on_batch_slice_hovered(self, state, slice_obj):
+        """Gère le survol d'une part du camembert de batch"""
+        if state:
+            slice_obj.setExploded(True)
+            slice_obj.setExplodeDistanceFactor(0.08)
+        else:
+            # Ne remettre à zéro que si ce n'est pas une famille completed
+            if not slice_obj.isExploded() or slice_obj.explodeDistanceFactor() > 0.05:
+                slice_obj.setExplodeDistanceFactor(0.05)
+    
+    def _on_family_clicked(self, family_data):
+        """
+        Gère le clic sur une portion du camembert de progression
+        Navigue vers les détails des batches de la famille
+        """
+        from utils.logger import logger
         
-        self.batch_info.setText(" | ".join(batch_details) if batch_details else "Aucune donnée")
+        family_name = family_data['family_name']
+        batch_numbers = family_data.get('batch_numbers', [])
+        
+        logger.info(f"🔍 _on_family_clicked: famille='{family_name}', batch_numbers={batch_numbers}")
+        
+        if not batch_numbers:
+            logger.warning(f"⚠️  Aucun batch_numbers pour la famille '{family_name}'")
+            return
+        
+        # Récupérer les détails des batches de cette famille
+        batch_details = []
+        
+        logger.info(f"📊 current_project_name='{getattr(self, 'current_project_name', None)}'")
+        logger.info(f"📊 database={self.database}")
+        
+        if hasattr(self, 'current_project_name') and self.current_project_name and self.database:
+            logger.info(f"✅ Récupération des batches pour le projet '{self.current_project_name}'")
+            
+            all_batches = self.database.get_all_batches(self.current_project_name)
+            logger.info(f"📦 Nombre total de batches récupérés: {len(all_batches)}")
+            
+            all_project_gens = self.database.get_all_generations(project_name=self.current_project_name, limit=1000)
+            logger.info(f"📋 Nombre total de générations récupérées: {len(all_project_gens)}")
+            
+            # Filtrer les batches de cette famille
+            for batch in all_batches:
+                if batch['batch_number'] in batch_numbers:
+                    logger.info(f"  ✅ Batch {batch['batch_number']} trouvé dans la famille")
+                    
+                    batch_data = batch.get('data', {})
+                    combinations = batch_data.get('combinations', [])
+                    total_expected = sum(combo.get('nb_samples', 1) for combo in combinations)
+                    
+                    logger.info(f"    • Expected samples: {total_expected}")
+                    
+                    # Trouver la génération correspondante
+                    generated = 0
+                    gen_status = 'pending'
+                    for pg in all_project_gens:
+                        if pg.get('batch_number') == batch['batch_number'] and pg.get('status') == 'completed':
+                            generated = pg.get('total_samples', 0)
+                            gen_status = 'completed'
+                            logger.info(f"    • Génération completed trouvée: {generated} samples")
+                            break
+                    
+                    if generated == 0:
+                        # Vérifier s'il y a une génération en cours
+                        for pg in all_project_gens:
+                            if pg.get('batch_number') == batch['batch_number'] and pg.get('status') in ['running', 'partial']:
+                                generated = pg.get('total_samples', 0)
+                                gen_status = 'partial'
+                                logger.info(f"    • Génération partielle trouvée: {generated} samples")
+                                break
+                    
+                    batch_details.append({
+                        'batch_number': batch['batch_number'],
+                        'expected': total_expected,
+                        'generated': generated,
+                        'status': gen_status
+                    })
+            
+            # Trier par numéro de batch
+            batch_details.sort(key=lambda x: x['batch_number'])
+            logger.info(f"📊 Total batch_details créés: {len(batch_details)}")
+            for bd in batch_details:
+                logger.info(f"  • Batch {bd['batch_number']}: {bd['generated']}/{bd['expected']} ({bd['status']})")
+        else:
+            logger.error(f"❌ Impossible de récupérer les batches:")
+            logger.error(f"   • hasattr current_project_name: {hasattr(self, 'current_project_name')}")
+            logger.error(f"   • current_project_name: {getattr(self, 'current_project_name', 'NON DEFINI')}")
+            logger.error(f"   • database: {self.database}")
+        
+        logger.info(f"🔄 Navigation vers famille '{family_name}' avec {len(batch_details)} batches")
+        
+        # Naviguer vers le niveau des batches
+        self.batch_progression_state.navigate_to_family(family_name, batch_details)
+        self._render_batch_chart()
+    
+    def _on_batch_back(self):
+        """Retourne au niveau précédent (familles)"""
+        if self.batch_progression_state.navigate_back():
+            self._render_batch_chart()
 
     def _on_view_generation(self):
         """Affiche les détails complets"""

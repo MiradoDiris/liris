@@ -1,0 +1,550 @@
+{
+  "export_info": {
+    "exported_at": "2026-01-02T13:16:51.936251",
+    "purpose": "Vérification de la configuration de génération avant envoi à Gemini"
+  },
+  "metadata": {
+    "project_name": "Macompta.fr",
+    "batch_number": 3,
+    "batch_name": "Calcul de la TVA sur une facture",
+    "batch_family": "TVA",
+    "num_batches_to_process": 1,
+    "total_samples_per_batch": 210,
+    "total_samples_all_batches": 210,
+    "output_format": "JSONL"
+  },
+  "prompts": {
+    "global_context": null,
+    "structure_explanation": "Voici la description de contexte:\n    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,\n    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.\n    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.\n    Ta tâche est de générer un dataset complet comme si tu étais à la place de l'utilisateur :\n    Crée des inputs réalistes correspondant aux différents labels que tu reçois.\n    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).\n    Fournis également l'output correspondant à cet input selon la classification.\n    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l'output associé,\n    en respectant la structure hiérarchique des labels.\n    Classification de donnée d'un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,\n    de les trier et de les structurer correctement. Le dataset est pour fine tuner un agent qui s'appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable.",
+    "local_prompt": "Mets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes liés à la TVA collectée et à la TVA déductible, en te basant exclusivement sur les informations fournies, en formulant les inputs uniquement du point de vue de l’utilisateur, dans un langage naturel reflétant des situations concrètes, parfois imprécises ou hésitantes selon le niveau indiqué, sans inclure de réponse ou d’explication de l’IA et sans jamais sortir du contexte.",
+    "combined_prompt": "Voici la description de contexte:\n    Nous avons créé un environnement basé sur des arbres taxonomiques de clusters et de labels,\n    comprenant plusieurs niveaux hiérarchiques correspondant à la classification des données.\n    Chaque label représente une structure taxonomique, utilisée pour classifier les inputs des utilisateurs et produire les outputs associés.\n    Ta tâche est de générer un dataset complet comme si tu étais à la place de l'utilisateur :\n    Crée des inputs réalistes correspondant aux différents labels que tu reçois.\n    Fournis pour chaque input le label complet (tous les niveaux de la hiérarchie).\n    Fournis également l'output correspondant à cet input selon la classification.\n    Le résultat doit permettre de relier de manière cohérente chaque input utilisateur à son label et à l'output associé,\n    en respectant la structure hiérarchique des labels.\n    Classification de donnée d'un environnement de logiciel SaaS comptable. Le but est de déterminer toutes les typologies de contexte,\n    de les trier et de les structurer correctement. Le dataset est pour fine tuner un agent qui s'appelle Emma et qui connaît parfaitement la comptabilité et le logiciel comptable.\n\n---\n\nMets-toi à la place d’un utilisateur du logiciel macompta.fr et génère un ensemble d’inputs utilisateur réalistes liés à la TVA collectée et à la TVA déductible, en te basant exclusivement sur les informations fournies, en formulant les inputs uniquement du point de vue de l’utilisateur, dans un langage naturel reflétant des situations concrètes, parfois imprécises ou hésitantes selon le niveau indiqué, sans inclure de réponse ou d’explication de l’IA et sans jamais sortir du contexte."
+  },
+  "master_typologie": {
+    "name": "Intention",
+    "full_structure": {
+      "name": "Intention",
+      "description": "",
+      "taxonomy_clusters": [
+        {
+          "name": "Explications",
+          "description": "",
+          "root_labels": [
+            {
+              "name": "Hesitation",
+              "description": "",
+              "category": "default",
+              "parent_labels": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "combinations_details": [
+    {
+      "combination_index": 1,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Hesitation",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "parent",
+          "display": "UX/UI / Modules / Facturation / Factures",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "parent_labels": [
+                    {
+                      "name": "Factures",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Débutant",
+          "taxonomy_clusters": [
+            {
+              "name": "Débutant",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Prestation de services",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Prestation de services",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 2,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Hesitation",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Intermédiaire",
+          "taxonomy_clusters": [
+            {
+              "name": "Intermédiaire",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Prestation de services",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Prestation de services",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "UX/UI / Modules / Facturation / Factures",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "parent_labels": [
+                    {
+                      "name": "Factures",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 3,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Hesitation",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Débutant",
+          "taxonomy_clusters": [
+            {
+              "name": "Débutant",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "UX/UI / Modules / Facturation / Factures",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "parent_labels": [
+                    {
+                      "name": "Factures",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Prestation de services",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Prestation de services",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 4,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Hesitation",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Débutant",
+          "taxonomy_clusters": [
+            {
+              "name": "Débutant",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Micro Entrepreneur / Auto entrepreneur / Vente",
+          "taxonomy_clusters": [
+            {
+              "name": "Micro Entrepreneur",
+              "root_labels": [
+                {
+                  "name": "Auto entrepreneur",
+                  "parent_labels": [
+                    {
+                      "name": "Vente",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "UX/UI / Modules / Facturation / Factures",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "parent_labels": [
+                    {
+                      "name": "Factures",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 5,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Hesitation",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Débutant",
+          "taxonomy_clusters": [
+            {
+              "name": "Débutant",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer → Intermédiaire",
+          "taxonomy_clusters": [
+            {
+              "name": "Intermédiaire",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte → Artisan / Commerçant → Bénéfices Industriels et Commerciaux → Boulangerie, pâtisserie",
+          "taxonomy_clusters": [
+            {
+              "name": "Artisan / Commerçant",
+              "root_labels": [
+                {
+                  "name": "Bénéfices Industriels et Commerciaux",
+                  "parent_labels": [
+                    {
+                      "name": "Boulangerie, pâtisserie",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 6,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Hesitation",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "parent",
+          "display": "UX/UI / Modules / Facturation / Factures",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "parent_labels": [
+                    {
+                      "name": "Factures",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Intermédiaire",
+          "taxonomy_clusters": [
+            {
+              "name": "Intermédiaire",
+              "root_labels": []
+            }
+          ]
+        },
+        {
+          "level": "parent",
+          "display": "Compte / Société / Bénéfices Non Commerciaux / Avocat",
+          "taxonomy_clusters": [
+            {
+              "name": "Société",
+              "root_labels": [
+                {
+                  "name": "Bénéfices Non Commerciaux",
+                  "parent_labels": [
+                    {
+                      "name": "Avocat",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "combination_index": 7,
+      "nb_samples": 30,
+      "master": {
+        "name": "Intention",
+        "taxonomy_clusters": [
+          {
+            "name": "Explications",
+            "description": "",
+            "root_labels": [
+              {
+                "name": "Hesitation",
+                "description": "",
+                "category": "default",
+                "parent_labels": []
+              }
+            ]
+          }
+        ]
+      },
+      "contexts": [
+        {
+          "level": "parent",
+          "display": "UX/UI / Modules / Facturation / Factures",
+          "taxonomy_clusters": [
+            {
+              "name": "Modules",
+              "root_labels": [
+                {
+                  "name": "Facturation",
+                  "parent_labels": [
+                    {
+                      "name": "Factures",
+                      "description": "",
+                      "category": "default",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "level": "taxonomy",
+          "display": "Level Scorer / Avancé",
+          "taxonomy_clusters": [
+            {
+              "name": "Avancé",
+              "root_labels": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
