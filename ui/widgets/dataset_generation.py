@@ -3458,7 +3458,8 @@ class DatasetGenerationPanel(QWidget):
             generation_config["combinations"].append(combo_export)
     
         # 📝 EXPORTER LA CONFIGURATION COMPLÈTE
-        config_filepath = self._export_generation_config_to_file(generation_config)
+        #config_filepath = self._export_generation_config_to_file(generation_config)
+        config_filepath = None
         generation_id = self.database.save_generation_start(generation_config)
     
         if not generation_id:
@@ -3512,8 +3513,8 @@ class DatasetGenerationPanel(QWidget):
         msg += f"• <b>Total samples : {total_samples_all_batches}</b><br>"
         msg += f"• Format : {self.format_combo.currentText()}<br>"
         msg += f"• <b>🤖 Modèle IA : {ai_model_name}</b><br>"
-        if config_filepath:
-            msg += f"<br>📝 <b>Config exportée :</b><br><small>{config_filepath}</small><br>"
+        #if config_filepath:
+        #    msg += f"<br>📝 <b>Config exportée :</b><br><small>{config_filepath}</small><br>"
         msg += f"<br><b>Lancer la génération ?</b>"
     
         reply = QMessageBox.question(
