@@ -309,6 +309,76 @@ class GeminiDatasetWorker(QThread):
         
         return batch_results
     
+    def _validate_sample(self, sample: Dict[str, Any]) -> bool:
+        """
+        ✅ NOUVELLE MÉTHODE : Valide un sample avant de l'accepter
+        Vérifie format, longueur, présence des champs requis
+        """
+        try:
+            # 1. Vérifier que c'est un dictionnaire
+            if not isinstance(sample, dict):
+                self._log("debug", "      ❌ Sample n'est pas un dict")
+                return False
+            
+            # 2. Vérifier présence des champs obligatoires
+            required_fields = ['input', 'output']
+            for field in required_fields:
+                if field not in sample:
+                    self._log("debug", f"      ❌ Champ manquant : {field}")
+                    return False
+                
+                # Vérifier que les champs ne sont pas vides
+                value = sample.get(field, '').strip()
+                if not value:
+                    self._log("debug", f"      ❌ Champ vide : {field}")
+                    return False
+            
+            # 3. Vérifier longueur input (5-20 mots)
+            input_text = sample.get('input', '')
+            input_words = len(input_text.split())
+            if input_words < 5 or input_words > 30:
+                self._log("debug", f"      ❌ Input hors limites : {input_words} mots (attendu : 5-30)")
+                return False
+            
+            # 4. Vérifier longueur output (10-30 mots)
+            output_text = sample.get('output', '')
+            output_words = len(output_text.split())
+            if output_words < 5 or output_words > 50:
+                self._log("debug", f"      ❌ Output hors limites : {output_words} mots (attendu : 5-50)")
+                return False
+            
+            # 5. Vérifier qu'il n'y a pas de termes interdits (taxonomie exposée)
+            forbidden_terms = [
+                'cluster', 'label', 'typologie', 'taxonomie', 
+                'contexte', 'root', 'parent', 'enfant',
+                'taxonomy', 'hierarchy'
+            ]
+            
+            combined_text = (input_text + ' ' + output_text).lower()
+            for term in forbidden_terms:
+                if term in combined_text:
+                    self._log("debug", f"      ❌ Terme interdit détecté : {term}")
+                    return False
+            
+            # 6. Vérifier pas de symboles de navigation
+            forbidden_symbols = ['>', '/', '→', '::', '--']
+            for symbol in forbidden_symbols:
+                if symbol in input_text or symbol in output_text:
+                    self._log("debug", f"      ❌ Symbole interdit : {symbol}")
+                    return False
+            
+            # 7. Vérifier que ce sont des phrases complètes (pas télégraphiques)
+            if not input_text[0].isupper() or not output_text[0].isupper():
+                self._log("debug", f"      ❌ Phrase ne commence pas par une majuscule")
+                return False
+            
+            # ✅ TOUTES LES VALIDATIONS PASSÉES
+            return True
+            
+        except Exception as e:
+            self._log("debug", f"      ❌ Erreur validation : {str(e)}")
+            return False
+    
     def _generate_combination(
         self, 
         combination: Dict[str, Any], 
@@ -316,76 +386,126 @@ class GeminiDatasetWorker(QThread):
         batch_number: int
     ) -> List[Dict[str, Any]]:
         """
-        Génère les échantillons pour UNE combinaison spécifique
+        ✅ VERSION AMÉLIORÉE : Continue jusqu'à obtenir le nombre exact de samples
+        Gère les rejets et continue la génération si nécessaire
         """
         samples = []
-        nb_samples = combination.get('nb_samples', 1)
-    
-        self._log("info", f"   🎯 Génération de {nb_samples} sample(s)...")
-    
+        nb_samples_requested = combination.get('nb_samples', 1)
+
+        self._log("info", f"   🎯 Génération de {nb_samples_requested} sample(s)...")
+
         # Construire le contexte EXACT de cette combinaison
         context = self._build_context(combination)
-    
-        # Construire le prompt
-        final_prompt = self._build_flexible_prompt(context, nb_samples)
-    
-        # 📝 LOGGER LE PROMPT DANS UN FICHIER
-        self._log_prompt_to_file(final_prompt, combination, combo_idx, batch_number)
-    
-        try:
-            generated_data = self._call_gemini_api(final_prompt, nb_samples)
-    
-            if generated_data:
-                for idx, sample in enumerate(generated_data):
-                    self.global_sample_counter += 1
-    
-                    if 'combinaisons' in sample and sample['combinaisons']:
-                        combinaisons = sample['combinaisons']
-                        self._log("debug", f"      ✅ Sample #{self.global_sample_counter}: format 'combinaisons' détecté")
-                    else:
-                        self._log("debug", f"      ⚠️ Sample #{self.global_sample_counter}: format legacy, reconstruction...")
-                        combinaisons = self._build_combinaisons_from_sample(sample, combination)
-    
-                    enriched_sample = {
-                        'sample_id': self.global_sample_counter,
-                        'input': sample.get('input', ''),
-                        'combinaisons': combinaisons,
-                        'output': sample.get('output', ''),
-                        'metadata': {
-                            'project_name': self.project_name,
-                            'batch_number': batch_number,
-                            'batch_name': self.batch_name,
-                            'batch_family': self.batch_family,
-                            'combination_index': combo_idx + 1,
-                            'local_sample_index': idx + 1,
-                            'generated_at': datetime.now().isoformat(),
-                            'model': self.model_name,
-                            'master': combination['master']['name'],
-                            'contexts': [ctx['display'] for ctx in combination['contexts']],
-                            'purpose': 'conversational_ai_training',
-                            'output_format': self.output_format
+
+        # ⭐ NOUVELLE LOGIQUE : Boucle jusqu'à obtenir le bon nombre
+        max_attempts = 5  # Limite pour éviter les boucles infinies
+        attempt = 0
+
+        while len(samples) < nb_samples_requested and attempt < max_attempts:
+            attempt += 1
+
+            # Calculer combien il reste à générer
+            remaining = nb_samples_requested - len(samples)
+
+            if attempt > 1:
+                self._log("warning", f"   🔄 Tentative {attempt}/{max_attempts} : il manque {remaining} sample(s)")
+
+            # Construire le prompt pour le nombre restant
+            final_prompt = self._build_flexible_prompt(context, remaining)
+
+            # 📝 Logger le prompt
+            self._log_prompt_to_file(final_prompt, combination, combo_idx, batch_number, attempt)
+
+            try:
+                # 🔥 APPEL API (Gemini ou OSS selon le worker)
+                if hasattr(self, '_call_gemini_api'):
+                    # Worker Gemini
+                    generated_data = self._call_gemini_api(final_prompt, remaining)
+                else:
+                    # Worker OSS
+                    generated_data = self._call_oss_api(final_prompt, remaining)
+
+                if generated_data:
+                    # Compteurs pour diagnostics
+                    valid_count = 0
+                    rejected_count = 0
+
+                    for idx, sample in enumerate(generated_data):
+                        # ✅ VALIDATION DU SAMPLE
+                        if not self._validate_sample(sample):
+                            rejected_count += 1
+                            self._log("warning", f"      ⚠️ Sample rejeté (validation échouée)")
+                            continue
+                        
+                        valid_count += 1
+                        self.global_sample_counter += 1
+
+                        # Gérer combinaisons
+                        if 'combinaisons' in sample and sample['combinaisons']:
+                            combinaisons = sample['combinaisons']
+                            self._log("debug", f"      ✅ Sample #{self.global_sample_counter}: format 'combinaisons' détecté")
+                        else:
+                            self._log("debug", f"      ⚠️ Sample #{self.global_sample_counter}: format legacy, reconstruction...")
+                            combinaisons = self._build_combinaisons_from_sample(sample, combination)
+
+                        # Enrichir le sample
+                        enriched_sample = {
+                            'sample_id': self.global_sample_counter,
+                            'input': sample.get('input', ''),
+                            'combinaisons': combinaisons,
+                            'output': sample.get('output', ''),
+                            'metadata': {
+                                'project_name': self.project_name,
+                                'batch_number': batch_number,
+                                'batch_name': self.batch_name,
+                                'batch_family': self.batch_family,
+                                'combination_index': combo_idx + 1,
+                                'local_sample_index': len(samples) + 1,
+                                'generated_at': datetime.now().isoformat(),
+                                'model': self.model_name if hasattr(self, 'model_name') else 'OSS Local Model',
+                                'master': combination['master']['name'],
+                                'contexts': [ctx['display'] for ctx in combination['contexts']],
+                                'purpose': 'conversational_ai_training',
+                                'output_format': self.output_format,
+                                'generation_attempt': attempt
+                            }
                         }
-                    }
-    
-                    samples.append(enriched_sample)
-    
-                self._log("info", f"   ✅ {len(samples)} sample(s) générés et acceptés")
-            else:
-                self._log("warning", f"   ⚠️ Aucun sample généré")
-    
-        except Exception as e:
-            self._log("error", f"   ❌ Erreur: {str(e)}")
-            import traceback
-            self._log("error", traceback.format_exc())
-    
+
+                        samples.append(enriched_sample)
+
+                        # ✅ Si on a atteint l'objectif, arrêter immédiatement
+                        if len(samples) >= nb_samples_requested:
+                            break
+                        
+                    # 📊 Rapport de cette tentative
+                    self._log("info", f"   📊 Tentative {attempt} : {valid_count} acceptés, {rejected_count} rejetés")
+
+                    if len(samples) >= nb_samples_requested:
+                        self._log("info", f"   ✅ Objectif atteint : {len(samples)}/{nb_samples_requested} samples")
+                        break
+                else:
+                    self._log("warning", f"   ⚠️ Aucun sample généré lors de la tentative {attempt}")
+
+            except Exception as e:
+                self._log("error", f"   ❌ Erreur tentative {attempt}: {str(e)}")
+                import traceback
+                self._log("error", traceback.format_exc())
+
+        # 📊 RAPPORT FINAL
+        if len(samples) < nb_samples_requested:
+            self._log("error", f"   ❌ INCOMPLET : {len(samples)}/{nb_samples_requested} samples après {attempt} tentative(s)")
+            self._log("error", f"      Taux de réussite : {len(samples)*100//nb_samples_requested}%")
+        else:
+            self._log("info", f"   ✅ COMPLET : {len(samples)}/{nb_samples_requested} samples générés")
+
         # Mise à jour progression
-        current = (combo_idx * nb_samples) + len(samples)
+        current = (combo_idx * nb_samples_requested) + len(samples)
         self.progress_updated.emit(
             current,
             self.total_samples_per_batch,
             f"Combinaison {combo_idx + 1}/{len(self.combinations)}"
         )
-    
+
         return samples
     
     def _build_combinaisons_from_sample(
@@ -487,7 +607,8 @@ class GeminiDatasetWorker(QThread):
 
     def _build_flexible_prompt(self, context: Dict[str, Any], nb_samples: int) -> str:
         """
-        ⭐ PROMPT FLEXIBLE : Génération libre basée sur la taxonomie fournie
+        ⭐ PROMPT OPTIMISÉ : Génération conversationnelle naturelle
+        Focus sur des dialogues humains réalistes sans exposer la taxonomie
         """
         master_name = context['master_name']
         master_data = context['master_typologie']
@@ -498,7 +619,6 @@ class GeminiDatasetWorker(QThread):
 
         if not master_data.get('taxonomy_clusters'):
             self._log("error", f"❌ taxonomy_clusters MANQUANT dans master_data !")
-            self._log("error", f"   Keys disponibles : {list(master_data.keys())}")
             raise ValueError("taxonomy_clusters manquant dans master_data")
 
         clusters = master_data['taxonomy_clusters']
@@ -508,139 +628,196 @@ class GeminiDatasetWorker(QThread):
         global_context = prompts.get('global_context', '')
         local_prompt = prompts.get('local_prompt', '')
 
+        # Validation master
         if not master_data or not master_data.get('taxonomy_clusters'):
             self._log("error", f"⚠️ ATTENTION : Typologie master '{master_name}' VIDE ou SANS clusters !")
-            self._log("error", f"   master_data keys: {master_data.keys() if master_data else 'NONE'}")
-
             if 'master_typologie' in self.generation_config:
                 fallback_master = self.generation_config['master_typologie'].get('full_data', {})
                 if fallback_master and fallback_master.get('taxonomy_clusters'):
                     self._log("warning", "   🔄 Utilisation des données master depuis generation_config")
                     master_data = fallback_master
                 else:
-                    self._log("error", "   ❌ Impossible de récupérer la structure master !")
                     raise ValueError(f"Structure master invalide pour '{master_name}' - Génération impossible.")
         else:
             clusters_count = len(master_data.get('taxonomy_clusters', []))
             self._log("info", f"   ✅ Typologie master '{master_name}' : {clusters_count} cluster(s)")
 
-            if clusters_count > 0:
-                first_cluster = master_data['taxonomy_clusters'][0]
-                cluster_name = first_cluster.get('cluster_name') or first_cluster.get('name', 'MISSING')
-                if cluster_name == 'MISSING':
-                    self._log("error", f"   ❌ Premier cluster sans 'name' dans master: {first_cluster.keys()}")
-                else:
-                    self._log("debug", f"   Premier cluster: '{cluster_name}'")
-
+        # Formater les taxonomies pour l'IA (usage interne uniquement)
         master_section = self._format_typologie_detailed(master_data, f"TYPOLOGIE MASTER : {master_name}")
-
-        if "📦 CLUSTER" not in master_section:
-            self._log("error", f"❌ master_section ne contient AUCUN cluster !")
-            self._log("error", f"   Longueur : {len(master_section)} caractères")
-            self._log("error", f"   Extrait : {master_section[:500]}")
-            raise ValueError("master_section invalide - aucun cluster formaté")
-
-        cluster_count = master_section.count("📦 CLUSTER")
-        self._log("debug", f"   ✅ master_section contient {cluster_count} cluster(s) formatés")
 
         context_sections = []
         for idx, ctx in enumerate(contexts):
             ctx_section = f"\n### CONTEXTE {idx + 1} ({ctx['level']}): {ctx['display']}\n"
             ctx_data = ctx.get('full_data', {})
-
             if not ctx_data or not ctx_data.get('taxonomy_clusters'):
                 self._log("warning", f"   ⚠️ Contexte {idx+1} '{ctx['display']}' VIDE ou SANS clusters")
             else:
                 ctx_clusters = len(ctx_data.get('taxonomy_clusters', []))
                 self._log("debug", f"   ✅ Contexte {idx+1} '{ctx['display']}' : {ctx_clusters} cluster(s)")
-
             ctx_section += self._format_typologie_detailed(ctx_data, "Typologie du contexte")
             context_sections.append(ctx_section)
 
-        exemple_structure = self._extract_structure_examples(master_data, contexts)
+        prompt = f"""# 🤖 GÉNÉRATION DE DATASET CONVERSATIONNEL NATUREL
 
-        prompt = f"""# 🤖 GÉNÉRATION DE DATASET POUR IA CONVERSATIONNELLE  
-NB: La combinaison doit etre entre de typologie de contexte minimum, 1 master avec 1 ou plusieurs autre contextes
+    ## 📚 CONTEXTE DE LA TAXONOMIE (USAGE INTERNE UNIQUEMENT - NE PAS MENTIONNER DANS LES RÉPONSES)
 
-## 📚 TAXONOMIE DE RÉFÉRENCE
+    {master_section}
 
-{master_section}
+    ### CONTEXTES SPÉCIFIQUES
+    {''.join(context_sections)}
 
-### CONTEXTES SPÉCIFIQUES
-{''.join(context_sections)}
+    ## 🎯 OBJECTIF DE GÉNÉRATION
 
-## 📋 FORMAT DE SORTIE OBLIGATOIRE
+    Vous devez créer des conversations **NATURELLES** entre un utilisateur humain et un assistant IA.
 
-⚠️ **IMPORTANT** : Vous DEVEZ générer UNIQUEMENT du JSON pur, sans texte avant/après.
+    **IMPORTANT** : Les utilisateurs NE CONNAISSENT PAS la taxonomie ci-dessus. Ils posent des questions de manière spontanée, avec leurs propres mots, sans jamais mentionner les clusters, labels ou typologies.
 
-Chaque échantillon doit suivre cette structure JSON **EXACTEMENT** :
+    ## 📋 FORMAT DE SORTIE OBLIGATOIRE
 
-```json
-{{
-  "sample_id": <numéro>,
-  "input": "<question_utilisateur_naturelle>",
-  "combinaisons": [
+    ⚠️ **CRITIQUE** : Générez UNIQUEMENT du JSON pur, sans texte avant/après.
+
+    Structure JSON attendue pour chaque échantillon :
+    ```json
     {{
-      "typologie_de_contexte": "<typologie_depuis_taxonomie>",
-      "cluster": "<cluster_depuis_taxonomie>",
-      "label": "<label_hiérarchique_SANS_le_cluster>"
+      "input": "<question_ou_demande_utilisateur>",
+      "output": "<réponse_assistant>"
     }}
-  ],
-  "output": "<réponse_chatbot_actionnable>"
-}}
-```
+    ```
 
-{exemple_structure}
+    ## 📖 RÈGLES DE GÉNÉRATION CONVERSATIONNELLE
 
-📋 INSTRUCTIONS UTILISATEUR
-Contexte Global du Projet :
-{global_context if global_context else "(Aucun contexte global défini)"}
-Instructions Spécifiques pour ce Batch :
-{local_prompt}
+    ### 🗣️ POUR L'INPUT (Question/Demande utilisateur)
 
-🎯 GÉNÉRATION
-⚠️ CONTRAINTE CRITIQUE : Générez EXACTEMENT {nb_samples} échantillon(s), ni plus ni moins.
-Retournez UNIQUEMENT un array JSON contenant EXACTEMENT {nb_samples} objet(s) :
-[
-  {{
-    "sample_id": 1,
-    "input": "...",
-    "combinaisons": [
+    1. **Langage naturel spontané** : L'utilisateur s'exprime comme dans une vraie conversation
+       - ✅ BON : "Comment je peux suivre mes dépenses facilement ?"
+       - ✅ BON : "J'aimerais savoir où créer une nouvelle facture"
+       - ❌ MAUVAIS : "Afficher suivi dépenses" (trop robotique)
+       - ❌ MAUVAIS : "Créer facture" (trop court, pas naturel)
+
+    2. **Questions complètes et contextualisées**
+       - ✅ BON : "J'ai besoin d'aide pour créer ma première facture, comment faire ?"
+       - ✅ BON : "Où est-ce que je peux voir l'historique de mes paiements ?"
+       - ❌ MAUVAIS : "Créer facture" (pas une vraie question)
+       - ❌ MAUVAIS : "Historique" (incomplet)
+
+    3. **Variété de formulations naturelles**
+       - Questions directes : "Où est-ce que je peux..."
+       - Demandes polies : "Pourriez-vous m'expliquer..."
+       - Expressions d'incertitude : "Je ne sais pas comment..."
+       - Problèmes exprimés : "J'ai du mal à..."
+       - Demandes d'aide : "Comment faire pour..."
+
+    4. **Longueur** : Entre 5 et 20 mots (phrases complètes et naturelles)
+
+    5. **Ton humain** : Avec hésitations, politesse, formulations variées comme dans une vraie conversation
+
+    ### 💬 POUR L'OUTPUT (Réponse assistant)
+
+    1. **Réponses DIRECTES et ACTIONNABLES**
+       - ✅ BON : "Pour suivre vos dépenses, allez dans le menu Comptabilité puis cliquez sur Tableau de bord."
+       - ✅ BON : "Vous pouvez voir l'historique des paiements dans l'onglet Transactions."
+       - ❌ MAUVAIS : "Comptabilité > Tableau de bord > Suivi des dépenses" (pas une phrase)
+       - ❌ MAUVAIS : "Menu Comptabilité" (incomplet, télégraphique)
+
+    2. **Phrases complètes et grammaticales**
+       - ✅ BON : "Vous pouvez créer une facture en cliquant sur le bouton Nouveau en haut à droite."
+       - ✅ BON : "Pour ajouter un client, rendez-vous dans la section Clients et cliquez sur Ajouter."
+       - ❌ MAUVAIS : "Cliquer Nouveau bouton" (télégraphique, pas de sujet)
+       - ❌ MAUVAIS : "Section Clients > Ajouter" (pas une phrase)
+
+    3. **Style conversationnel professionnel**
+       - Utiliser "vous" pour s'adresser à l'utilisateur
+       - Verbes conjugués correctement (pas d'infinitif seul)
+       - Instructions claires et précises
+       - Ton aidant et bienveillant
+
+    4. **Longueur** : Entre 10 et 30 mots (suffisamment détaillé sans être verbeux)
+
+    5. **Aucune mention de la taxonomie** : Ne JAMAIS révéler les noms techniques (clusters, labels, typologies, etc.)
+
+    ## ❌ INTERDICTIONS ABSOLUES
+
+    **Ces règles sont NON-NÉGOCIABLES :**
+
+    1. ❌ **NE JAMAIS** inclure les mots : "cluster", "label", "typologie", "taxonomie", "contexte", "root", "parent", "enfant" ou tout terme technique
+    2. ❌ **NE JAMAIS** générer de phrases incomplètes ou télégraphiques
+    3. ❌ **NE JAMAIS** utiliser les symboles ">", "/", "-", "→" pour séparer des concepts
+    4. ❌ **NE JAMAIS** générer de formules mathématiques, code ou expressions techniques
+    5. ❌ **NE JAMAIS** dépasser 30 mots par input ou output
+    6. ❌ **NE JAMAIS** utiliser ":" ou "..." dans les réponses
+    7. ❌ **NE JAMAIS** utiliser d'abréviations techniques ou jargon
+    8. ❌ **NE JAMAIS** mentionner la structure interne du système
+
+    ## 📋 INSTRUCTIONS UTILISATEUR
+
+    Contexte Global du Projet :
+    {global_context if global_context else "(Aucun contexte global défini)"}
+
+    Instructions Spécifiques pour ce Batch :
+    {local_prompt}
+
+    ## 🎯 GÉNÉRATION
+
+    ⚠️ **CONTRAINTE CRITIQUE** : Générez EXACTEMENT {nb_samples} échantillon(s), ni plus ni moins.
+
+    Retournez UNIQUEMENT un array JSON (pas de texte explicatif avant ou après) :
+    ```json
+    [
       {{
-        "typologie_de_contexte": "...",
-        "cluster": "...",
-        "label": "..."
+        "input": "Comment je peux ajouter un nouveau client dans le système ?",
+        "output": "Pour ajouter un client, cliquez sur Clients dans le menu principal puis sur le bouton Nouveau client."
+      }},
+      {{
+        "input": "J'aimerais savoir où voir mes factures impayées",
+        "output": "Vos factures impayées sont visibles dans l'onglet Factures en utilisant le filtre Impayées."
       }}
-    ],
-    "output": "..."
-  }}
-]
+    ]
+    ```
 
-⚠️ RÈGLES STRICTES ET NON NÉGOCIABLES :
+    ## ✅ CHECKLIST FINALE AVANT GÉNÉRATION
 
-1-Générer EXACTEMENT {nb_samples} échantillon(s).
-2-Générer UNIQUEMENT en langue française.
-3-Chaque input doit être une question humaine, naturelle et complète, avec au minimum un sujet et un verbe.
-4-Chaque output doit être une réponse courte, claire et grammaticale, avec sujet + verbe, jamais télégraphique.
-5-Interdiction absolue de réponses robotiques, mathématiques brutes ou phrases incomplètes.
-6-Aucun input ni output ne doit dépasser 10 mots.
-7-Interdiction d’utiliser :
-8-Deux points :
-  Points de suspension
-  Abréviations techniques ou formules sèches
-9-Le champ cluster doit contenir uniquement le nom exact du 📦 CLUSTER, jamais le mot “Cluster”.
-10-Le champ label ne doit jamais contenir le nom du cluster.
-11-Les inputs doivent exprimer une intention réaliste d’utilisateur humain, avec hésitation, question ou besoin clair.
-12-Les outputs doivent répondre directement à la question, sans explication supplémentaire.
-13-Ne produire AUCUN texte avant ou après la réponse.
-14-Ne pas utiliser de balises markdown.
-15-Retourner uniquement un array JSON valide, commençant immédiatement par [.
+    **Vérifiez CHAQUE sample avant de le générer :**
 
-🔒 CONTRAINTE QUALITATIVE OBLIGATOIRE
-Si une phrase semble artificielle, mécanique ou incomplète, elle est considérée comme invalide et doit être reformulée avant génération.
+    - [ ] L'input est une question/demande complète et naturelle (comme un humain parlerait)
+    - [ ] L'input fait entre 5-20 mots
+    - [ ] L'output est une réponse complète avec sujet + verbe (phrase grammaticale)
+    - [ ] L'output fait entre 10-30 mots
+    - [ ] Aucune mention de termes techniques (cluster, label, typologie, etc.)
+    - [ ] Pas de format télégraphique ou de symboles de navigation (>, /, -)
+    - [ ] Pas de formules, code, abréviations ou jargon technique
+    - [ ] Langage français correct et professionnel
+    - [ ] La conversation semble naturelle et réaliste
+    - [ ] L'utilisateur ne "sait pas" qu'il y a une taxonomie derrière
 
-COMMENCEZ MAINTENANT.
-"""
+    ## 🎬 EXEMPLES DE BONNES CONVERSATIONS
+
+    **Exemple 1 :**
+    ```json
+    {{
+      "input": "Comment je fais pour envoyer une facture à un client ?",
+      "output": "Pour envoyer une facture, ouvrez-la puis cliquez sur le bouton Envoyer par email en haut."
+    }}
+    ```
+
+    **Exemple 2 :**
+    ```json
+    {{
+      "input": "Où est-ce que je peux voir le total de mes ventes du mois ?",
+      "output": "Le total de vos ventes mensuelles est disponible dans Tableau de bord sous Chiffre d'affaires."
+    }}
+    ```
+
+    **Exemple 3 :**
+    ```json
+    {{
+      "input": "J'aimerais modifier les informations d'un client existant",
+      "output": "Pour modifier un client, allez dans Clients, sélectionnez le client concerné puis cliquez sur Modifier."
+    }}
+    ```
+
+    **COMMENCEZ MAINTENANT LA GÉNÉRATION DE {nb_samples} ÉCHANTILLON(S).**
+    **RETOURNEZ UNIQUEMENT LE JSON, SANS AUCUN TEXTE AVANT OU APRÈS.**
+    """
         return prompt
     
     def _format_typologie_detailed(self, typologie_data: Dict[str, Any], title: str) -> str:
