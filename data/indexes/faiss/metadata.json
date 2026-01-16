@@ -1,0 +1,6924 @@
+[
+  {
+    "id": "typo_0x2",
+    "uid": "0x2",
+    "name": "Intention",
+    "domain": "Macompta.fr",
+    "type": "typologie",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x2",
+      "createdAt": "2026-01-10T01:00:40.637657Z",
+      "updatedAt": "2026-01-10T01:00:40.637675Z"
+    }
+  },
+  {
+    "id": "cluster_0x3",
+    "uid": "0x3",
+    "name": "Explications",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x3",
+      "typologie": "Intention",
+      "createdAt": "2026-01-10T01:00:41.503105Z",
+      "updatedAt": "2026-01-10T01:00:41.503117Z"
+    }
+  },
+  {
+    "id": "root_0x4",
+    "uid": "0x4",
+    "name": "Question",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x4",
+      "typologie": "Intention",
+      "cluster": "Explications",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:42.233248Z",
+      "updatedAt": "2026-01-10T01:00:42.233264Z"
+    }
+  },
+  {
+    "id": "root_0x5",
+    "uid": "0x5",
+    "name": "Supposition",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x5",
+      "typologie": "Intention",
+      "cluster": "Explications",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:42.988131Z",
+      "updatedAt": "2026-01-10T01:00:42.98815Z"
+    }
+  },
+  {
+    "id": "root_0x6",
+    "uid": "0x6",
+    "name": "Hesitation",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x6",
+      "typologie": "Intention",
+      "cluster": "Explications",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:43.716645Z",
+      "updatedAt": "2026-01-10T01:00:43.71666Z"
+    }
+  },
+  {
+    "id": "root_0x7",
+    "uid": "0x7",
+    "name": "Incomprehension",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x7",
+      "typologie": "Intention",
+      "cluster": "Explications",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:44.459308Z",
+      "updatedAt": "2026-01-10T01:00:44.459313Z"
+    }
+  },
+  {
+    "id": "root_0x8",
+    "uid": "0x8",
+    "name": "Confusion",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x8",
+      "typologie": "Intention",
+      "cluster": "Explications",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:45.132831Z",
+      "updatedAt": "2026-01-10T01:00:45.13284Z"
+    }
+  },
+  {
+    "id": "cluster_0x9",
+    "uid": "0x9",
+    "name": "Action",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x9",
+      "typologie": "Intention",
+      "createdAt": "2026-01-10T01:00:45.820402Z",
+      "updatedAt": "2026-01-10T01:00:45.820419Z"
+    }
+  },
+  {
+    "id": "root_0xa",
+    "uid": "0xa",
+    "name": "Configuration",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa",
+      "typologie": "Intention",
+      "cluster": "Action",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:46.500972Z",
+      "updatedAt": "2026-01-10T01:00:46.500987Z"
+    }
+  },
+  {
+    "id": "root_0xb",
+    "uid": "0xb",
+    "name": "Synchronisation",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb",
+      "typologie": "Intention",
+      "cluster": "Action",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:47.171007Z",
+      "updatedAt": "2026-01-10T01:00:47.171027Z"
+    }
+  },
+  {
+    "id": "root_0xc",
+    "uid": "0xc",
+    "name": "Création",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc",
+      "typologie": "Intention",
+      "cluster": "Action",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:47.889958Z",
+      "updatedAt": "2026-01-10T01:00:47.889972Z"
+    }
+  },
+  {
+    "id": "child_0xd",
+    "uid": "0xd",
+    "name": "Documents de vente",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd",
+      "typologie": "Intention",
+      "cluster": "Action",
+      "root": "Création",
+      "path": [
+        "Documents de vente"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xe",
+    "uid": "0xe",
+    "name": "Écritures comptables",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe",
+      "typologie": "Intention",
+      "cluster": "Action",
+      "root": "Création",
+      "path": [
+        "Écritures comptables"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0xf",
+    "uid": "0xf",
+    "name": "Déclarations & Obligations légales",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf",
+      "typologie": "Intention",
+      "cluster": "Action",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:49.995273Z",
+      "updatedAt": "2026-01-10T01:00:49.995278Z"
+    }
+  },
+  {
+    "id": "root_0x10",
+    "uid": "0x10",
+    "name": "Reporting",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x10",
+      "typologie": "Intention",
+      "cluster": "Action",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:50.683459Z",
+      "updatedAt": "2026-01-10T01:00:50.683465Z"
+    }
+  },
+  {
+    "id": "root_0x11",
+    "uid": "0x11",
+    "name": "Envoi / Diffusion",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x11",
+      "typologie": "Intention",
+      "cluster": "Action",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:51.347677Z",
+      "updatedAt": "2026-01-10T01:00:51.347707Z"
+    }
+  },
+  {
+    "id": "root_0x12",
+    "uid": "0x12",
+    "name": "Enregistrement",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x12",
+      "typologie": "Intention",
+      "cluster": "Action",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:52.028972Z",
+      "updatedAt": "2026-01-10T01:00:52.028988Z"
+    }
+  },
+  {
+    "id": "typo_0x13",
+    "uid": "0x13",
+    "name": "UX/UI",
+    "domain": "Macompta.fr",
+    "type": "typologie",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x13",
+      "createdAt": "2026-01-10T01:00:52.705301Z",
+      "updatedAt": "2026-01-10T01:00:52.705325Z"
+    }
+  },
+  {
+    "id": "cluster_0x14",
+    "uid": "0x14",
+    "name": "Tableau de bord",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x14",
+      "typologie": "UX/UI",
+      "createdAt": "2026-01-10T01:00:53.395139Z",
+      "updatedAt": "2026-01-10T01:00:53.395146Z"
+    }
+  },
+  {
+    "id": "root_0x15",
+    "uid": "0x15",
+    "name": "Trésorerie",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x15",
+      "typologie": "UX/UI",
+      "cluster": "Tableau de bord",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:54.140272Z",
+      "updatedAt": "2026-01-10T01:00:54.14029Z"
+    }
+  },
+  {
+    "id": "root_0x16",
+    "uid": "0x16",
+    "name": "Résultat",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x16",
+      "typologie": "UX/UI",
+      "cluster": "Tableau de bord",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:54.895232Z",
+      "updatedAt": "2026-01-10T01:00:54.895247Z"
+    }
+  },
+  {
+    "id": "root_0x17",
+    "uid": "0x17",
+    "name": "Analyse des charges",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x17",
+      "typologie": "UX/UI",
+      "cluster": "Tableau de bord",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:55.585254Z",
+      "updatedAt": "2026-01-10T01:00:55.585269Z"
+    }
+  },
+  {
+    "id": "root_0x18",
+    "uid": "0x18",
+    "name": "Chiffre d'affaires",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x18",
+      "typologie": "UX/UI",
+      "cluster": "Tableau de bord",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:56.261699Z",
+      "updatedAt": "2026-01-10T01:00:56.261715Z"
+    }
+  },
+  {
+    "id": "root_0x19",
+    "uid": "0x19",
+    "name": "Échéancier",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x19",
+      "typologie": "UX/UI",
+      "cluster": "Tableau de bord",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:56.926307Z",
+      "updatedAt": "2026-01-10T01:00:56.926323Z"
+    }
+  },
+  {
+    "id": "cluster_0x1a",
+    "uid": "0x1a",
+    "name": "Mon dossier",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x1a",
+      "typologie": "UX/UI",
+      "createdAt": "2026-01-10T01:00:57.67637Z",
+      "updatedAt": "2026-01-10T01:00:57.676385Z"
+    }
+  },
+  {
+    "id": "root_0x1b",
+    "uid": "0x1b",
+    "name": "Comptabilité",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x1b",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:00:58.423101Z",
+      "updatedAt": "2026-01-10T01:00:58.423114Z"
+    }
+  },
+  {
+    "id": "child_0x1c",
+    "uid": "0x1c",
+    "name": "Paramétrage",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x1c",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Paramétrage"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x1d",
+    "uid": "0x1d",
+    "name": "Liste des comptes",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x1d",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Liste des comptes"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x1e",
+    "uid": "0x1e",
+    "name": "Comptes de TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x1e",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Comptes de TVA"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x1f",
+    "uid": "0x1f",
+    "name": "Banques",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x1f",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Banques"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x20",
+    "uid": "0x20",
+    "name": "Caisses",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x20",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Caisses"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x21",
+    "uid": "0x21",
+    "name": "Moyens de paiements",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x21",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Moyens de paiements"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x22",
+    "uid": "0x22",
+    "name": "Délais de paiements",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x22",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Délais de paiements"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x23",
+    "uid": "0x23",
+    "name": "Journaux Débit/Crédit",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x23",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Journaux Débit/Crédit"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x24",
+    "uid": "0x24",
+    "name": "Modèles de relances",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x24",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Modèles de relances"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x25",
+    "uid": "0x25",
+    "name": "Sections analytiques",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x25",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Comptabilité",
+      "path": [
+        "Sections analytiques"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0x26",
+    "uid": "0x26",
+    "name": "Devis / Facturation",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x26",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:01:06.479594Z",
+      "updatedAt": "2026-01-10T01:01:06.479607Z"
+    }
+  },
+  {
+    "id": "child_0x27",
+    "uid": "0x27",
+    "name": "Paramétrage",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x27",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Devis / Facturation",
+      "path": [
+        "Paramétrage"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x28",
+    "uid": "0x28",
+    "name": "Délais de paiements",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x28",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Devis / Facturation",
+      "path": [
+        "Délais de paiements"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x29",
+    "uid": "0x29",
+    "name": "Moyens de paiements",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x29",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Devis / Facturation",
+      "path": [
+        "Moyens de paiements"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x2a",
+    "uid": "0x2a",
+    "name": "Familles d'articles",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x2a",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Devis / Facturation",
+      "path": [
+        "Familles d'articles"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x2b",
+    "uid": "0x2b",
+    "name": "Articles et prestations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x2b",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Devis / Facturation",
+      "path": [
+        "Articles et prestations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x2c",
+    "uid": "0x2c",
+    "name": "Unités",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x2c",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Devis / Facturation",
+      "path": [
+        "Unités"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x2d",
+    "uid": "0x2d",
+    "name": "Commentaires modèles",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x2d",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Devis / Facturation",
+      "path": [
+        "Commentaires modèles"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x2e",
+    "uid": "0x2e",
+    "name": "Numérotation des documents",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x2e",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Devis / Facturation",
+      "path": [
+        "Numérotation des documents"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0x2f",
+    "uid": "0x2f",
+    "name": "Fiscal",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x2f",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:01:12.970342Z",
+      "updatedAt": "2026-01-10T01:01:12.970357Z"
+    }
+  },
+  {
+    "id": "child_0x30",
+    "uid": "0x30",
+    "name": "Paramétrage",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x30",
+      "typologie": "UX/UI",
+      "cluster": "Mon dossier",
+      "root": "Fiscal",
+      "path": [
+        "Paramétrage"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "cluster_0x31",
+    "uid": "0x31",
+    "name": "test",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x31",
+      "typologie": "UX/UI",
+      "createdAt": "2026-01-10T01:01:14.480652Z",
+      "updatedAt": "2026-01-10T01:01:14.480665Z"
+    }
+  },
+  {
+    "id": "root_0x32",
+    "uid": "0x32",
+    "name": "Modules",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x32",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:01:15.167497Z",
+      "updatedAt": "2026-01-10T01:01:15.167502Z"
+    }
+  },
+  {
+    "id": "child_0x33",
+    "uid": "0x33",
+    "name": "Facturation",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x33",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Facturation"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x34",
+    "uid": "0x34",
+    "name": "Devis",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x34",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Facturation",
+        "Devis"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x35",
+    "uid": "0x35",
+    "name": "Bons de livraison",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x35",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Facturation",
+        "Bons de livraison"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x36",
+    "uid": "0x36",
+    "name": "Factures",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x36",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Facturation",
+        "Factures"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x37",
+    "uid": "0x37",
+    "name": "Avoirs",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x37",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Facturation",
+        "Avoirs"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x38",
+    "uid": "0x38",
+    "name": "Tous les documents",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x38",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Facturation",
+        "Tous les documents"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x39",
+    "uid": "0x39",
+    "name": "Exports",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x39",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Facturation",
+        "Exports"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x3a",
+    "uid": "0x3a",
+    "name": "Comptabilité",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x3a",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x3b",
+    "uid": "0x3b",
+    "name": "Saisie simplifiée",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x3b",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie simplifiée"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x3c",
+    "uid": "0x3c",
+    "name": "Banque",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x3c",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie simplifiée",
+        "Banque"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x3d",
+    "uid": "0x3d",
+    "name": "Caisse",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x3d",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie simplifiée",
+        "Caisse"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x3e",
+    "uid": "0x3e",
+    "name": "Notes de frais",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x3e",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie simplifiée",
+        "Notes de frais"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x3f",
+    "uid": "0x3f",
+    "name": "Factures clients",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x3f",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie simplifiée",
+        "Factures clients"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x40",
+    "uid": "0x40",
+    "name": "Factures fournisseurs",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x40",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie simplifiée",
+        "Factures fournisseurs"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x41",
+    "uid": "0x41",
+    "name": "Import OCR",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x41",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie simplifiée",
+        "Import OCR"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x42",
+    "uid": "0x42",
+    "name": "Saisie Débit/Crédit",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x42",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie Débit/Crédit"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x43",
+    "uid": "0x43",
+    "name": "Opérations diverses",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x43",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie Débit/Crédit",
+        "Opérations diverses"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x44",
+    "uid": "0x44",
+    "name": "Journal import achats",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x44",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie Débit/Crédit",
+        "Journal import achats"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x45",
+    "uid": "0x45",
+    "name": "Journal import ventes",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x45",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie Débit/Crédit",
+        "Journal import ventes"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x46",
+    "uid": "0x46",
+    "name": "Journaux supplémentaires",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x46",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Saisie Débit/Crédit",
+        "Journaux supplémentaires"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x47",
+    "uid": "0x47",
+    "name": "Éditions comptables",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x47",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x48",
+    "uid": "0x48",
+    "name": "Balance comptable",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x48",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables",
+        "Balance comptable"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x49",
+    "uid": "0x49",
+    "name": "Grand livre",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x49",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables",
+        "Grand livre"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x4a",
+    "uid": "0x4a",
+    "name": "Journaux",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x4a",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables",
+        "Journaux"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x4b",
+    "uid": "0x4b",
+    "name": "FEC",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x4b",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables",
+        "FEC"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x4c",
+    "uid": "0x4c",
+    "name": "Bilan",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x4c",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables",
+        "Bilan"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x4d",
+    "uid": "0x4d",
+    "name": "Clôture d'exercice",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x4d",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables",
+        "Clôture d'exercice"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x4e",
+    "uid": "0x4e",
+    "name": "Plaquette",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x4e",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables",
+        "Plaquette"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x4f",
+    "uid": "0x4f",
+    "name": "Tableau SIG",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x4f",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables",
+        "Tableau SIG"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x50",
+    "uid": "0x50",
+    "name": "Suivi budgétaire",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x50",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions comptables",
+        "Suivi budgétaire"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x51",
+    "uid": "0x51",
+    "name": "Éditions analytiques",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x51",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions analytiques"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x52",
+    "uid": "0x52",
+    "name": "Balance analytique",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x52",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions analytiques",
+        "Balance analytique"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x53",
+    "uid": "0x53",
+    "name": "Grand livre analytique",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x53",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions analytiques",
+        "Grand livre analytique"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x54",
+    "uid": "0x54",
+    "name": "Journaux analytiques",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x54",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Comptabilité",
+        "Éditions analytiques",
+        "Journaux analytiques"
+      ],
+      "depth": 2,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x55",
+    "uid": "0x55",
+    "name": "Déclarations fiscales",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x55",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Déclarations fiscales"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x56",
+    "uid": "0x56",
+    "name": "États de contrôle TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x56",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Déclarations fiscales",
+        "États de contrôle TVA"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x57",
+    "uid": "0x57",
+    "name": "Déclaration de TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x57",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Déclarations fiscales",
+        "Déclaration de TVA"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x58",
+    "uid": "0x58",
+    "name": "Liasse fiscale",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x58",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Déclarations fiscales",
+        "Liasse fiscale"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x59",
+    "uid": "0x59",
+    "name": "Tableaux OG",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x59",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Déclarations fiscales",
+        "Tableaux OG"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x5a",
+    "uid": "0x5a",
+    "name": "Paie",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x5a",
+      "typologie": "UX/UI",
+      "cluster": "test",
+      "root": "Modules",
+      "path": [
+        "Paie"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "typo_0x5b",
+    "uid": "0x5b",
+    "name": "Level Scorer",
+    "domain": "Macompta.fr",
+    "type": "typologie",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x5b",
+      "createdAt": "2026-01-10T01:01:44.413815Z",
+      "updatedAt": "2026-01-10T01:01:44.413831Z"
+    }
+  },
+  {
+    "id": "cluster_0x5c",
+    "uid": "0x5c",
+    "name": "Débutant",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x5c",
+      "typologie": "Level Scorer",
+      "createdAt": "2026-01-10T01:01:45.112087Z",
+      "updatedAt": "2026-01-10T01:01:45.112104Z"
+    }
+  },
+  {
+    "id": "cluster_0x5d",
+    "uid": "0x5d",
+    "name": "Avancé",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x5d",
+      "typologie": "Level Scorer",
+      "createdAt": "2026-01-10T01:01:45.788231Z",
+      "updatedAt": "2026-01-10T01:01:45.788236Z"
+    }
+  },
+  {
+    "id": "cluster_0x5e",
+    "uid": "0x5e",
+    "name": "test",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x5e",
+      "typologie": "Level Scorer",
+      "createdAt": "2026-01-10T01:01:46.475247Z",
+      "updatedAt": "2026-01-10T01:01:46.475262Z"
+    }
+  },
+  {
+    "id": "root_0x5f",
+    "uid": "0x5f",
+    "name": "test",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x5f",
+      "typologie": "Level Scorer",
+      "cluster": "test",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:01:47.173897Z",
+      "updatedAt": "2026-01-10T01:01:47.173902Z"
+    }
+  },
+  {
+    "id": "child_0x60",
+    "uid": "0x60",
+    "name": "Intermédiaire",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x60",
+      "typologie": "Level Scorer",
+      "cluster": "test",
+      "root": "test",
+      "path": [
+        "Intermédiaire"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x61",
+    "uid": "0x61",
+    "name": "test3",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x61",
+      "typologie": "Level Scorer",
+      "cluster": "test",
+      "root": "test",
+      "path": [
+        "Intermédiaire",
+        "test3"
+      ],
+      "depth": 1,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "typo_0x62",
+    "uid": "0x62",
+    "name": "Trust",
+    "domain": "Macompta.fr",
+    "type": "typologie",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x62",
+      "createdAt": "2026-01-10T01:01:49.325052Z",
+      "updatedAt": "2026-01-10T01:01:49.325068Z"
+    }
+  },
+  {
+    "id": "typo_0x63",
+    "uid": "0x63",
+    "name": "Complexity",
+    "domain": "Macompta.fr",
+    "type": "typologie",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x63",
+      "createdAt": "2026-01-10T01:01:50.040933Z",
+      "updatedAt": "2026-01-10T01:01:50.040946Z"
+    }
+  },
+  {
+    "id": "cluster_0x64",
+    "uid": "0x64",
+    "name": "Niveau 1",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x64",
+      "typologie": "Complexity",
+      "createdAt": "2026-01-10T01:01:50.812236Z",
+      "updatedAt": "2026-01-10T01:01:50.812241Z"
+    }
+  },
+  {
+    "id": "root_0x65",
+    "uid": "0x65",
+    "name": "Operation 1.5",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x65",
+      "typologie": "Complexity",
+      "cluster": "Niveau 1",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:01:51.510289Z",
+      "updatedAt": "2026-01-10T01:01:51.510305Z"
+    }
+  },
+  {
+    "id": "child_0x66",
+    "uid": "0x66",
+    "name": "1 Opération",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x66",
+      "typologie": "Complexity",
+      "cluster": "Niveau 1",
+      "root": "Operation 1.5",
+      "path": [
+        "1 Opération"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x67",
+    "uid": "0x67",
+    "name": "2 Opération",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x67",
+      "typologie": "Complexity",
+      "cluster": "Niveau 1",
+      "root": "Operation 1.5",
+      "path": [
+        "2 Opération"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "cluster_0x68",
+    "uid": "0x68",
+    "name": "Niveau 3",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x68",
+      "typologie": "Complexity",
+      "createdAt": "2026-01-10T01:01:53.600848Z",
+      "updatedAt": "2026-01-10T01:01:53.600853Z"
+    }
+  },
+  {
+    "id": "root_0x69",
+    "uid": "0x69",
+    "name": "1000 oP2RATION",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x69",
+      "typologie": "Complexity",
+      "cluster": "Niveau 3",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:01:54.329198Z",
+      "updatedAt": "2026-01-10T01:01:54.329214Z"
+    }
+  },
+  {
+    "id": "child_0x6a",
+    "uid": "0x6a",
+    "name": "6 Opérations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x6a",
+      "typologie": "Complexity",
+      "cluster": "Niveau 3",
+      "root": "1000 oP2RATION",
+      "path": [
+        "6 Opérations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x6b",
+    "uid": "0x6b",
+    "name": "7 Opérations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x6b",
+      "typologie": "Complexity",
+      "cluster": "Niveau 3",
+      "root": "1000 oP2RATION",
+      "path": [
+        "7 Opérations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x6c",
+    "uid": "0x6c",
+    "name": "8 Opérations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x6c",
+      "typologie": "Complexity",
+      "cluster": "Niveau 3",
+      "root": "1000 oP2RATION",
+      "path": [
+        "8 Opérations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x6d",
+    "uid": "0x6d",
+    "name": "9 Opérations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x6d",
+      "typologie": "Complexity",
+      "cluster": "Niveau 3",
+      "root": "1000 oP2RATION",
+      "path": [
+        "9 Opérations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x6e",
+    "uid": "0x6e",
+    "name": "10 Opérations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x6e",
+      "typologie": "Complexity",
+      "cluster": "Niveau 3",
+      "root": "1000 oP2RATION",
+      "path": [
+        "10 Opérations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "cluster_0x6f",
+    "uid": "0x6f",
+    "name": "Niveau 4",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x6f",
+      "typologie": "Complexity",
+      "createdAt": "2026-01-10T01:01:58.626636Z",
+      "updatedAt": "2026-01-10T01:01:58.626648Z"
+    }
+  },
+  {
+    "id": "root_0x70",
+    "uid": "0x70",
+    "name": "11 Opérations",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x70",
+      "typologie": "Complexity",
+      "cluster": "Niveau 4",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:01:59.351305Z",
+      "updatedAt": "2026-01-10T01:01:59.35131Z"
+    }
+  },
+  {
+    "id": "root_0x71",
+    "uid": "0x71",
+    "name": "12 Opérations",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x71",
+      "typologie": "Complexity",
+      "cluster": "Niveau 4",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:00.062145Z",
+      "updatedAt": "2026-01-10T01:02:00.062151Z"
+    }
+  },
+  {
+    "id": "root_0x72",
+    "uid": "0x72",
+    "name": "13 Opérations",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x72",
+      "typologie": "Complexity",
+      "cluster": "Niveau 4",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:00.86736Z",
+      "updatedAt": "2026-01-10T01:02:00.867375Z"
+    }
+  },
+  {
+    "id": "root_0x73",
+    "uid": "0x73",
+    "name": "14 Opérations",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x73",
+      "typologie": "Complexity",
+      "cluster": "Niveau 4",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:02.138924Z",
+      "updatedAt": "2026-01-10T01:02:02.138929Z"
+    }
+  },
+  {
+    "id": "root_0x74",
+    "uid": "0x74",
+    "name": "15 Opérations",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x74",
+      "typologie": "Complexity",
+      "cluster": "Niveau 4",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:02.793132Z",
+      "updatedAt": "2026-01-10T01:02:02.793137Z"
+    }
+  },
+  {
+    "id": "cluster_0x75",
+    "uid": "0x75",
+    "name": "Niveau 1.5",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x75",
+      "typologie": "Complexity",
+      "createdAt": "2026-01-10T01:02:03.443928Z",
+      "updatedAt": "2026-01-10T01:02:03.443943Z"
+    }
+  },
+  {
+    "id": "root_0x76",
+    "uid": "0x76",
+    "name": "Niveau 2",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x76",
+      "typologie": "Complexity",
+      "cluster": "Niveau 1.5",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:04.139145Z",
+      "updatedAt": "2026-01-10T01:02:04.139157Z"
+    }
+  },
+  {
+    "id": "child_0x77",
+    "uid": "0x77",
+    "name": "3 Opérations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x77",
+      "typologie": "Complexity",
+      "cluster": "Niveau 1.5",
+      "root": "Niveau 2",
+      "path": [
+        "3 Opérations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x78",
+    "uid": "0x78",
+    "name": "4 Opérations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x78",
+      "typologie": "Complexity",
+      "cluster": "Niveau 1.5",
+      "root": "Niveau 2",
+      "path": [
+        "4 Opérations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x79",
+    "uid": "0x79",
+    "name": "5 Opérations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x79",
+      "typologie": "Complexity",
+      "cluster": "Niveau 1.5",
+      "root": "Niveau 2",
+      "path": [
+        "5 Opérations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "typo_0x7a",
+    "uid": "0x7a",
+    "name": "Sales",
+    "domain": "Macompta.fr",
+    "type": "typologie",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x7a",
+      "createdAt": "2026-01-10T01:02:06.871531Z",
+      "updatedAt": "2026-01-10T01:02:06.871545Z"
+    }
+  },
+  {
+    "id": "typo_0x7b",
+    "uid": "0x7b",
+    "name": "Compte",
+    "domain": "Macompta.fr",
+    "type": "typologie",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x7b",
+      "createdAt": "2026-01-10T01:02:07.5463Z",
+      "updatedAt": "2026-01-10T01:02:07.546305Z"
+    }
+  },
+  {
+    "id": "cluster_0x7c",
+    "uid": "0x7c",
+    "name": "Micro Entrepreneur",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x7c",
+      "typologie": "Compte",
+      "createdAt": "2026-01-10T01:02:08.223257Z",
+      "updatedAt": "2026-01-10T01:02:08.223272Z"
+    }
+  },
+  {
+    "id": "root_0x7d",
+    "uid": "0x7d",
+    "name": "Auto entrepreneur",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x7d",
+      "typologie": "Compte",
+      "cluster": "Micro Entrepreneur",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:08.901338Z",
+      "updatedAt": "2026-01-10T01:02:08.901353Z"
+    }
+  },
+  {
+    "id": "child_0x7e",
+    "uid": "0x7e",
+    "name": "Prestation de services",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x7e",
+      "typologie": "Compte",
+      "cluster": "Micro Entrepreneur",
+      "root": "Auto entrepreneur",
+      "path": [
+        "Prestation de services"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x7f",
+    "uid": "0x7f",
+    "name": "Vente",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x7f",
+      "typologie": "Compte",
+      "cluster": "Micro Entrepreneur",
+      "root": "Auto entrepreneur",
+      "path": [
+        "Vente"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "cluster_0x80",
+    "uid": "0x80",
+    "name": "Association",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x80",
+      "typologie": "Compte",
+      "createdAt": "2026-01-10T01:02:10.912815Z",
+      "updatedAt": "2026-01-10T01:02:10.912829Z"
+    }
+  },
+  {
+    "id": "root_0x81",
+    "uid": "0x81",
+    "name": "Non Fiscalisé",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x81",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:11.629708Z",
+      "updatedAt": "2026-01-10T01:02:11.629724Z"
+    }
+  },
+  {
+    "id": "child_0x82",
+    "uid": "0x82",
+    "name": "Animation socio-culturelle",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x82",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "Animation socio-culturelle"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x83",
+    "uid": "0x83",
+    "name": "Association – plan standard",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x83",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "Association – plan standard"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x84",
+    "uid": "0x84",
+    "name": "Association Omni-Sport (ASPTT)",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x84",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "Association Omni-Sport (ASPTT)"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x85",
+    "uid": "0x85",
+    "name": "Association artistique ou culturelle",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x85",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "Association artistique ou culturelle"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x86",
+    "uid": "0x86",
+    "name": "Associations UNASS (secourisme)",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x86",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "Associations UNASS (secourisme)"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x87",
+    "uid": "0x87",
+    "name": "Club sportif",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x87",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "Club sportif"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x88",
+    "uid": "0x88",
+    "name": "Comité d'entreprise",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x88",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "Comité d'entreprise"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x89",
+    "uid": "0x89",
+    "name": "Crèche",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x89",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "Crèche"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x8a",
+    "uid": "0x8a",
+    "name": "FFTT – Fédération Française de Tennis de Table",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x8a",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "FFTT – Fédération Française de Tennis de Table"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x8b",
+    "uid": "0x8b",
+    "name": "MJC",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x8b",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "MJC"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x8c",
+    "uid": "0x8c",
+    "name": "Organisations syndicales et professionnelles",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x8c",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Non Fiscalisé",
+      "path": [
+        "Organisations syndicales et professionnelles"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0x8d",
+    "uid": "0x8d",
+    "name": "Fiscalisé",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x8d",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:19.909201Z",
+      "updatedAt": "2026-01-10T01:02:19.909215Z"
+    }
+  },
+  {
+    "id": "child_0x8e",
+    "uid": "0x8e",
+    "name": "Association – plan standard",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x8e",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Fiscalisé",
+      "path": [
+        "Association – plan standard"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x8f",
+    "uid": "0x8f",
+    "name": "Association Omni-Sport (ASPTT)",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x8f",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Fiscalisé",
+      "path": [
+        "Association Omni-Sport (ASPTT)"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x90",
+    "uid": "0x90",
+    "name": "Association artistique ou culturelle",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x90",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Fiscalisé",
+      "path": [
+        "Association artistique ou culturelle"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x91",
+    "uid": "0x91",
+    "name": "Association technique",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x91",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Fiscalisé",
+      "path": [
+        "Association technique"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x92",
+    "uid": "0x92",
+    "name": "FFTT – Fédération Française de Tennis de Table",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x92",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Fiscalisé",
+      "path": [
+        "FFTT – Fédération Française de Tennis de Table"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x93",
+    "uid": "0x93",
+    "name": "Junior entreprise",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x93",
+      "typologie": "Compte",
+      "cluster": "Association",
+      "root": "Fiscalisé",
+      "path": [
+        "Junior entreprise"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "cluster_0x94",
+    "uid": "0x94",
+    "name": "Artisan / Commerçant",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x94",
+      "typologie": "Compte",
+      "createdAt": "2026-01-10T01:02:24.745112Z",
+      "updatedAt": "2026-01-10T01:02:24.745127Z"
+    }
+  },
+  {
+    "id": "root_0x95",
+    "uid": "0x95",
+    "name": "Bénéfices Industriels et Commerciaux",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x95",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:25.465867Z",
+      "updatedAt": "2026-01-10T01:02:25.465872Z"
+    }
+  },
+  {
+    "id": "child_0x96",
+    "uid": "0x96",
+    "name": "Bar restaurant",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x96",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Bar restaurant"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x97",
+    "uid": "0x97",
+    "name": "Bâtiment",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x97",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Bâtiment"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x98",
+    "uid": "0x98",
+    "name": "Bijoux – Fabrication et vente",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x98",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Bijoux – Fabrication et vente"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x99",
+    "uid": "0x99",
+    "name": "Boulangerie, pâtisserie",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x99",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Boulangerie, pâtisserie"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x9a",
+    "uid": "0x9a",
+    "name": "Coiffure",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x9a",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Coiffure"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x9b",
+    "uid": "0x9b",
+    "name": "Commerçant – plan standard",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x9b",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Commerçant – plan standard"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x9c",
+    "uid": "0x9c",
+    "name": "Événementiel",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x9c",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Événementiel"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x9d",
+    "uid": "0x9d",
+    "name": "Fleuriste",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x9d",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Fleuriste"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x9e",
+    "uid": "0x9e",
+    "name": "Garage, carrosserie, réparations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x9e",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Garage, carrosserie, réparations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x9f",
+    "uid": "0x9f",
+    "name": "Informatique – vente et réparation",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x9f",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Informatique – vente et réparation"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa0",
+    "uid": "0xa0",
+    "name": "Lavage voitures",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa0",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Lavage voitures"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa1",
+    "uid": "0xa1",
+    "name": "Laverie automatique",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa1",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Laverie automatique"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa2",
+    "uid": "0xa2",
+    "name": "Location chambre d'hôtes",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa2",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Location chambre d'hôtes"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa3",
+    "uid": "0xa3",
+    "name": "Loueur de fonds de commerce",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa3",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Loueur de fonds de commerce"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa4",
+    "uid": "0xa4",
+    "name": "Loueur en meublé",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa4",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Loueur en meublé"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa5",
+    "uid": "0xa5",
+    "name": "Presse – diffuseur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa5",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Presse – diffuseur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa6",
+    "uid": "0xa6",
+    "name": "Presse – édition",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa6",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Presse – édition"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa7",
+    "uid": "0xa7",
+    "name": "Prestataire de services – plan standard",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa7",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Prestataire de services – plan standard"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa8",
+    "uid": "0xa8",
+    "name": "Secrétariat et assistance administrative",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa8",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Secrétariat et assistance administrative"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xa9",
+    "uid": "0xa9",
+    "name": "Services à la personne",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xa9",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Services à la personne"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xaa",
+    "uid": "0xaa",
+    "name": "Tabac – presse – jeux",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xaa",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Tabac – presse – jeux"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xab",
+    "uid": "0xab",
+    "name": "Taxi",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xab",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Taxi"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xac",
+    "uid": "0xac",
+    "name": "Traiteur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xac",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Traiteur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xad",
+    "uid": "0xad",
+    "name": "Transport, déménagement",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xad",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Transport, déménagement"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xae",
+    "uid": "0xae",
+    "name": "Commerce de biens d’occasion (TVA sur marge)",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xae",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Commerce de biens d’occasion (TVA sur marge)"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0xaf",
+    "uid": "0xaf",
+    "name": "Revenus Fonciers",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xaf",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:43.776351Z",
+      "updatedAt": "2026-01-10T01:02:43.776367Z"
+    }
+  },
+  {
+    "id": "child_0xb0",
+    "uid": "0xb0",
+    "name": "Location d’immeubles",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb0",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Revenus Fonciers",
+      "path": [
+        "Location d’immeubles"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0xb1",
+    "uid": "0xb1",
+    "name": "Bénéfices Agricoles",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb1",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:45.115624Z",
+      "updatedAt": "2026-01-10T01:02:45.11564Z"
+    }
+  },
+  {
+    "id": "child_0xb2",
+    "uid": "0xb2",
+    "name": "Centre équestre",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb2",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Agricoles",
+      "path": [
+        "Centre équestre"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xb3",
+    "uid": "0xb3",
+    "name": "Cultivateur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb3",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Agricoles",
+      "path": [
+        "Cultivateur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xb4",
+    "uid": "0xb4",
+    "name": "Cultivateur, Éleveur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb4",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Agricoles",
+      "path": [
+        "Cultivateur, Éleveur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xb5",
+    "uid": "0xb5",
+    "name": "Éleveur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb5",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Agricoles",
+      "path": [
+        "Éleveur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xb6",
+    "uid": "0xb6",
+    "name": "Micro Bénéfices Agricoles",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb6",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "Bénéfices Agricoles",
+      "path": [
+        "Micro Bénéfices Agricoles"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0xb7",
+    "uid": "0xb7",
+    "name": "BIC",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb7",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:49.331891Z",
+      "updatedAt": "2026-01-10T01:02:49.331911Z"
+    }
+  },
+  {
+    "id": "child_0xb8",
+    "uid": "0xb8",
+    "name": "Bâtiment",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb8",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "BIC",
+      "path": [
+        "Bâtiment"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xb9",
+    "uid": "0xb9",
+    "name": "Bar restaurant",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xb9",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "BIC",
+      "path": [
+        "Bar restaurant"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xba",
+    "uid": "0xba",
+    "name": "Services à la personne",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xba",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "BIC",
+      "path": [
+        "Services à la personne"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xbb",
+    "uid": "0xbb",
+    "name": "Garage, carrosserie",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xbb",
+      "typologie": "Compte",
+      "cluster": "Artisan / Commerçant",
+      "root": "BIC",
+      "path": [
+        "Garage, carrosserie"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "cluster_0xbc",
+    "uid": "0xbc",
+    "name": "Société",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xbc",
+      "typologie": "Compte",
+      "createdAt": "2026-01-10T01:02:52.918095Z",
+      "updatedAt": "2026-01-10T01:02:52.918113Z"
+    }
+  },
+  {
+    "id": "root_0xbd",
+    "uid": "0xbd",
+    "name": "Impôts sur les sociétés",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xbd",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:02:53.623649Z",
+      "updatedAt": "2026-01-10T01:02:53.623663Z"
+    }
+  },
+  {
+    "id": "child_0xbe",
+    "uid": "0xbe",
+    "name": "Agence immobilière",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xbe",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Agence immobilière"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xbf",
+    "uid": "0xbf",
+    "name": "Agent commercial",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xbf",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Agent commercial"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc0",
+    "uid": "0xc0",
+    "name": "Agent général d'assurance",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc0",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Agent général d'assurance"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc1",
+    "uid": "0xc1",
+    "name": "Architecture",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc1",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Architecture"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc2",
+    "uid": "0xc2",
+    "name": "Auto école",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc2",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Auto école"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc3",
+    "uid": "0xc3",
+    "name": "Avocat",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc3",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Avocat"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc4",
+    "uid": "0xc4",
+    "name": "Bar restaurant",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc4",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Bar restaurant"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc5",
+    "uid": "0xc5",
+    "name": "Bâtiment",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc5",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Bâtiment"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc6",
+    "uid": "0xc6",
+    "name": "Bijoux – Fabrication et vente",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc6",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Bijoux – Fabrication et vente"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc7",
+    "uid": "0xc7",
+    "name": "Boulangerie, pâtisserie",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc7",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Boulangerie, pâtisserie"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc8",
+    "uid": "0xc8",
+    "name": "Bureau d'études, géomètres, experts",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc8",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Bureau d'études, géomètres, experts"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xc9",
+    "uid": "0xc9",
+    "name": "Coiffure",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xc9",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Coiffure"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xca",
+    "uid": "0xca",
+    "name": "Commerce – plan standard",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xca",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Commerce – plan standard"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xcb",
+    "uid": "0xcb",
+    "name": "Consultant (informatique, marketing, gestion)",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xcb",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Consultant (informatique, marketing, gestion)"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xcc",
+    "uid": "0xcc",
+    "name": "Événementiel",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xcc",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Événementiel"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xcd",
+    "uid": "0xcd",
+    "name": "Fleuriste",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xcd",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Fleuriste"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xce",
+    "uid": "0xce",
+    "name": "Formation",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xce",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Formation"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xcf",
+    "uid": "0xcf",
+    "name": "Garage, carrosserie, réparations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xcf",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Garage, carrosserie, réparations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd0",
+    "uid": "0xd0",
+    "name": "Holding",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd0",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Holding"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd1",
+    "uid": "0xd1",
+    "name": "Informatique – vente et réparation",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd1",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Informatique – vente et réparation"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd2",
+    "uid": "0xd2",
+    "name": "Lavage voitures",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd2",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Lavage voitures"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd3",
+    "uid": "0xd3",
+    "name": "Laverie automatique",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd3",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Laverie automatique"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd4",
+    "uid": "0xd4",
+    "name": "Location d'immeuble",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd4",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Location d'immeuble"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd5",
+    "uid": "0xd5",
+    "name": "Location gérance de fonds de commerce",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd5",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Location gérance de fonds de commerce"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd6",
+    "uid": "0xd6",
+    "name": "Loueur en meublé",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd6",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Loueur en meublé"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd7",
+    "uid": "0xd7",
+    "name": "Médecin",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd7",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Médecin"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd8",
+    "uid": "0xd8",
+    "name": "Paramédicaux",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd8",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Paramédicaux"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xd9",
+    "uid": "0xd9",
+    "name": "Presse – diffuseur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xd9",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Presse – diffuseur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xda",
+    "uid": "0xda",
+    "name": "Presse – édition",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xda",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Presse – édition"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xdb",
+    "uid": "0xdb",
+    "name": "Prestataire de services – plan standard",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xdb",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Prestataire de services – plan standard"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xdc",
+    "uid": "0xdc",
+    "name": "Secrétariat et assistance administrative",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xdc",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Secrétariat et assistance administrative"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xdd",
+    "uid": "0xdd",
+    "name": "Services à la personne",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xdd",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Services à la personne"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xde",
+    "uid": "0xde",
+    "name": "Studio photographique",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xde",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Studio photographique"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xdf",
+    "uid": "0xdf",
+    "name": "Tabac – presse – jeux",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xdf",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Tabac – presse – jeux"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xe0",
+    "uid": "0xe0",
+    "name": "Taxi",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe0",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Taxi"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xe1",
+    "uid": "0xe1",
+    "name": "Traduction / Interprétariat",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe1",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Traduction / Interprétariat"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xe2",
+    "uid": "0xe2",
+    "name": "Traiteur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe2",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Traiteur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xe3",
+    "uid": "0xe3",
+    "name": "Transport, déménagement",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe3",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Transport, déménagement"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xe4",
+    "uid": "0xe4",
+    "name": "Commerce de biens d’occasion (TVA sur marge)",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe4",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Impôts sur les sociétés",
+      "path": [
+        "Commerce de biens d’occasion (TVA sur marge)"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0xe5",
+    "uid": "0xe5",
+    "name": "Bénéfices Industriels et Commerciaux",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe5",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:03:21.537008Z",
+      "updatedAt": "2026-01-10T01:03:21.537028Z"
+    }
+  },
+  {
+    "id": "child_0xe6",
+    "uid": "0xe6",
+    "name": "Bar restaurant",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe6",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Bar restaurant"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xe7",
+    "uid": "0xe7",
+    "name": "Bâtiment",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe7",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Bâtiment"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xe8",
+    "uid": "0xe8",
+    "name": "Bijoux – Fabrication et vente",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe8",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Bijoux – Fabrication et vente"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xe9",
+    "uid": "0xe9",
+    "name": "Boulangerie, pâtisserie",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xe9",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Boulangerie, pâtisserie"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xea",
+    "uid": "0xea",
+    "name": "Coiffure",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xea",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Coiffure"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xeb",
+    "uid": "0xeb",
+    "name": "Commerce – plan standard",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xeb",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Commerce – plan standard"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xec",
+    "uid": "0xec",
+    "name": "Événementiel",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xec",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Événementiel"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xed",
+    "uid": "0xed",
+    "name": "Garage, carrosserie, réparations",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xed",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Garage, carrosserie, réparations"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xee",
+    "uid": "0xee",
+    "name": "Informatique – vente et réparation",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xee",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Informatique – vente et réparation"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xef",
+    "uid": "0xef",
+    "name": "Lavage voitures",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xef",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Lavage voitures"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf0",
+    "uid": "0xf0",
+    "name": "Laverie automatique",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf0",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Laverie automatique"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf1",
+    "uid": "0xf1",
+    "name": "Loueur en meublé",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf1",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Loueur en meublé"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf2",
+    "uid": "0xf2",
+    "name": "Presse – diffuseur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf2",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Presse – diffuseur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf3",
+    "uid": "0xf3",
+    "name": "Presse – édition",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf3",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Presse – édition"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf4",
+    "uid": "0xf4",
+    "name": "Prestataire de services – plan standard",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf4",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Prestataire de services – plan standard"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf5",
+    "uid": "0xf5",
+    "name": "Secrétariat et assistance administrative",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf5",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Secrétariat et assistance administrative"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf6",
+    "uid": "0xf6",
+    "name": "Services à la personne",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf6",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Services à la personne"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf7",
+    "uid": "0xf7",
+    "name": "Tabac – presse – jeux",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf7",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Tabac – presse – jeux"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf8",
+    "uid": "0xf8",
+    "name": "Taxi",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf8",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Taxi"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xf9",
+    "uid": "0xf9",
+    "name": "Traiteur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xf9",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Traiteur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xfa",
+    "uid": "0xfa",
+    "name": "Transport, déménagement",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xfa",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Industriels et Commerciaux",
+      "path": [
+        "Transport, déménagement"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0xfb",
+    "uid": "0xfb",
+    "name": "Bénéfices Non Commerciaux",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xfb",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:03:36.986981Z",
+      "updatedAt": "2026-01-10T01:03:36.986996Z"
+    }
+  },
+  {
+    "id": "child_0xfc",
+    "uid": "0xfc",
+    "name": "Agent commercial",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xfc",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Agent commercial"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xfd",
+    "uid": "0xfd",
+    "name": "Agent général d'assurance",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xfd",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Agent général d'assurance"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xfe",
+    "uid": "0xfe",
+    "name": "Architecte",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xfe",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Architecte"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0xff",
+    "uid": "0xff",
+    "name": "Artiste – Franchise de TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0xff",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Artiste – Franchise de TVA"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x100",
+    "uid": "0x100",
+    "name": "Auto école",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x100",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Auto école"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x101",
+    "uid": "0x101",
+    "name": "Avocat",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x101",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Avocat"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x102",
+    "uid": "0x102",
+    "name": "Bureau d'études, géomètres, experts",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x102",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Bureau d'études, géomètres, experts"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x103",
+    "uid": "0x103",
+    "name": "Formateur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x103",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Formateur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x104",
+    "uid": "0x104",
+    "name": "Médecin",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x104",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Médecin"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x105",
+    "uid": "0x105",
+    "name": "Prestataire de services",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x105",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Prestataire de services"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x106",
+    "uid": "0x106",
+    "name": "Professeur de sport",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x106",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Professeur de sport"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x107",
+    "uid": "0x107",
+    "name": "Secrétaire",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x107",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Secrétaire"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x108",
+    "uid": "0x108",
+    "name": "Studio photographique",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x108",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Studio photographique"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x109",
+    "uid": "0x109",
+    "name": "Traducteur Interprète",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x109",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Traducteur Interprète"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0x10a",
+    "uid": "0x10a",
+    "name": "Revenus Fonciers",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x10a",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:03:47.38702Z",
+      "updatedAt": "2026-01-10T01:03:47.387036Z"
+    }
+  },
+  {
+    "id": "child_0x10b",
+    "uid": "0x10b",
+    "name": "SCI location d'immeubles",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x10b",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Revenus Fonciers",
+      "path": [
+        "SCI location d'immeubles"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0x10c",
+    "uid": "0x10c",
+    "name": "Revenus Agricoles",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x10c",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:03:48.758361Z",
+      "updatedAt": "2026-01-10T01:03:48.758366Z"
+    }
+  },
+  {
+    "id": "child_0x10d",
+    "uid": "0x10d",
+    "name": "Centre équestre",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x10d",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Revenus Agricoles",
+      "path": [
+        "Centre équestre"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x10e",
+    "uid": "0x10e",
+    "name": "Culture",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x10e",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Revenus Agricoles",
+      "path": [
+        "Culture"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x10f",
+    "uid": "0x10f",
+    "name": "Culture, élevage",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x10f",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Revenus Agricoles",
+      "path": [
+        "Culture, élevage"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x110",
+    "uid": "0x110",
+    "name": "Élevage",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x110",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "Revenus Agricoles",
+      "path": [
+        "Élevage"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0x111",
+    "uid": "0x111",
+    "name": "BNC SCM",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x111",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:03:52.160213Z",
+      "updatedAt": "2026-01-10T01:03:52.160228Z"
+    }
+  },
+  {
+    "id": "child_0x112",
+    "uid": "0x112",
+    "name": "Agent commerciale",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x112",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Agent commerciale"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x113",
+    "uid": "0x113",
+    "name": "Agent général d'assurance",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x113",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Agent général d'assurance"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x114",
+    "uid": "0x114",
+    "name": "Architecte",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x114",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Architecte"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x115",
+    "uid": "0x115",
+    "name": "Artiste – Franchise de TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x115",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Artiste – Franchise de TVA"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x116",
+    "uid": "0x116",
+    "name": "Auto école",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x116",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Auto école"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x117",
+    "uid": "0x117",
+    "name": "Avocat",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x117",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Avocat"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x118",
+    "uid": "0x118",
+    "name": "Bureau d'études, géomètres, experts",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x118",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Bureau d'études, géomètres, experts"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x119",
+    "uid": "0x119",
+    "name": "Formateur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x119",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Formateur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x11a",
+    "uid": "0x11a",
+    "name": "Médecin",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x11a",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Médecin"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x11b",
+    "uid": "0x11b",
+    "name": "Prestataire de services",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x11b",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Prestataire de services"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x11c",
+    "uid": "0x11c",
+    "name": "Professeur de sport",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x11c",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Professeur de sport"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x11d",
+    "uid": "0x11d",
+    "name": "Secrétaire",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x11d",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Secrétaire"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x11e",
+    "uid": "0x11e",
+    "name": "Studio photographique",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x11e",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Studio photographique"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x11f",
+    "uid": "0x11f",
+    "name": "Traducteur Interprète",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x11f",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "BNC SCM",
+      "path": [
+        "Traducteur Interprète"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "root_0x120",
+    "uid": "0x120",
+    "name": "IS",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x120",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:04:02.483453Z",
+      "updatedAt": "2026-01-10T01:04:02.483467Z"
+    }
+  },
+  {
+    "id": "child_0x121",
+    "uid": "0x121",
+    "name": "Bâtiment",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x121",
+      "typologie": "Compte",
+      "cluster": "Société",
+      "root": "IS",
+      "path": [
+        "Bâtiment"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "cluster_0x122",
+    "uid": "0x122",
+    "name": "Profession Libérale",
+    "domain": "Macompta.fr",
+    "type": "cluster",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x122",
+      "typologie": "Compte",
+      "createdAt": "2026-01-10T01:04:03.835172Z",
+      "updatedAt": "2026-01-10T01:04:03.835187Z"
+    }
+  },
+  {
+    "id": "root_0x123",
+    "uid": "0x123",
+    "name": "Bénéfices Non Commerciaux",
+    "domain": "Macompta.fr",
+    "type": "root_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x123",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "entityType": null,
+      "uiComponent": null,
+      "examplePrompts": [],
+      "createdAt": "2026-01-10T01:04:04.511524Z",
+      "updatedAt": "2026-01-10T01:04:04.51154Z"
+    }
+  },
+  {
+    "id": "child_0x124",
+    "uid": "0x124",
+    "name": "Agent commercial",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x124",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Agent commercial"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x125",
+    "uid": "0x125",
+    "name": "Agent général d'assurance",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x125",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Agent général d'assurance"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x126",
+    "uid": "0x126",
+    "name": "Architecte",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x126",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Architecte"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x127",
+    "uid": "0x127",
+    "name": "Artiste – Franchise de TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x127",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Artiste – Franchise de TVA"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x128",
+    "uid": "0x128",
+    "name": "Auto école",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x128",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Auto école"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x129",
+    "uid": "0x129",
+    "name": "Avocat",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x129",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Avocat"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x12a",
+    "uid": "0x12a",
+    "name": "Bureaux d'études, géomètres, experts",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x12a",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Bureaux d'études, géomètres, experts"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x12b",
+    "uid": "0x12b",
+    "name": "Consultant (informatique, marketing, gestion)",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x12b",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Consultant (informatique, marketing, gestion)"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x12c",
+    "uid": "0x12c",
+    "name": "Formateur",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x12c",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Formateur"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x12d",
+    "uid": "0x12d",
+    "name": "Graphiste",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x12d",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Graphiste"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x12e",
+    "uid": "0x12e",
+    "name": "Médecin",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x12e",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Médecin"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x12f",
+    "uid": "0x12f",
+    "name": "Paramédicaux (Infirmières, Kiné, Pédicure)",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x12f",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Paramédicaux (Infirmières, Kiné, Pédicure)"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x130",
+    "uid": "0x130",
+    "name": "Photographe",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x130",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Photographe"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x131",
+    "uid": "0x131",
+    "name": "Plan comptable générique BNC avec TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x131",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Plan comptable générique BNC avec TVA"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x132",
+    "uid": "0x132",
+    "name": "Plan comptable générique BNC sans TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x132",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Plan comptable générique BNC sans TVA"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x133",
+    "uid": "0x133",
+    "name": "Professeur de sport",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x133",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Professeur de sport"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x134",
+    "uid": "0x134",
+    "name": "Secrétaire",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x134",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Secrétaire"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x135",
+    "uid": "0x135",
+    "name": "Sophrologue",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x135",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Sophrologue"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x136",
+    "uid": "0x136",
+    "name": "Traducteur Interprète",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x136",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Traducteur Interprète"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x137",
+    "uid": "0x137",
+    "name": "Vétérinaire",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x137",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Vétérinaire"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x138",
+    "uid": "0x138",
+    "name": "Plan comptable FB BNC avec TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x138",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Plan comptable FB BNC avec TVA"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  {
+    "id": "child_0x139",
+    "uid": "0x139",
+    "name": "Plan comptable FB BNC sans TVA",
+    "domain": "Macompta.fr",
+    "type": "child_label",
+    "description": "",
+    "dgraph_metadata": {
+      "dgraph_uid": "0x139",
+      "typologie": "Compte",
+      "cluster": "Profession Libérale",
+      "root": "Bénéfices Non Commerciaux",
+      "path": [
+        "Plan comptable FB BNC sans TVA"
+      ],
+      "depth": 0,
+      "category": "default",
+      "intentKeywords": [],
+      "actionKeywords": [],
+      "createdAt": null,
+      "updatedAt": null
+    }
+  }
+]

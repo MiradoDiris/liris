@@ -27,7 +27,7 @@ from ui.widgets.platform_config_widget import PlatformConfigWidget
 from ui.widgets.dataset_generator import DatasetGenerator, integrate_generation_button
 from ui.widgets.dashboard_panel import DashboardPanel
 
-from ui.widgets.dataset_strategy import DatasetStrategyWidget
+from ui.widgets.dataset_verification import DatasetVerificationPanel
 from ui.widgets.dataset_generation import DatasetGenerationPanel
 import qtawesome as qta
 
@@ -273,7 +273,7 @@ class MainWindow(QMainWindow):
         self.dashboard_panel = None
 
         # ✅ CORRECTION: Widgets Data Science avec noms distincts
-        self.dataset_strategy = DatasetStrategyWidget()
+        self.dataset_strategy = DatasetVerificationPanel()
 
         # Widget pour l'onglet "Génération" (mode Data)
         self.dataset_generation_tab = DatasetGenerationPanel()

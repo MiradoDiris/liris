@@ -3418,41 +3418,42 @@ class DatasetRelationTab(QtWidgets.QWidget):
             return None
 
     def _navigate_down_labels(self):
-        """Descendre dans la hiérarchie - PAS de checkbox pour niveaux intermédiaires"""
+        """Descendre dans la hiérarchie - CORRECTION AVEC SUPPORT ENFANTS"""
         selected_item = self.dynamic_labels_tree.currentItem()
-
+    
         if not selected_item:
             QtWidgets.QMessageBox.information(
                 self, "Info",
                 "Sélectionnez UN élément pour descendre (cliquez sur le texte)."
             )
             return
-
+    
         item_data = selected_item.data(0, Qt.UserRole)
-
+    
         if not item_data or not item_data.get('has_children'):
             QtWidgets.QMessageBox.information(
                 self, "Info",
                 "Cet élément n'a pas d'enfants."
             )
             return
-
+    
         level = item_data.get('level', '')
-
+    
+        # ===== ROOT → PARENT =====
         if level == 'root':
             root = item_data.get('data', {})
             cluster = item_data.get('cluster', {})
-
+    
             self._context_navigation['root'] = root
             self._context_navigation['current_level'] = 'root'
-
+    
             self.dynamic_labels_tree.clear()
             for parent in root.get('parent_labels', []):
                 parent_name = parent.get('name', '')
                 if parent_name:
                     sample_count = self._count_parent_samples(parent)
                     display_text = f"{parent_name} ({sample_count})"
-
+    
                     tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                     tree_item.setData(0, Qt.UserRole, {
                         'level': 'parent',
@@ -3462,68 +3463,149 @@ class DatasetRelationTab(QtWidgets.QWidget):
                         'has_children': bool(parent.get('children', [])),
                         'name': parent_name
                     })
-
-                    # ✅ MODIFICATION: Checkbox uniquement pour éléments sans enfants
+    
                     has_children = bool(parent.get('children', []))
-
                     if not has_children:
-                        # Élément feuille : checkbox visible
                         checkbox = self._create_styled_checkbox()
                         self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
                         checkbox.stateChanged.connect(
                             lambda state, it=tree_item: self._on_checkbox_changed(it, 'parent')
                         )
-
+    
                     self.dynamic_labels_tree.addTopLevelItem(tree_item)
+    
+        # ===== PARENT → ENFANTS =====
+        elif level == 'parent':
+            parent = item_data.get('data', {})
+            root = item_data.get('root', {})
+            cluster = item_data.get('cluster', {})
+    
+            self._context_navigation['parent'] = parent
+            self._context_navigation['current_level'] = 'parent'
+            self._context_navigation['child_path'] = []  # Réinitialiser le chemin
+    
+            # Charger les enfants directs
+            self._load_children_in_dynamic_list(
+                parent.get('children', []),
+                cluster,
+                root,
+                parent
+            )
+    
+        # ===== ENFANT → SOUS-ENFANTS =====
+        elif level == 'child':
+            child = item_data.get('data', {})
+            child_path = item_data.get('path', [])
+    
+            if child and child.get('children'):
+                # Mettre à jour le chemin de navigation
+                self._context_navigation['child_path'] = child_path
+                self._context_navigation['current_level'] = 'child'
+    
+                # Charger les sous-enfants
+                self._load_children_in_dynamic_list(
+                    child.get('children', []),
+                    item_data.get('cluster'),
+                    item_data.get('root'),
+                    item_data.get('parent')
+                )
+            else:
+                QtWidgets.QMessageBox.information(
+                    self, "Info",
+                    "Cet enfant n'a pas de sous-enfants."
+                )
+    
+        # Mettre à jour l'interface
+        self._update_labels_breadcrumb()
+        self._update_label_navigation_buttons()
 
     def _navigate_up_labels(self):
-        """Remonter dans la hiérarchie avec compteurs"""
+        """Remonter dans la hiérarchie avec support complet de tous les niveaux"""
         current_level = self._context_navigation.get('current_level', '')
         child_path = self._context_navigation.get('child_path', [])
-
+    
+        logger.info(f"=== Remontée dans la hiérarchie ===")
+        logger.info(f"Niveau actuel: {current_level}")
+        logger.info(f"Chemin enfant: {child_path}")
+    
+        # ===== CAS 1 : Remonter dans les enfants (profondeur N → N-1) =====
         if child_path:
-            child_path.pop()
+            logger.info(f"Cas 1: Remontée dans les enfants (profondeur {len(child_path)})")
+            
+            # Retirer le dernier niveau du chemin
+            removed = child_path.pop()
             self._context_navigation['child_path'] = child_path
-
+            logger.info(f"  Retrait de: {removed}")
+            logger.info(f"  Nouveau chemin: {child_path}")
+    
             if child_path:
+                # Toujours dans les enfants - recharger le niveau parent approprié
+                logger.info(f"  Toujours dans les enfants, rechargement niveau {len(child_path)}")
+                
                 parent = self._context_navigation.get('parent', {})
+                cluster = self._context_navigation.get('taxonomy', {})
+                root = self._context_navigation.get('root', {})
+                
+                # Trouver le bon niveau d'enfants en suivant le chemin
                 current_children = parent.get('children', [])
-
-                for path_item in child_path:
+                
+                for path_segment in child_path:
+                    logger.debug(f"    Navigation vers: {path_segment}")
+                    found = False
                     for child in current_children:
-                        if child.get('name') == path_item:
+                        if child.get('name') == path_segment:
                             current_children = child.get('children', [])
+                            found = True
+                            logger.debug(f"      Trouvé, {len(current_children)} enfants au niveau suivant")
                             break
-                        
+                    if not found:
+                        logger.warning(f"      Chemin '{path_segment}' non trouvé!")
+                        break
+                    
+                # Recharger la liste avec les enfants du niveau approprié
                 self._load_children_in_dynamic_list(
                     current_children,
-                    self._context_navigation.get('taxonomy'),
-                    self._context_navigation.get('root'),
+                    cluster,
+                    root,
                     parent
                 )
             else:
+                # Retour au niveau parent - recharger les enfants directs
+                logger.info(f"  Retour au niveau parent (enfants directs)")
+                
                 parent = self._context_navigation.get('parent', {})
+                cluster = self._context_navigation.get('taxonomy', {})
+                root = self._context_navigation.get('root', {})
+                
+                self._context_navigation['current_level'] = 'parent'  # ✅ Correction : rester au niveau parent
+                
                 self._load_children_in_dynamic_list(
                     parent.get('children', []),
-                    self._context_navigation.get('taxonomy'),
-                    self._context_navigation.get('root'),
+                    cluster,
+                    root,
                     parent
                 )
-
-        elif current_level == 'child':
+    
+        # ===== CAS 2 : Parent → Root (CORRECTION PRINCIPALE) =====
+        elif current_level == 'parent':
+            logger.info("Cas 2: Parent → Root")
+            
             root = self._context_navigation.get('root', {})
             cluster = self._context_navigation.get('taxonomy', {})
-
+    
+            # ✅ Réinitialiser le parent mais garder le root
             self._context_navigation['parent'] = None
             self._context_navigation['current_level'] = 'root'
-
+            self._context_navigation['child_path'] = []
+    
+            # Recharger les parents
             self.dynamic_labels_tree.clear()
             for parent in root.get('parent_labels', []):
                 parent_name = parent.get('name', '')
                 if parent_name:
                     sample_count = self._count_parent_samples(parent)
                     display_text = f"{parent_name} ({sample_count})"
-
+    
                     tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                     tree_item.setData(0, Qt.UserRole, {
                         'level': 'parent',
@@ -3533,28 +3615,40 @@ class DatasetRelationTab(QtWidgets.QWidget):
                         'has_children': bool(parent.get('children', [])),
                         'name': parent_name
                     })
-
-                    checkbox = self._create_styled_checkbox()
+    
+                    # Checkbox uniquement pour éléments sans enfants
+                    has_children = bool(parent.get('children', []))
+                    if not has_children:
+                        checkbox = self._create_styled_checkbox()
+                        self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
+                        checkbox.stateChanged.connect(
+                            lambda state, it=tree_item: self._on_checkbox_changed(it, 'parent')
+                        )
+    
                     self.dynamic_labels_tree.addTopLevelItem(tree_item)
-                    self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
-                    checkbox.stateChanged.connect(
-                        lambda state, it=tree_item: self._on_checkbox_changed(it, 'parent')
-                    )
-
-        elif current_level == 'parent':
+    
+            logger.info(f"  {len(root.get('parent_labels', []))} parents rechargés")
+    
+        # ===== CAS 3 : Root → Taxonomy (Cluster) =====
+        elif current_level == 'root':
+            logger.info("Cas 3: Root → Taxonomy")
+            
             cluster = self._context_navigation.get('taxonomy', {})
-
+    
+            # ✅ Réinitialiser le root mais garder le cluster
             self._context_navigation['root'] = None
             self._context_navigation['parent'] = None
             self._context_navigation['current_level'] = 'taxonomy'
-
+            self._context_navigation['child_path'] = []
+    
+            # Recharger les roots
             self.dynamic_labels_tree.clear()
             for root in cluster.get('root_labels', []):
                 root_name = root.get('name', '')
                 if root_name:
                     sample_count = self._count_root_samples(root)
                     display_text = f"{root_name} ({sample_count})"
-
+    
                     tree_item = QtWidgets.QTreeWidgetItem([display_text, ""])
                     tree_item.setData(0, Qt.UserRole, {
                         'level': 'root',
@@ -3563,16 +3657,45 @@ class DatasetRelationTab(QtWidgets.QWidget):
                         'has_children': bool(root.get('parent_labels', [])),
                         'name': root_name
                     })
-
-                    checkbox = self._create_styled_checkbox()
+    
+                    # Checkbox uniquement pour éléments sans enfants
+                    has_children = bool(root.get('parent_labels', []))
+                    if not has_children:
+                        checkbox = self._create_styled_checkbox()
+                        self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
+                        checkbox.stateChanged.connect(
+                            lambda state, it=tree_item: self._on_checkbox_changed(it, 'root')
+                        )
+    
                     self.dynamic_labels_tree.addTopLevelItem(tree_item)
-                    self.dynamic_labels_tree.setItemWidget(tree_item, 1, checkbox)
-                    checkbox.stateChanged.connect(
-                        lambda state, it=tree_item: self._on_checkbox_changed(it, 'root')
-                    )
-
+    
+            logger.info(f"  {len(cluster.get('root_labels', []))} roots rechargés")
+    
+        # ===== CAS 4 : Taxonomy → Typologie (impossible normalement) =====
+        elif current_level == 'taxonomy':
+            logger.info("Cas 4: Taxonomy → Typologie (retour au cluster)")
+            
+            # Vider la liste dynamique car on retourne au niveau cluster
+            # qui est géré par context_taxonomy_tree
+            self.dynamic_labels_tree.clear()
+            
+            self._context_navigation['taxonomy'] = None
+            self._context_navigation['root'] = None
+            self._context_navigation['parent'] = None
+            self._context_navigation['current_level'] = 'typologie'
+            self._context_navigation['child_path'] = []
+            
+            logger.info("  Retour au niveau typologie - utilisez la colonne 'Cluster'")
+    
+        else:
+            logger.warning(f"Cas non géré: current_level={current_level}, child_path={child_path}")
+            logger.warning("  Impossible de remonter plus haut")
+    
+        # Mettre à jour l'interface
         self._update_labels_breadcrumb()
         self._update_label_navigation_buttons()
+        
+        logger.info(f"✅ Remontée terminée - Niveau: {self._context_navigation.get('current_level', '')}")
 
     def _permanent_clear_batch(self):
         """Efface définitivement tous les batches et combinaisons avec confirmation UI."""

@@ -1,684 +1,1421 @@
+"""
+dataset_dgraph_manager.py - Gestionnaire CRUD complet pour Dgraph
+Projet: macompta (liris-projet2)
+
+Gère toutes les opérations de manipulation des données avec Dgraph:
+- Création, lecture, mise à jour, suppression (CRUD)
+- Navigation hiérarchique
+- Synchronisation avec l'interface
+- Gestion des transactions
+"""
+
 import json
-import logging
-import hashlib
+from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
-from typing import Optional, List, Dict
-import pydgraph
-
-logger = logging.getLogger(__name__)
+from utils.logger import logger
+from utils.dataset_dgraph_connector import TaxonomyDgraphConnector
 
 
-class DgraphTaxonomyManager:
-    def __init__(self, dgraph_url="localhost:8090"):
-        """Initialise la connexion à Dgraph"""
-        self.dgraph_url = dgraph_url
-        self.client_stub = None
-        self.client = None
-        self._init_connection()
-        self._init_schema()
-
-    def _init_connection(self):
-        """Établit la connexion avec Dgraph"""
-        try:
-            self.client_stub = pydgraph.DgraphClientStub(self.dgraph_url)
-            self.client = pydgraph.DgraphClient(self.client_stub)
-            logger.info(f"Connexion Dgraph établie: {self.dgraph_url}")
-        except Exception as e:
-            logger.error(f"Erreur connexion Dgraph: {str(e)}")
-            raise e
-
-    def _init_schema(self):
-        """Définit le schéma Dgraph avec la taxonomie complète"""
-        schema = """
+class DgraphDatasetManager:
+    """
+    Gestionnaire principal pour toutes les opérations CRUD sur Dgraph
+    Abstrait la complexité du connecteur et fournit une API simple
+    """
+    
+    def __init__(self):
+        """Initialise le gestionnaire avec connexion Dgraph"""
+        self.connector = TaxonomyDgraphConnector()
+        self.current_project_uid = None
+        self.current_project_name = None
         
-        type Project {
-            project_name
-            description
-            typologies
-            batches
-            created_at
-            updated_at
+        # Cache local pour optimiser les requêtes
+        self._cache = {
+            'projects': {},
+            'typologies': {},
+            'clusters': {},
+            'roots': {},
+            'parents': {},
+            'children': {}
         }
-
-        type Typologie {
-            typologie_name
-            description
-            position
-            project
-            taxonomy_clusters
-        }
-
-        type TaxonomyCluster {
-            cluster_name
-            description
-            position
-            typologie
-            root_labels
-        }
-
-        type RootLabel {
-            label_name
-            description
-            category
-            position
-            taxonomy_cluster
-            parent_labels
-        }
-
-        type ParentLabel {
-            label_name
-            description
-            category
-            position
-            root_label
-            children
-        }
-
-        type ChildLabel {
-            label_name
-            description
-            category
-            depth
-            position
-            parent_label
-            parent_child
-            children
-        }
-
-        # ==========================================
-        # TYPES POUR COMBINAISONS
-        # ==========================================
-
-        type Batch {
-            batch_uuid
-            batch_number
-            total_batches
-            project_name
-            project
-            combinations
-            status
-            prompt_template
-            created_at
-            processed_at
-        }
-
-        type ContextCombination {
-            combination_uuid
-            combination_hash
-            batch
-            selected_nodes
-            sample_count
-            typologie_distribution
-            created_at
-        }
-
-        # ==========================================
-        # PRÉDICATS
-        # ==========================================
         
-        # Noms et descriptions
-        project_name: string @index(exact, term) .
-        typologie_name: string @index(exact, term) .
-        cluster_name: string @index(exact, term) .
-        label_name: string @index(exact, term, fulltext) .
-        description: string @index(fulltext) .
-        
-        # Métadonnées taxonomiques
-        category: string @index(exact) .
-        position: int @index(int) .
-        depth: int @index(int) .
-        
-        # Métadonnées batch/combinaisons
-        batch_uuid: string @index(exact) .
-        batch_number: int @index(int) .
-        total_batches: int .
-        combination_uuid: string @index(exact) .
-        combination_hash: string @index(exact) .
-        sample_count: int .
-        status: string @index(exact) .
-        prompt_template: string .
-        typologie_distribution: string .
-        
-        # Relations hiérarchiques (un seul parent)
-        project: uid @reverse .
-        typologie: uid @reverse .
-        taxonomy_cluster: uid @reverse .
-        root_label: uid @reverse .
-        parent_label: uid @reverse .
-        parent_child: uid @reverse .
-        batch: uid @reverse .
-        
-        # Relations de collection (plusieurs enfants)
-        typologies: [uid] @reverse .
-        taxonomy_clusters: [uid] @reverse .
-        root_labels: [uid] @reverse .
-        parent_labels: [uid] @reverse .
-        children: [uid] @reverse .
-        batches: [uid] @reverse .
-        combinations: [uid] @reverse .
-        selected_nodes: [uid] @reverse .
-        
-        # Timestamps
-        created_at: datetime @index(hour) .
-        updated_at: datetime @index(hour) .
-        processed_at: datetime .
+        logger.info("✅ DgraphDatasetManager initialisé")
+    
+    # ============================================
+    # GESTION DES PROJETS
+    # ============================================
+    
+    def create_project(self, name: str, description: str = "") -> Optional[str]:
         """
-
-        try:
-            op = pydgraph.Operation(schema=schema)
-            self.client.alter(op)
-            logger.info("Schéma Dgraph avec taxonomie complète initialisé")
-        except Exception as e:
-            logger.error(f"Erreur initialisation schéma: {str(e)}")
-            raise e
-
-    def sync_project_from_sqlite(self, project_data: Dict) -> Optional[str]:
-        """
-        Synchronise AUTOMATIQUEMENT un projet complet depuis SQLite vers Dgraph
-        Crée toute la hiérarchie: Typologie → Cluster → Root → Parent → Child → ...
+        Crée un nouveau projet
         
-        project_data: Structure complète depuis dataset_database.get_dataset_projet()
-        {
-            'nom': 'mon_projet',
-            'description': '...',
-            'typologies': [...]
-        }
-        """
-        try:
-            project_name = project_data['nom']
+        Args:
+            name: Nom du projet
+            description: Description optionnelle
             
-            txn = self.client.txn()
-            try:
-                # Vérifier si le projet existe déjà
-                query = f'''
-                {{
-                    existing(func: eq(project_name, "{project_name}")) @filter(type(Project)) {{
-                        uid
-                    }}
-                }}
-                '''
-                res = json.loads(txn.query(query).json)
-                
-                # Si existe, le supprimer pour recréer (synchronisation complète)
-                if res.get('existing'):
-                    existing_uid = res['existing'][0]['uid']
-                    txn.mutate(del_obj={'uid': existing_uid})
-                    logger.info(f"Projet existant '{project_name}' supprimé pour resync")
-
-                # Créer le projet complet
-                project_node = {
-                    'dgraph.type': 'Project',
-                    'project_name': project_name,
-                    'description': project_data.get('description', ''),
-                    'created_at': datetime.now().isoformat(),
-                    'updated_at': datetime.now().isoformat(),
-                    'typologies': []
-                }
-
-                # Créer toutes les typologies
-                for typ_idx, typologie in enumerate(project_data.get('typologies', [])):
-                    typologie_node = self._create_typologie_node(
-                        typologie, 
-                        typ_idx
-                    )
-                    project_node['typologies'].append(typologie_node)
-
-                # Sauvegarder tout
-                mutation = txn.mutate(set_obj=project_node)
-                txn.commit()
-                
-                project_uid = list(mutation.uids.values())[0]
-                logger.info(f"Projet '{project_name}' synchronisé dans Dgraph avec hiérarchie complète")
-                return project_uid
-
-            finally:
-                txn.discard()
-
+        Returns:
+            UID du projet créé ou None en cas d'erreur
+        """
+        try:
+            # Vérifier si le projet existe déjà
+            existing = self.get_project_by_name(name)
+            if existing:
+                logger.warning(f"Le projet '{name}' existe déjà")
+                return None
+            
+            project_uid = self.connector.create_project(name, description)
+            
+            if project_uid:
+                self.current_project_uid = project_uid
+                self.current_project_name = name
+                self._cache['projects'][name] = project_uid
+                logger.info(f"✅ Projet créé: {name} (UID: {project_uid})")
+            
+            return project_uid
+            
         except Exception as e:
-            logger.error(f"Erreur sync projet: {str(e)}")
+            logger.error(f"❌ Erreur création projet: {e}")
             return None
-
-    def _create_typologie_node(self, typologie: Dict, position: int) -> Dict:
-        """Crée un nœud Typologie avec tous ses clusters"""
-        typologie_node = {
-            'dgraph.type': 'Typologie',
-            'typologie_name': typologie['name'],
-            'description': typologie.get('description', ''),
-            'position': position,
-            'taxonomy_clusters': []
-        }
-
-        for cluster_idx, cluster in enumerate(typologie.get('taxonomy_clusters', [])):
-            cluster_node = self._create_cluster_node(cluster, cluster_idx)
-            typologie_node['taxonomy_clusters'].append(cluster_node)
-
-        return typologie_node
-
-    def _create_cluster_node(self, cluster: Dict, position: int) -> Dict:
-        """Crée un nœud TaxonomyCluster avec tous ses root labels"""
-        cluster_node = {
-            'dgraph.type': 'TaxonomyCluster',
-            'cluster_name': cluster['name'],
-            'description': cluster.get('description', ''),
-            'position': position,
-            'root_labels': []
-        }
-
-        for root_idx, root in enumerate(cluster.get('root_labels', [])):
-            root_node = self._create_root_label_node(root, root_idx)
-            cluster_node['root_labels'].append(root_node)
-
-        return cluster_node
-
-    def _create_root_label_node(self, root: Dict, position: int) -> Dict:
-        """Crée un nœud RootLabel avec tous ses parent labels"""
-        root_node = {
-            'dgraph.type': 'RootLabel',
-            'label_name': root['name'],
-            'description': root.get('description', ''),
-            'category': root.get('category', 'default'),
-            'position': position,
-            'parent_labels': []
-        }
-
-        for parent_idx, parent in enumerate(root.get('parent_labels', [])):
-            parent_node = self._create_parent_label_node(parent, parent_idx)
-            root_node['parent_labels'].append(parent_node)
-
-        return root_node
-
-    def _create_parent_label_node(self, parent: Dict, position: int) -> Dict:
-        """Crée un nœud ParentLabel avec tous ses enfants"""
-        parent_node = {
-            'dgraph.type': 'ParentLabel',
-            'label_name': parent['name'],
-            'description': parent.get('description', ''),
-            'category': parent.get('category', 'default'),
-            'position': position,
-            'children': []
-        }
-
-        for child_idx, child in enumerate(parent.get('children', [])):
-            child_node = self._create_child_label_node(child, child_idx, depth=0)
-            parent_node['children'].append(child_node)
-
-        return parent_node
-
-    def _create_child_label_node(self, child: Dict, position: int, depth: int) -> Dict:
-        """Crée un nœud ChildLabel RÉCURSIVEMENT (profondeur infinie)"""
-        child_node = {
-            'dgraph.type': 'ChildLabel',
-            'label_name': child['name'],
-            'description': child.get('description', ''),
-            'category': child.get('category', 'default'),
-            'depth': depth,
-            'position': position,
-            'children': []
-        }
-
-        # RÉCURSION pour les sous-enfants (infini)
-        for sub_idx, sub_child in enumerate(child.get('children', [])):
-            sub_node = self._create_child_label_node(sub_child, sub_idx, depth=depth+1)
-            child_node['children'].append(sub_node)
-
-        return child_node
-
-    def get_full_taxonomy(self, project_name: str) -> Optional[Dict]:
+    
+    def get_all_projects(self) -> List[Dict]:
         """
-        Récupère la taxonomie COMPLÈTE d'un projet depuis Dgraph
-        Retourne la structure hiérarchique entière
-        """
-        try:
-            query = f'''
-            {{
-                project(func: eq(project_name, "{project_name}")) @filter(type(Project)) {{
-                    uid
-                    project_name
-                    description
-                    created_at
-                    typologies (orderasc: position) {{
-                        uid
-                        typologie_name
-                        description
-                        position
-                        taxonomy_clusters (orderasc: position) {{
-                            uid
-                            cluster_name
-                            description
-                            position
-                            root_labels (orderasc: position) {{
-                                uid
-                                label_name
-                                description
-                                category
-                                position
-                                parent_labels (orderasc: position) {{
-                                    uid
-                                    label_name
-                                    description
-                                    category
-                                    position
-                                    children (orderasc: position) @recurse(depth: 20) {{
-                                        uid
-                                        label_name
-                                        description
-                                        category
-                                        depth
-                                        position
-                                        children
-                                    }}
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-            }}
-            '''
-            
-            txn = self.client.txn(read_only=True)
-            try:
-                res = json.loads(txn.query(query).json)
-                projects = res.get('project', [])
-                return projects[0] if projects else None
-            finally:
-                txn.discard()
-
-        except Exception as e:
-            logger.error(f"Erreur récupération taxonomie: {str(e)}")
-            return None
-
-    def find_node_by_path(
-        self,
-        project_name: str,
-        typologie_name: str,
-        path: str
-    ) -> Optional[str]:
-        """
-        Trouve l'UID d'un nœud via son chemin
-        path: 'cluster_name/root_name/parent_name/child1/child2/...'
-        """
-        try:
-            parts = path.split('/')
-            
-            # Construire la query progressive
-            query = f'''
-            {{
-                project(func: eq(project_name, "{project_name}")) @filter(type(Project)) {{
-                    typologies @filter(eq(typologie_name, "{typologie_name}")) {{
-            '''
-            
-            # Niveau cluster
-            if len(parts) >= 1:
-                query += f'''
-                        taxonomy_clusters @filter(eq(cluster_name, "{parts[0]}")) {{
-                '''
-            
-            # Niveau root
-            if len(parts) >= 2:
-                query += f'''
-                            root_labels @filter(eq(label_name, "{parts[1]}")) {{
-                '''
-            
-            # Niveau parent
-            if len(parts) >= 3:
-                query += f'''
-                                parent_labels @filter(eq(label_name, "{parts[2]}")) {{
-                '''
-            
-            # Niveaux children (récursif)
-            if len(parts) >= 4:
-                for i in range(3, len(parts)):
-                    query += f'''
-                                    children @filter(eq(label_name, "{parts[i]}")) {{
-                    '''
-            
-            # Fermer toutes les accolades et récupérer l'UID
-            query += 'uid ' + '}' * len(parts) + '}}}'
-            
-            txn = self.client.txn(read_only=True)
-            try:
-                res = json.loads(txn.query(query).json)
-                
-                # Naviguer dans le résultat pour extraire l'UID
-                node = res.get('project', [{}])[0]
-                
-                if 'typologies' in node and node['typologies']:
-                    node = node['typologies'][0]
-                else:
-                    return None
-                
-                for level in ['taxonomy_clusters', 'root_labels', 'parent_labels'] + ['children'] * (len(parts) - 3):
-                    if level in node and node[level]:
-                        node = node[level][0]
-                    else:
-                        return None
-                
-                return node.get('uid')
-                
-            finally:
-                txn.discard()
-
-        except Exception as e:
-            logger.error(f"Erreur recherche nœud: {str(e)}")
-            return None
-
-    def save_batch_combinations(
-        self,
-        project_name: str,
-        batch_number: int,
-        total_batches: int,
-        combinations: List[Dict],
-        prompt_template: str = "",
-        status: str = "pending"
-    ) -> Optional[str]:
-        """
-        Sauvegarde un batch avec ses combinaisons
-        Les combinaisons référencent directement les nœuds de la taxonomie
+        Récupère tous les projets
         
-        combinations: [
+        Returns:
+            Liste des projets avec leurs métadonnées
+        """
+        try:
+            query = """
             {
-                'nodes': [
-                    {
-                        'typologie': 'Contexte Géographique',
-                        'path': 'Lieux urbains/Ville/Paris'
-                    },
-                    {
-                        'typologie': 'Contexte Temporel',
-                        'path': 'Périodes/Jour/Matin/Début'
-                    }
-                ],
-                'sample_count': 5
+              projects(func: type(Project)) {
+                uid
+                name
+                description
+                createdAt
+                updatedAt
+                typologiesCount: count(typologies)
+              }
             }
-        ]
+            """
+            
+            txn = self.connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+            
+            data = json.loads(resp.json)
+            projects = data.get('projects', [])
+            
+            logger.info(f"📊 {len(projects)} projet(s) récupéré(s)")
+            return projects
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération projets: {e}")
+            return []
+    
+    def get_project_by_name(self, name: str) -> Optional[Dict]:
+        """
+        Récupère un projet par son nom
+        
+        Args:
+            name: Nom du projet
+            
+        Returns:
+            Dictionnaire contenant les données du projet ou None
         """
         try:
-            # Vérifier que le projet existe
-            query = f'''
-            {{
-                project(func: eq(project_name, "{project_name}")) @filter(type(Project)) {{
-                    uid
-                }}
-            }}
-            '''
+            projects = self.connector.get_project(name)
+            if projects and len(projects) > 0:
+                project = projects[0]
+                self.current_project_uid = project.get('uid')
+                self.current_project_name = name
+                return project
+            return None
             
-            txn = self.client.txn()
-            try:
-                res = json.loads(txn.query(query).json)
-                
-                if not res.get('project'):
-                    logger.error(f"Projet '{project_name}' non trouvé dans Dgraph. Synchronisez d'abord.")
-                    return None
-                
-                project_uid = res['project'][0]['uid']
-                batch_uuid = f"{project_name}_batch_{batch_number}"
-
-                # Créer le batch
-                batch_node = {
-                    'dgraph.type': 'Batch',
-                    'batch_uuid': batch_uuid,
-                    'batch_number': batch_number,
-                    'total_batches': total_batches,
-                    'project_name': project_name,
-                    'project': {'uid': project_uid},
-                    'status': status,
-                    'prompt_template': prompt_template,
-                    'created_at': datetime.now().isoformat(),
-                    'combinations': []
-                }
-
-                # Créer les combinaisons
-                for idx, combo in enumerate(combinations):
-                    combo_hash = self._generate_combination_hash(combo['nodes'])
-                    combo_uuid = f"{batch_uuid}_combo_{idx}"
-
-                    # Récupérer les UIDs des nœuds sélectionnés
-                    node_uids = []
-                    typologie_dist = {}
-
-                    for node_ref in combo['nodes']:
-                        typologie = node_ref['typologie']
-                        path = node_ref['path']
-                        
-                        # Trouver le nœud dans la taxonomie
-                        node_uid = self.find_node_by_path(project_name, typologie, path)
-                        
-                        if node_uid:
-                            node_uids.append({'uid': node_uid})
-                            typologie_dist[typologie] = typologie_dist.get(typologie, 0) + 1
-                        else:
-                            logger.warning(f"Nœud non trouvé: {typologie}/{path}")
-
-                    # Créer la combinaison
-                    combo_node = {
-                        'dgraph.type': 'ContextCombination',
-                        'combination_uuid': combo_uuid,
-                        'combination_hash': combo_hash,
-                        'sample_count': combo.get('sample_count', 1),
-                        'typologie_distribution': json.dumps(typologie_dist),
-                        'created_at': datetime.now().isoformat(),
-                        'selected_nodes': node_uids
-                    }
-
-                    batch_node['combinations'].append(combo_node)
-
-                # Sauvegarder
-                mutation = txn.mutate(set_obj=batch_node)
-                txn.commit()
-                
-                logger.info(f"Batch {batch_number} créé avec {len(combinations)} combinaisons")
-                return batch_uuid
-
-            finally:
-                txn.discard()
-
         except Exception as e:
-            logger.error(f"Erreur sauvegarde batch: {str(e)}")
+            logger.error(f"❌ Erreur récupération projet '{name}': {e}")
+            return None
+    
+    def update_project(self, project_uid: str, name: str = None, 
+                      description: str = None) -> bool:
+        """
+        Met à jour un projet
+        
+        Args:
+            project_uid: UID du projet
+            name: Nouveau nom (optionnel)
+            description: Nouvelle description (optionnel)
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            mutation = {"uid": project_uid}
+            
+            if name is not None:
+                mutation["name"] = name
+            if description is not None:
+                mutation["description"] = description
+            
+            mutation["updatedAt"] = datetime.now().isoformat() + "Z"
+            
+            txn.mutate(set_obj=mutation)
+            txn.commit()
+            
+            if name:
+                self.current_project_name = name
+            
+            logger.info(f"✅ Projet mis à jour: {project_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur mise à jour projet: {e}")
+            return False
+    
+    def delete_project(self, project_uid: str) -> bool:
+        """
+        Supprime un projet et toutes ses données
+        
+        Args:
+            project_uid: UID du projet
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            # Supprimer le projet (cascade via edges)
+            mutation = {
+                "uid": project_uid,
+                "dgraph.type": None,
+                "name": None,
+                "description": None,
+                "typologies": None
+            }
+            
+            txn.mutate(del_obj=mutation)
+            txn.commit()
+            
+            logger.info(f"✅ Projet supprimé: {project_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur suppression projet: {e}")
+            return False
+    
+    # ============================================
+    # GESTION DES TYPOLOGIES
+    # ============================================
+    
+    def add_typologie(self, typologie_name: str, description: str = "", 
+                     position: int = 0) -> Optional[str]:
+        """
+        Ajoute une typologie au projet actuel
+        
+        Args:
+            typologie_name: Nom de la typologie
+            description: Description optionnelle
+            position: Position dans la liste
+            
+        Returns:
+            UID de la typologie créée ou None
+        """
+        if not self.current_project_uid:
+            logger.error("Aucun projet actuel sélectionné")
+            return None
+        
+        try:
+            return self.connector.add_typologie(
+                self.current_project_uid, 
+                typologie_name, 
+                description, 
+                position
+            )
+        except Exception as e:
+            logger.error(f"❌ Erreur ajout typologie: {e}")
+            return None
+    
+    def get_typologies(self) -> List[Dict]:
+        """
+        Récupère toutes les typologies du projet actuel
+        
+        Returns:
+            Liste des typologies
+        """
+        if not self.current_project_name:
+            return []
+        
+        try:
+            projects = self.connector.get_project(self.current_project_name)
+            if projects and len(projects) > 0:
+                return projects[0].get('typologies', [])
+            return []
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération typologies: {e}")
+            return []
+    
+    def update_typologie(self, typologie_uid: str, name: str = None, 
+                        description: str = None, position: int = None) -> bool:
+        """
+        Met à jour une typologie
+        
+        Args:
+            typologie_uid: UID de la typologie
+            name: Nouveau nom (optionnel)
+            description: Nouvelle description (optionnel)
+            position: Nouvelle position (optionnel)
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            mutation = {"uid": typologie_uid}
+            
+            if name is not None:
+                mutation["name"] = name
+            if description is not None:
+                mutation["description"] = description
+            if position is not None:
+                mutation["position"] = position
+            
+            mutation["updatedAt"] = datetime.now().isoformat() + "Z"
+            
+            txn.mutate(set_obj=mutation)
+            txn.commit()
+            
+            logger.info(f"✅ Typologie mise à jour: {typologie_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur mise à jour typologie: {e}")
+            return False
+    
+    def delete_typologie(self, typologie_uid: str) -> bool:
+        """
+        Supprime une typologie et tous ses clusters
+        
+        Args:
+            typologie_uid: UID de la typologie
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            mutation = {
+                "uid": typologie_uid,
+                "dgraph.type": None,
+                "name": None,
+                "clusters": None
+            }
+            
+            txn.mutate(del_obj=mutation)
+            txn.commit()
+            
+            logger.info(f"✅ Typologie supprimée: {typologie_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur suppression typologie: {e}")
+            return False
+    
+    # ============================================
+    # GESTION DES CLUSTERS DE TAXONOMIE
+    # ============================================
+    
+    def add_cluster(self, typologie_uid: str, cluster_name: str, 
+                   description: str = "", position: int = 0) -> Optional[str]:
+        """
+        Ajoute un cluster à une typologie
+        
+        Args:
+            typologie_uid: UID de la typologie parent
+            cluster_name: Nom du cluster
+            description: Description optionnelle
+            position: Position dans la liste
+            
+        Returns:
+            UID du cluster créé ou None
+        """
+        try:
+            return self.connector.add_cluster(
+                typologie_uid, 
+                cluster_name, 
+                description, 
+                position
+            )
+        except Exception as e:
+            logger.error(f"❌ Erreur ajout cluster: {e}")
+            return None
+    
+    def get_clusters(self, typologie_uid: str) -> List[Dict]:
+        """
+        Récupère tous les clusters d'une typologie
+        
+        Args:
+            typologie_uid: UID de la typologie
+            
+        Returns:
+            Liste des clusters
+        """
+        try:
+            result = self.connector.expand_typologie(typologie_uid)
+            if result and len(result) > 0:
+                return result[0].get('clusters', [])
+            return []
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération clusters: {e}")
+            return []
+    
+    def update_cluster(self, cluster_uid: str, name: str = None, 
+                      description: str = None, position: int = None) -> bool:
+        """
+        Met à jour un cluster
+        
+        Args:
+            cluster_uid: UID du cluster
+            name: Nouveau nom (optionnel)
+            description: Nouvelle description (optionnel)
+            position: Nouvelle position (optionnel)
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            mutation = {"uid": cluster_uid}
+            
+            if name is not None:
+                mutation["name"] = name
+            if description is not None:
+                mutation["description"] = description
+            if position is not None:
+                mutation["position"] = position
+            
+            mutation["updatedAt"] = datetime.now().isoformat() + "Z"
+            
+            txn.mutate(set_obj=mutation)
+            txn.commit()
+            
+            logger.info(f"✅ Cluster mis à jour: {cluster_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur mise à jour cluster: {e}")
+            return False
+    
+    def delete_cluster(self, cluster_uid: str) -> bool:
+        """
+        Supprime un cluster et tous ses root labels
+        
+        Args:
+            cluster_uid: UID du cluster
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            mutation = {
+                "uid": cluster_uid,
+                "dgraph.type": None,
+                "name": None,
+                "rootLabels": None
+            }
+            
+            txn.mutate(del_obj=mutation)
+            txn.commit()
+            
+            logger.info(f"✅ Cluster supprimé: {cluster_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur suppression cluster: {e}")
+            return False
+    
+    # ============================================
+    # GESTION DES ROOT LABELS
+    # ============================================
+    
+    def add_root_label(self, cluster_uid: str, label_name: str, 
+                      description: str = "", category: str = "default", 
+                      position: int = 0, **metadata) -> Optional[str]:
+        """
+        Ajoute un root label à un cluster
+        
+        Args:
+            cluster_uid: UID du cluster parent
+            label_name: Nom du label
+            description: Description optionnelle
+            category: Catégorie du label
+            position: Position dans la liste
+            **metadata: Métadonnées additionnelles (intentKeywords, etc.)
+            
+        Returns:
+            UID du root label créé ou None
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            mutation = {
+                "uid": "_:rootlabel",
+                "dgraph.type": "RootLabel",
+                "name": label_name,
+                "description": description,
+                "category": category,
+                "position": position,
+                "createdAt": datetime.now().isoformat() + "Z",
+                "updatedAt": datetime.now().isoformat() + "Z"
+            }
+            
+            # Ajouter métadonnées
+            for key, value in metadata.items():
+                if value is not None:
+                    mutation[key] = value
+            
+            cluster_link = {
+                "uid": cluster_uid,
+                "rootLabels": [{"uid": "_:rootlabel"}]
+            }
+            
+            response = txn.mutate(set_obj=[mutation, cluster_link])
+            txn.commit()
+            
+            rootlabel_uid = response.uids["rootlabel"]
+            logger.info(f"✅ Root label créé: {label_name} (UID: {rootlabel_uid})")
+            return rootlabel_uid
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur ajout root label: {e}")
+            return None
+    
+    def get_root_labels(self, cluster_uid: str) -> List[Dict]:
+        """
+        Récupère tous les root labels d'un cluster
+        
+        Args:
+            cluster_uid: UID du cluster
+            
+        Returns:
+            Liste des root labels
+        """
+        try:
+            result = self.connector.expand_cluster(cluster_uid)
+            if result and len(result) > 0:
+                return result[0].get('rootLabels', [])
+            return []
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération root labels: {e}")
+            return []
+    
+    def update_root_label(self, root_uid: str, name: str = None, 
+                         description: str = None, category: str = None,
+                         position: int = None, **metadata) -> bool:
+        """
+        Met à jour un root label
+        
+        Args:
+            root_uid: UID du root label
+            name: Nouveau nom (optionnel)
+            description: Nouvelle description (optionnel)
+            category: Nouvelle catégorie (optionnel)
+            position: Nouvelle position (optionnel)
+            **metadata: Métadonnées à mettre à jour
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            mutation = {"uid": root_uid}
+            
+            if name is not None:
+                mutation["name"] = name
+            if description is not None:
+                mutation["description"] = description
+            if category is not None:
+                mutation["category"] = category
+            if position is not None:
+                mutation["position"] = position
+            
+            # Ajouter métadonnées
+            for key, value in metadata.items():
+                if value is not None:
+                    mutation[key] = value
+            
+            mutation["updatedAt"] = datetime.now().isoformat() + "Z"
+            
+            txn.mutate(set_obj=mutation)
+            txn.commit()
+            
+            logger.info(f"✅ Root label mis à jour: {root_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur mise à jour root label: {e}")
+            return False
+    
+    def delete_root_label(self, root_uid: str) -> bool:
+        """
+        Supprime un root label
+        
+        Args:
+            root_uid: UID du root label
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            mutation = {
+                "uid": root_uid,
+                "dgraph.type": None,
+                "name": None,
+                "children": None
+            }
+            
+            txn.mutate(del_obj=mutation)
+            txn.commit()
+            
+            logger.info(f"✅ Root label supprimé: {root_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur suppression root label: {e}")
+            return False
+    
+    # ============================================
+    # GESTION DES LABEL NODES (Parents/Children)
+    # ============================================
+    
+    def add_label_node(self, parent_uid: str, label_name: str, 
+                      description: str = "", category: str = "default",
+                      depth: int = 0, position: int = 0, **metadata) -> Optional[str]:
+        """
+        Ajoute un label node (parent ou enfant)
+        
+        Args:
+            parent_uid: UID du parent (RootLabel ou LabelNode)
+            label_name: Nom du label
+            description: Description optionnelle
+            category: Catégorie du label
+            depth: Profondeur dans l'arbre
+            position: Position dans la liste
+            **metadata: Métadonnées additionnelles
+            
+        Returns:
+            UID du label node créé ou None
+        """
+        try:
+            return self.connector.add_label_node(
+                parent_uid, 
+                label_name, 
+                description, 
+                category, 
+                depth, 
+                position, 
+                **metadata
+            )
+        except Exception as e:
+            logger.error(f"❌ Erreur ajout label node: {e}")
+            return None
+    
+    def get_children(self, parent_uid: str, limit: int = 50, 
+                    offset: int = 0) -> Tuple[List[Dict], int]:
+        """
+        Récupère les enfants d'un nœud avec pagination
+        
+        Args:
+            parent_uid: UID du parent
+            limit: Nombre maximum d'enfants à retourner
+            offset: Décalage pour la pagination
+            
+        Returns:
+            Tuple (liste des enfants, nombre total d'enfants)
+        """
+        try:
+            result = self.connector.get_node_by_uid(
+                parent_uid, 
+                load_children=True, 
+                children_limit=limit, 
+                children_offset=offset
+            )
+            
+            if result and len(result) > 0:
+                node = result[0]
+                children = node.get('children', [])
+                total = node.get('totalChildren', len(children))
+                return children, total
+            
+            return [], 0
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération enfants: {e}")
+            return [], 0
+    
+    def update_label_node(self, node_uid: str, name: str = None, 
+                         description: str = None, category: str = None,
+                         position: int = None, depth: int = None, 
+                         **metadata) -> bool:
+        """
+        Met à jour un label node
+        
+        Args:
+            node_uid: UID du nœud
+            name: Nouveau nom (optionnel)
+            description: Nouvelle description (optionnel)
+            category: Nouvelle catégorie (optionnel)
+            position: Nouvelle position (optionnel)
+            depth: Nouvelle profondeur (optionnel)
+            **metadata: Métadonnées à mettre à jour
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            mutation = {"uid": node_uid}
+            
+            if name is not None:
+                mutation["name"] = name
+            if description is not None:
+                mutation["description"] = description
+            if category is not None:
+                mutation["category"] = category
+            if position is not None:
+                mutation["position"] = position
+            if depth is not None:
+                mutation["depth"] = depth
+            
+            # Ajouter métadonnées
+            for key, value in metadata.items():
+                if value is not None:
+                    mutation[key] = value
+            
+            mutation["updatedAt"] = datetime.now().isoformat() + "Z"
+            
+            txn.mutate(set_obj=mutation)
+            txn.commit()
+            
+            logger.info(f"✅ Label node mis à jour: {node_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur mise à jour label node: {e}")
+            return False
+    
+    def delete_label_node(self, node_uid: str, recursive: bool = True) -> bool:
+        """
+        Supprime un label node
+        
+        Args:
+            node_uid: UID du nœud
+            recursive: Si True, supprime aussi les enfants
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            if recursive:
+                # Récupérer tous les descendants
+                descendants = self._get_all_descendants(node_uid)
+                
+                # Supprimer tous les descendants
+                for desc_uid in descendants:
+                    mutation = {
+                        "uid": desc_uid,
+                        "dgraph.type": None,
+                        "name": None,
+                        "children": None
+                    }
+                    txn.mutate(del_obj=mutation)
+            
+            # Supprimer le nœud principal
+            mutation = {
+                "uid": node_uid,
+                "dgraph.type": None,
+                "name": None,
+                "children": None
+            }
+            
+            txn.mutate(del_obj=mutation)
+            txn.commit()
+            
+            logger.info(f"✅ Label node supprimé: {node_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur suppression label node: {e}")
+            return False
+    
+    # ============================================
+    # OPÉRATIONS DE RÉORGANISATION
+    # ============================================
+    
+    def move_node(self, node_uid: str, new_parent_uid: str, 
+                 new_position: int = 0) -> bool:
+        """
+        Déplace un nœud vers un nouveau parent
+        
+        Args:
+            node_uid: UID du nœud à déplacer
+            new_parent_uid: UID du nouveau parent
+            new_position: Nouvelle position dans la liste
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            # Récupérer l'ancien parent
+            old_parent_query = f"""
+            {{
+              node(func: uid({node_uid})) {{
+                parent {{
+                  uid
+                }}
+              }}
+            }}
+            """
+            
+            resp = txn.query(old_parent_query)
+            data = json.loads(resp.json)
+            
+            old_parent_uid = None
+            if data.get('node') and len(data['node']) > 0:
+                parent = data['node'][0].get('parent')
+                if parent:
+                    old_parent_uid = parent.get('uid')
+            
+            # Supprimer l'ancien lien
+            if old_parent_uid:
+                remove_mutation = {
+                    "uid": old_parent_uid,
+                    "children": [{"uid": node_uid}]
+                }
+                txn.mutate(del_obj=remove_mutation)
+            
+            # Créer le nouveau lien
+            add_mutation = {
+                "uid": new_parent_uid,
+                "children": [{"uid": node_uid}]
+            }
+            
+            # Mettre à jour la position
+            position_mutation = {
+                "uid": node_uid,
+                "position": new_position,
+                "updatedAt": datetime.now().isoformat() + "Z"
+            }
+            
+            txn.mutate(set_obj=[add_mutation, position_mutation])
+            txn.commit()
+            
+            logger.info(f"✅ Nœud déplacé: {node_uid} vers {new_parent_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur déplacement nœud: {e}")
+            return False
+    
+    def reorder_children(self, parent_uid: str, 
+                        ordered_child_uids: List[str]) -> bool:
+        """
+        Réorganise les enfants d'un parent
+        
+        Args:
+            parent_uid: UID du parent
+            ordered_child_uids: Liste ordonnée des UIDs des enfants
+            
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            txn = self.connector.client.txn()
+            
+            # Mettre à jour la position de chaque enfant
+            for position, child_uid in enumerate(ordered_child_uids):
+                mutation = {
+                    "uid": child_uid,
+                    "position": position,
+                    "updatedAt": datetime.now().isoformat() + "Z"
+                }
+                txn.mutate(set_obj=mutation)
+            
+            txn.commit()
+            
+            logger.info(f"✅ Enfants réordonnés pour: {parent_uid}")
+            return True
+            
+        except Exception as e:
+            txn.discard()
+            logger.error(f"❌ Erreur réorganisation enfants: {e}")
+            return False
+    
+    # ============================================
+    # RECHERCHE ET NAVIGATION
+    # ============================================
+    
+    def search_by_name(self, search_term: str, node_types: List[str] = None) -> List[Dict]:
+        """
+        Recherche globale par nom
+        
+        Args:
+            search_term: Terme de recherche
+            node_types: Types de nœuds à rechercher (optionnel)
+            
+        Returns:
+            Liste des résultats
+        """
+        try:
+            type_filter = ""
+            if node_types:
+                type_conditions = " OR ".join([f'eq(dgraph.type, "{t}")' for t in node_types])
+                type_filter = f"@filter({type_conditions})"
+            
+            query = f"""
+            {{
+              search(func: allofterms(name, "{search_term}")) {type_filter} {{
+                uid
+                name
+                dgraph.type
+                description
+                category
+                position
+                depth
+                
+                parent {{
+                  uid
+                  name
+                }}
+              }}
+            }}
+            """
+            
+            txn = self.connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+            
+            data = json.loads(resp.json)
+            results = data.get('search', [])
+            
+            logger.info(f"🔍 Recherche '{search_term}': {len(results)} résultat(s)")
+            return results
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche: {e}")
+            return []
+    
+    def get_path_to_root(self, node_uid: str) -> List[Dict]:
+        """
+        Récupère le chemin complet de la racine au nœud
+        
+        Args:
+            node_uid: UID du nœud
+            
+        Returns:
+            Liste des nœuds du chemin (de la racine au nœud)
+        """
+        try:
+            result = self.connector.get_path_to_root(node_uid)
+            if result and len(result) > 0:
+                # Reconstruire le chemin dans l'ordre
+                path = []
+                current = result[0]
+                
+                # Remonter récursivement
+                def build_path(node, accumulated):
+                    accumulated.insert(0, {
+                        'uid': node.get('uid'),
+                        'name': node.get('name'),
+                        'type': node.get('dgraph.type')
+                    })
+                    
+                    parent = node.get('parent')
+                    if parent:
+                        build_path(parent, accumulated)
+                
+                build_path(current, path)
+                return path
+            
+            return []
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération chemin: {e}")
+            return []
+    
+    def get_node_statistics(self, node_uid: str) -> Dict[str, Any]:
+        """
+        Récupère les statistiques d'un nœud
+        
+        Args:
+            node_uid: UID du nœud
+            
+        Returns:
+            Dictionnaire contenant les statistiques
+        """
+        try:
+            query = f"""
+            {{
+              node(func: uid({node_uid})) {{
+                uid
+                name
+                dgraph.type
+                depth
+                childrenCount: count(children)
+                
+                # Compter les descendants récursivement
+                children @recurse(depth: 20) {{
+                  uid
+                  children
+                }}
+              }}
+            }}
+            """
+            
+            txn = self.connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+            
+            data = json.loads(resp.json)
+            
+            if data.get('node') and len(data['node']) > 0:
+                node = data['node'][0]
+                
+                # Compter tous les descendants
+                descendants = self._count_descendants(node)
+                
+                stats = {
+                    'uid': node.get('uid'),
+                    'name': node.get('name'),
+                    'type': node.get('dgraph.type'),
+                    'depth': node.get('depth', 0),
+                    'direct_children': node.get('childrenCount', 0),
+                    'total_descendants': descendants
+                }
+                
+                return stats
+            
+            return {}
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération statistiques: {e}")
+            return {}
+    
+    # ============================================
+    # IMPORT/EXPORT
+    # ============================================
+    
+    def export_project_to_json(self, project_name: str) -> Optional[Dict]:
+        """
+        Exporte un projet complet en JSON
+        
+        Args:
+            project_name: Nom du projet
+            
+        Returns:
+            Dictionnaire contenant toutes les données du projet
+        """
+        try:
+            project = self.get_project_by_name(project_name)
+            if not project:
+                logger.error(f"Projet '{project_name}' non trouvé")
+                return None
+            
+            # Construire la structure complète
+            export_data = {
+                'project': {
+                    'uid': project.get('uid'),
+                    'name': project.get('name'),
+                    'description': project.get('description'),
+                    'createdAt': project.get('createdAt'),
+                    'updatedAt': project.get('updatedAt')
+                },
+                'typologies': []
+            }
+            
+            # Récupérer toutes les typologies
+            for typologie in project.get('typologies', []):
+                typ_data = {
+                    'uid': typologie.get('uid'),
+                    'name': typologie.get('name'),
+                    'description': typologie.get('description'),
+                    'position': typologie.get('position'),
+                    'clusters': []
+                }
+                
+                # Récupérer les clusters
+                clusters = self.get_clusters(typologie.get('uid'))
+                for cluster in clusters:
+                    cluster_data = {
+                        'uid': cluster.get('uid'),
+                        'name': cluster.get('name'),
+                        'description': cluster.get('description'),
+                        'position': cluster.get('position'),
+                        'rootLabels': []
+                    }
+                    
+                    # Récupérer les root labels
+                    roots = self.get_root_labels(cluster.get('uid'))
+                    for root in roots:
+                        root_data = {
+                            'uid': root.get('uid'),
+                            'name': root.get('name'),
+                            'description': root.get('description'),
+                            'category': root.get('category'),
+                            'position': root.get('position'),
+                            'children': self._export_children_recursive(root.get('uid'))
+                        }
+                        cluster_data['rootLabels'].append(root_data)
+                    
+                    typ_data['clusters'].append(cluster_data)
+                
+                export_data['typologies'].append(typ_data)
+            
+            logger.info(f"✅ Projet '{project_name}' exporté")
+            return export_data
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur export projet: {e}")
+            return None
+    
+    def import_project_from_json(self, data: Dict) -> Optional[str]:
+        """
+        Importe un projet depuis JSON
+        
+        Args:
+            data: Données du projet au format JSON
+            
+        Returns:
+            UID du projet créé ou None
+        """
+        try:
+            project_data = data.get('project', {})
+            project_name = project_data.get('name')
+            project_desc = project_data.get('description', '')
+            
+            # Créer le projet
+            project_uid = self.create_project(project_name, project_desc)
+            if not project_uid:
+                return None
+            
+            # Importer les typologies
+            for typ_data in data.get('typologies', []):
+                typ_uid = self.add_typologie(
+                    typ_data.get('name'),
+                    typ_data.get('description', ''),
+                    typ_data.get('position', 0)
+                )
+                
+                if not typ_uid:
+                    continue
+                
+                # Importer les clusters
+                for cluster_data in typ_data.get('clusters', []):
+                    cluster_uid = self.add_cluster(
+                        typ_uid,
+                        cluster_data.get('name'),
+                        cluster_data.get('description', ''),
+                        cluster_data.get('position', 0)
+                    )
+                    
+                    if not cluster_uid:
+                        continue
+                    
+                    # Importer les root labels
+                    for root_data in cluster_data.get('rootLabels', []):
+                        root_uid = self.add_root_label(
+                            cluster_uid,
+                            root_data.get('name'),
+                            root_data.get('description', ''),
+                            root_data.get('category', 'default'),
+                            root_data.get('position', 0)
+                        )
+                        
+                        if not root_uid:
+                            continue
+                        
+                        # Importer les enfants récursivement
+                        self._import_children_recursive(
+                            root_uid, 
+                            root_data.get('children', []),
+                            depth=0
+                        )
+            
+            logger.info(f"✅ Projet '{project_name}' importé")
+            return project_uid
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur import projet: {e}")
+            return None
+    
+    # ============================================
+    # MÉTHODES UTILITAIRES PRIVÉES
+    # ============================================
+    
+    def _get_all_descendants(self, node_uid: str) -> List[str]:
+        """Récupère tous les UIDs des descendants"""
+        try:
+            query = f"""
+            {{
+              descendants(func: uid({node_uid})) @recurse(depth: 20) {{
+                uid
+                children
+              }}
+            }}
+            """
+            
+            txn = self.connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+            
+            data = json.loads(resp.json)
+            descendants = []
+            
+            def collect_uids(nodes):
+                for node in nodes:
+                    uid = node.get('uid')
+                    if uid and uid != node_uid:
+                        descendants.append(uid)
+                    
+                    children = node.get('children', [])
+                    if children:
+                        collect_uids(children)
+            
+            if data.get('descendants'):
+                collect_uids(data['descendants'])
+            
+            return descendants
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération descendants: {e}")
+            return []
+        
+    def get_typologie_by_name(self, project_name: str, typologie_name: str):
+        """
+        Récupère une typologie par nom
+
+        Returns:
+            dict avec 'uid', 'name' ou None
+        """
+        query = f"""
+        {{
+          typologie(func: type(Typologie)) @filter(eq(name, "{typologie_name}")) {{
+            uid
+            name
+            description
+            position
+          }}
+        }}
+        """
+
+        try:
+            resp = self.connector.client.txn(read_only=True).query(query)
+            data = json.loads(resp.json)
+            results = data.get('typologie', [])
+            return results[0] if results else None
+        except Exception as e:
+            logger.error(f"Erreur get_typologie_by_name: {e}")
             return None
 
-    def _generate_combination_hash(self, nodes: List[Dict]) -> str:
-        """Génère un hash unique pour une combinaison"""
-        nodes_str = json.dumps(sorted(
-            [f"{n['typologie']}:{n['path']}" for n in nodes]
-        ))
-        return hashlib.sha256(nodes_str.encode()).hexdigest()[:16]
+    def get_cluster_by_name(self, typologie_uid: str, cluster_name: str):
+        """
+        Récupère un cluster par nom dans une typologie
 
-    def get_batch_combinations(self, project_name: str, batch_number: int) -> List[Dict]:
-        """Récupère les combinaisons d'un batch avec les détails des nœuds"""
-        try:
-            batch_uuid = f"{project_name}_batch_{batch_number}"
-            
-            query = f'''
-            {{
-                batch(func: eq(batch_uuid, "{batch_uuid}")) @filter(type(Batch)) {{
-                    batch_uuid
-                    batch_number
-                    status
-                    prompt_template
-                    combinations {{
-                        combination_uuid
-                        combination_hash
-                        sample_count
-                        typologie_distribution
-                        selected_nodes {{
-                            uid
-                            label_name
-                            description
-                            category
-                            dgraph.type
-                        }}
-                    }}
-                }}
+        Returns:
+            dict avec 'uid', 'name' ou None
+        """
+        query = f"""
+        {{
+          cluster(func: uid({typologie_uid})) {{
+            clusters @filter(eq(name, "{cluster_name}")) {{
+              uid
+              name
+              description
+              position
             }}
-            '''
-            
-            txn = self.client.txn(read_only=True)
-            try:
-                res = json.loads(txn.query(query).json)
-                return res.get('batch', [])
-            finally:
-                txn.discard()
+          }}
+        }}
+        """
 
-        except Exception as e:
-            logger.error(f"Erreur récupération combinaisons: {str(e)}")
-            return []
-
-    def get_distribution_stats(self, project_name: str) -> Dict:
-        """Calcule les statistiques pour le camembert"""
         try:
-            query = f'''
-            {{
-                project(func: eq(project_name, "{project_name}")) @filter(type(Project)) {{
-                    batches {{
-                        combinations {{
-                            typologie_distribution
-                            sample_count
-                        }}
-                    }}
-                }}
-            }}
-            '''
-            
-            txn = self.client.txn(read_only=True)
-            try:
-                res = json.loads(txn.query(query).json)
-                
-                if not res.get('project'):
-                    return {}
-
-                typologie_totals = {}
-                total_samples = 0
-
-                for batch in res['project'][0].get('batches', []):
-                    for combo in batch.get('combinations', []):
-                        sample_count = combo.get('sample_count', 1)
-                        total_samples += sample_count
-                        
-                        dist = json.loads(combo.get('typologie_distribution', '{}'))
-                        for typ, count in dist.items():
-                            typologie_totals[typ] = typologie_totals.get(typ, 0) + (sample_count * count)
-
-                stats = {
-                    'total_samples': total_samples,
-                    'typologies': {}
-                }
-
-                for typ, count in typologie_totals.items():
-                    stats['typologies'][typ] = {
-                        'count': count,
-                        'percentage': (count / total_samples * 100) if total_samples > 0 else 0
-                    }
-
-                return stats
-
-            finally:
-                txn.discard()
-
+            resp = self.connector.client.txn(read_only=True).query(query)
+            data = json.loads(resp.json)
+            results = data.get('cluster', [])
+            if results and results[0].get('clusters'):
+                return results[0]['clusters'][0]
+            return None
         except Exception as e:
-            logger.error(f"Erreur calcul stats: {str(e)}")
-            return {}
+            logger.error(f"Erreur get_cluster_by_name: {e}")
+            return None
 
+    def get_root_label_by_name(self, cluster_uid: str, root_name: str):
+        """
+        Récupère un root label par nom
+        """
+        query = f"""
+        {{
+          root(func: uid({cluster_uid})) {{
+            rootLabels @filter(eq(name, "{root_name}")) {{
+              uid
+              name
+              description
+              category
+              position
+            }}
+          }}
+        }}
+        """
+
+        try:
+            resp = self.connector.client.txn(read_only=True).query(query)
+            data = json.loads(resp.json)
+            results = data.get('root', [])
+            if results and results[0].get('rootLabels'):
+                return results[0]['rootLabels'][0]
+            return None
+        except Exception as e:
+            logger.error(f"Erreur get_root_label_by_name: {e}")
+            return None
+
+    def get_label_node_by_name(self, parent_uid: str, label_name: str):
+        """
+        Récupère un label node enfant par nom
+        """
+        query = f"""
+        {{
+          parent(func: uid({parent_uid})) {{
+            children @filter(eq(name, "{label_name}")) {{
+              uid
+              name
+              description
+              depth
+              position
+            }}
+          }}
+        }}
+        """
+
+        try:
+            resp = self.connector.client.txn(read_only=True).query(query)
+            data = json.loads(resp.json)
+            results = data.get('parent', [])
+            if results and results[0].get('children'):
+                return results[0]['children'][0]
+            return None
+        except Exception as e:
+            logger.error(f"Erreur get_label_node_by_name: {e}")
+            return None
+    
+    def _count_descendants(self, node: Dict) -> int:
+        """Compte récursivement tous les descendants"""
+        count = 0
+        children = node.get('children', [])
+        
+        for child in children:
+            count += 1
+            count += self._count_descendants(child)
+        
+        return count
+    
+    def _export_children_recursive(self, parent_uid: str) -> List[Dict]:
+        """Exporte récursivement les enfants"""
+        children_data = []
+        children, _ = self.get_children(parent_uid, limit=1000)
+        
+        for child in children:
+            child_data = {
+                'uid': child.get('uid'),
+                'name': child.get('name'),
+                'description': child.get('description', ''),
+                'category': child.get('category', 'default'),
+                'depth': child.get('depth', 0),
+                'position': child.get('position', 0),
+                'children': self._export_children_recursive(child.get('uid'))
+            }
+            children_data.append(child_data)
+        
+        return children_data
+    
+    def _import_children_recursive(self, parent_uid: str, children_data: List[Dict], 
+                                   depth: int = 0):
+        """Importe récursivement les enfants"""
+        for child_data in children_data:
+            child_uid = self.add_label_node(
+                parent_uid,
+                child_data.get('name'),
+                child_data.get('description', ''),
+                child_data.get('category', 'default'),
+                depth,
+                child_data.get('position', 0)
+            )
+            
+            if child_uid:
+                # Importer les sous-enfants
+                sub_children = child_data.get('children', [])
+                if sub_children:
+                    self._import_children_recursive(child_uid, sub_children, depth + 1)
+    
+    # ============================================
+    # GESTION DU CACHE
+    # ============================================
+    
+    def clear_cache(self):
+        """Vide le cache local"""
+        self._cache = {
+            'projects': {},
+            'typologies': {},
+            'clusters': {},
+            'roots': {},
+            'parents': {},
+            'children': {}
+        }
+        logger.debug("🗑️ Cache vidé")
+    
+    def get_cache_stats(self) -> Dict[str, int]:
+        """Retourne les statistiques du cache"""
+        return {
+            'projects': len(self._cache['projects']),
+            'typologies': len(self._cache['typologies']),
+            'clusters': len(self._cache['clusters']),
+            'roots': len(self._cache['roots']),
+            'parents': len(self._cache['parents']),
+            'children': len(self._cache['children'])
+        }
+    
+    # ============================================
+    # FERMETURE
+    # ============================================
+    
     def close(self):
         """Ferme la connexion Dgraph"""
-        if self.client_stub:
-            self.client_stub.close()
-            logger.info("Connexion Dgraph fermée")
+        if self.connector:
+            self.connector.close()
+            logger.info("✅ DgraphDatasetManager fermé")

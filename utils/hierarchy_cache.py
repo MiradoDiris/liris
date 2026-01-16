@@ -6,6 +6,7 @@ Structure: Projet -> Typologie -> Cluster -> Racine -> Parent -> Enfants (récur
 """
 
 import logging
+from os import path
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 
@@ -196,6 +197,61 @@ class HierarchyCache:
                 return True
         return False
     
+    def insert_parent_above(self, path: List[str], element_name: str, new_parent_name: str) -> bool:
+        """
+        Insère un nouveau parent AU-DESSUS d'un élément existant
+        L'élément existant devient enfant du nouveau parent
+
+        Exemple:
+            Avant: typologie → cluster → root → parent1 → child1
+            Appel: insert_parent_above([typ, cluster, root], "parent1", "new_parent")
+            Après: typologie → cluster → root → new_parent → parent1 → child1
+
+        Args:
+            path: Chemin jusqu'au niveau PARENT de l'élément
+            element_name: Nom de l'élément qui aura un nouveau parent
+            new_parent_name: Nom du nouveau parent à créer
+
+        Returns:
+            True si l'insertion réussit, False sinon
+        """
+        # Validation
+        if not path or not element_name or not new_parent_name:
+            logger.error("Chemin, élément ou nouveau parent vide")
+            return False
+
+        # Vérifier que l'élément existe
+        parent_node = self.get_node_at_path(path)
+        if not parent_node:
+            logger.error(f"Nœud parent non trouvé: {' > '.join(path)}")
+            return False
+
+        element_node = parent_node.get_child(element_name)
+        if not element_node:
+            logger.error(f"Élément '{element_name}' non trouvé dans {' > '.join(path)}")
+            return False
+
+        # Vérifier que le nouveau parent n'existe pas déjà
+        if parent_node.get_child(new_parent_name):
+            logger.error(f"Le nouveau parent '{new_parent_name}' existe déjà")
+            return False
+
+        # ÉTAPE 1: Créer le nouveau parent
+        new_parent_node = parent_node.add_child(new_parent_name, element_node.category)
+
+        # ÉTAPE 2: Déplacer l'élément existant sous le nouveau parent
+        # Copier toute la structure de l'élément
+        new_parent_node.children[element_name] = element_node
+
+        # ÉTAPE 3: Supprimer l'élément de son emplacement original
+        del parent_node.children[element_name]
+
+        self._dirty = True
+        logger.info(f"✅ Parent '{new_parent_name}' inséré au-dessus de '{element_name}' dans {' > '.join(path)}")
+        logger.info(f"   Structure: {' > '.join(path)} → {new_parent_name} → {element_name}")
+
+        return True
+    
     def remove_child_at_path(self, path: List[str], child_name: str) -> bool:
         """Supprimer un enfant à un chemin donné"""
         if not path:
@@ -208,6 +264,186 @@ class HierarchyCache:
             return True
         return False
     
+    def insert_child_between(self, path: List[str], new_child_name: str, 
+                        move_existing_children: bool = True) -> bool:
+        """
+        Insère un nouveau niveau d'enfant ENTRE un parent et ses enfants existants
+
+        Exemple:
+            Avant: typologie → cluster → root → parent1 → [child1, child2, child3]
+            Appel: insert_child_between([typ, cluster, root, parent1], "intermediate")
+            Après: typologie → cluster → root → parent1 → intermediate → [child1, child2, child3]
+
+        Args:
+            path: Chemin jusqu'au parent qui recevra le nouvel enfant intermédiaire
+            new_child_name: Nom du nouvel enfant intermédiaire
+            move_existing_children: Si True, déplace tous les enfants existants sous le nouveau
+
+        Returns:
+            True si l'insertion réussit, False sinon
+        """
+        # Validation
+        if not path or not new_child_name:
+            logger.error("Chemin ou nom d'enfant vide")
+            return False
+
+        # Obtenir le nœud parent
+        parent_node = self.get_node_at_path(path)
+        if not parent_node:
+            logger.error(f"Nœud parent non trouvé: {' > '.join(path)}")
+            return False
+
+        # Vérifier que le nouvel enfant n'existe pas déjà
+        if parent_node.get_child(new_child_name):
+            logger.error(f"L'enfant '{new_child_name}' existe déjà")
+            return False
+
+        # Sauvegarder les enfants existants
+        existing_children = dict(parent_node.children) if move_existing_children else {}
+
+        # ÉTAPE 1: Créer le nouvel enfant intermédiaire
+        new_child_node = parent_node.add_child(new_child_name, parent_node.category)
+
+        if move_existing_children and existing_children:
+            # ÉTAPE 2: Déplacer tous les enfants existants sous le nouveau
+            for child_name, child_node in existing_children.items():
+                if child_name != new_child_name:  # Ne pas déplacer le nouveau nœud lui-même
+                    new_child_node.children[child_name] = child_node
+                    # Supprimer de l'emplacement original
+                    if child_name in parent_node.children:
+                        del parent_node.children[child_name]
+
+            logger.info(f"✅ Enfant intermédiaire '{new_child_name}' inséré avec {len(existing_children)-1} enfants déplacés")
+        else:
+            logger.info(f"✅ Enfant intermédiaire '{new_child_name}' créé sans déplacement")
+
+        self._dirty = True
+        logger.info(f"   Structure: {' > '.join(path)} → {new_child_name} → [{', '.join(new_child_node.get_children_names())}]")
+
+        return True
+    
+    def insert_sibling_and_move(self, path: List[str], element_name: str, 
+                           new_sibling_name: str, elements_to_move: List[str]) -> bool:
+        """
+        Crée un nouveau frère/sœur et y déplace des éléments spécifiques
+        Utile pour réorganiser la taxonomie
+
+        Exemple:
+            Avant: parent → [child1, child2, child3, child4]
+            Appel: insert_sibling_and_move([parent], "child1", "new_group", ["child2", "child3"])
+            Après: parent → [child1, new_group → [child2, child3], child4]
+
+        Args:
+            path: Chemin jusqu'au niveau parent
+            element_name: Élément de référence (pour la catégorie)
+            new_sibling_name: Nom du nouveau frère/sœur
+            elements_to_move: Liste des noms d'éléments à déplacer
+
+        Returns:
+            True si l'insertion réussit, False sinon
+        """
+        # Validation
+        parent_node = self.get_node_at_path(path)
+        if not parent_node:
+            logger.error(f"Nœud parent non trouvé: {' > '.join(path)}")
+            return False
+
+        ref_element = parent_node.get_child(element_name)
+        if not ref_element:
+            logger.error(f"Élément de référence '{element_name}' non trouvé")
+            return False
+
+        # Vérifier que le nouveau sibling n'existe pas
+        if parent_node.get_child(new_sibling_name):
+            logger.error(f"Le sibling '{new_sibling_name}' existe déjà")
+            return False
+
+        # ÉTAPE 1: Créer le nouveau sibling
+        new_sibling = parent_node.add_child(new_sibling_name, ref_element.category)
+
+        # ÉTAPE 2: Déplacer les éléments spécifiés
+        moved_count = 0
+        for elem_name in elements_to_move:
+            elem_node = parent_node.get_child(elem_name)
+            if elem_node:
+                # Déplacer sous le nouveau sibling
+                new_sibling.children[elem_name] = elem_node
+                del parent_node.children[elem_name]
+                moved_count += 1
+            else:
+                logger.warning(f"Élément '{elem_name}' non trouvé, ignoré")
+
+        self._dirty = True
+        logger.info(f"✅ Sibling '{new_sibling_name}' créé avec {moved_count} éléments déplacés")
+
+        return True
+    
+    def promote_to_higher_level(self, path: List[str], element_name: str) -> bool:
+        if len(path) < 1:
+            logger.error("Impossible de promouvoir depuis la racine")
+            return False
+
+        # Obtenir le nœud parent actuel
+        parent_node = self.get_node_at_path(path)
+        if not parent_node:
+            logger.error(f"Nœud parent non trouvé: {' > '.join(path)}")
+            return False
+
+        # Obtenir l'élément à promouvoir
+        element_node = parent_node.get_child(element_name)
+        if not element_node:
+            logger.error(f"Élément '{element_name}' non trouvé")
+            return False
+
+        # Obtenir le grand-parent (niveau au-dessus)
+        grandparent_path = path[:-1]
+        grandparent_node = self.get_node_at_path(grandparent_path) if grandparent_path else None
+
+        if not grandparent_node and len(path) > 1:
+            logger.error("Grand-parent non trouvé")
+            return False
+
+        # ÉTAPE 1: Copier l'élément au niveau supérieur
+        if grandparent_node:
+            grandparent_node.children[element_name] = element_node
+        else:
+            # Cas spécial: promotion au niveau typologie
+            if len(path) == 1:
+                self.typologies[element_name] = element_node
+
+        # ÉTAPE 2: Supprimer de l'emplacement original
+        del parent_node.children[element_name]
+
+        self._dirty = True
+        logger.info(f"✅ Élément '{element_name}' promu de {' > '.join(path)} vers {' > '.join(grandparent_path)}")
+
+        return True
+    
+    def demote_to_child_of_sibling(self, path: List[str], element_name: str, 
+                               target_sibling_name: str) -> bool:
+        parent_node = self.get_node_at_path(path)
+        if not parent_node:
+            logger.error(f"Nœud parent non trouvé: {' > '.join(path)}")
+            return False
+
+        element_node = parent_node.get_child(element_name)
+        target_node = parent_node.get_child(target_sibling_name)
+
+        if not element_node or not target_node:
+            logger.error(f"Élément ou sibling cible non trouvé")
+            return False
+
+        # ÉTAPE 1: Déplacer l'élément sous le sibling cible
+        target_node.children[element_name] = element_node
+
+        # ÉTAPE 2: Supprimer de l'emplacement original
+        del parent_node.children[element_name]
+
+        self._dirty = True
+        logger.info(f"✅ Élément '{element_name}' déplacé sous '{target_sibling_name}'")
+
+        return True
+
     def rename_child_at_path(self, path: List[str], old_name: str, 
                              new_name: str) -> bool:
         """Renommer un enfant à un chemin donné"""
@@ -221,8 +457,95 @@ class HierarchyCache:
             return True
         return False
     
-    # ==================== GESTION DU CONTEXTE DE NAVIGATION ====================
+    def shift_level_down(self, path: List[str], element_name: str, new_parent_name: str) -> bool:
+        """
+        Décale un élément d'un niveau vers le bas en insérant un nouveau parent au-dessus
+
+        Exemple:
+            Avant: A(root) → B(parent) → C(child)
+            Appel: shift_level_down([typologie, cluster], "A", "X")
+            Après: X(root) → A(parent) → B(child) → C(child-child)
+
+        Args:
+            path: Chemin jusqu'au niveau CONTENANT l'élément
+            element_name: Nom de l'élément à décaler vers le bas
+            new_parent_name: Nom du nouveau parent à insérer au-dessus
+
+        Returns:
+            True si le décalage réussit
+        """
+        parent_node = self.get_node_at_path(path)
+        if not parent_node:
+            logger.error(f"Nœud parent non trouvé: {' > '.join(path)}")
+            return False
+
+        element_node = parent_node.get_child(element_name)
+        if not element_node:
+            logger.error(f"Élément '{element_name}' non trouvé")
+            return False
+
+        # Vérifier que le nouveau parent n'existe pas déjà
+        if parent_node.get_child(new_parent_name):
+            logger.error(f"Le nouveau parent '{new_parent_name}' existe déjà")
+            return False
+
+        # ÉTAPE 1: Créer le nouveau parent au niveau actuel
+        new_parent_node = parent_node.add_child(new_parent_name, element_node.category)
+
+        # ÉTAPE 2: Déplacer l'élément existant (avec toute sa descendance) sous le nouveau parent
+        new_parent_node.children[element_name] = element_node
+
+        # ÉTAPE 3: Supprimer l'élément de son emplacement original
+        del parent_node.children[element_name]
+
+        self._dirty = True
+        logger.info(f"✅ '{element_name}' décalé vers le bas, nouveau parent '{new_parent_name}' créé")
+        logger.info(f"   Structure: {' > '.join(path)} → {new_parent_name} → {element_name}")
+
+        return True
     
+    def shift_level_up(self, path: List[str], parent_name: str, new_child_name: str) -> bool:
+        # Construire le chemin complet vers le parent
+        full_path = path + [parent_name]
+        parent_node = self.get_node_at_path(full_path)
+        
+        if not parent_node:
+            logger.error(f"Parent '{parent_name}' non trouvé au chemin {' > '.join(path)}")
+            return False
+        
+        # Vérifier que le nouvel enfant n'existe pas déjà
+        if parent_node.get_child(new_child_name):
+            logger.error(f"L'enfant '{new_child_name}' existe déjà")
+            return False
+        
+        # Sauvegarder tous les enfants existants
+        existing_children = dict(parent_node.children)
+        
+        if not existing_children:
+            logger.warning(f"Aucun enfant à décaler pour '{parent_name}'")
+            # On peut quand même créer le nouvel enfant
+            parent_node.add_child(new_child_name, parent_node.category)
+            self._dirty = True
+            return True
+        
+        # ÉTAPE 1: Créer le nouvel enfant intermédiaire
+        new_child_node = parent_node.add_child(new_child_name, parent_node.category)
+        
+        # ÉTAPE 2: Déplacer tous les enfants existants sous le nouvel enfant
+        for child_name, child_node in existing_children.items():
+            new_child_node.children[child_name] = child_node
+            # Supprimer de l'emplacement original
+            if child_name in parent_node.children and child_name != new_child_name:
+                del parent_node.children[child_name]
+        
+        self._dirty = True
+        logger.info(f"✅ Nouvel enfant '{new_child_name}' créé, {len(existing_children)} enfants décalés")
+        logger.info(f"   Structure: {' > '.join(full_path)} → {new_child_name} → [{', '.join(existing_children.keys())}]")
+        
+        return True
+
+        # ==================== GESTION DU CONTEXTE DE NAVIGATION ====================
+
     def set_current_path(self, path: List[str]):
         """Définir le chemin de navigation actuel"""
         self._current_path = list(path)

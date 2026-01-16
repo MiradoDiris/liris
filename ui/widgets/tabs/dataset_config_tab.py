@@ -7,11 +7,13 @@ import os
 import traceback
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt, pyqtSignal
+import self
 
 from ui.localization.translator import tr
 from ui.styles.theme import Theme
 from utils.hierarchy_cache import HierarchyCache
 from PyQt5.QtWidgets import QScrollArea
+from utils.dataset_dgraph_manager import DgraphDatasetManager
 
 
 from utils.logger import logger
@@ -31,11 +33,70 @@ class DatasetConfigTab(QtWidgets.QWidget):
         # Cache hiérarchique unifié
         self.hierarchy_cache = HierarchyCache()
 
-        # État de navigation pour les enfants (au-delà du parent)
+        # État de navigation pour les enfants
         self._child_navigation_path: list = []
+
+        # === NOUVEAU: Gestionnaire Dgraph ===
+        self.dgraph_manager = None
+        self.dgraph_available = False
+
+        # Tentative d'initialisation Dgraph (non bloquant)
+        try:
+            self.dgraph_manager = DgraphDatasetManager()
+            self.dgraph_available = True
+            logger.info("✅ Dgraph disponible et initialisé")
+        except Exception as e:
+            logger.warning(f"⚠️ Dgraph non disponible: {e}")
+            logger.info("ℹ️ Le système fonctionnera uniquement avec SQLite")
+            self.dgraph_manager = None
+            self.dgraph_available = False
 
         self._init_ui()
         self._load_initial_data()
+
+        # Afficher l'alerte de disponibilité
+        self._show_storage_availability_alert()
+
+    def _show_storage_availability_alert(self):
+        """Affiche une alerte sur la disponibilité des systèmes de stockage"""
+        sqlite_available = self.project_manager is not None
+        dgraph_available = self.dgraph_available
+
+        if sqlite_available and dgraph_available:
+            logger.info("✅ SQLite et Dgraph disponibles - Mode dual actif")
+            return
+
+        if not sqlite_available and not dgraph_available:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Erreur Critique",
+                "❌ Aucun système de stockage disponible !\n\n"
+                "Ni SQLite ni Dgraph ne sont accessibles.\n"
+                "L'application ne peut pas fonctionner."
+            )
+            logger.error("❌ CRITIQUE: Aucun système de stockage disponible")
+            return
+
+        if not dgraph_available:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Dgraph Non Disponible",
+                "⚠️ Dgraph n'est pas disponible\n\n"
+                "Le système fonctionnera uniquement avec SQLite.\n\n"
+                "Raison: Connexion Dgraph impossible.\n"
+                "Vérifiez que Dgraph est démarré sur le port 9082."
+            )
+            logger.warning("⚠️ Mode SQLite uniquement - Dgraph non disponible")
+
+        if not sqlite_available:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "SQLite Non Disponible",
+                "⚠️ SQLite n'est pas disponible\n\n"
+                "Le système fonctionnera uniquement avec Dgraph.\n\n"
+                "Raison: Base de données SQLite inaccessible."
+            )
+            logger.warning("⚠️ Mode Dgraph uniquement - SQLite non disponible")
 
     def _get_full_path(self) -> list:
         """
@@ -510,7 +571,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
         return layout
 
     def _create_label_section(self, level, title):
-        """Create a label section with list and CRUD buttons - responsive single line"""
+        """Create a label section with list and action buttons - VERSION SIMPLIFIÉE"""
         group = self._create_modern_group(title)
         group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         layout = QtWidgets.QVBoxLayout(group)
@@ -532,43 +593,67 @@ class DatasetConfigTab(QtWidgets.QWidget):
             self.parent_list = list_widget
             list_widget.currentItemChanged.connect(self._on_parent_selected)
 
-        btn_container = QtWidgets.QWidget()
-        btn_layout = QtWidgets.QHBoxLayout(btn_container)
-        btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(2)
+        # === LIGNE 1: Boutons principaux ===
+        btn_container1 = QtWidgets.QWidget()
+        btn_layout1 = QtWidgets.QHBoxLayout(btn_container1)
+        btn_layout1.setContentsMargins(0, 0, 0, 0)
+        btn_layout1.setSpacing(2)
 
         add_btn = self._create_compact_button(tr("dataset.add"), lambda: self._add_label(level))
         edit_btn = self._create_compact_button(tr("dataset.edit"), lambda: self._edit_label(level))
         delete_btn = self._create_compact_button(tr("dataset.delete"), lambda: self._remove_label(level))
-        category_btn = self._create_compact_button(tr("dataset.category"), lambda: self._modify_category(level))
 
         setattr(self, f'add_{level}_btn', add_btn)
         setattr(self, f'edit_{level}_btn', edit_btn)
         setattr(self, f'remove_{level}_btn', delete_btn)
-        setattr(self, f'category_{level}_btn', category_btn)
 
         add_btn.setEnabled(False)
         edit_btn.setEnabled(False)
         delete_btn.setEnabled(False)
-        category_btn.setEnabled(False)
 
-        # Tous les boutons ont le même poids pour se partager l'espace
-        btn_layout.addWidget(add_btn, 1)
-        btn_layout.addWidget(edit_btn, 1)
-        btn_layout.addWidget(delete_btn, 1)
-        btn_layout.addWidget(category_btn, 1)
+        btn_layout1.addWidget(add_btn, 1)
+        btn_layout1.addWidget(edit_btn, 1)
+        btn_layout1.addWidget(delete_btn, 1)
 
-        layout.addWidget(btn_container)
+        layout.addWidget(btn_container1)
+
+        # === LIGNE 2: Boutons d'insertion ===
+        btn_container2 = QtWidgets.QWidget()
+        btn_layout2 = QtWidgets.QHBoxLayout(btn_container2)
+        btn_layout2.setContentsMargins(0, 0, 0, 0)
+        btn_layout2.setSpacing(2)
+
+        # Bouton "↑ Insérer Parent"
+        insert_parent_btn = self._create_compact_button(
+            "↑ Parent", 
+            lambda: self._insert_parent_above(level)
+        )
+        # Bouton "↓ Insérer Enfant"
+        insert_child_btn = self._create_compact_button(
+            "↓ Enfant", 
+            lambda: self._insert_child_below(level)
+        )
+        setattr(self, f'insert_parent_{level}_btn', insert_parent_btn)
+        setattr(self, f'insert_child_{level}_btn', insert_child_btn)
+
+        insert_parent_btn.setEnabled(False)
+        insert_child_btn.setEnabled(False)
+
+        btn_layout2.addWidget(insert_parent_btn, 1)
+        btn_layout2.addWidget(insert_child_btn, 1)
+
+        layout.addWidget(btn_container2)
 
         return group
 
     def _create_dynamic_child_section(self):
-        """Create dynamic child section with breadcrumb navigation - responsive single line"""
+        """Create dynamic child section with breadcrumb navigation - VERSION AVEC INSERTION"""
         group = self._create_modern_group(tr("dataset.child_labels"))
         group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         layout = QtWidgets.QVBoxLayout(group)
         layout.setSpacing(6)
 
+        # Breadcrumb
         breadcrumb_container = QtWidgets.QWidget()
         breadcrumb_layout = QtWidgets.QHBoxLayout(breadcrumb_container)
         breadcrumb_layout.setContentsMargins(0, 0, 0, 0)
@@ -597,6 +682,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
         layout.addWidget(breadcrumb_container)
 
+        # Liste
         self.child_list = QtWidgets.QListWidget()
         self.child_list.setStyleSheet(self._get_modern_list_style())
         self.child_list.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -605,30 +691,548 @@ class DatasetConfigTab(QtWidgets.QWidget):
         self.child_list.itemDoubleClicked.connect(self._navigate_into_child)
         layout.addWidget(self.child_list)
 
-        btn_container = QtWidgets.QWidget()
-        btn_layout = QtWidgets.QHBoxLayout(btn_container)
-        btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(2)
+        # === LIGNE 1: Boutons principaux ===
+        btn_container1 = QtWidgets.QWidget()
+        btn_layout1 = QtWidgets.QHBoxLayout(btn_container1)
+        btn_layout1.setContentsMargins(0, 0, 0, 0)
+        btn_layout1.setSpacing(2)
 
         self.add_child_btn = self._create_compact_button(tr("dataset.add"), self._add_child)
         self.edit_child_btn = self._create_compact_button(tr("dataset.edit"), self._edit_child)
         self.remove_child_btn = self._create_compact_button(tr("dataset.delete"), self._remove_child)
-        self.category_child_btn = self._create_compact_button(tr("dataset.category"), lambda: self._modify_category('child'))
 
         self.add_child_btn.setEnabled(False)
         self.edit_child_btn.setEnabled(False)
         self.remove_child_btn.setEnabled(False)
-        self.category_child_btn.setEnabled(False)
 
-        # Tous les boutons ont le même poids
-        btn_layout.addWidget(self.add_child_btn, 1)
-        btn_layout.addWidget(self.edit_child_btn, 1)
-        btn_layout.addWidget(self.remove_child_btn, 1)
-        btn_layout.addWidget(self.category_child_btn, 1)
+        btn_layout1.addWidget(self.add_child_btn, 1)
+        btn_layout1.addWidget(self.edit_child_btn, 1)
+        btn_layout1.addWidget(self.remove_child_btn, 1)
 
-        layout.addWidget(btn_container)
+        layout.addWidget(btn_container1)
+
+        # === LIGNE 2: Boutons d'insertion ===
+        btn_container2 = QtWidgets.QWidget()
+        btn_layout2 = QtWidgets.QHBoxLayout(btn_container2)
+        btn_layout2.setContentsMargins(0, 0, 0, 0)
+        btn_layout2.setSpacing(2)
+
+        self.insert_parent_child_btn = self._create_compact_button(
+            "↑ Parent", 
+            lambda: self._insert_parent_above('child')
+        )
+
+        self.insert_child_child_btn = self._create_compact_button(
+            "↓ Enfant", 
+            lambda: self._insert_child_below('child')
+        )
+
+        self.insert_parent_child_btn.setEnabled(False)
+        self.insert_child_child_btn.setEnabled(False)
+
+        btn_layout2.addWidget(self.insert_parent_child_btn, 1)
+        btn_layout2.addWidget(self.insert_child_child_btn, 1)
+
+        layout.addWidget(btn_container2)
 
         return group
+    
+    def _create_label_section_with_insert(self, level, title):
+        """
+        Version étendue de _create_label_section avec boutons d'insertion
+        Remplace la méthode existante
+        """
+        group = self._create_modern_group(title)
+        group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setSpacing(6)
+
+        list_widget = QtWidgets.QListWidget()
+        list_widget.setStyleSheet(self._get_modern_list_style())
+        list_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        list_widget.setMinimumHeight(100)
+        layout.addWidget(list_widget)
+
+        if level == 'taxonomy':
+            self.taxonomy_list = list_widget
+            list_widget.currentItemChanged.connect(self._on_taxonomy_selected)
+        elif level == 'root':
+            self.root_list = list_widget
+            list_widget.currentItemChanged.connect(self._on_root_selected)
+        elif level == 'parent':
+            self.parent_list = list_widget
+            list_widget.currentItemChanged.connect(self._on_parent_selected)
+
+        # === BOUTONS PRINCIPAUX (ligne 1) ===
+        btn_container1 = QtWidgets.QWidget()
+        btn_layout1 = QtWidgets.QHBoxLayout(btn_container1)
+        btn_layout1.setContentsMargins(0, 0, 0, 0)
+        btn_layout1.setSpacing(2)
+
+        add_btn = self._create_compact_button(tr("dataset.add"), lambda: self._add_label(level))
+        edit_btn = self._create_compact_button(tr("dataset.edit"), lambda: self._edit_label(level))
+        delete_btn = self._create_compact_button(tr("dataset.delete"), lambda: self._remove_label(level))
+
+        setattr(self, f'add_{level}_btn', add_btn)
+        setattr(self, f'edit_{level}_btn', edit_btn)
+        setattr(self, f'remove_{level}_btn', delete_btn)
+
+        add_btn.setEnabled(False)
+        edit_btn.setEnabled(False)
+        delete_btn.setEnabled(False)
+
+        btn_layout1.addWidget(add_btn, 1)
+        btn_layout1.addWidget(edit_btn, 1)
+        btn_layout1.addWidget(delete_btn, 1)
+
+        layout.addWidget(btn_container1)
+
+        # === BOUTONS D'INSERTION (ligne 2) ===
+        btn_container2 = QtWidgets.QWidget()
+        btn_layout2 = QtWidgets.QHBoxLayout(btn_container2)
+        btn_layout2.setContentsMargins(0, 0, 0, 0)
+        btn_layout2.setSpacing(2)
+
+        # Bouton "Insérer Parent Au-Dessus"
+        insert_parent_btn = self._create_compact_button(
+            "↑ Parent", 
+            lambda: self._insert_parent_above_selected(level)
+        )
+
+        # Bouton "Insérer Enfant Entre"
+        insert_child_btn = self._create_compact_button(
+            "↓ Enfant", 
+            lambda: self._insert_child_between_selected(level)
+        )
+        # Bouton "Promouvoir"
+        promote_btn = self._create_compact_button(
+            "⬆ Niveau+", 
+            lambda: self._promote_selected(level)
+        )
+
+        setattr(self, f'insert_parent_{level}_btn', insert_parent_btn)
+        setattr(self, f'insert_child_{level}_btn', insert_child_btn)
+        setattr(self, f'promote_{level}_btn', promote_btn)
+
+        insert_parent_btn.setEnabled(False)
+        insert_child_btn.setEnabled(False)
+        promote_btn.setEnabled(False)
+
+        btn_layout2.addWidget(insert_parent_btn, 1)
+        btn_layout2.addWidget(insert_child_btn, 1)
+        btn_layout2.addWidget(promote_btn, 1)
+
+        layout.addWidget(btn_container2)
+
+        return group
+    
+    def _insert_parent_above_selected(self, level):
+        """
+        Insère un nouveau parent au-dessus de l'élément sélectionné
+        """
+        list_widget = self._get_list_for_level(level)
+        current = list_widget.currentItem()
+        if not current:
+            QtWidgets.QMessageBox.warning(
+                self, "Sélection requise",
+                "Veuillez sélectionner un élément pour insérer un parent au-dessus"
+            )
+            return
+        
+        # Extraire le nom sans compteur
+        element_display = current.text()
+        element_name = element_display.split(" (")[0] if " (" in element_display else element_display
+        
+        # Demander le nom du nouveau parent
+        new_parent_name, ok = QtWidgets.QInputDialog.getText(
+            self, 
+            "Insérer Parent Au-Dessus",
+            f"Nouveau parent pour '{element_name}':\n\n"
+            f"Structure: ... → NOUVEAU → {element_name} → ...",
+            QtWidgets.QLineEdit.Normal
+        )
+        
+        if not ok or not new_parent_name.strip():
+            return
+        
+        new_parent_name = new_parent_name.strip()
+        
+        # Obtenir le chemin parent
+        path = self._get_path_for_level(level)
+        if path is None:
+            QtWidgets.QMessageBox.warning(
+                self, "Erreur",
+                "Impossible de déterminer le chemin"
+            )
+            return
+        
+        # Sauvegarder les sélections
+        saved_selections = self._save_current_selections()
+        
+        # Effectuer l'insertion dans le cache
+        if self.hierarchy_cache.insert_parent_above(path, element_name, new_parent_name):
+            # Recharger l'interface
+            self._refresh_ui_after_insert(level, saved_selections)
+            
+            QtWidgets.QMessageBox.information(
+                self, "Succès",
+                f"✅ Parent '{new_parent_name}' inséré au-dessus de '{element_name}'\n\n"
+                f"Nouvelle structure:\n"
+                f"{' → '.join(path)} → {new_parent_name} → {element_name}"
+            )
+            
+            logger.info(f"✅ Parent inséré: {new_parent_name} > {element_name}")
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, "Échec",
+                f"Impossible d'insérer le parent '{new_parent_name}'"
+            )
+
+    def _insert_parent_above(self, level):
+        """
+        Insère un nouveau parent AU-DESSUS de l'élément sélectionné
+        Décale l'élément actuel d'un niveau vers le bas
+        """
+        list_widget = self._get_list_for_level(level)
+        current = list_widget.currentItem()
+        if not current:
+            QtWidgets.QMessageBox.warning(
+                self, "Sélection requise",
+                "Veuillez sélectionner un élément"
+            )
+            return
+
+        # Extraire le nom sans compteur
+        element_display = current.text()
+        element_name = element_display.split(" (")[0] if " (" in element_display else element_display
+
+        # Demander le nom du nouveau parent
+        new_parent_name, ok = QtWidgets.QInputDialog.getText(
+            self, 
+            "Insérer Parent Au-Dessus",
+            f"Nouveau parent pour '{element_name}':\n\n"
+            f"'{element_name}' sera décalé d'un niveau vers le bas.\n\n"
+            f"Nom du nouveau parent:",
+            QtWidgets.QLineEdit.Normal
+        )
+
+        if not ok or not new_parent_name.strip():
+            return
+
+        new_parent_name = new_parent_name.strip()
+
+        # Obtenir le chemin parent
+        path = self._get_path_for_level(level)
+        if path is None:
+            QtWidgets.QMessageBox.warning(
+                self, "Erreur",
+                "Impossible de déterminer le chemin"
+            )
+            return
+
+        # Sauvegarder les sélections
+        saved_selections = self._save_current_selections()
+
+        # Effectuer l'insertion dans le cache
+        if self.hierarchy_cache.shift_level_down(path, element_name, new_parent_name):
+            # Recharger l'interface
+            self._refresh_ui_after_structure_change(level, saved_selections)
+
+            QtWidgets.QMessageBox.information(
+                self, "Succès",
+                f"✅ '{element_name}' décalé vers le bas\n\n"
+                f"Nouveau parent '{new_parent_name}' créé\n"
+                f"Structure: {' → '.join(path)} → {new_parent_name} → {element_name}"
+            )
+
+            logger.info(f"✅ Parent inséré: {new_parent_name} > {element_name}")
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, "Échec",
+                f"Impossible d'insérer le parent '{new_parent_name}'"
+            )
+
+    def _insert_child_below(self, level):
+        """
+        Insère un nouvel enfant SOUS l'élément sélectionné
+        Décale tous les enfants existants d'un niveau vers le bas
+        """
+        list_widget = self._get_list_for_level(level)
+        current = list_widget.currentItem()
+        if not current:
+            QtWidgets.QMessageBox.warning(
+                self, "Sélection requise",
+                "Veuillez sélectionner un élément"
+            )
+            return
+
+        # Extraire le nom sans compteur
+        element_display = current.text()
+        element_name = element_display.split(" (")[0] if " (" in element_display else element_display
+
+        # Construire le chemin jusqu'à l'élément
+        path = self._get_path_for_level(level)
+        if path is None:
+            return
+
+        # Vérifier si l'élément a des enfants
+        element_path = path + [element_name] if level != 'child' else self._get_full_path()
+        children = self.hierarchy_cache.get_children_at_path(element_path)
+
+        # Message différent selon qu'il y a des enfants ou non
+        if children:
+            message = (
+                f"Nouvel enfant intermédiaire pour '{element_name}':\n\n"
+                f"Tous les {len(children)} enfants existants seront décalés d'un niveau vers le bas.\n\n"
+                f"Nom du nouvel enfant:"
+            )
+        else:
+            message = (
+                f"Nouvel enfant pour '{element_name}':\n\n"
+                f"(Aucun enfant existant ne sera décalé)\n\n"
+                f"Nom du nouvel enfant:"
+            )
+
+        # Demander le nom du nouvel enfant
+        new_child_name, ok = QtWidgets.QInputDialog.getText(
+            self, 
+            "Insérer Enfant Intermédiaire",
+            message,
+            QtWidgets.QLineEdit.Normal
+        )
+
+        if not ok or not new_child_name.strip():
+            return
+
+        new_child_name = new_child_name.strip()
+
+        # Sauvegarder les sélections
+        saved_selections = self._save_current_selections()
+
+        # Effectuer l'insertion dans le cache
+        if self.hierarchy_cache.shift_level_up(path, element_name, new_child_name):
+            # Recharger l'interface
+            self._refresh_ui_after_structure_change(level, saved_selections)
+
+            if children:
+                QtWidgets.QMessageBox.information(
+                    self, "Succès",
+                    f"✅ Enfant intermédiaire '{new_child_name}' créé\n\n"
+                    f"{len(children)} enfants décalés d'un niveau vers le bas"
+                )
+            else:
+                QtWidgets.QMessageBox.information(
+                    self, "Succès",
+                    f"✅ Enfant '{new_child_name}' créé sous '{element_name}'"
+                )
+
+            logger.info(f"✅ Enfant inséré: {element_name} > {new_child_name} > {len(children)} enfants")
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, "Échec",
+                f"Impossible d'insérer l'enfant '{new_child_name}'"
+            )
+
+    def _refresh_ui_after_structure_change(self, level, saved_selections):
+        """
+        Rafraîchit l'interface après un changement structurel (insertion parent/enfant)
+        """
+        logger.debug(f"=== REFRESH UI AFTER STRUCTURE CHANGE: {level} ===")
+
+        # Bloquer les signaux
+        widgets = {
+            'typologie': self.typologie_list,
+            'taxonomy': self.taxonomy_list if hasattr(self, 'taxonomy_list') else None,
+            'root': self.root_list,
+            'parent': self.parent_list,
+            'child': self.child_list
+        }
+
+        for widget in widgets.values():
+            if widget:
+                widget.blockSignals(True)
+
+        # Recharger toutes les listes depuis le cache avec les compteurs
+        self._refresh_all_counts()
+
+        # Restaurer les sélections
+        self._restore_selections(saved_selections)
+
+        # Débloquer les signaux
+        for widget in widgets.values():
+            if widget:
+                widget.blockSignals(False)
+
+        # Mettre à jour les boutons
+        self._update_button_states()
+
+        logger.debug("✅ UI rafraîchie après changement structurel")
+
+    def _insert_child_between_selected(self, level):
+        """
+        Insère un nouveau niveau d'enfant entre l'élément sélectionné et ses enfants
+        """
+        list_widget = self._get_list_for_level(level)
+        current = list_widget.currentItem()
+        if not current:
+            QtWidgets.QMessageBox.warning(
+                self, "Sélection requise",
+                "Veuillez sélectionner un élément"
+            )
+            return
+
+        # Extraire le nom sans compteur
+        element_display = current.text()
+        element_name = element_display.split(" (")[0] if " (" in element_display else element_display
+
+        # Construire le chemin jusqu'à l'élément
+        path = self._get_path_for_level(level)
+        if path is None:
+            return
+
+        element_path = path + [element_name]
+
+        # Vérifier si l'élément a des enfants
+        children = self.hierarchy_cache.get_children_at_path(element_path)
+
+        if not children:
+            QtWidgets.QMessageBox.information(
+                self, "Aucun enfant",
+                f"'{element_name}' n'a pas encore d'enfants.\n\n"
+                f"Utilisez 'Ajouter' pour créer des enfants d'abord."
+            )
+            return
+
+        # Demander le nom du nouvel enfant intermédiaire
+        new_child_name, ok = QtWidgets.QInputDialog.getText(
+            self, 
+            "Insérer Enfant Intermédiaire",
+            f"Nouvel enfant pour '{element_name}':\n\n"
+            f"Structure: {element_name} → NOUVEAU → [{', '.join(children[:3])}{'...' if len(children) > 3 else ''}]\n\n"
+            f"Tous les {len(children)} enfants existants seront déplacés sous le nouveau niveau.",
+            QtWidgets.QLineEdit.Normal
+        )
+
+        if not ok or not new_child_name.strip():
+            return
+
+        new_child_name = new_child_name.strip()
+
+        # Sauvegarder les sélections
+        saved_selections = self._save_current_selections()
+
+        # Effectuer l'insertion dans le cache
+        if self.hierarchy_cache.insert_child_between(element_path, new_child_name, move_existing_children=True):
+            # Recharger l'interface
+            self._refresh_ui_after_insert(level, saved_selections)
+
+            QtWidgets.QMessageBox.information(
+                self, "Succès",
+                f"✅ Enfant intermédiaire '{new_child_name}' créé\n\n"
+                f"{len(children)} enfants déplacés sous le nouveau niveau"
+            )
+
+            logger.info(f"✅ Enfant intermédiaire inséré: {element_name} > {new_child_name} > {len(children)} enfants")
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, "Échec",
+                f"Impossible d'insérer l'enfant '{new_child_name}'"
+            )
+
+    def _promote_selected(self, level):
+        """
+        Promouvoir l'élément sélectionné d'un niveau vers le haut
+        """
+        list_widget = self._get_list_for_level(level)
+        current = list_widget.currentItem()
+        if not current:
+            QtWidgets.QMessageBox.warning(
+                self, "Sélection requise",
+                "Veuillez sélectionner un élément à promouvoir"
+            )
+            return
+
+        # Extraire le nom sans compteur
+        element_display = current.text()
+        element_name = element_display.split(" (")[0] if " (" in element_display else element_display
+
+        # Obtenir le chemin parent
+        path = self._get_path_for_level(level)
+        if path is None or len(path) < 1:
+            QtWidgets.QMessageBox.warning(
+                self, "Impossible",
+                "Cet élément est déjà au niveau le plus haut"
+            )
+            return
+
+        # Confirmer l'action
+        grandparent_level = " → ".join(path[:-1]) if len(path) > 1 else "Racine"
+        reply = QtWidgets.QMessageBox.question(
+            self, "Confirmer la promotion",
+            f"Promouvoir '{element_name}' ?\n\n"
+            f"De: {' → '.join(path)} → {element_name}\n"
+            f"Vers: {grandparent_level} → {element_name}\n\n"
+            f"L'élément deviendra frère de son ancien parent.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        # Sauvegarder les sélections
+        saved_selections = self._save_current_selections()
+
+        # Effectuer la promotion dans le cache
+        if self.hierarchy_cache.promote_to_higher_level(path, element_name):
+            # Recharger l'interface
+            self._refresh_ui_after_insert(level, saved_selections)
+
+            QtWidgets.QMessageBox.information(
+                self, "Succès",
+                f"✅ '{element_name}' promu avec succès"
+            )
+
+            logger.info(f"✅ Promotion: {element_name} de niveau {len(path)} à {len(path)-1}")
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, "Échec",
+                f"Impossible de promouvoir '{element_name}'"
+            )
+
+    def _refresh_ui_after_insert(self, level, saved_selections):
+        """
+        Rafraîchit l'interface après une opération d'insertion/promotion
+        """
+        logger.debug(f"=== REFRESH UI AFTER INSERT: {level} ===")
+
+        # Bloquer les signaux
+        widgets = {
+            'typologie': self.typologie_list,
+            'taxonomy': self.taxonomy_list if hasattr(self, 'taxonomy_list') else None,
+            'root': self.root_list,
+            'parent': self.parent_list,
+            'child': self.child_list
+        }
+
+        for widget in widgets.values():
+            if widget:
+                widget.blockSignals(True)
+
+        # Recharger toutes les listes depuis le cache avec les compteurs
+        self._refresh_all_counts()
+
+        # Restaurer les sélections
+        self._restore_selections(saved_selections)
+
+        # Débloquer les signaux
+        for widget in widgets.values():
+            if widget:
+                widget.blockSignals(False)
+
+        # Mettre à jour les boutons
+        self._update_button_states()
+
+        logger.debug("✅ UI rafraîchie après insertion")
 
     def _create_modern_group(self, title):
         """Create modern styled group box - responsive"""
@@ -814,130 +1418,73 @@ class DatasetConfigTab(QtWidgets.QWidget):
     # ========== EVENT HANDLERS ==========
 
     def _on_project_selected(self, index):
-        """
-        Gestion de la sélection de projet - VERSION CORRIGÉE AVEC GESTION D'ERREURS
-        """
+        """Charge un projet (priorité SQLite, fallback Dgraph)"""
         if index < 0:
             return
-    
+
         project_name = self.project_combo.currentText()
-        
-        # Vérifier que le nom n'est pas vide
+
         if not project_name or not project_name.strip():
             logger.warning("Nom de projet vide détecté")
             return
-    
-        try:
-            logger.info(f"📂 Tentative de chargement du projet '{project_name}'...")
-            
-            # 1. Charger le projet depuis la DB
-            load_success = self.project_manager.load_project(project_name)
-            
-            if not load_success:
-                logger.error(f"❌ Échec du chargement du projet '{project_name}'")
-                QtWidgets.QMessageBox.warning(
-                    self, 
-                    "Erreur",
-                    f"Impossible de charger le projet '{project_name}'.\n\n"
-                    f"Le projet existe peut-être mais ne contient pas de données valides."
-                )
-                return
-    
-            logger.info(f"✅ Projet '{project_name}' chargé depuis la DB")
-    
-            # 2. Vérifier que les données ont bien été chargées
-            if not self.project_manager.current_project_data:
-                logger.error(f"❌ current_project_data est None après load_project")
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Erreur",
-                    f"Données du projet '{project_name}' non initialisées après chargement."
-                )
-                return
-    
-            # 3. Vérifier le contenu des données
-            typologies = self.project_manager.current_project_data.get('typologies', [])
-            logger.info(f"📊 Projet contient {len(typologies)} typologie(s)")
-    
-            # 4. Vider le cache et réinitialiser la navigation
+
+        sqlite_loaded = False
+        dgraph_loaded = False
+
+        # Tentative de chargement SQLite
+        if self.project_manager:
+            try:
+                logger.info(f"📂 Chargement depuis SQLite: '{project_name}'")
+                sqlite_loaded = self.project_manager.load_project(project_name)
+
+                if sqlite_loaded:
+                    logger.info(f"✅ Projet chargé depuis SQLite")
+            except Exception as e:
+                logger.error(f"❌ Erreur chargement SQLite: {e}")
+
+        # Si SQLite échoue, essayer Dgraph
+        if not sqlite_loaded and self.dgraph_available and self.dgraph_manager:
+            try:
+                logger.info(f"📊 Chargement depuis Dgraph: '{project_name}'")
+                dgraph_project = self.dgraph_manager.get_project_by_name(project_name)
+
+                if dgraph_project:
+                    # Exporter depuis Dgraph
+                    dgraph_data = self.dgraph_manager.export_project_to_json(project_name)
+
+                    if dgraph_data and self.project_manager:
+                        # Créer dans SQLite si nécessaire
+                        if not self.project_manager.create_new_project(project_name, dgraph_data['project'].get('description', '')):
+                            # Projet existe déjà, le charger
+                            self.project_manager.load_project(project_name)
+
+                        # Importer les données
+                        self.project_manager.current_project_data['typologies'] = dgraph_data.get('typologies', [])
+                        dgraph_loaded = True
+                        logger.info(f"✅ Projet chargé depuis Dgraph")
+            except Exception as e:
+                logger.error(f"❌ Erreur chargement Dgraph: {e}")
+
+        # Résultat
+        if sqlite_loaded or dgraph_loaded:
+            # Charger dans le cache et l'UI
             self.hierarchy_cache.clear()
             self._child_navigation_path.clear()
-            logger.debug("🗑️ Cache et navigation réinitialisés")
-    
-            # 5. Charger le projet dans le cache
-            try:
-                self._load_project_from_db_to_cache()
-                logger.info("✅ Projet chargé dans le cache")
-            except Exception as cache_error:
-                logger.error(f"❌ Erreur lors du chargement dans le cache: {cache_error}")
-                logger.error(traceback.format_exc())
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Erreur de cache",
-                    f"Impossible de charger le projet dans le cache:\n\n{str(cache_error)}"
-                )
-                return
-    
-            # 6. Charger l'UI
-            try:
-                self._load_project_ui()
-                logger.info("✅ Interface chargée")
-            except Exception as ui_error:
-                logger.error(f"❌ Erreur lors du chargement de l'UI: {ui_error}")
-                logger.error(traceback.format_exc())
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Erreur d'affichage",
-                    f"Le projet a été chargé mais l'interface n'a pas pu être mise à jour:\n\n{str(ui_error)}"
-                )
-                # On continue malgré l'erreur UI
-    
-            # 7. Exporter la stratégie
-            try:
-                self._export_strategy()
-                logger.info("✅ Stratégie exportée")
-            except Exception as export_error:
-                logger.warning(f"⚠️ Erreur lors de l'export de stratégie: {export_error}")
-                # Non bloquant, on continue
-    
-            logger.info(f"🎉 Projet '{project_name}' chargé avec succès")
-    
-        except sqlite3.Error as db_error:
-            # Erreur spécifique à SQLite
-            logger.error(f"❌ Erreur SQLite lors du chargement: {db_error}")
-            logger.error(traceback.format_exc())
+
+            self._load_project_from_db_to_cache()
+            self._load_project_ui()
+            self._export_strategy()
+
+            if sqlite_loaded:
+                logger.info(f"✅ Projet '{project_name}' chargé depuis SQLite")
+            else:
+                logger.info(f"✅ Projet '{project_name}' chargé depuis Dgraph")
+        else:
             QtWidgets.QMessageBox.critical(
                 self,
-                "Erreur de base de données",
-                f"Erreur lors de l'accès à la base de données:\n\n"
-                f"{type(db_error).__name__}: {str(db_error)}\n\n"
-                f"Projet: '{project_name}'"
-            )
-        
-        except KeyError as key_error:
-            # Erreur de clé manquante
-            logger.error(f"❌ Clé manquante: {key_error}")
-            logger.error(traceback.format_exc())
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Données corrompues",
-                f"Le projet '{project_name}' contient des données incomplètes:\n\n"
-                f"Clé manquante: {str(key_error)}\n\n"
-                f"Le projet doit être recréé ou réparé."
-            )
-        
-        except Exception as e:
-            # Toute autre erreur
-            logger.error(f"❌ Erreur inattendue lors du chargement: {str(e)}")
-            logger.error(f"Type d'erreur: {type(e).__name__}")
-            logger.error(traceback.format_exc())
-            
-            QtWidgets.QMessageBox.critical(
-                self, 
                 "Erreur",
-                f"Erreur inattendue lors du chargement du projet '{project_name}':\n\n"
-                f"{type(e).__name__}: {str(e)}\n\n"
-                f"Consultez les logs pour plus de détails."
+                f"Impossible de charger le projet '{project_name}'\n\n"
+                f"Non trouvé dans SQLite ni dans Dgraph."
             )
         
     def _on_typologie_selected(self, current, previous):
@@ -1004,38 +1551,30 @@ class DatasetConfigTab(QtWidgets.QWidget):
             self.child_list.clear()
             self._update_button_states()
             return
-    
+
         typ_item = self.typologie_list.currentItem()
         if not typ_item:
             logger.warning("Typologie non sélectionnée")
             return
-    
+
         # CORRECTION CRITIQUE: Extraire les noms SANS les compteurs
         taxonomy_display = current.text()
-        if " (" in taxonomy_display:
-            taxonomy_name = taxonomy_display.split(" (")[0]
-        else:
-            taxonomy_name = taxonomy_display
-    
+        taxonomy_name = taxonomy_display.split(" (")[0] if " (" in taxonomy_display else taxonomy_display
+
         typologie_display = typ_item.text()
-        if " (" in typologie_display:
-            typologie_name = typologie_display.split(" (")[0]
-        else:
-            typologie_name = typologie_display
-    
+        typologie_name = typologie_display.split(" (")[0] if " (" in typologie_display else typologie_display
+
         logger.debug(f"Sélection taxonomy: '{taxonomy_name}' dans typologie '{typologie_name}'")
-    
-        # === PARTIE CRITIQUE: SYNCHRONISER LE PROJECT_MANAGER ===
-    
-        # 1. Trouver l'index du taxonomy dans le project_manager
+
+        # === SYNCHRONISER LE PROJECT_MANAGER ===
         typologie = self.project_manager.get_current_typologie()
         if not typologie:
             logger.error(f"Typologie '{typologie_name}' non trouvée dans project_manager!")
             return
-    
+
         taxonomy_clusters = typologie.get('taxonomy_clusters', [])
         taxonomy_index = -1
-    
+
         for idx, cluster in enumerate(taxonomy_clusters):
             if cluster.get('name') == taxonomy_name:
                 taxonomy_index = idx
@@ -1051,31 +1590,49 @@ class DatasetConfigTab(QtWidgets.QWidget):
             }
             taxonomy_clusters.append(new_cluster)
             taxonomy_index = len(taxonomy_clusters) - 1
-    
+
         # 2. Définir l'index dans le project_manager
         self.project_manager.current_taxonomy_index = taxonomy_index
-    
+
         logger.info(f"✓ Taxonomy index synchronisé: {taxonomy_index} pour '{taxonomy_name}'")
-    
-        # Vérification: S'assurer que get_current_taxonomy() fonctionne
-        current_tax = self.project_manager.get_current_taxonomy()
-        if current_tax:
-            logger.debug(f"✓ get_current_taxonomy() retourne: '{current_tax.get('name')}'")
-        else:
-            logger.error("✗ get_current_taxonomy() retourne None!")
-            return
-    
-        # === FIN PARTIE CRITIQUE ===
-    
+
+        # === SYNCHRONISER DGRAPH (NOUVEAU) ===
+        if self.dgraph_available and self.dgraph_manager:
+            try:
+                # Obtenir l'UID de la typologie dans Dgraph
+                typologie_dgraph = self.dgraph_manager.get_typologie_by_name(
+                    self.project_manager.current_project_name,
+                    typologie_name
+                )
+
+                if typologie_dgraph:
+                    # Vérifier si le cluster existe dans Dgraph
+                    cluster_exists = self.dgraph_manager.get_cluster_by_name(
+                        typologie_dgraph['uid'],
+                        taxonomy_name
+                    )
+
+                    if not cluster_exists:
+                        # Créer le cluster dans Dgraph
+                        cluster_uid = self.dgraph_manager.add_cluster(
+                            typologie_dgraph['uid'],
+                            taxonomy_name,
+                            '',
+                            taxonomy_index
+                        )
+                        logger.info(f"✅ Cluster '{taxonomy_name}' créé dans Dgraph (UID: {cluster_uid})")
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur sync Dgraph pour taxonomy: {e}")
+
         # Charger les roots depuis le cache AVEC LES NOMS SANS COMPTEURS
         path = [typologie_name, taxonomy_name]
         self._load_list_from_cache(self.root_list, path)
-    
+
         # Effacer les niveaux inférieurs
         self.parent_list.clear()
         self.child_list.clear()
         self._child_navigation_path.clear()
-    
+
         self._update_button_states()
         logger.debug(f"Taxonomie '{taxonomy_name}' sélectionnée et synchronisée")
 
@@ -1274,276 +1831,339 @@ class DatasetConfigTab(QtWidgets.QWidget):
     # ========== CRUD ACTIONS ==========
 
     def _add_project(self):
-        """Add new project"""
-        name, ok = QtWidgets.QInputDialog.getText(self, tr("dataset.new_project"), tr("dataset.project_name") + ":")
+        """Créer un nouveau projet dans les deux systèmes"""
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, tr("dataset.new_project"), 
+            tr("dataset.project_name") + ":"
+        )
         if not ok or not name.strip():
             return
-        description, ok = QtWidgets.QInputDialog.getMultiLineText(self, tr("dataset.description"), tr("dataset.description") + " (optional):")
+
+        description, ok = QtWidgets.QInputDialog.getMultiLineText(
+            self, tr("dataset.description"), 
+            tr("dataset.description") + " (optional):"
+        )
         if not ok:
             description = ""
-        if self.project_manager.create_new_project(name.strip(), description.strip()):
+
+        name = name.strip()
+        description = description.strip()
+
+        sqlite_success = False
+        dgraph_success = False
+
+        # Tentative SQLite
+        if self.project_manager:
+            try:
+                sqlite_success = self.project_manager.create_new_project(name, description)
+                if sqlite_success:
+                    logger.info(f"✅ Projet '{name}' créé dans SQLite")
+            except Exception as e:
+                logger.error(f"❌ Erreur création SQLite: {e}")
+
+        # Tentative Dgraph
+        if self.dgraph_available and self.dgraph_manager:
+            try:
+                dgraph_uid = self.dgraph_manager.create_project(name, description)
+                dgraph_success = dgraph_uid is not None
+                if dgraph_success:
+                    logger.info(f"✅ Projet '{name}' créé dans Dgraph (UID: {dgraph_uid})")
+            except Exception as e:
+                logger.error(f"❌ Erreur création Dgraph: {e}")
+
+        # Résultat
+        if sqlite_success or dgraph_success:
             self._refresh_project_combos()
-            self.project_combo.setCurrentText(name.strip())
+            self.project_combo.setCurrentText(name)
             self._load_project_ui()
-            logger.info(f"Project '{name}' created")
+
+            if sqlite_success and dgraph_success:
+                logger.info(f"✅✅ Projet '{name}' créé dans les deux systèmes")
+            elif sqlite_success:
+                logger.warning(f"⚠️ Projet '{name}' créé dans SQLite uniquement")
+            elif dgraph_success:
+                logger.warning(f"⚠️ Projet '{name}' créé dans Dgraph uniquement")
         else:
-            QtWidgets.QMessageBox.warning(self, tr("dataset.error"), f"{tr('dataset.project_exists')}: '{name}'")
+            QtWidgets.QMessageBox.critical(
+                self, "Erreur",
+                f"Impossible de créer le projet '{name}' dans aucun système"
+            )
 
     def _delete_project(self):
-        """Delete current project"""
-        project_name = self.project_manager.current_project_name
+        """Supprimer un projet des deux systèmes"""
+        project_name = self.project_manager.current_project_name if self.project_manager else None
+
         if not project_name:
             return
+
         reply = QtWidgets.QMessageBox.question(
-            self, tr("dataset.confirm"), f"{tr('dataset.delete_project_confirm')}: '{project_name}'?",
+            self, tr("dataset.confirm"), 
+            f"{tr('dataset.delete_project_confirm')}: '{project_name}'?",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
         )
-        if reply == QtWidgets.QMessageBox.Yes:
-            if self.project_manager.delete_project(project_name):
-                self._clear_ui()
-                self._refresh_project_combos()
-                logger.info(f"Project '{project_name}' deleted")
+
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        sqlite_success = False
+        dgraph_success = False
+
+        # Suppression SQLite
+        if self.project_manager:
+            try:
+                sqlite_success = self.project_manager.delete_project(project_name)
+                if sqlite_success:
+                    logger.info(f"✅ Projet '{project_name}' supprimé de SQLite")
+            except Exception as e:
+                logger.error(f"❌ Erreur suppression SQLite: {e}")
+
+        # Suppression Dgraph
+        if self.dgraph_available and self.dgraph_manager:
+            try:
+                dgraph_project = self.dgraph_manager.get_project_by_name(project_name)
+                if dgraph_project:
+                    dgraph_success = self.dgraph_manager.delete_project(dgraph_project['uid'])
+                    if dgraph_success:
+                        logger.info(f"✅ Projet '{project_name}' supprimé de Dgraph")
+            except Exception as e:
+                logger.error(f"❌ Erreur suppression Dgraph: {e}")
+
+        # Résultat
+        if sqlite_success or dgraph_success:
+            self._clear_ui()
+            self._refresh_project_combos()
+
+            if sqlite_success and dgraph_success:
+                logger.info(f"✅✅ Projet '{project_name}' supprimé des deux systèmes")
+            elif sqlite_success:
+                logger.warning(f"⚠️ Projet '{project_name}' supprimé de SQLite uniquement")
+            elif dgraph_success:
+                logger.warning(f"⚠️ Projet '{project_name}' supprimé de Dgraph uniquement")
 
     def _save_project(self):
-        """Sauvegarde le projet - VERSION COMPLÈTE AVEC DIAGNOSTIC"""
+        """Sauvegarde le projet dans les deux systèmes"""
         logger.info("=" * 100)
-        logger.info("🚀 DÉBUT DU PROCESSUS DE SAUVEGARDE")
+        logger.info("🚀 DÉBUT DU PROCESSUS DE SAUVEGARDE DUAL")
         logger.info("=" * 100)
-    
-        # POINT 1: État Initial
-        logger.info("\n📋 DIAGNOSTIC POINT 1: État Initial")
-        logger.info(f"  project_manager.current_project_name: '{self.project_manager.current_project_name}'")
-        logger.info(f"  project_manager.current_project_data existe: {self.project_manager.current_project_data is not None}")
-        logger.info(f"  project_combo.currentText(): '{self.project_combo.currentText()}'")
-        logger.info(f"  project_name_edit.text(): '{self.project_name_edit.text()}'")
-    
-        # POINT 2: Récupération du nom
-        logger.info("\n📋 DIAGNOSTIC POINT 2: Récupération du nom")
-        project_name = self.project_manager.current_project_name
-        logger.info(f"  current_project_name: '{project_name}'")
-    
-        if not project_name:
-            combo_text = self.project_combo.currentText()
-            if combo_text:
-                if self.project_manager.load_project(combo_text):
-                    project_name = combo_text
-                    logger.info(f"  ✅ Chargé depuis combo: '{project_name}'")
-    
-        if not project_name:
-            new_name = self.project_name_edit.text().strip()
-            if new_name:
-                if self.project_manager.create_new_project(new_name, ""):
-                    project_name = new_name
-                    logger.info(f"  ✅ Nouveau projet créé: '{project_name}'")
-    
-        # POINT 3: Validation
-        logger.info("\n📋 DIAGNOSTIC POINT 3: Validation")
-        if not self.project_manager.current_project_name:
-            logger.error("❌ BLOCAGE: current_project_name est None")
+
+        # Validation initiale
+        if self.project_manager and not self.project_manager.current_project_name:
             QtWidgets.QMessageBox.critical(self, "Erreur", "Projet sans nom valide")
             return
-    
-        if not self.project_manager.current_project_data:
-            logger.error("❌ BLOCAGE: current_project_data est None")
-            QtWidgets.QMessageBox.critical(self, "Erreur", "Données non initialisées")
-            return
-    
+
         new_name = self.project_name_edit.text().strip()
         if not new_name:
-            logger.error("❌ BLOCAGE: project_name_edit vide")
             QtWidgets.QMessageBox.warning(self, "Erreur", "Nom manquant")
             return
-    
-        logger.info(f"✅ Validations OK - Projet: '{new_name}'")
-    
-        # POINT 4: Contenu du cache
-        logger.info("\n📋 DIAGNOSTIC POINT 4: Cache")
-        typologies_cache = self.hierarchy_cache.get_typologies()
-        logger.info(f"  {len(typologies_cache)} typologie(s) dans cache")
-    
-        # POINT 5: Synchronisation
-        logger.info("\n📋 DIAGNOSTIC POINT 5: Synchronisation")
-        try:
-            sync_success = self._sync_cache_to_project_manager()
-            logger.info(f"  sync result: {sync_success}")
-            if not sync_success:
-                logger.error("❌ BLOCAGE: Sync failed")
-                QtWidgets.QMessageBox.critical(self, "Erreur", "Sync échouée")
-                return
-        except Exception as e:
-            logger.error(f"❌ EXCEPTION SYNC: {e}")
-            QtWidgets.QMessageBox.critical(self, "Exception", str(e))
-            return
-    
-        logger.info("✅ Sync OK")
-    
-        # POINT 6: Project Manager Content
-        logger.info("\n📋 DIAGNOSTIC POINT 6: Project Manager")
-        typologies_manager = self.project_manager.current_project_data.get('typologies', [])
-        logger.info(f"  {len(typologies_manager)} typologie(s) dans manager")
-    
-        # POINT 7: Nom
-        logger.info("\n📋 DIAGNOSTIC POINT 7: Mise à jour nom")
-        old_name = self.project_manager.current_project_name
-        self.project_manager.current_project_data['nom'] = new_name
-        self.project_manager.current_project_name = new_name
-        logger.info(f"  '{old_name}' → '{new_name}'")
-    
-        # POINT 8: Save Project
-        logger.info("\n📋 DIAGNOSTIC POINT 8: Appel save_project()")
-        try:
-            save_success = self.project_manager.save_project()
-            logger.info(f"  save_project() result: {save_success}")
-            
-            if not save_success:
-                logger.error("❌ BLOCAGE: save_project() = False")
-                QtWidgets.QMessageBox.critical(self, "Échec", "save_project() a échoué")
-                return
-        except Exception as e:
-            logger.error(f"❌ EXCEPTION SAVE: {e}")
-            logger.error(traceback.format_exc())
-            QtWidgets.QMessageBox.critical(self, "Exception", str(e))
-            return
-    
-        logger.info("✅ save_project() OK")
-    
-        # ================================================================
-        # POINT 9: VÉRIFICATION EN BASE - SECTION CRITIQUE
-        # ================================================================
-        logger.info("\n" + "=" * 100)
-        logger.info("📋 DIAGNOSTIC POINT 9: VÉRIFICATION BASE DE DONNÉES")
-        logger.info("=" * 100)
-    
-        try:
-            db = self.project_manager.database
-            
-            if not db.connection:
-                logger.error("❌ CRITIQUE: Pas de connexion DB!")
-                QtWidgets.QMessageBox.critical(self, "Erreur", "Pas de connexion DB")
-                return
-            
-            logger.info(f"DB path: {db.db_path}")
-            cursor = db.connection.cursor()
-            
-            # Recherche du projet
-            logger.info(f"\n🔍 Recherche projet '{new_name}'...")
-            cursor.execute("SELECT * FROM projects WHERE name = ?", (new_name,))
-            project_row = cursor.fetchone()
-            
-            if project_row:
-                logger.info("✅ PROJET TROUVÉ EN BASE!")
-                logger.info(f"   ID: {project_row['id']}")
-                logger.info(f"   Nom: {project_row['name']}")
-                
-                project_id = project_row['id']
-                
-                # Compter les éléments
-                cursor.execute("SELECT COUNT(*) as c FROM typologies WHERE project_id = ?", (project_id,))
-                typ_count = cursor.fetchone()['c']
-                
-                cursor.execute("""
-                    SELECT COUNT(*) as c FROM taxonomy_clusters 
-                    WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
-                """, (project_id,))
-                cluster_count = cursor.fetchone()['c']
-                
-                cursor.execute("""
-                    SELECT COUNT(*) as c FROM root_labels 
-                    WHERE taxonomy_id IN (
-                        SELECT id FROM taxonomy_clusters 
-                        WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
-                    )
-                """, (project_id,))
-                root_count = cursor.fetchone()['c']
-                
-                cursor.execute("""
-                    SELECT COUNT(*) as c FROM parent_labels 
-                    WHERE root_id IN (
-                        SELECT id FROM root_labels 
-                        WHERE taxonomy_id IN (
-                            SELECT id FROM taxonomy_clusters 
-                            WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
-                        )
-                    )
-                """, (project_id,))
-                parent_count = cursor.fetchone()['c']
-                
-                cursor.execute("""
-                    SELECT COUNT(*) as c FROM child_labels 
-                    WHERE parent_label_id IN (
-                        SELECT id FROM parent_labels 
-                        WHERE root_id IN (
-                            SELECT id FROM root_labels 
-                            WHERE taxonomy_id IN (
-                                SELECT id FROM taxonomy_clusters 
-                                WHERE typologie_id IN (SELECT id FROM typologies WHERE project_id = ?)
-                            )
-                        )
-                    )
-                """, (project_id,))
-                child_count = cursor.fetchone()['c']
-                
-                logger.info(f"\n📊 Contenu:")
-                logger.info(f"   - {typ_count} typologie(s)")
-                logger.info(f"   - {cluster_count} cluster(s)")
-                logger.info(f"   - {root_count} root(s)")
-                logger.info(f"   - {parent_count} parent(s)")
-                logger.info(f"   - {child_count} enfant(s)")
-                
-                total = typ_count + cluster_count + root_count + parent_count + child_count
-                logger.info(f"\n🎯 TOTAL: {total} enregistrements")
-                
-                if total == 0:
-                    logger.error("⚠️ ALERTE: Projet VIDE!")
-                    QtWidgets.QMessageBox.warning(
-                        self, "Projet Vide",
-                        f"Le projet '{new_name}' existe en base mais est VIDE!\n\n"
-                        f"Ajoutez des typologies avant de sauvegarder."
-                    )
+
+        sqlite_success = False
+        dgraph_success = False
+
+        # === SAUVEGARDE SQLITE ===
+        if self.project_manager:
+            try:
+                logger.info("\n📦 SAUVEGARDE SQLITE")
+                logger.info("-" * 80)
+
+                if not self.project_manager.current_project_data:
+                    raise Exception("Données non initialisées")
+
+                # Synchronisation cache → manager
+                if not self._sync_cache_to_project_manager():
+                    raise Exception("Échec sync cache")
+
+                # Mise à jour du nom
+                old_name = self.project_manager.current_project_name
+                self.project_manager.current_project_data['nom'] = new_name
+                self.project_manager.current_project_name = new_name
+
+                # Sauvegarde
+                sqlite_success = self.project_manager.save_project()
+
+                if sqlite_success:
+                    logger.info(f"✅ SQLite: Projet '{new_name}' sauvegardé")
                 else:
-                    logger.info("✅ PROJET CORRECTEMENT SAUVEGARDÉ!")
-                    
-            else:
-                logger.error(f"❌ PROJET '{new_name}' NON TROUVÉ!")
-                
-                cursor.execute("SELECT name FROM projects")
-                all_projects = [r['name'] for r in cursor.fetchall()]
-                logger.error(f"Projets existants: {all_projects}")
-                
-                QtWidgets.QMessageBox.critical(
-                    self, "Échec",
-                    f"Le projet '{new_name}' N'EST PAS en base!\n\n"
-                    f"Projets existants: {', '.join(all_projects) if all_projects else 'Aucun'}"
+                    logger.error("❌ SQLite: Échec de sauvegarde")
+
+            except Exception as e:
+                logger.error(f"❌ Erreur sauvegarde SQLite: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+
+        # === SAUVEGARDE DGRAPH ===
+        if self.dgraph_available and self.dgraph_manager:
+            try:
+                logger.info("\n📊 SAUVEGARDE DGRAPH")
+                logger.info("-" * 80)
+
+                # Vérifier si le projet existe
+                existing = self.dgraph_manager.get_project_by_name(new_name)
+
+                if existing:
+                    # Mettre à jour le projet existant
+                    logger.info(f"Projet '{new_name}' existe, écrasement...")
+                    self.dgraph_manager.delete_project(existing['uid'])
+
+                # Créer le projet
+                project_uid = self.dgraph_manager.create_project(
+                    new_name,
+                    self.project_manager.current_project_data.get('description', '') if self.project_manager else ''
                 )
-                return
-                
-        except Exception as e:
-            logger.error(f"❌ EXCEPTION POINT 9: {e}")
-            logger.error(traceback.format_exc())
-            QtWidgets.QMessageBox.critical(self, "Erreur", f"Exception: {e}")
-            return
-    
+
+                if not project_uid:
+                    raise Exception("Échec création projet Dgraph")
+
+                # Synchroniser les données
+                if self.project_manager:
+                    self._sync_sqlite_data_to_dgraph(project_uid)
+
+                dgraph_success = True
+                logger.info(f"✅ Dgraph: Projet '{new_name}' sauvegardé (UID: {project_uid})")
+
+            except Exception as e:
+                logger.error(f"❌ Erreur sauvegarde Dgraph: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+
+        # === RÉSULTAT FINAL ===
         logger.info("\n" + "=" * 100)
-        logger.info("✅ VÉRIFICATION POINT 9 TERMINÉE")
+
+        if sqlite_success and dgraph_success:
+            logger.info(f"✅✅ SUCCÈS COMPLET: '{new_name}' sauvegardé dans SQLite ET Dgraph")
+            QtWidgets.QMessageBox.information(
+                self, "Succès",
+                f"✅ Projet '{new_name}' sauvegardé dans les deux systèmes !"
+            )
+        elif sqlite_success:
+            logger.warning(f"⚠️ SUCCÈS PARTIEL: '{new_name}' sauvegardé dans SQLite uniquement")
+            QtWidgets.QMessageBox.warning(
+                self, "Succès Partiel",
+                f"⚠️ Projet '{new_name}' sauvegardé dans SQLite uniquement.\n\n"
+                f"Dgraph non disponible ou erreur."
+            )
+        elif dgraph_success:
+            logger.warning(f"⚠️ SUCCÈS PARTIEL: '{new_name}' sauvegardé dans Dgraph uniquement")
+            QtWidgets.QMessageBox.warning(
+                self, "Succès Partiel",
+                f"⚠️ Projet '{new_name}' sauvegardé dans Dgraph uniquement.\n\n"
+                f"SQLite non disponible ou erreur."
+            )
+        else:
+            logger.error(f"❌ ÉCHEC TOTAL: '{new_name}' non sauvegardé")
+            QtWidgets.QMessageBox.critical(
+                self, "Échec",
+                f"❌ Impossible de sauvegarder le projet '{new_name}'.\n\n"
+                f"Aucun système de stockage n'a réussi."
+            )
+            return
+
         logger.info("=" * 100)
-    
-        # POINT 10: Post-traitement
-        logger.info("\n📋 DIAGNOSTIC POINT 10: Post-traitement")
+
+        # Post-traitement (uniquement si au moins un succès)
         self.hierarchy_cache.mark_clean()
         self._refresh_project_combos()
         index = self.project_combo.findText(new_name)
         if index >= 0:
             self.project_combo.setCurrentIndex(index)
         self.project_saved.emit()
-    
-        logger.info("\n" + "=" * 100)
-        logger.info(f"🎉 SAUVEGARDE TERMINÉE AVEC SUCCÈS: '{new_name}'")
-        logger.info("=" * 100)
-        
-        QtWidgets.QMessageBox.information(
-            self, "Succès",
-            f"✅ Projet '{new_name}' sauvegardé!\n\nConsultez les logs."
-        )
+
+    def _sync_sqlite_data_to_dgraph(self, project_uid: str):
+        """Synchronise les données SQLite vers Dgraph"""
+        if not self.project_manager or not self.project_manager.current_project_data:
+            return
+
+        project_data = self.project_manager.current_project_data
+        typologies = project_data.get('typologies', [])
+
+        logger.info(f"  📊 Synchronisation de {len(typologies)} typologie(s)")
+
+        for typ_idx, typologie in enumerate(typologies):
+            typ_name = typologie.get('name', '')
+
+            typ_uid = self.dgraph_manager.add_typologie(
+                typ_name,
+                typologie.get('description', ''),
+                typologie.get('position', typ_idx)
+            )
+
+            if not typ_uid:
+                continue
+            
+            # Clusters
+            clusters = typologie.get('taxonomy_clusters', [])
+            for cluster_idx, cluster in enumerate(clusters):
+                cluster_name = cluster.get('name', '')
+
+                cluster_uid = self.dgraph_manager.add_cluster(
+                    typ_uid,
+                    cluster_name,
+                    cluster.get('description', ''),
+                    cluster.get('position', cluster_idx)
+                )
+
+                if not cluster_uid:
+                    continue
+                
+                # Root labels
+                roots = cluster.get('root_labels', [])
+                for root_idx, root in enumerate(roots):
+                    root_name = root.get('name', '')
+
+                    root_uid = self.dgraph_manager.add_root_label(
+                        cluster_uid,
+                        root_name,
+                        root.get('description', ''),
+                        root.get('category', 'default'),
+                        root.get('position', root_idx)
+                    )
+
+                    if not root_uid:
+                        continue
+                    
+                    # Parent labels
+                    parents = root.get('parent_labels', [])
+                    for parent_idx, parent in enumerate(parents):
+                        parent_name = parent.get('name', '')
+
+                        parent_uid = self.dgraph_manager.add_label_node(
+                            root_uid,
+                            parent_name,
+                            parent.get('description', ''),
+                            parent.get('category', 'default'),
+                            depth=0,
+                            position=parent.get('position', parent_idx)
+                        )
+
+                        if not parent_uid:
+                            continue
+                        
+                        # Enfants récursifs
+                        children = parent.get('children', [])
+                        if children:
+                            self._sync_children_recursive_to_dgraph(
+                                parent_uid, 
+                                children, 
+                                depth=1
+                            )
+
+    def _sync_children_recursive_to_dgraph(self, parent_uid: str, children: list, depth: int):
+        """Synchronise récursivement les enfants vers Dgraph"""
+        for child_idx, child in enumerate(children):
+            child_name = child.get('name', '')
+
+            child_uid = self.dgraph_manager.add_label_node(
+                parent_uid,
+                child_name,
+                child.get('description', ''),
+                child.get('category', 'default'),
+                depth=depth,
+                position=child.get('position', child_idx)
+            )
+
+            if child_uid:
+                sub_children = child.get('children', [])
+                if sub_children:
+                    self._sync_children_recursive_to_dgraph(child_uid, sub_children, depth + 1)
             
     def _verify_database_content(self, project_name):
         """
@@ -1836,7 +2456,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
 
     def _add_label(self, level):
         """
-        Ajoute un label à un niveau - VERSION FLUIDE
+        Ajoute un label à un niveau - VERSION AVEC SYNC DGRAPH
         """
         name, ok = QtWidgets.QInputDialog.getText(
             self, f"Nouveau {level}", "Nom :"
@@ -1918,16 +2538,117 @@ class DatasetConfigTab(QtWidgets.QWidget):
             else:
                 logger.info(f"✓ '{name}' ajouté au project_manager")
 
+        # === SYNC DGRAPH (NOUVEAU) ===
+        dgraph_success = False
+        if self.dgraph_available and self.dgraph_manager and success:
+            try:
+                dgraph_success = self._sync_label_to_dgraph(level, name, path)
+            except Exception as e:
+                logger.error(f"❌ Erreur sync Dgraph pour '{name}': {e}")
+
         if success:
             # Recharger l'interface de manière fluide
             self._refresh_ui_after_add(level, saved_selections)
-            logger.info(f"✓✓✓ {level.capitalize()} '{name}' ajouté avec succès")
+
+            # Message selon résultat
+            if dgraph_success:
+                logger.info(f"✓✓✓ {level.capitalize()} '{name}' ajouté (SQLite + Dgraph)")
+            else:
+                logger.warning(f"⚠️ {level.capitalize()} '{name}' ajouté (SQLite uniquement)")
         else:
             # Rollback en cas d'échec
             self.hierarchy_cache.remove_child_at_path(path, name)
             logger.error(f"✗✗✗ Rollback: '{name}' retiré du cache")
             QtWidgets.QMessageBox.warning(self, "Erreur",
                 f"Impossible d'ajouter le {level} dans le gestionnaire de projet.")
+            
+    def _sync_label_to_dgraph(self, level: str, name: str, path: list) -> bool:
+        if not self.dgraph_available or not self.dgraph_manager:
+            return False
+
+        try:
+            project_name = self.project_manager.current_project_name
+
+            if level == "taxonomy":
+                # Obtenir l'UID de la typologie
+                typologie_name = path[0]
+                typologie_dgraph = self.dgraph_manager.get_typologie_by_name(
+                    project_name,
+                    typologie_name
+                )
+
+                if typologie_dgraph:
+                    position = len(self.hierarchy_cache.get_children_at_path([typologie_name]))
+                    cluster_uid = self.dgraph_manager.add_cluster(
+                        typologie_dgraph['uid'],
+                        name,
+                        '',
+                        position
+                    )
+                    return cluster_uid is not None
+
+            elif level == "root":
+                # Obtenir l'UID du cluster
+                typologie_name, cluster_name = path[:2]
+                typologie_dgraph = self.dgraph_manager.get_typologie_by_name(
+                    project_name,
+                    typologie_name
+                )
+
+                if typologie_dgraph:
+                    cluster_dgraph = self.dgraph_manager.get_cluster_by_name(
+                        typologie_dgraph['uid'],
+                        cluster_name
+                    )
+
+                    if cluster_dgraph:
+                        position = len(self.hierarchy_cache.get_children_at_path(path))
+                        root_uid = self.dgraph_manager.add_root_label(
+                            cluster_dgraph['uid'],
+                            name,
+                            '',
+                            'default',
+                            position
+                        )
+                        return root_uid is not None
+
+            elif level == "parent":
+                # Obtenir l'UID du root
+                typologie_name, cluster_name, root_name = path[:3]
+                typologie_dgraph = self.dgraph_manager.get_typologie_by_name(
+                    project_name,
+                    typologie_name
+                )
+
+                if typologie_dgraph:
+                    cluster_dgraph = self.dgraph_manager.get_cluster_by_name(
+                        typologie_dgraph['uid'],
+                        cluster_name
+                    )
+
+                    if cluster_dgraph:
+                        root_dgraph = self.dgraph_manager.get_root_label_by_name(
+                            cluster_dgraph['uid'],
+                            root_name
+                        )
+
+                        if root_dgraph:
+                            position = len(self.hierarchy_cache.get_children_at_path(path))
+                            parent_uid = self.dgraph_manager.add_label_node(
+                                root_dgraph['uid'],
+                                name,
+                                '',
+                                'default',
+                                depth=0,
+                                position=position
+                            )
+                            return parent_uid is not None
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Erreur _sync_label_to_dgraph: {e}")
+            return False
 
     def _edit_label(self, level):
         """Modifier un label"""
@@ -2031,150 +2752,214 @@ class DatasetConfigTab(QtWidgets.QWidget):
             return None
 
         return None
+    
+    def _sync_child_to_dgraph(self, name: str, path: list) -> bool:
+        if not self.dgraph_available or not self.dgraph_manager:
+            return False
 
+        try:
+            project_name = self.project_manager.current_project_name
+
+            # Déterminer le parent direct et la profondeur
+            if len(path) == 4:
+                # Parent direct = parent_label
+                typologie_name, cluster_name, root_name, parent_name = path
+                depth = 1
+                parent_level = "parent"
+            else:
+                # Parent direct = child label à (len(path) - 4) niveaux
+                typologie_name, cluster_name, root_name = path[:3]
+                depth = len(path) - 3
+                parent_level = "child"
+
+            # Obtenir l'UID du parent
+            typologie_dgraph = self.dgraph_manager.get_typologie_by_name(
+                project_name,
+                typologie_name
+            )
+
+            if not typologie_dgraph:
+                return False
+
+            cluster_dgraph = self.dgraph_manager.get_cluster_by_name(
+                typologie_dgraph['uid'],
+                cluster_name
+            )
+
+            if not cluster_dgraph:
+                return False
+
+            root_dgraph = self.dgraph_manager.get_root_label_by_name(
+                cluster_dgraph['uid'],
+                root_name
+            )
+
+            if not root_dgraph:
+                return False
+
+            # Naviguer jusqu'au parent direct
+            parent_uid = root_dgraph['uid']
+
+            for i in range(3, len(path)):
+                parent_name = path[i]
+                # Chercher le parent dans Dgraph
+                parent_dgraph = self.dgraph_manager.get_label_node_by_name(
+                    parent_uid,
+                    parent_name
+                )
+
+                if not parent_dgraph:
+                    logger.warning(f"Parent '{parent_name}' non trouvé dans Dgraph")
+                    return False
+
+                parent_uid = parent_dgraph['uid']
+
+            # Créer l'enfant
+            position = len(self.hierarchy_cache.get_children_at_path(path))
+            child_uid = self.dgraph_manager.add_label_node(
+                parent_uid,
+                name,
+                '',
+                'default',
+                depth=depth,
+                position=position
+            )
+
+            return child_uid is not None
+
+        except Exception as e:
+            logger.error(f"Erreur _sync_child_to_dgraph: {e}")
+            return False
+        
+    def _reload_ui_after_child_add(self, saved_names):
+        """
+        Recharge l'UI après ajout d'enfant - VERSION OPTIMISÉE
+        """
+        # Bloquer signaux
+        widgets = [
+            self.typologie_list,
+            self.taxonomy_list,
+            self.root_list,
+            self.parent_list,
+            self.child_list
+        ]
+
+        for widget in widgets:
+            if widget:
+                widget.blockSignals(True)
+
+        # Recharger et restaurer chaque niveau
+        if 'typologie' in saved_names:
+            self._load_list_from_cache(self.typologie_list, [])
+            self._restore_selection(self.typologie_list, saved_names['typologie'])
+
+        if 'taxonomy' in saved_names and saved_names['typologie']:
+            self._load_list_from_cache(
+                self.taxonomy_list,
+                [saved_names['typologie']]
+            )
+            self._restore_selection(self.taxonomy_list, saved_names['taxonomy'])
+
+        if 'root' in saved_names and all([saved_names['typologie'], saved_names['taxonomy']]):
+            self._load_list_from_cache(
+                self.root_list,
+                [saved_names['typologie'], saved_names['taxonomy']]
+            )
+            self._restore_selection(self.root_list, saved_names['root'])
+
+        if 'parent' in saved_names and all([
+            saved_names['typologie'],
+            saved_names['taxonomy'],
+            saved_names['root']
+        ]):
+            self._load_list_from_cache(
+                self.parent_list,
+                [saved_names['typologie'], saved_names['taxonomy'], saved_names['root']]
+            )
+            self._restore_selection(self.parent_list, saved_names['parent'])
+
+        # Recharger enfants
+        self._load_children_from_cache()
+
+        # Débloquer signaux
+        for widget in widgets:
+            if widget:
+                widget.blockSignals(False)
+
+        # Mettre à jour boutons
+        self._update_button_states()
 
     def _add_child(self):
         """
-        Ajoute un enfant - VERSION CORRIGÉE avec sauvegarde des noms avant rechargement
+        Ajoute un enfant - VERSION AVEC SYNC DGRAPH
         """
         parent_item = self.parent_list.currentItem()
         if not parent_item:
             QtWidgets.QMessageBox.warning(self, "Erreur",
                 "Veuillez d'abord sélectionner un parent")
             return
-    
+
         name, ok = QtWidgets.QInputDialog.getText(
             self, "Nouvel enfant", "Nom :"
         )
         if not ok or not name.strip():
             return
-    
+
         name = name.strip()
-    
+
         path = self._get_full_path()
         logger.debug(f"=== AJOUT ENFANT ===")
         logger.debug(f"Nom: '{name}'")
         logger.debug(f"Chemin: {' > '.join(path)}")
-    
+
         if len(path) < 4:
             QtWidgets.QMessageBox.warning(self, "Erreur",
                 "Chemin incomplet. Veuillez sélectionner typologie, taxonomy, root et parent.")
             return
-    
+
         # Vérifier les doublons
         existing = self.hierarchy_cache.get_children_at_path(path)
         if name in existing:
             QtWidgets.QMessageBox.warning(self, "Doublon",
                 f"'{name}' existe déjà à ce niveau")
             return
-    
-        # CORRECTION: Sauvegarder les NOMS avant toute manipulation
-        saved_names = {}
-        
-        typ_item = self.typologie_list.currentItem()
-        if typ_item:
-            typ_text = typ_item.text()
-            saved_names['typologie'] = typ_text.split(" (")[0] if " (" in typ_text else typ_text
-        
-        tax_item = self.taxonomy_list.currentItem()
-        if tax_item:
-            tax_text = tax_item.text()
-            saved_names['taxonomy'] = tax_text.split(" (")[0] if " (" in tax_text else tax_text
-        
-        root_item = self.root_list.currentItem()
-        if root_item:
-            root_text = root_item.text()
-            saved_names['root'] = root_text.split(" (")[0] if " (" in root_text else root_text
-        
-        parent_item = self.parent_list.currentItem()
-        if parent_item:
-            parent_text = parent_item.text()
-            saved_names['parent'] = parent_text.split(" (")[0] if " (" in parent_text else parent_text
-    
+
+        # Sauvegarder les noms
+        saved_names = self._save_current_selections()
         logger.debug(f"Noms sauvegardés: {saved_names}")
-    
+
         # Ajouter au cache
         if self.hierarchy_cache.add_child_at_path(path, name):
             logger.info(f"✓ '{name}' ajouté au cache")
-    
+
             # Ajouter au project_manager
             if self.project_manager.add_child_label(name, self):
                 logger.info(f"✓ '{name}' ajouté au project_manager")
-    
-                # Bloquer les signaux pour éviter les cascades
-                self.typologie_list.blockSignals(True)
-                self.taxonomy_list.blockSignals(True)
-                self.root_list.blockSignals(True)
-                self.parent_list.blockSignals(True)
-                self.child_list.blockSignals(True)
-    
-                # Recharger et restaurer typologie
-                if 'typologie' in saved_names:
-                    self._load_list_from_cache(self.typologie_list, [])
-                    for i in range(self.typologie_list.count()):
-                        item_text = self.typologie_list.item(i).text()
-                        item_name = item_text.split(" (")[0] if " (" in item_text else item_text
-                        if item_name == saved_names['typologie']:
-                            self.typologie_list.setCurrentRow(i)
-                            break
-                        
-                # Recharger et restaurer taxonomy
-                if 'taxonomy' in saved_names and 'typologie' in saved_names:
-                    self._load_list_from_cache(self.taxonomy_list, [saved_names['typologie']])
-                    for i in range(self.taxonomy_list.count()):
-                        item_text = self.taxonomy_list.item(i).text()
-                        item_name = item_text.split(" (")[0] if " (" in item_text else item_text
-                        if item_name == saved_names['taxonomy']:
-                            self.taxonomy_list.setCurrentRow(i)
-                            break
-                        
-                # Recharger et restaurer root
-                if 'root' in saved_names and 'taxonomy' in saved_names and 'typologie' in saved_names:
-                    self._load_list_from_cache(self.root_list, [saved_names['typologie'], saved_names['taxonomy']])
-                    for i in range(self.root_list.count()):
-                        item_text = self.root_list.item(i).text()
-                        item_name = item_text.split(" (")[0] if " (" in item_text else item_text
-                        if item_name == saved_names['root']:
-                            self.root_list.setCurrentRow(i)
-                            break
-                        
-                # Recharger et restaurer parent
-                if all(k in saved_names for k in ['parent', 'root', 'taxonomy', 'typologie']):
-                    self._load_list_from_cache(
-                        self.parent_list, 
-                        [saved_names['typologie'], saved_names['taxonomy'], saved_names['root']]
-                    )
-                    for i in range(self.parent_list.count()):
-                        item_text = self.parent_list.item(i).text()
-                        item_name = item_text.split(" (")[0] if " (" in item_text else item_text
-                        if item_name == saved_names['parent']:
-                            self.parent_list.setCurrentRow(i)
-                            break
-                        
-                # Recharger la liste des enfants
-                self._load_children_from_cache()
-    
-                # Débloquer les signaux
-                self.typologie_list.blockSignals(False)
-                self.taxonomy_list.blockSignals(False)
-                self.root_list.blockSignals(False)
-                self.parent_list.blockSignals(False)
-                self.child_list.blockSignals(False)
-                
-                # Mettre à jour les boutons
-                self._update_button_states()
-                
-                logger.info(f"✓✓✓ Enfant '{name}' ajouté avec succès et affiché")
+
+                # === SYNC DGRAPH (NOUVEAU) ===
+                dgraph_success = False
+                if self.dgraph_available and self.dgraph_manager:
+                    try:
+                        dgraph_success = self._sync_child_to_dgraph(name, path)
+                    except Exception as e:
+                        logger.error(f"❌ Erreur sync Dgraph: {e}")
+
+                # Recharger l'UI
+                self._reload_ui_after_child_add(saved_names)
+
+                # Message selon résultat
+                if dgraph_success:
+                    logger.info(f"✓✓✓ Enfant '{name}' ajouté (SQLite + Dgraph)")
+                else:
+                    logger.warning(f"⚠️ Enfant '{name}' ajouté (SQLite uniquement)")
             else:
-                # Rollback en cas d'échec
+                # Rollback
                 self.hierarchy_cache.remove_child_at_path(path, name)
                 logger.error(f"✗ Échec ajout au project_manager, rollback")
                 QtWidgets.QMessageBox.warning(self, "Erreur",
                     "Impossible d'ajouter l'enfant au project_manager")
         else:
             logger.error(f"✗ Échec ajout au cache")
-            QtWidgets.QMessageBox.warning(self, "Erreur",
-                "Impossible d'ajouter l'enfant au cache")
     
     def _refresh_ui_after_add(self, level, saved_selections):
         """
@@ -2331,19 +3116,6 @@ class DatasetConfigTab(QtWidgets.QWidget):
             self._refresh_all_counts()
 
             logger.info(f"Enfant '{child_name}' supprimé")
-
-    def _modify_category(self, level):
-        """Modify label category"""
-        categories = ["default", "technique", "business", "creative"]
-        category, ok = QtWidgets.QInputDialog.getItem(
-            self, tr("dataset.modify_category"), tr("dataset.choose_category") + ":", categories, 0, False
-        )
-        if ok:
-            if self.project_manager.modify_label_category(level, category):
-                project_data = self.project_manager.get_current_project_data()
-                if project_data:
-                    self.preview_updated.emit(project_data)
-                logger.info(f"Category of {level} modified to '{category}'")
 
     # ========== UI HELPERS ==========
 
@@ -2551,10 +3323,7 @@ class DatasetConfigTab(QtWidgets.QWidget):
         self._update_button_states()
 
     def _update_button_states(self):
-        """
-        Update button states based on selections and hierarchy - VERSION OPTIMISÉE
-        Maintient les boutons actifs pour permettre l'ajout successif
-        """
+        """Update button states - VERSION AVEC BOUTONS D'INSERTION"""
         project_selected = bool(
             self.project_combo.currentIndex() >= 0 and 
             self.project_combo.currentText()
@@ -2580,33 +3349,41 @@ class DatasetConfigTab(QtWidgets.QWidget):
             self.add_taxonomy_btn.setEnabled(typologie_selected)
             self.edit_taxonomy_btn.setEnabled(taxonomy_selected)
             self.remove_taxonomy_btn.setEnabled(taxonomy_selected)
-            self.category_taxonomy_btn.setEnabled(taxonomy_selected)
-            # Liste taxonomy active si typologie sélectionnée OU contenu existant
+            # Boutons d'insertion
+            if hasattr(self, 'insert_parent_taxonomy_btn'):
+                self.insert_parent_taxonomy_btn.setEnabled(taxonomy_selected)
+                self.insert_child_taxonomy_btn.setEnabled(taxonomy_selected)
             self.taxonomy_list.setEnabled(typologie_selected or self.taxonomy_list.count() > 0)
 
-        # Boutons de root - CRITIQUE: Activer "Ajouter" si taxonomy sélectionné
+        # Boutons de root
         self.add_root_btn.setEnabled(taxonomy_selected)
         self.edit_root_btn.setEnabled(root_selected)
         self.remove_root_btn.setEnabled(root_selected)
-        self.category_root_btn.setEnabled(root_selected)
-        # Liste root active si taxonomy sélectionné OU contenu existant
+        # Boutons d'insertion
+        if hasattr(self, 'insert_parent_root_btn'):
+            self.insert_parent_root_btn.setEnabled(root_selected)
+            self.insert_child_root_btn.setEnabled(root_selected)
         self.root_list.setEnabled(taxonomy_selected or self.root_list.count() > 0)
 
-        # Boutons de parent - CRITIQUE: Activer "Ajouter" si root sélectionné
+        # Boutons de parent
         self.add_parent_btn.setEnabled(root_selected)
         self.edit_parent_btn.setEnabled(parent_selected)
         self.remove_parent_btn.setEnabled(parent_selected)
-        self.category_parent_btn.setEnabled(parent_selected)
-        # Liste parent active si root sélectionné OU contenu existant
+        # Boutons d'insertion
+        if hasattr(self, 'insert_parent_parent_btn'):
+            self.insert_parent_parent_btn.setEnabled(parent_selected)
+            self.insert_child_parent_btn.setEnabled(parent_selected)
         self.parent_list.setEnabled(root_selected or self.parent_list.count() > 0)
 
-        # Boutons de child - CRITIQUE: Activer "Ajouter" si parent sélectionné
+        # Boutons de child
         self.add_child_btn.setEnabled(parent_selected)
         self.edit_child_btn.setEnabled(child_selected)
         self.remove_child_btn.setEnabled(child_selected)
-        self.category_child_btn.setEnabled(child_selected)
+        # Boutons d'insertion
+        if hasattr(self, 'insert_parent_child_btn'):
+            self.insert_parent_child_btn.setEnabled(child_selected)
+            self.insert_child_child_btn.setEnabled(child_selected)
         self.dive_btn.setEnabled(child_selected)
-        # Liste child active si parent sélectionné OU contenu existant
         self.child_list.setEnabled(parent_selected or self.child_list.count() > 0)
 
         # Bouton de navigation
@@ -2964,6 +3741,15 @@ class DatasetConfigTab(QtWidgets.QWidget):
                         logger.info(f"      Parent: {parent}")
                         self._debug_print_children([typ_name, cluster, root, parent], 8)
 
+    def _restore_selection(self, list_widget, name):
+        """Restaure la sélection d'un item par nom"""
+        for i in range(list_widget.count()):
+            item_text = list_widget.item(i).text()
+            item_name = item_text.split(" (")[0] if " (" in item_text else item_text
+            if item_name == name:
+                list_widget.setCurrentRow(i)
+                break
+
     def _restore_selections(self, selections):
         """
         Restaure les sélections sauvegardées - VERSION AMÉLIORÉE
@@ -3116,3 +3902,14 @@ class DatasetConfigTab(QtWidgets.QWidget):
         self._refresh_project_combos()
         if self.project_manager.current_project_name:
             self._load_project_ui()
+
+    def closeEvent(self, event):
+        """Appelé à la fermeture du widget"""
+        if self.dgraph_manager:
+            try:
+                self.dgraph_manager.close()
+                logger.info("✅ Dgraph manager fermé proprement")
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur fermeture Dgraph: {e}")
+        
+        event.accept()

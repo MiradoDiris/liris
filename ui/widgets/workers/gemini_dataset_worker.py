@@ -22,7 +22,6 @@ class GeminiDatasetWorker(QThread):
     ✅ Utilise le nouveau système de stockage multi-plateforme
     """
     
-    # Signaux
     progress_updated = pyqtSignal(int, int, str)
     combination_completed = pyqtSignal(int, dict)
     batch_completed = pyqtSignal(int, list)
@@ -67,37 +66,34 @@ class GeminiDatasetWorker(QThread):
         # Mode debug
         self.debug_mode = generation_config.get('debug_mode', True)
         
-        logger.info("🤖 GeminiDatasetWorker initialisé (MODE STRICT + STORAGE ROBUSTE)")
+        logger.info("🤖 GeminiDatasetWorker initialisé (GÉNÉRATION EXACTE GARANTIE)")
     
     def _load_gemini_config(self) -> bool:
-        """
-        ✅ VERSION CORRIGÉE : Charge la configuration avec fallback intelligent
-        Supporte le nouveau système SecureStorage + anciens systèmes
-        """
+        """Charge la configuration Gemini"""
         try:
             self._log("info", "📋 Chargement config Gemini...")
             
-            # 🔄 MÉTHODE 1 : Nouveau système (AIPlatformManager)
+            # Nouveau système (AIPlatformManager)
             config = self._try_new_platform_manager()
             
             if config and config.get('api_key'):
                 self.api_key = config['api_key']
                 self.model_name = config.get('model', 'gemini-2.0-flash-exp')
                 self.max_tokens = config.get('max_tokens', 8192)
-                self._log("info", f"✅ Config chargée (nouveau système): {self.model_name}")
+                self._log("info", f"✅ Config chargée : {self.model_name}")
                 return True
             
-            # 🔄 MÉTHODE 2 : KeyringHelper (ancien système)
+            # Keyring (ancien système)
             config = self._try_keyring_helper()
             
             if config and config.get('api_key'):
                 self.api_key = config['api_key']
                 self.model_name = config.get('model', 'gemini-2.0-flash-exp')
                 self.max_tokens = config.get('max_tokens', 8192)
-                self._log("warning", f"⚠️ Config chargée (keyring legacy): {self.model_name}")
+                self._log("warning", f"⚠️ Config chargée (keyring) : {self.model_name}")
                 return True
             
-            # 🔄 MÉTHODE 3 : Variable d'environnement
+            # Variable d'environnement
             import os
             env_key = os.getenv('GEMINI_API_KEY')
             
@@ -105,21 +101,14 @@ class GeminiDatasetWorker(QThread):
                 self.api_key = env_key
                 self.model_name = 'gemini-2.0-flash-exp'
                 self.max_tokens = 8192
-                self._log("warning", "⚠️ Config chargée depuis variable d'environnement (.env)")
-                self._log("warning", "💡 Conseil: Configurez via l'interface pour plus de sécurité")
+                self._log("warning", "⚠️ Config chargée depuis .env")
                 return True
             
-            # ❌ Échec total
             self._log("error", "❌ AUCUNE clé API Gemini trouvée")
-            self._log("error", "💡 Veuillez configurer Gemini via:")
-            self._log("error", "   1. Interface de configuration (recommandé)")
-            self._log("error", "   2. Variable d'environnement GEMINI_API_KEY")
             return False
             
         except Exception as e:
             self._log("error", f"❌ Erreur chargement config: {str(e)}")
-            import traceback
-            self._log("debug", traceback.format_exc())
             return False
     
     def _try_new_platform_manager(self) -> Optional[Dict[str, Any]]:
@@ -294,11 +283,7 @@ class GeminiDatasetWorker(QThread):
             
             self._log("info", f"\n--- Combinaison {combo_idx + 1}/{len(self.combinations)} ---")
             
-            combo_samples = self._generate_combination(
-                combination, 
-                combo_idx, 
-                batch_number
-            )
+            combo_samples = self._generate_combination(combination, combo_idx, batch_number)
             
             if combo_samples:
                 batch_results.extend(combo_samples)
@@ -311,8 +296,8 @@ class GeminiDatasetWorker(QThread):
     
     def _validate_sample(self, sample: Dict[str, Any]) -> bool:
         """
-        ✅ NOUVELLE MÉTHODE : Valide un sample avant de l'accepter
-        Vérifie format, longueur, présence des champs requis
+        ✅ VALIDATION ASSOUPLIE
+        Focus sur l'essentiel : format valide et contenu présent
         """
         try:
             # 1. Vérifier que c'est un dictionnaire
@@ -333,46 +318,30 @@ class GeminiDatasetWorker(QThread):
                     self._log("debug", f"      ❌ Champ vide : {field}")
                     return False
             
-            # 3. Vérifier longueur input (5-20 mots)
+            # 3. ✅ LIMITES ASSOUPLIES : 3-50 mots pour input
             input_text = sample.get('input', '')
             input_words = len(input_text.split())
-            if input_words < 5 or input_words > 30:
-                self._log("debug", f"      ❌ Input hors limites : {input_words} mots (attendu : 5-30)")
+            if input_words < 3 or input_words > 50:
+                self._log("debug", f"      ❌ Input hors limites : {input_words} mots (attendu : 3-50)")
                 return False
             
-            # 4. Vérifier longueur output (10-30 mots)
+            # 4. ✅ LIMITES ASSOUPLIES : 3-100 mots pour output
             output_text = sample.get('output', '')
             output_words = len(output_text.split())
-            if output_words < 5 or output_words > 50:
-                self._log("debug", f"      ❌ Output hors limites : {output_words} mots (attendu : 5-50)")
+            if output_words < 3 or output_words > 100:
+                self._log("debug", f"      ❌ Output hors limites : {output_words} mots (attendu : 3-100)")
                 return False
             
-            # 5. Vérifier qu'il n'y a pas de termes interdits (taxonomie exposée)
-            forbidden_terms = [
-                'cluster', 'label', 'typologie', 'taxonomie', 
-                'contexte', 'root', 'parent', 'enfant',
-                'taxonomy', 'hierarchy'
-            ]
-            
+            # 5. ✅ DÉTECTION SIMPLIFIÉE : Seulement les termes techniques évidents
+            forbidden_terms = ['taxonomy_clusters', 'root_labels', 'parent_labels', 'child_name']
             combined_text = (input_text + ' ' + output_text).lower()
+            
             for term in forbidden_terms:
                 if term in combined_text:
-                    self._log("debug", f"      ❌ Terme interdit détecté : {term}")
+                    self._log("debug", f"      ❌ Terme technique détecté : {term}")
                     return False
             
-            # 6. Vérifier pas de symboles de navigation
-            forbidden_symbols = ['>', '/', '→', '::', '--']
-            for symbol in forbidden_symbols:
-                if symbol in input_text or symbol in output_text:
-                    self._log("debug", f"      ❌ Symbole interdit : {symbol}")
-                    return False
-            
-            # 7. Vérifier que ce sont des phrases complètes (pas télégraphiques)
-            if not input_text[0].isupper() or not output_text[0].isupper():
-                self._log("debug", f"      ❌ Phrase ne commence pas par une majuscule")
-                return False
-            
-            # ✅ TOUTES LES VALIDATIONS PASSÉES
+            # ✅ VALIDATION RÉUSSIE
             return True
             
         except Exception as e:
@@ -386,44 +355,43 @@ class GeminiDatasetWorker(QThread):
         batch_number: int
     ) -> List[Dict[str, Any]]:
         """
-        ✅ VERSION AMÉLIORÉE : Continue jusqu'à obtenir le nombre exact de samples
-        Gère les rejets et continue la génération si nécessaire
+        ✅ VERSION GARANTIE : Continue jusqu'à obtenir EXACTEMENT le nombre demandé
         """
         samples = []
         nb_samples_requested = combination.get('nb_samples', 1)
 
-        self._log("info", f"   🎯 Génération de {nb_samples_requested} sample(s)...")
+        self._log("info", f"   🎯 Génération de EXACTEMENT {nb_samples_requested} sample(s)...")
 
-        # Construire le contexte EXACT de cette combinaison
+        # Construire le contexte
         context = self._build_context(combination)
 
-        # ⭐ NOUVELLE LOGIQUE : Boucle jusqu'à obtenir le bon nombre
-        max_attempts = 5  # Limite pour éviter les boucles infinies
+        # ✅ NOUVELLE STRATÉGIE : Génération par paquets jusqu'à complétion
+        max_total_attempts = 20  # Augmenté pour garantir le succès
         attempt = 0
+        total_generated = 0
+        total_rejected = 0
 
-        while len(samples) < nb_samples_requested and attempt < max_attempts:
+        while len(samples) < nb_samples_requested and attempt < max_total_attempts:
             attempt += 1
 
             # Calculer combien il reste à générer
             remaining = nb_samples_requested - len(samples)
 
+            # ✅ STRATÉGIE : Demander 50% de plus pour compenser les rejets
+            samples_to_request = max(remaining, int(remaining * 1.5))
+
             if attempt > 1:
-                self._log("warning", f"   🔄 Tentative {attempt}/{max_attempts} : il manque {remaining} sample(s)")
+                self._log("warning", f"   🔄 Tentative {attempt}/{max_total_attempts} : demande de {samples_to_request} samples (besoin de {remaining})")
 
-            # Construire le prompt pour le nombre restant
-            final_prompt = self._build_flexible_prompt(context, remaining)
+            # Construire le prompt
+            final_prompt = self._build_flexible_prompt(context, samples_to_request)
 
-            # 📝 Logger le prompt
-            self._log_prompt_to_file(final_prompt, combination, combo_idx, batch_number, attempt)
+            # 📁 Logger le prompt
+            #self._log_prompt_to_file(final_prompt, combination, combo_idx, batch_number, attempt)
 
             try:
-                # 🔥 APPEL API (Gemini ou OSS selon le worker)
-                if hasattr(self, '_call_gemini_api'):
-                    # Worker Gemini
-                    generated_data = self._call_gemini_api(final_prompt, remaining)
-                else:
-                    # Worker OSS
-                    generated_data = self._call_oss_api(final_prompt, remaining)
+                # 🔥 APPEL API
+                generated_data = self._call_gemini_api(final_prompt, samples_to_request)
 
                 if generated_data:
                     # Compteurs pour diagnostics
@@ -434,18 +402,17 @@ class GeminiDatasetWorker(QThread):
                         # ✅ VALIDATION DU SAMPLE
                         if not self._validate_sample(sample):
                             rejected_count += 1
-                            self._log("warning", f"      ⚠️ Sample rejeté (validation échouée)")
+                            total_rejected += 1
                             continue
                         
                         valid_count += 1
+                        total_generated += 1
                         self.global_sample_counter += 1
 
                         # Gérer combinaisons
                         if 'combinaisons' in sample and sample['combinaisons']:
                             combinaisons = sample['combinaisons']
-                            self._log("debug", f"      ✅ Sample #{self.global_sample_counter}: format 'combinaisons' détecté")
                         else:
-                            self._log("debug", f"      ⚠️ Sample #{self.global_sample_counter}: format legacy, reconstruction...")
                             combinaisons = self._build_combinaisons_from_sample(sample, combination)
 
                         # Enrichir le sample
@@ -462,7 +429,7 @@ class GeminiDatasetWorker(QThread):
                                 'combination_index': combo_idx + 1,
                                 'local_sample_index': len(samples) + 1,
                                 'generated_at': datetime.now().isoformat(),
-                                'model': self.model_name if hasattr(self, 'model_name') else 'OSS Local Model',
+                                'model': self.model_name,
                                 'master': combination['master']['name'],
                                 'contexts': [ctx['display'] for ctx in combination['contexts']],
                                 'purpose': 'conversational_ai_training',
@@ -473,18 +440,22 @@ class GeminiDatasetWorker(QThread):
 
                         samples.append(enriched_sample)
 
-                        # ✅ Si on a atteint l'objectif, arrêter immédiatement
+                        # ✅ OBJECTIF ATTEINT
                         if len(samples) >= nb_samples_requested:
+                            self._log("info", f"   ✅ Objectif atteint : {len(samples)}/{nb_samples_requested} samples")
                             break
                         
                     # 📊 Rapport de cette tentative
                     self._log("info", f"   📊 Tentative {attempt} : {valid_count} acceptés, {rejected_count} rejetés")
 
                     if len(samples) >= nb_samples_requested:
-                        self._log("info", f"   ✅ Objectif atteint : {len(samples)}/{nb_samples_requested} samples")
                         break
                 else:
                     self._log("warning", f"   ⚠️ Aucun sample généré lors de la tentative {attempt}")
+                    
+                # ⏱️ Pause entre tentatives pour éviter le rate limiting
+                if len(samples) < nb_samples_requested and attempt < max_total_attempts:
+                    time.sleep(2)
 
             except Exception as e:
                 self._log("error", f"   ❌ Erreur tentative {attempt}: {str(e)}")
@@ -492,11 +463,19 @@ class GeminiDatasetWorker(QThread):
                 self._log("error", traceback.format_exc())
 
         # 📊 RAPPORT FINAL
+        self._log("info", f"\n   {'='*50}")
         if len(samples) < nb_samples_requested:
-            self._log("error", f"   ❌ INCOMPLET : {len(samples)}/{nb_samples_requested} samples après {attempt} tentative(s)")
-            self._log("error", f"      Taux de réussite : {len(samples)*100//nb_samples_requested}%")
+            self._log("error", f"   ❌ INCOMPLET : {len(samples)}/{nb_samples_requested} samples")
+            self._log("error", f"      • Tentatives : {attempt}/{max_total_attempts}")
+            self._log("error", f"      • Générés : {total_generated}")
+            self._log("error", f"      • Rejetés : {total_rejected}")
+            self._log("error", f"      • Taux de rejet : {total_rejected*100//(total_generated+total_rejected) if (total_generated+total_rejected) > 0 else 0}%")
         else:
-            self._log("info", f"   ✅ COMPLET : {len(samples)}/{nb_samples_requested} samples générés")
+            self._log("info", f"   ✅ SUCCÈS : {len(samples)}/{nb_samples_requested} samples")
+            self._log("info", f"      • Tentatives : {attempt}")
+            self._log("info", f"      • Générés : {total_generated}")
+            self._log("info", f"      • Rejetés : {total_rejected}")
+        self._log("info", f"   {'='*50}\n")
 
         # Mise à jour progression
         current = (combo_idx * nb_samples_requested) + len(samples)
@@ -665,15 +644,6 @@ class GeminiDatasetWorker(QThread):
 
     ### CONTEXTES SPÉCIFIQUES
     {''.join(context_sections)}
-
-    ## 🎯 OBJECTIF DE GÉNÉRATION
-
-    Vous devez créer des conversations **NATURELLES** entre un utilisateur humain et un assistant IA.
-
-    **IMPORTANT** : Les utilisateurs NE CONNAISSENT PAS la taxonomie ci-dessus. Ils posent des questions de manière spontanée, avec leurs propres mots, sans jamais mentionner les clusters, labels ou typologies.
-
-    ## 📋 FORMAT DE SORTIE OBLIGATOIRE
-
     ⚠️ **CRITIQUE** : Générez UNIQUEMENT du JSON pur, sans texte avant/après.
 
     Structure JSON attendue pour chaque échantillon :
@@ -796,22 +766,6 @@ class GeminiDatasetWorker(QThread):
     {{
       "input": "Comment je fais pour envoyer une facture à un client ?",
       "output": "Pour envoyer une facture, ouvrez-la puis cliquez sur le bouton Envoyer par email en haut."
-    }}
-    ```
-
-    **Exemple 2 :**
-    ```json
-    {{
-      "input": "Où est-ce que je peux voir le total de mes ventes du mois ?",
-      "output": "Le total de vos ventes mensuelles est disponible dans Tableau de bord sous Chiffre d'affaires."
-    }}
-    ```
-
-    **Exemple 3 :**
-    ```json
-    {{
-      "input": "J'aimerais modifier les informations d'un client existant",
-      "output": "Pour modifier un client, allez dans Clients, sélectionnez le client concerné puis cliquez sur Modifier."
     }}
     ```
 

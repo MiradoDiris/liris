@@ -6,11 +6,13 @@ Dataset Generation Panel - Improved 3-column layout
 Left: Project & Config | Center: Prompt Editor | Right: Combinations Visualizer
 """
 
+from email.mime import message
 import json
 from operator import index
 import os
 from datetime import datetime
 from typing import Dict
+from unittest import result
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import (
@@ -22,6 +24,8 @@ from PyQt5.QtGui import QFont, QColor, QLinearGradient, QPainter, QBrush
 import sys
 from pathlib import Path
 from typing import Dict, Any
+from PyQt5.QtCore import QThread
+from utils.enhanced_logging import ResultTracer
 
 import self
 
@@ -34,7 +38,7 @@ from utils.dataset_database import DatasetDatabase
 from utils.dataset_project_manager import DatasetProjectManager
 import qtawesome as qta
 from PyQt5.QtGui import QPainter
-
+from context_weaver.pipeline.main_pipeline import ContextWeaverPipeline
 
 def get_dropdown_svg_path():
     """Retourne le chemin vers l'icône dropdown SVG"""
@@ -259,6 +263,7 @@ class CombinationVisualizer(QWidget):
         super().__init__(parent)
         self.combinations = []
         self.completed = []
+        self.all_project_typologies = []  # ✅ Ajout pour la recherche
         self._init_ui()
         
     def _init_ui(self):
@@ -279,203 +284,6 @@ class CombinationVisualizer(QWidget):
 
         layout.addWidget(scroll)
 
-        layout.addWidget(scroll)
-
-    def _request_add_context_to_combo(self, combo_idx):
-        """Ouvre l'interface pour ajouter un contexte à une combinaison existante"""
-        if combo_idx < 0 or combo_idx >= len(self.combinations):
-            return
-
-        # Stocker l'index de la combo en cours d'édition
-        self._editing_combo_idx = combo_idx
-
-        # Créer un dialog pour sélectionner un nouveau contexte
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Ajouter un contexte à la combinaison #{combo_idx + 1}")
-        dialog.setMinimumSize(600, 400)
-
-        layout = QVBoxLayout(dialog)
-
-        # Info
-        info = QLabel(f"<b>Combinaison #{combo_idx + 1}</b><br>"
-                      f"Ajoutez un nouveau contexte à cette combinaison")
-        info.setStyleSheet("padding: 10px; background: #F0F8FF; border-radius: 4px;")
-        layout.addWidget(info)
-
-        # Champ de recherche
-        search_label = QLabel("Rechercher une taxonomie:")
-        search_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        layout.addWidget(search_label)
-
-        search_input = QtWidgets.QLineEdit()
-        search_input.setPlaceholderText("Tapez pour rechercher...")
-        search_input.setMinimumHeight(32)
-        layout.addWidget(search_input)
-
-        # Liste des résultats
-        results_list = QtWidgets.QListWidget()
-        results_list.setMinimumHeight(200)
-        layout.addWidget(results_list)
-
-        # Fil d'ariane
-        breadcrumb = QLabel("Aucune sélection")
-        breadcrumb.setStyleSheet("background: #F8F9FA; border: 1px solid #E0E0E0; "
-                                 "border-radius: 4px; padding: 8px; font-size: 8pt;")
-        layout.addWidget(breadcrumb)
-
-        # Boutons
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-
-        cancel_btn = QPushButton("Annuler")
-        cancel_btn.clicked.connect(dialog.reject)
-        buttons.addWidget(cancel_btn)
-
-        add_btn = QPushButton("Ajouter")
-        add_btn.setEnabled(False)
-        add_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
-            }}
-            QPushButton:disabled {{
-                background: #CCCCCC;
-                color: #888888;
-            }}
-        """)
-        buttons.addWidget(add_btn)
-
-        layout.addLayout(buttons)
-
-        # Variable pour stocker la sélection
-        selected_taxonomy = None
-
-        def on_search(text):
-            results_list.clear()
-            if not text or len(text) < 2:
-                return
-
-            if not self.all_project_typologies:
-                results_list.addItem("⚠️ Aucune typologie disponible")
-                return
-
-            text_lower = text.lower()
-            results = []
-
-            # Recherche dans toutes les typologies
-            for typologie in self.all_project_typologies:
-                if not isinstance(typologie, dict):
-                    continue
-                
-                typologie_name = typologie.get('name', '')
-                clusters = typologie.get('taxonomy_clusters', [])
-
-                for cluster in clusters:
-                    cluster_name = cluster.get('name', '')
-
-                    if text_lower in cluster_name.lower():
-                        results.append({
-                            'display': f"Cluster: {cluster_name}",
-                            'path': f"{typologie_name} → {cluster_name}",
-                            'level': 'taxonomy',
-                            'typologie': typologie_name,
-                            'taxonomy': cluster_name,
-                            'data': cluster,
-                            'full_typologie': typologie
-                        })
-
-                    # Recherche dans root, parent, children...
-                    for root in cluster.get('root_labels', []):
-                        root_name = root.get('name', '')
-
-                        if text_lower in root_name.lower():
-                            results.append({
-                                'display': f"Label root: {root_name}",
-                                'path': f"{typologie_name} → {cluster_name} → {root_name}",
-                                'level': 'root',
-                                'typologie': typologie_name,
-                                'taxonomy': cluster_name,
-                                'root': root_name,
-                                'data': root,
-                                'full_typologie': typologie
-                            })
-
-                        for parent in root.get('parent_labels', []):
-                            parent_name = parent.get('name', '')
-
-                            if text_lower in parent_name.lower():
-                                results.append({
-                                    'display': f"Label parent: {parent_name}",
-                                    'path': f"{typologie_name} → {cluster_name} → {root_name} → {parent_name}",
-                                    'level': 'parent',
-                                    'typologie': typologie_name,
-                                    'taxonomy': cluster_name,
-                                    'root': root_name,
-                                    'parent': parent_name,
-                                    'data': parent,
-                                    'full_typologie': typologie
-                                })
-
-                            # Recherche dans children (récursif)
-                            self._search_in_children(
-                                parent.get('children', []), text_lower, results,
-                                typologie_name, cluster_name, root_name, parent_name, [], typologie
-                            )
-
-            # Afficher les résultats
-            if results:
-                for result in results[:15]:
-                    item = QtWidgets.QListWidgetItem(result['display'])
-                    item.setData(Qt.UserRole, result)
-                    item.setToolTip(result['path'])
-                    results_list.addItem(item)
-            else:
-                results_list.addItem("❌ Aucun résultat")
-
-        def on_select(item):
-            nonlocal selected_taxonomy
-            result = item.data(Qt.UserRole)
-
-            if not result or isinstance(result, str):
-                return
-
-            selected_taxonomy = result
-            breadcrumb.setText(f"✅ {result['path']}")
-            add_btn.setEnabled(True)
-
-        def on_add():
-            if not selected_taxonomy:
-                return
-
-            # Construire le nouveau contexte
-            new_context = {
-                'level': selected_taxonomy['level'],
-                'display': selected_taxonomy['path'],
-                'data': self._build_context_data_from_selection(selected_taxonomy)
-            }
-
-            # Ajouter à la combinaison
-            combo = self.combinations[combo_idx]
-            combo['contexts'].append(new_context)
-
-            dialog.accept()
-
-        # Connexions
-        search_input.textChanged.connect(on_search)
-        results_list.itemDoubleClicked.connect(on_select)
-        add_btn.clicked.connect(on_add)
-
-        dialog.exec_()
-
     def set_combinations(self, combinations):
         """Définit les combinaisons à afficher"""
         self.combinations = combinations
@@ -489,7 +297,9 @@ class CombinationVisualizer(QWidget):
             self._update_display()
             
     def _update_display(self):
-        """Met à jour l'affichage - VERSION AVEC ÉDITION DES CONTEXTES"""
+        """
+        ✅ Met à jour l'affichage avec les chemins taxonomiques complets
+        """
         # Vider le layout
         while self.combinations_layout.count():
             item = self.combinations_layout.takeAt(0)
@@ -536,7 +346,7 @@ class CombinationVisualizer(QWidget):
             combo_layout.setSpacing(4)
             combo_layout.setContentsMargins(4, 4, 4, 4)
 
-            # En-tête avec boutons d'action
+            # En-tête
             header_layout = QHBoxLayout()
             header_layout.setSpacing(4)
             header_layout.setContentsMargins(0, 0, 0, 0)
@@ -544,7 +354,6 @@ class CombinationVisualizer(QWidget):
             num_label = QLabel(f"#{i+1}")
             num_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
             num_label.setStyleSheet(f"color: {text_color}; min-width: 30px;")
-            num_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
             header_layout.addWidget(num_label)
 
             master_name = combo.get('master', 'N/A')
@@ -552,7 +361,6 @@ class CombinationVisualizer(QWidget):
             master_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
             master_label.setStyleSheet(f"color: {text_color};")
             master_label.setWordWrap(True)
-            master_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
             header_layout.addWidget(master_label, 1)
 
             # Info compacte
@@ -562,11 +370,10 @@ class CombinationVisualizer(QWidget):
             info_label = QLabel(f"{nb_contexts}ctx • {nb_samples}spl")
             info_label.setFont(QFont("Segoe UI", 8))
             info_label.setStyleSheet(f"color: {text_color}; padding: 0 5px;")
-            info_label.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
             header_layout.addWidget(info_label)
 
+            # Boutons d'action (code existant)
             if not is_completed:
-                # Bouton Modifier samples
                 edit_samples_btn = QPushButton("Modifier")
                 edit_samples_btn.setToolTip("Modifier le nombre de samples")
                 edit_samples_btn.setMinimumSize(40, 22)
@@ -592,7 +399,6 @@ class CombinationVisualizer(QWidget):
                 edit_samples_btn.clicked.connect(lambda checked, idx=i: self._edit_samples(idx))
                 header_layout.addWidget(edit_samples_btn)
 
-                # Bouton Supprimer
                 delete_btn = QPushButton("Suppr")
                 delete_btn.setToolTip("Supprimer la combinaison")
                 delete_btn.setMinimumSize(45, 22)
@@ -618,7 +424,6 @@ class CombinationVisualizer(QWidget):
                 delete_btn.clicked.connect(lambda checked, idx=i: self.combination_deleted.emit(idx))
                 header_layout.addWidget(delete_btn)
 
-            # Statut
             status_label = QLabel("✓" if is_completed else "○")
             status_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
             status_label.setStyleSheet(f"color: {text_color};")
@@ -632,21 +437,41 @@ class CombinationVisualizer(QWidget):
             separator.setStyleSheet(f"background-color: {text_color}; max-height: 1px; opacity: 0.3;")
             combo_layout.addWidget(separator)
 
-            # ✅ LISTE DES CONTEXTES AVEC BOUTONS SUPPRIMER
+            # ✅ AFFICHAGE DES CONTEXTES AVEC CHEMINS COMPLETS
             contexts = combo.get('contexts', [])
             for ctx_idx, ctx in enumerate(contexts):
                 ctx_layout = QHBoxLayout()
                 ctx_layout.setSpacing(4)
                 ctx_layout.setContentsMargins(0, 2, 0, 2)
 
-                ctx_label = QLabel(f"{ctx_idx + 1}. {ctx.get('display', 'N/A')}")
+                # ✅ Utiliser 'display' qui contient maintenant le breadcrumb complet
+                display_text = ctx.get('display', 'N/A')
+                
+                # ✅ Afficher avec numéro et chemin complet
+                ctx_label = QLabel(f"{ctx_idx + 1}. {display_text}")
                 ctx_label.setFont(QFont("Segoe UI", 8))
                 ctx_label.setStyleSheet(f"color: {text_color}; padding-left: 15px;")
                 ctx_label.setWordWrap(True)
                 ctx_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+                
+                # ✅ Tooltip enrichi avec les détails
+                ctx_data = ctx.get('data', {})
+                tooltip_parts = []
+                if 'breadcrumb' in ctx_data and ctx_data['breadcrumb']:
+                    tooltip_parts.append(f"📍 {ctx_data['breadcrumb']}")
+                if 'description' in ctx_data and ctx_data['description']:
+                    tooltip_parts.append(f"📝 {ctx_data['description']}")
+                if 'score' in ctx_data:
+                    tooltip_parts.append(f"⭐ Score: {ctx_data['score']:.3f}")
+                if 'depth' in ctx_data:
+                    tooltip_parts.append(f"🔢 Profondeur: {ctx_data['depth']}")
+                    
+                if tooltip_parts:
+                    ctx_label.setToolTip("\n".join(tooltip_parts))
+                
                 ctx_layout.addWidget(ctx_label, 1)
 
-                # ✅ Bouton supprimer contexte (uniquement si non complété)
+                # Bouton supprimer contexte (DESIGN ORIGINAL)
                 if not is_completed:
                     delete_ctx_btn = QPushButton("X")
                     delete_ctx_btn.setToolTip("Supprimer ce contexte")
@@ -682,16 +507,14 @@ class CombinationVisualizer(QWidget):
                     delete_ctx_btn.clicked.connect(lambda checked, combo_idx=i, ctx_i=ctx_idx: self._delete_context(combo_idx, ctx_i))
                     ctx_layout.addWidget(delete_ctx_btn)
 
-                # ✅ IMPORTANT : Ajouter le layout DANS la boucle !
                 combo_layout.addLayout(ctx_layout)
 
-            # ✅ BOUTON AJOUTER CONTEXTE (uniquement si non complété)
+            # Bouton ajouter contexte
             if not is_completed:
                 add_ctx_btn = QPushButton("+ Contexte")
                 add_ctx_btn.setMinimumHeight(30)
                 add_ctx_btn.setMaximumHeight(30)
                 add_ctx_btn.setMaximumWidth(120)
-                add_ctx_btn.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
                 add_ctx_btn.setCursor(Qt.PointingHandCursor)
                 add_ctx_btn.setStyleSheet(f"""
                     QPushButton {{
@@ -714,12 +537,9 @@ class CombinationVisualizer(QWidget):
                 add_ctx_btn.clicked.connect(lambda checked, idx=i: self._add_context_to_combo(idx))
                 combo_layout.addWidget(add_ctx_btn)
 
-            # ✅ AJOUTER LE COMBO_FRAME POUR TOUTES LES COMBINAISONS
             self.combinations_layout.addWidget(combo_frame)
 
-        # ✅ STRETCH EN DEHORS DE LA BOUCLE (UNE SEULE FOIS)
         self.combinations_layout.addStretch()
-
 
     def _delete_context(self, combo_idx, ctx_idx):
         """Supprime un contexte d'une combinaison"""
@@ -789,6 +609,34 @@ class CombinationVisualizer(QWidget):
             combo['nb_samples'] = new_samples
             self.combination_modified.emit(combo_idx, combo)
             self._update_display()
+
+    def _search_in_children(self, children, text_lower, results, typologie, cluster, root, parent, path, full_typologie):
+        """Recherche récursive dans les enfants"""
+        for child in children:
+            child_name = child.get('name', '')
+            current_path = path + [child_name]
+
+            if text_lower in child_name.lower():
+                # Déterminer le niveau de l'enfant (enfant 1, enfant 2, etc.)
+                child_level = len(current_path)
+                results.append({
+                    'display': f"Label enfant {child_level}: {child_name}",
+                    'path': f"{typologie} → {cluster} → {root} → {parent} → {' → '.join(current_path)}",
+                    'level': 'child',
+                    'typologie': typologie,
+                    'taxonomy': cluster,
+                    'root': root,
+                    'parent': parent,
+                    'child_path': current_path,
+                    'data': child,
+                    'full_typologie': full_typologie
+                })
+
+            # Récursion
+            self._search_in_children(
+                child.get('children', []), text_lower, results,
+                typologie, cluster, root, parent, current_path, full_typologie
+            )
 
 class AISelectionDialog(QDialog):
     """Dialog pour sélectionner l'IA à utiliser en mode API"""
@@ -923,6 +771,370 @@ class AISelectionDialog(QDialog):
         """Retourne l'IA sélectionnée"""
         return self.selected_ai
 
+class ContextWeaverWorker(QThread):
+    """Worker pour exécuter Context Weaver avec données de la base"""
+
+    MAX_RESULTS_FOR_GROUPING = 30
+    MAX_CONTEXTS_PER_COMBINATION = 10
+    CREATE_MULTIPLE_COMBINATIONS = True
+    CONTEXTS_PER_COMBINATION = 5
+    
+    progress_updated = pyqtSignal(str)  # message
+    generation_completed = pyqtSignal(dict)  # résultats
+    generation_failed = pyqtSignal(str)  # erreur
+    
+    def __init__(self, user_context: str, database=None, project_name: str = None, parent=None):
+        super().__init__(parent)
+        self.user_context = user_context
+        self.database = database
+        self.project_name = project_name
+        self.pipeline = None
+    
+    def run(self):
+        """Exécute le pipeline Context Weaver avec données DB"""
+        try:
+            self.progress_updated.emit("🔄 Initialisation du Context Weaver...")
+            
+            # ✅ CORRECTION: Utiliser la nouvelle architecture avec VectorStore
+            from context_weaver.pipeline.main_pipeline import ContextWeaverPipeline
+            from context_weaver.data.vector_store import VectorStore
+            
+            # ✅ Indexer les données du projet si nécessaire
+            if self.database and self.project_name:
+                self.progress_updated.emit(f"📚 Indexation du projet '{self.project_name}'...")
+                
+                try:
+                    # Importer l'indexeur
+                    import sys
+                    from pathlib import Path
+                    current_dir = Path(__file__).parent.parent
+                    sys.path.insert(0, str(current_dir))
+                    
+                    from context_weaver.data.database_indexer import DatabaseIndexer
+                    
+                    # Créer le VectorStore
+                    vector_store = VectorStore()
+                    vector_store.initialize()
+                    
+                    # Indexer le projet dans le VectorStore
+                    indexer = DatabaseIndexer(self.database)
+                    success = indexer.index_project_to_vector_store(
+                        self.project_name,
+                        vector_store
+                    )
+                    
+                    if success:
+                        doc_count = vector_store.get_document_count()
+                        logger.info(f"✅ Projet '{self.project_name}' indexé avec succès")
+                        logger.info(f"   • VectorStore: {doc_count} documents")
+                    else:
+                        logger.warning(f"⚠️ Indexation du projet échouée, utilisation de la base vide")
+                        vector_store = None
+                    
+                except ImportError as e:
+                    logger.warning(f"⚠️ Indexeur non disponible: {e}")
+                    logger.warning("   → Utilisation du pipeline sans données indexées")
+                    vector_store = None
+                except Exception as e:
+                    logger.error(f"❌ Erreur indexation: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    vector_store = None
+            else:
+                vector_store = None
+            
+            # ✅ Initialiser le pipeline avec le VectorStore
+            self.progress_updated.emit("🧠 Classification sémantique en cours...")
+            self.pipeline = ContextWeaverPipeline(
+                vector_store=vector_store,
+                project_name=self.project_name,
+                enable_taxonomy_validation=True  # Active la validation taxonomique
+            )
+            
+            # Exécuter le pipeline
+            result = self.pipeline.run(self.user_context)
+            
+            self.progress_updated.emit("✅ Génération terminée!")
+            
+            # Convertir le résultat en dict pour les combinaisons
+            combinations_data = self._convert_to_combinations(result)
+            self.generation_completed.emit(combinations_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur Context Weaver: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self.generation_failed.emit(str(e))
+        
+        finally:
+            if self.pipeline:
+                try:
+                    self.pipeline.close()
+                except:
+                    pass
+    
+    def _convert_to_combinations(self, pipeline_output):
+        """
+        ✅ VERSION AMÉLIORÉE avec chemins taxonomiques complets (breadcrumb)
+        """
+        combinations = []
+        master_typologie = None
+
+        stats = {
+            'pipeline_results': 0,
+            'used_for_grouping': 0,
+            'groups_created': 0,
+            'combinations_generated': 0,
+            'total_contexts': 0
+        }
+
+        try:
+            if hasattr(pipeline_output, 'search_results'):
+                search_results = pipeline_output.search_results.results
+                stats['pipeline_results'] = len(search_results)
+
+                logger.info(f"📊 {len(search_results)} résultat(s) de recherche trouvés")
+
+                # Limiter aux meilleurs résultats
+                limited_results = search_results[:self.MAX_RESULTS_FOR_GROUPING]
+                stats['used_for_grouping'] = len(limited_results)
+
+                logger.info(f"🔽 Limitation aux {len(limited_results)} meilleurs résultats")
+
+                # Grouper par domaine/type
+                grouped = {}
+                for result in limited_results:
+                    key = f"{result.domain}_{result.type}"
+                    if key not in grouped:
+                        grouped[key] = []
+                    grouped[key].append(result)
+
+                stats['groups_created'] = len(grouped)
+
+                logger.info(f"📦 Groupement créé : {len(grouped)} groupe(s)")
+
+                # ✅ CRÉATION DES COMBINAISONS AVEC BREADCRUMB
+                if self.CREATE_MULTIPLE_COMBINATIONS:
+                    logger.info(f"\n🔄 Mode : Combinaisons multiples ({self.CONTEXTS_PER_COMBINATION} contextes par combinaison)")
+
+                    for group_key, group_results in grouped.items():
+                        logger.info(f"\n🎯 Traitement du groupe '{group_key}':")
+                        logger.info(f"   • Résultats dans le groupe: {len(group_results)}")
+
+                        for i in range(0, len(group_results), self.CONTEXTS_PER_COMBINATION):
+                            batch = group_results[i:i+self.CONTEXTS_PER_COMBINATION]
+                            contexts = []
+
+                            logger.info(f"\n   📦 Batch {i//self.CONTEXTS_PER_COMBINATION + 1}:")
+                            logger.info(f"      • Contextes dans ce batch: {len(batch)}")
+
+                            for idx, result in enumerate(batch, 1):
+                                logger.info(f"         {idx}. {result.name} (score: {result.score:.3f})")
+
+                                # ✅ EXTRACTION DU BREADCRUMB (chemin complet)
+                                breadcrumb = result.content.get('breadcrumb', result.name)
+                                
+                                # ✅ CRÉER UN DISPLAY AVEC LE CHEMIN COMPLET
+                                # Format: "Domain → Cluster → Root → Parent → Name"
+                                if breadcrumb and breadcrumb != result.name:
+                                    display_text = breadcrumb
+                                else:
+                                    # Fallback: construire depuis metadata
+                                    display_text = self._build_display_path(result)
+                                
+                                context = {
+                                    'level': result.type,
+                                    'display': display_text,  # ✅ Chemin complet
+                                    'data': {
+                                        'name': result.name,
+                                        'domain': result.domain,
+                                        'type': result.type,
+                                        'description': result.content.get('description', ''),
+                                        'breadcrumb': breadcrumb,  # ✅ Conserver breadcrumb
+                                        'score': result.score,
+                                        'depth': result.content.get('depth', 0)
+                                    }
+                                }
+                                contexts.append(context)
+
+                            if contexts:
+                                combination = {
+                                    'contexts': contexts,
+                                    'nb_samples': 10
+                                }
+                                combinations.append(combination)
+                                logger.info(f"      ✅ Combinaison créée avec {len(contexts)} contextes")
+
+                else:
+                    # Mode combinaison unique (même logique)
+                    logger.info(f"\n🔄 Mode : Combinaison unique ({self.MAX_CONTEXTS_PER_COMBINATION} contextes max)")
+
+                    for group_key, group_results in grouped.items():
+                        logger.info(f"\n🎯 Traitement du groupe '{group_key}':")
+                        contexts = []
+
+                        selected_results = group_results[:self.MAX_CONTEXTS_PER_COMBINATION]
+
+                        for idx, result in enumerate(selected_results, 1):
+                            logger.info(f"      {idx}. {result.name} (score: {result.score:.3f})")
+
+                            # ✅ EXTRACTION DU BREADCRUMB
+                            breadcrumb = result.content.get('breadcrumb', result.name)
+                            
+                            if breadcrumb and breadcrumb != result.name:
+                                display_text = breadcrumb
+                            else:
+                                display_text = self._build_display_path(result)
+
+                            context = {
+                                'level': result.type,
+                                'display': display_text,
+                                'data': {
+                                    'name': result.name,
+                                    'domain': result.domain,
+                                    'type': result.type,
+                                    'description': result.content.get('description', ''),
+                                    'breadcrumb': breadcrumb,
+                                    'score': result.score,
+                                    'depth': result.content.get('depth', 0)
+                                }
+                            }
+                            contexts.append(context)
+
+                        if contexts:
+                            combination = {
+                                'contexts': contexts,
+                                'nb_samples': 10
+                            }
+                            combinations.append(combination)
+                            logger.info(f"   ✅ Combinaison créée avec {len(contexts)} contextes")
+
+            # ✅ Créer la typologie master avec les bonnes données
+            if hasattr(pipeline_output, 'classification'):
+                classification = pipeline_output.classification
+                master_typologie = {
+                    'name': f"Taxonomie {classification.domain}",
+                    'taxonomy_clusters': [{
+                        'name': classification.domain,
+                        'root_labels': []
+                    }]
+                }
+
+            # Fallback si aucune combinaison
+            if not combinations and hasattr(pipeline_output, 'classification'):
+                classification = pipeline_output.classification
+                logger.warning("⚠️ Aucun résultat de recherche, création de combinaisons par défaut")
+
+                for variable in classification.variables[:5]:
+                    combination = {
+                        'contexts': [{
+                            'level': 'variable',
+                            'display': f"Variable: {variable}",
+                            'data': {
+                                'name': variable,
+                                'domain': classification.domain,
+                                'type': 'variable',
+                                'description': f"Variable détectée: {variable}"
+                            }
+                        }],
+                        'nb_samples': 10
+                    }
+                    combinations.append(combination)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur conversion résultats: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+        # Assurer au moins une combinaison
+        if not combinations:
+            logger.warning("⚠️ Création d'une combinaison par défaut")
+            combinations = [{
+                'contexts': [{
+                    'level': 'default',
+                    'display': 'Contexte généré automatiquement',
+                    'data': {
+                        'name': 'Default Context',
+                        'domain': 'unknown',
+                        'type': 'default',
+                        'description': 'Contexte par défaut'
+                    }
+                }],
+                'nb_samples': 10
+            }]
+
+        # Stats finales
+        stats['combinations_generated'] = len(combinations)
+        stats['total_contexts'] = sum(len(c['contexts']) for c in combinations)
+
+        logger.info(f"\n{'='*80}")
+        logger.info(f"📊 RÉSUMÉ DE LA CONVERSION")
+        logger.info(f"{'='*80}")
+        logger.info(f"   • Résultats du pipeline: {stats['pipeline_results']}")
+        logger.info(f"   • Résultats utilisés: {stats['used_for_grouping']}")
+        logger.info(f"   • Groupes créés: {stats['groups_created']}")
+        logger.info(f"   • Combinaisons générées: {stats['combinations_generated']}")
+        logger.info(f"   • Total contextes: {stats['total_contexts']}")
+        logger.info(f"{'='*80}\n")
+
+        return {
+            'master_typologie': master_typologie,
+            'combinations': combinations,
+            'metadata': {
+                'source': 'context_weaver_db',
+                'confidence': (
+                    getattr(pipeline_output.context_weaver, 'confidence_score', 0.0) 
+                    if hasattr(pipeline_output, 'context_weaver') 
+                    else 0.0
+                ),
+                'execution_time_ms': (
+                    pipeline_output.execution_time_ms 
+                    if hasattr(pipeline_output, 'execution_time_ms') 
+                    else 0.0
+                ),
+                'indexed_from_database': self.database is not None and self.project_name is not None,
+                'conversion_stats': stats,
+                'configuration': {
+                    'max_results_for_grouping': self.MAX_RESULTS_FOR_GROUPING,
+                    'max_contexts_per_combination': self.MAX_CONTEXTS_PER_COMBINATION,
+                    'create_multiple_combinations': self.CREATE_MULTIPLE_COMBINATIONS,
+                    'contexts_per_combination': self.CONTEXTS_PER_COMBINATION
+                }
+            }
+        }
+    
+    def _build_display_path(self, result):
+        """
+        ✅ NOUVELLE MÉTHODE: Construit un chemin d'affichage depuis les métadonnées
+        
+        Args:
+            result: SearchResult du pipeline
+            
+        Returns:
+            str: Chemin formaté "Domain → Type → Name"
+        """
+        parts = []
+        
+        # Ajouter le domaine
+        if result.domain:
+            parts.append(result.domain)
+        
+        # Ajouter le type (traduit)
+        type_labels = {
+            'taxon': 'Taxon',
+            'root': 'Label root',
+            'parent': 'Label parent',
+            'child': 'Label enfant',
+            'variable': 'Variable'
+        }
+        parts.append(type_labels.get(result.type, result.type.capitalize()))
+        
+        # Ajouter le nom
+        parts.append(result.name)
+        
+        # Joindre avec flèches
+        return ' → '.join(parts)
+    
 class DatasetGenerationPanel(QWidget):
     """Panel principal de génération de datasets - Layout 3 colonnes"""
     
@@ -1547,9 +1759,244 @@ class DatasetGenerationPanel(QWidget):
             }}
         """)
         layout.addWidget(self.prompt_editor, 1)
+
+        self.context_weaver_section = CollapsibleSection("Génération Automatique")
+        self.context_weaver_section.set_light_style()
+
+        cw_info = QLabel(
+            "Utilisez Context Weaver pour générer automatiquement des combinaisons "
+            "basées sur votre contexte global et local."
+        )
+        cw_info.setWordWrap(True)
+        cw_info.setFont(QFont("Segoe UI", 9))
+        cw_info.setStyleSheet("color: #666; padding: 10px; background: #F0F8FF; border-radius: 4px;")
+        self.context_weaver_section.add_widget(cw_info)
+
+        # Bouton de génération
+        self.generate_combinations_btn = GradientButton("Générer avec Context Weaver")
+        self.generate_combinations_btn.setMinimumHeight(50)
+        self.generate_combinations_btn.setEnabled(False)  # Désactivé par défaut
+        self.generate_combinations_btn.clicked.connect(self._on_generate_with_context_weaver)
+        self.context_weaver_section.add_widget(self.generate_combinations_btn)
+
+        # Barre de progression Context Weaver
+        self.cw_progress_bar = GradientProgressBar()
+        self.cw_progress_bar.setVisible(False)
+        self.cw_progress_bar.setMinimumHeight(30)
+        self.context_weaver_section.add_widget(self.cw_progress_bar)
+
+        layout.addWidget(self.context_weaver_section)
+
+        self.global_context_editor.textChanged.connect(self._check_context_weaver_ready)
+        self.prompt_editor.textChanged.connect(self._check_context_weaver_ready)
     
         return column
     
+    def _check_context_weaver_ready(self):
+        """
+        Active le bouton Context Weaver si:
+        - Contexte global OU local rempli
+        (Peut générer même s'il y a déjà des combinaisons)
+        """
+        has_global_context = bool(self.global_context_editor.toPlainText().strip())
+        has_local_context = bool(self.prompt_editor.toPlainText().strip())
+
+        # ✅ Activer dès qu'il y a au moins un contexte rempli
+        can_generate = has_global_context or has_local_context
+
+        self.generate_combinations_btn.setEnabled(can_generate)
+
+        # Mettre à jour le texte du bouton
+        if not can_generate:
+            self.generate_combinations_btn.setText("🔍 Contexte requis")
+            self.generate_combinations_btn.setToolTip(
+                "Remplissez le contexte global ou local pour générer"
+            )
+        else:
+            self.generate_combinations_btn.setText("🧠 Générer avec Context Weaver")
+            self.generate_combinations_btn.setToolTip(
+                "Cliquez pour générer automatiquement des combinaisons"
+            )
+    
+
+    def _on_generate_with_context_weaver(self):
+        """Lance la génération automatique via Context Weaver"""
+
+        # Vérifications
+        if not self.current_project_name or not self.current_batch_number:
+            QMessageBox.warning(
+                self,
+                "Projet requis",
+                "Veuillez d'abord sélectionner un projet et un batch."
+            )
+            return
+
+        # ✅ DEMANDER CONFIRMATION SI DES COMBINAISONS EXISTENT
+        if len(self.combinations) > 0:
+            reply = QMessageBox.question(
+                self,
+                "Combinaisons existantes",
+                f"<b>⚠️ Attention</b><br><br>"
+                f"Il y a déjà {len(self.combinations)} combinaison(s) dans ce batch.<br><br>"
+                f"<b>Voulez-vous :</b><br>"
+                f"• <b>Remplacer</b> toutes les combinaisons existantes par celles générées par Context Weaver ?<br>"
+                f"• Ou <b>Annuler</b> et garder les combinaisons actuelles ?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply != QMessageBox.Yes:
+                logger.info("❌ Génération Context Weaver annulée par l'utilisateur")
+                return
+
+        # ✅ LANCER LE PIPELINE CONTEXT WEAVER
+        try:
+            # Récupérer le contexte combiné
+            global_context = self.global_context_editor.toPlainText().strip()
+            local_prompt = self.prompt_editor.toPlainText().strip()
+            
+            # Combiner les contextes
+            combined_context = ""
+            if global_context:
+                combined_context += global_context + "\n\n"
+            combined_context += local_prompt
+            
+            logger.info("🚀 Lancement du Context Weaver Worker...")
+            logger.info(f"📝 Contexte: {combined_context[:100]}...")
+            
+            # Désactiver le bouton pendant le traitement
+            self.generate_combinations_btn.setEnabled(False)
+            self.generate_combinations_btn.setText("⏳ Génération en cours...")
+            
+            # Afficher la barre de progression
+            self.cw_progress_bar.setVisible(True)
+            self.cw_progress_bar.setValue(0)
+            self.cw_progress_bar.setFormat("🔄 Initialisation...")
+            
+            # Créer et lancer le worker
+            self.cw_worker = ContextWeaverWorker(
+                user_context=combined_context,
+                database=self.database,
+                project_name=self.current_project_name
+            )
+            
+            # Connecter les signaux
+            self.cw_worker.progress_updated.connect(self._on_cw_progress)
+            self.cw_worker.generation_completed.connect(self._on_cw_completed)
+            self.cw_worker.generation_failed.connect(self._on_cw_failed)
+            
+            # Démarrer
+            self.cw_worker.start()
+            
+            logger.info("✅ Context Weaver Worker démarré")
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur lancement Context Weaver: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Impossible de lancer Context Weaver:\n\n{str(e)}"
+            )
+            
+            # Réactiver le bouton
+            self.generate_combinations_btn.setEnabled(True)
+            self.generate_combinations_btn.setText("🧠 Générer avec Context Weaver")
+            self.cw_progress_bar.setVisible(False)
+
+    def _on_cw_progress(self, message: str):
+        """Met à jour la progression Context Weaver"""
+        self.cw_progress_bar.setFormat(message)
+        logger.info(f"Context Weaver: {message}")
+    
+    def _on_cw_completed(self, result: dict):
+        """Traite les résultats du Context Weaver"""
+        try:
+            self.cw_progress_bar.setVisible(False)
+            self.generate_combinations_btn.setEnabled(True)
+            self.generate_combinations_btn.setText("🧠 Générer avec Context Weaver")
+
+            # Extraire les données
+            master_typologie = result.get('master_typologie')
+            combinations = result.get('combinations', [])
+            metadata = result.get('metadata', {})
+
+            if not combinations:
+                QMessageBox.warning(
+                    self,
+                    "Aucun résultat",
+                    "Context Weaver n'a pas pu générer de combinaisons pertinentes.\n\n"
+                    "Essayez de fournir plus de contexte."
+                )
+                return
+
+            # Sauvegarder dans la base de données
+            batch_result = self.database.get_batch(self.current_project_name, self.current_batch_number)
+            batch_data = batch_result.get('data', {})
+
+            # Remplacer ou ajouter les combinaisons
+            batch_data['combinations'] = combinations
+            batch_data['count'] = len(combinations)
+
+            # Ajouter la typologie master si elle n'existe pas
+            if not batch_data.get('master_typologie') and master_typologie:
+                batch_data['master_typologie'] = master_typologie
+
+            # Ajouter les métadonnées Context Weaver
+            batch_data['context_weaver_metadata'] = metadata
+
+            # Sauvegarder
+            cursor = self.database.connection.cursor()
+            cursor.execute("""
+                UPDATE batches 
+                SET data = ?
+                WHERE project_id = (SELECT id FROM projects WHERE name = ?)
+                AND batch_number = ?
+            """, (json.dumps(batch_data), self.current_project_name, self.current_batch_number))
+            self.database.connection.commit()
+
+            logger.info(f"✅ {len(combinations)} combinaisons générées et sauvegardées")
+
+            # Recharger l'affichage
+            self._on_batch_changed(self.batch_combo.currentIndex())
+
+            # Message de succès
+            QMessageBox.information(
+                self,
+                "✅ Génération réussie",
+                f"<b>Context Weaver a généré {len(combinations)} combinaison(s)</b><br><br>"
+                f"Confiance: {metadata.get('confidence', 0):.1%}<br>"
+                f"Temps: {metadata.get('execution_time_ms', 0):.0f} ms<br><br>"
+                f"Vous pouvez maintenant les modifier ou générer le dataset."
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Erreur traitement résultats: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            QMessageBox.critical(
+                self,
+                "Erreur",
+                f"Impossible de traiter les résultats:\n\n{str(e)}"
+            )
+
+    def _on_cw_failed(self, error: str):
+        """Gère les erreurs du Context Weaver"""
+        self.cw_progress_bar.setVisible(False)
+        self.generate_combinations_btn.setEnabled(True)
+        self.generate_combinations_btn.setText("🧠 Générer avec Context Weaver")
+
+        logger.error(f"❌ Context Weaver échoué: {error}")
+
+        QMessageBox.critical(
+            self,
+            "❌ Erreur Context Weaver",
+            f"La génération automatique a échoué:\n\n{error}\n\n"
+            f"Vérifiez les logs pour plus de détails."
+        )
+        
     def _handle_combination_modified(self, combo_idx: int, modified_combo: dict):
         """Gère la sauvegarde d'une combinaison modifiée (logique extraite de visualizer)"""
         if not self.current_project_name or not self.current_batch_number:
