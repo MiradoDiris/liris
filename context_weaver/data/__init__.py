@@ -3,8 +3,8 @@
 
 """Data management for Context Weaver"""
 
-from context_weaver.data.local_index import LocalIndex
-from context_weaver.data.vector_store import VectorStore
+#from context_weaver.data.vector_store import VectorStore
+from context_weaver.data.vector_store_chroma import VectorStore
 from context_weaver.data.database import Database
 from context_weaver.data.database_indexer import DatabaseIndexer
 from context_weaver.data.init_context_weaver import init_context_weaver_with_database

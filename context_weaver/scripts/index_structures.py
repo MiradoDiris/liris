@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.dataset_database import DatasetDatabase
-from context_weaver.data.vector_store import VectorStore  # ✅ REFACTORISÉ
+from context_weaver.data.vector_store_chroma import VectorStore  # ✅ REFACTORISÉ
 from context_weaver.services.oss_classifier import OSSClassifierClient
 
 

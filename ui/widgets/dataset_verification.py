@@ -2,112 +2,144 @@
 # -*- coding: utf-8 -*-
 
 """
-Dataset Verification Panel
-Vérification et validation des datasets générés avec analyse de qualité
-Design cohérent avec dataset_generation.py et prompt_list.py
+Dataset Verification Panel - AMÉLIORÉ avec API + Feedback Utilisateur
+- Intégration API de vérification (RL + RLHF)
+- Interface de feedback humain
+- Validation en temps réel
+- Export des résultats
 """
 
 import json
 import os
+import requests
 from datetime import datetime
-from typing import Dict, List, Any
-from collections import defaultdict
+from typing import Dict, List, Any, Optional
 
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QComboBox, QProgressBar, QScrollArea,
-    QFrame, QGroupBox, QMessageBox, QFileDialog, QTableWidget,
-    QTableWidgetItem, QHeaderView
+    QTextEdit, QComboBox, QProgressBar, QGroupBox, QMessageBox, 
+    QFileDialog, QFrame, QTabWidget, QScrollArea, QDialog,
+    QDialogButtonBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QSpinBox, QCheckBox, QRadioButton, QButtonGroup
 )
 from PyQt5.QtGui import QFont, QColor
-from PyQt5.QtChart import QChart, QChartView, QPieSeries, QPieSlice, QBarSeries, QBarSet, QBarCategoryAxis, QValueAxis
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
 
 from ui.styles.theme import Theme
 from utils.logger import logger
 from utils.dataset_database import DatasetDatabase
 
 
-def get_dropdown_svg_path():
-    """Retourne le chemin vers l'icône dropdown SVG"""
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    ui_dir = os.path.dirname(current_dir)
-    svg_path = os.path.join(ui_dir, "resources", "icons", "dropdown.svg")
-    return os.path.normpath(svg_path).replace('\\', '/')
+# ============================================================================
+# CONFIGURATION API
+# ============================================================================
+
+API_BASE_URL = "http://localhost:8086"
+
+class ValidationLevel:
+    QUICK = "quick"
+    STANDARD = "standard"
+    STRICT = "strict"
 
 
-class DatasetVerificationWorker(QThread):
-    """Worker pour la vérification asynchrone des datasets"""
+# ============================================================================
+# WORKER DE VÉRIFICATION VIA API
+# ============================================================================
+
+class APIVerificationWorker(QThread):
+    """Worker pour vérification via API"""
     
     progress_updated = pyqtSignal(int, int, str)
     verification_completed = pyqtSignal(dict)
     verification_failed = pyqtSignal(str)
     
-    def __init__(self, file_path, file_format):
+    def __init__(self, file_path, file_format, validation_level, rlhf_enabled):
         super().__init__()
         self.file_path = file_path
         self.file_format = file_format
+        self.validation_level = validation_level
+        self.rlhf_enabled = rlhf_enabled
         
     def run(self):
-        """Execute la vérification du dataset"""
+        """Execute la vérification via API"""
         try:
-            logger.info(f"🔍 Début vérification: {self.file_path}")
+            logger.info(f"Début vérification API: {self.file_path}")
             
             # Charger les données
-            self.progress_updated.emit(1, 5, "Chargement du fichier...")
+            self.progress_updated.emit(1, 4, "Chargement du fichier...")
             data = self._load_data()
             
             if not data:
                 raise ValueError("Impossible de charger les données")
             
-            # Analyser la structure
-            self.progress_updated.emit(2, 5, "Analyse de la structure...")
-            structure_analysis = self._analyze_structure(data)
+            # Vérifier connexion API
+            self.progress_updated.emit(2, 4, "Connexion à l'API...")
+            if not self._check_api_health():
+                raise ConnectionError("API de vérification non disponible")
             
-            # Vérifier la qualité
-            self.progress_updated.emit(3, 5, "Vérification de la qualité...")
-            quality_analysis = self._analyze_quality(data)
+            # Envoyer à l'API
+            self.progress_updated.emit(3, 4, "Vérification en cours...")
+            api_result = self._verify_via_api(data)
             
-            # Vérifier les doublons
-            self.progress_updated.emit(4, 5, "Détection des doublons...")
-            duplicates_analysis = self._check_duplicates(data)
+            # Finalisation
+            self.progress_updated.emit(4, 4, "Finalisation...")
             
-            # Statistiques globales
-            self.progress_updated.emit(5, 5, "Calcul des statistiques...")
-            statistics = self._compute_statistics(data)
-            
-            # Résultat complet
             result = {
                 'file_path': self.file_path,
                 'file_format': self.file_format,
-                'structure': structure_analysis,
-                'quality': quality_analysis,
-                'duplicates': duplicates_analysis,
-                'statistics': statistics,
+                'validation_level': self.validation_level,
+                'rlhf_enabled': self.rlhf_enabled,
+                'api_result': api_result,
                 'data': data,
                 'timestamp': datetime.now().isoformat()
             }
             
             self.verification_completed.emit(result)
-            logger.info("✅ Vérification terminée avec succès")
+            logger.info("Vérification API terminée")
             
         except Exception as e:
-            error_msg = f"Erreur lors de la vérification: {str(e)}"
-            logger.error(f"❌ {error_msg}")
+            error_msg = f"Erreur lors de la vérification API: {str(e)}"
+            logger.error(f"{error_msg}")
             import traceback
             logger.error(traceback.format_exc())
             self.verification_failed.emit(error_msg)
+    
+    def _check_api_health(self) -> bool:
+        """Vérifie la santé de l'API"""
+        try:
+            response = requests.get(f"{API_BASE_URL}/health", timeout=5)
+            return response.status_code == 200
+        except:
+            return False
+    
+    def _verify_via_api(self, data: List[Dict]) -> Dict:
+        """Envoie les données à l'API"""
+        payload = {
+            "samples": data,
+            "validation_level": self.validation_level,
+            "rlhf_validation": self.rlhf_enabled,
+            "auto_fix": False
+        }
+        
+        response = requests.post(
+            f"{API_BASE_URL}/verify",
+            json=payload,
+            timeout=1200  # 5 minutes max
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"API error: {response.status_code}")
+        
+        return response.json()
     
     def _load_data(self) -> List[Dict]:
         """Charge les données selon le format"""
         if self.file_format == 'JSON':
             with open(self.file_path, 'r', encoding='utf-8') as f:
                 content = json.load(f)
-                # Gérer le cas où le JSON contient {samples: [...]}
                 if isinstance(content, dict) and 'samples' in content:
                     return content['samples']
                 elif isinstance(content, list):
@@ -138,181 +170,456 @@ class DatasetVerificationWorker(QThread):
             return df.to_dict('records')
         
         return []
+
+
+# ============================================================================
+# DIALOGUE DE FEEDBACK UTILISATEUR
+# ============================================================================
+
+class FeedbackDialog(QDialog):
+    """Dialogue pour le feedback utilisateur sur un sample"""
     
-    def _analyze_structure(self, data: List[Dict]) -> Dict:
-        """Analyse la structure du dataset"""
-        if not data:
-            return {'valid': False, 'error': 'Dataset vide'}
+    def __init__(self, sample_result: Dict, parent=None):
+        super().__init__(parent)
+        self.sample_result = sample_result
+        self.feedback_data = {}
         
-        # Vérifier les champs communs
-        first_keys = set(data[0].keys())
-        required_fields = {'sample_id', 'input', 'output'}
+        self.setWindowTitle("Feedback Utilisateur")
+        self.setMinimumSize(700, 600)
         
-        missing_fields = required_fields - first_keys
-        extra_fields = first_keys - required_fields
+        self._init_ui()
+    
+    def _init_ui(self):
+        """Initialise l'interface"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
         
-        # Vérifier la cohérence des clés
-        inconsistent_samples = []
-        for i, sample in enumerate(data[1:], start=1):
-            if set(sample.keys()) != first_keys:
-                inconsistent_samples.append(i)
+        # Titre
+        title = QLabel("Validation du Sample")
+        title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        title.setStyleSheet("color: #000000;")
+        layout.addWidget(title)
         
-        return {
-            'valid': len(missing_fields) == 0 and len(inconsistent_samples) == 0,
-            'total_samples': len(data),
-            'fields': list(first_keys),
-            'required_fields': list(required_fields),
-            'missing_fields': list(missing_fields),
-            'extra_fields': list(extra_fields),
-            'inconsistent_samples': inconsistent_samples[:10]  # Max 10 exemples
+        # Infos sample
+        info_group = QGroupBox("Informations")
+        info_layout = QVBoxLayout(info_group)
+        
+        sample_id = self.sample_result.get('sample_id', 'N/A')
+        status = self.sample_result.get('status', 'unknown')
+        score = self.sample_result.get('quality_score', 0)
+        
+        info_text = f"Sample ID: {sample_id}\n"
+        info_text += f"Statut actuel: {status}\n"
+        info_text += f"Score qualité: {score:.1f}/100"
+        
+        info_label = QLabel(info_text)
+        info_label.setStyleSheet("padding: 10px; background: #F5F5F5; border-radius: 4px;")
+        info_layout.addWidget(info_label)
+        
+        layout.addWidget(info_group)
+        
+        # Textes
+        text_group = QGroupBox("Contenu")
+        text_layout = QVBoxLayout(text_group)
+        
+        input_label = QLabel("Input:")
+        input_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        input_label.setStyleSheet("color: #000000;")
+        text_layout.addWidget(input_label)
+        
+        input_text = QTextEdit()
+        input_text.setReadOnly(True)
+        input_text.setMinimumHeight(60)
+        input_text.setMaximumHeight(80)
+        input_text.setPlainText(self.sample_result.get('input_text', ''))
+        input_text.setStyleSheet("background: #FAFAFA; border: 1px solid #DDD;")
+        text_layout.addWidget(input_text)
+        
+        output_label = QLabel("Output:")
+        output_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        output_label.setStyleSheet("color: #000000;")
+        text_layout.addWidget(output_label)
+        
+        self.output_text = QTextEdit()
+        self.output_text.setMinimumHeight(80)
+        self.output_text.setMaximumHeight(120)
+        self.output_text.setPlainText(self.sample_result.get('output_text', ''))
+        self.output_text.setStyleSheet("background: white; border: 2px solid #4CAF50;")
+        text_layout.addWidget(self.output_text)
+        
+        hint = QLabel("Vous pouvez modifier l'output directement ci-dessus")
+        hint.setStyleSheet("color: #666; font-size: 8pt; font-style: italic;")
+        text_layout.addWidget(hint)
+        
+        layout.addWidget(text_group)
+        
+        # Issues détectées
+        issues = self.sample_result.get('issues', [])
+        if issues:
+            issues_group = QGroupBox(f"Problèmes détectés ({len(issues)})")
+            issues_layout = QVBoxLayout(issues_group)
+            
+            issues_text = ""
+            for issue in issues[:5]:  # Max 5
+                severity = issue.get('severity', 'info')
+                issues_text += f"{issue.get('message', '')}\n"
+            
+            issues_label = QLabel(issues_text)
+            issues_label.setWordWrap(True)
+            issues_label.setStyleSheet("padding: 10px; background: #FFF3E0; border-radius: 4px;")
+            issues_layout.addWidget(issues_label)
+            
+            layout.addWidget(issues_group)
+        
+        # Décision utilisateur
+        decision_group = QGroupBox("Votre Décision")
+        decision_layout = QVBoxLayout(decision_group)
+        
+        self.decision_group = QButtonGroup(self)
+        
+        self.valid_radio = QRadioButton("Valider ce sample")
+        self.invalid_radio = QRadioButton("Rejeter ce sample")
+        self.review_radio = QRadioButton("Nécessite une révision")
+        
+        self.decision_group.addButton(self.valid_radio, 1)
+        self.decision_group.addButton(self.invalid_radio, 2)
+        self.decision_group.addButton(self.review_radio, 3)
+        
+        # Pré-sélectionner selon le statut
+        if status == "valid":
+            self.valid_radio.setChecked(True)
+        elif status == "invalid":
+            self.invalid_radio.setChecked(True)
+        else:
+            self.review_radio.setChecked(True)
+        
+        decision_layout.addWidget(self.valid_radio)
+        decision_layout.addWidget(self.invalid_radio)
+        decision_layout.addWidget(self.review_radio)
+        
+        layout.addWidget(decision_group)
+        
+        # Commentaires
+        comment_group = QGroupBox("Commentaires (optionnel)")
+        comment_layout = QVBoxLayout(comment_group)
+        
+        self.comment_text = QTextEdit()
+        self.comment_text.setMinimumHeight(50)
+        self.comment_text.setMaximumHeight(80)
+        self.comment_text.setPlaceholderText("Ajoutez vos commentaires ici...")
+        comment_layout.addWidget(self.comment_text)
+        
+        layout.addWidget(comment_group)
+        
+        # Boutons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._on_submit)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+    
+    def _on_submit(self):
+        """Soumission du feedback"""
+        # Récupérer la décision
+        if self.valid_radio.isChecked():
+            decision = "valid"
+        elif self.invalid_radio.isChecked():
+            decision = "invalid"
+        else:
+            decision = "needs_review"
+        
+        # Construire le feedback
+        self.feedback_data = {
+            'sample_id': self.sample_result.get('sample_id'),
+            'user_decision': decision,
+            'user_comments': self.comment_text.toPlainText(),
+            'corrected_output': self.output_text.toPlainText(),
+            'timestamp': datetime.now().isoformat()
         }
+        
+        self.accept()
     
-    def _analyze_quality(self, data: List[Dict]) -> Dict:
-        """Analyse la qualité des données"""
-        issues = []
-        empty_inputs = 0
-        empty_outputs = 0
-        short_inputs = 0
-        short_outputs = 0
+    def get_feedback(self) -> Dict:
+        """Retourne le feedback"""
+        return self.feedback_data
+
+
+# ============================================================================
+# WIDGET DE RÉSULTATS DÉTAILLÉS
+# ============================================================================
+
+class DetailedResultsWidget(QWidget):
+    """Widget pour afficher les résultats détaillés avec feedback"""
+    
+    feedback_submitted = pyqtSignal(dict)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_results = []
+        self.feedbacks = []
         
-        for i, sample in enumerate(data):
-            sample_id = sample.get('sample_id', f'sample_{i}')
-            
-            # Vérifier les champs vides
-            if not sample.get('input', '').strip():
-                empty_inputs += 1
-                issues.append({
-                    'sample_id': sample_id,
-                    'type': 'empty_input',
-                    'message': 'Input vide'
-                })
-            
-            if not sample.get('output', '').strip():
-                empty_outputs += 1
-                issues.append({
-                    'sample_id': sample_id,
-                    'type': 'empty_output',
-                    'message': 'Output vide'
-                })
-            
-            # Vérifier les longueurs suspectes
-            input_text = sample.get('input', '')
-            output_text = sample.get('output', '')
-            
-            if len(input_text.strip()) < 10:
-                short_inputs += 1
-                if len(issues) < 100:  # Limiter les issues
-                    issues.append({
-                        'sample_id': sample_id,
-                        'type': 'short_input',
-                        'message': f'Input court ({len(input_text)} caractères)'
-                    })
-            
-            if len(output_text.strip()) < 10:
-                short_outputs += 1
-                if len(issues) < 100:
-                    issues.append({
-                        'sample_id': sample_id,
-                        'type': 'short_output',
-                        'message': f'Output court ({len(output_text)} caractères)'
-                    })
+        self._init_ui()
+    
+    def _init_ui(self):
+        """Initialise l'interface"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         
-        total_samples = len(data)
-        quality_score = 100 - (
-            (empty_inputs / total_samples * 30) +
-            (empty_outputs / total_samples * 30) +
-            (short_inputs / total_samples * 20) +
-            (short_outputs / total_samples * 20)
+        # Barre d'outils
+        toolbar = QHBoxLayout()
+        
+        toolbar_label = QLabel("Résultats Détaillés")
+        toolbar_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        toolbar_label.setStyleSheet("color: #000000;")
+        toolbar.addWidget(toolbar_label)
+        
+        toolbar.addStretch()
+        
+        # Filtres
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItems([
+            "Tous", "Valides", "Warnings", "Invalides"
+        ])
+        self.filter_combo.setMinimumHeight(28)
+        self.filter_combo.currentTextChanged.connect(self._apply_filter)
+        toolbar.addWidget(QLabel("Filtre:"))
+        toolbar.addWidget(self.filter_combo)
+        
+        # Export
+        export_btn = QPushButton("Exporter")
+        export_btn.setMinimumHeight(28)
+        export_btn.clicked.connect(self._export_results)
+        toolbar.addWidget(export_btn)
+        
+        layout.addLayout(toolbar)
+        
+        # Table
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            "ID", "Statut", "Score", "Input", "Output", "Issues", "Actions"
+        ])
+        
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        header.setSectionResizeMode(6, QHeaderView.Fixed)
+        
+        # Réduire au maximum les colonnes fixes pour donner plus d'espace aux Input/Output
+        self.table.setColumnWidth(0, 35)   # ID - minimum
+        self.table.setColumnWidth(1, 70)   # Statut
+        self.table.setColumnWidth(2, 45)   # Score
+        self.table.setColumnWidth(5, 45)   # Issues
+        self.table.setColumnWidth(6, 90)   # Actions
+        
+        # Définir une largeur minimale pour les colonnes Stretch
+        self.table.horizontalHeader().setMinimumSectionSize(200)
+        
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().setVisible(False)  # Masquer les numéros de lignes
+        self.table.verticalHeader().setDefaultSectionSize(32)  # Hauteur de ligne réduite
+        self.table.setWordWrap(True)  # Activer le retour à la ligne
+        self.table.setStyleSheet("""
+            QTableWidget {
+                background-color: white;
+                gridline-color: #E0E0E0;
+                border: 1px solid #CCCCCC;
+            }
+            QTableWidget::item {
+                padding: 2px 4px;
+                color: #000000;
+            }
+            QTableWidget::item:alternate {
+                background-color: #FAFAFA;
+            }
+            QTableWidget::item:selected {
+                background-color: #E3F2FD;
+            }
+            QHeaderView::section {
+                background-color: #F5F5F5;
+                padding: 4px;
+                border: none;
+                border-bottom: 2px solid #DDDDDD;
+                font-weight: bold;
+                color: #333333;
+                font-size: 9pt;
+            }
+        """)
+        
+        layout.addWidget(self.table)
+    
+    def load_results(self, results: List[Dict]):
+        """Charge les résultats"""
+        self.current_results = results
+        self._populate_table(results)
+    
+    def _populate_table(self, results: List[Dict]):
+        """Remplit la table"""
+        self.table.setRowCount(len(results))
+        
+        for row, result in enumerate(results):
+            # ID
+            id_item = QTableWidgetItem(str(result.get('sample_id', row)))
+            id_item.setTextAlignment(Qt.AlignCenter)
+            id_item.setForeground(QColor("#000000"))
+            self.table.setItem(row, 0, id_item)
+            
+            # Statut
+            status = result.get('status', 'unknown')
+            status_item = QTableWidgetItem(status.upper())
+            status_item.setTextAlignment(Qt.AlignCenter)
+            
+            # Couleurs avec fond subtil + texte coloré pour meilleure distinction
+            if status == 'valid':
+                status_item.setBackground(QColor("#E8F5E9"))  # Vert très clair
+                status_item.setForeground(QColor("#2E7D32"))  # Vert foncé
+                status_item.setData(Qt.ForegroundRole, QColor("#2E7D32"))
+            elif status == 'warning':
+                status_item.setBackground(QColor("#FFF8E1"))  # Jaune très clair
+                status_item.setForeground(QColor("#F57C00"))  # Orange foncé
+                status_item.setData(Qt.ForegroundRole, QColor("#F57C00"))
+            else:
+                status_item.setBackground(QColor("#FFEBEE"))  # Rouge très clair
+                status_item.setForeground(QColor("#C62828"))  # Rouge foncé
+                status_item.setData(Qt.ForegroundRole, QColor("#C62828"))
+            
+            self.table.setItem(row, 1, status_item)
+            
+            # Score
+            score = result.get('quality_score', 0)
+            score_item = QTableWidgetItem(f"{score:.1f}")
+            score_item.setTextAlignment(Qt.AlignCenter)
+            score_item.setForeground(QColor("#000000"))
+            self.table.setItem(row, 2, score_item)
+            
+            # Input
+            input_text = result.get('input_text', '')[:100]  # Augmenter à 100 caractères
+            if len(result.get('input_text', '')) > 100:
+                input_text += "..."
+            input_item = QTableWidgetItem(input_text)
+            input_item.setForeground(QColor("#000000"))
+            self.table.setItem(row, 3, input_item)
+            
+            # Output
+            output_text = result.get('output_text', '')[:100]  # Augmenter à 100 caractères
+            if len(result.get('output_text', '')) > 100:
+                output_text += "..."
+            output_item = QTableWidgetItem(output_text)
+            output_item.setForeground(QColor("#000000"))
+            self.table.setItem(row, 4, output_item)
+            
+            # Issues
+            issues_count = len(result.get('issues', []))
+            issues_item = QTableWidgetItem(str(issues_count))
+            issues_item.setTextAlignment(Qt.AlignCenter)
+            issues_item.setForeground(QColor("#000000"))
+            self.table.setItem(row, 5, issues_item)
+            
+            # Actions
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(4, 0, 4, 0)
+            actions_layout.setSpacing(0)
+            
+            feedback_btn = QPushButton("Feedback")
+            feedback_btn.setToolTip("Donner un feedback sur ce sample")
+            feedback_btn.setFixedHeight(22)
+            feedback_btn.setFixedWidth(78)
+            feedback_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #F5F5F5;
+                    color: #333333;
+                    border: 1px solid #CCCCCC;
+                    border-radius: 3px;
+                    padding: 2px 4px;
+                    font-size: 8pt;
+                }
+                QPushButton:hover {
+                    background-color: #E0E0E0;
+                    border-color: #999999;
+                }
+                QPushButton:pressed {
+                    background-color: #D0D0D0;
+                }
+            """)
+            feedback_btn.clicked.connect(lambda checked, r=result: self._show_feedback_dialog(r))
+            
+            actions_layout.addWidget(feedback_btn)
+            
+            self.table.setCellWidget(row, 6, actions_widget)
+        
+        self.table.resizeRowsToContents()
+    
+    def _apply_filter(self, filter_text: str):
+        """Applique un filtre"""
+        if filter_text == "Tous":
+            filtered = self.current_results
+        elif filter_text == "Valides":
+            filtered = [r for r in self.current_results if r.get('status') == 'valid']
+        elif filter_text == "Warnings":
+            filtered = [r for r in self.current_results if r.get('status') == 'warning']
+        else:  # Invalides
+            filtered = [r for r in self.current_results if r.get('status') == 'invalid']
+        
+        self._populate_table(filtered)
+    
+    def _show_feedback_dialog(self, result: Dict):
+        """Affiche le dialogue de feedback"""
+        dialog = FeedbackDialog(result, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            feedback = dialog.get_feedback()
+            self.feedbacks.append(feedback)
+            self.feedback_submitted.emit(feedback)
+            
+            QMessageBox.information(
+                self,
+                "Feedback Enregistré",
+                "Votre feedback a été enregistré avec succès."
+            )
+    
+    def _export_results(self):
+        """Exporte les résultats"""
+        if not self.current_results:
+            QMessageBox.warning(self, "Attention", "Aucun résultat à exporter")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter les résultats",
+            f"verification_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            "JSON Files (*.json)"
         )
         
-        return {
-            'quality_score': max(0, quality_score),
-            'empty_inputs': empty_inputs,
-            'empty_outputs': empty_outputs,
-            'short_inputs': short_inputs,
-            'short_outputs': short_outputs,
-            'issues': issues[:50],  # Max 50 issues affichées
-            'total_issues': len(issues)
-        }
-    
-    def _check_duplicates(self, data: List[Dict]) -> Dict:
-        """Détecte les doublons"""
-        seen_inputs = {}
-        seen_outputs = {}
-        exact_duplicates = []
-        similar_inputs = []
-        
-        for i, sample in enumerate(data):
-            sample_id = sample.get('sample_id', f'sample_{i}')
-            input_text = sample.get('input', '').strip().lower()
-            output_text = sample.get('output', '').strip().lower()
-            
-            # Doublons exacts d'input
-            if input_text in seen_inputs:
-                similar_inputs.append({
-                    'sample_id': sample_id,
-                    'duplicate_of': seen_inputs[input_text],
-                    'text': sample.get('input', '')[:100]
-                })
-            else:
-                seen_inputs[input_text] = sample_id
-            
-            # Doublons exacts (input + output)
-            key = (input_text, output_text)
-            if key in exact_duplicates:
-                continue
-            
-            for j in range(i + 1, len(data)):
-                other_input = data[j].get('input', '').strip().lower()
-                other_output = data[j].get('output', '').strip().lower()
-                
-                if input_text == other_input and output_text == other_output:
-                    exact_duplicates.append({
-                        'sample_1': sample_id,
-                        'sample_2': data[j].get('sample_id', f'sample_{j}')
-                    })
-                    break
-        
-        return {
-            'exact_duplicates': len(exact_duplicates),
-            'similar_inputs': len(similar_inputs),
-            'duplicate_examples': exact_duplicates[:20],
-            'similar_examples': similar_inputs[:20]
-        }
-    
-    def _compute_statistics(self, data: List[Dict]) -> Dict:
-        """Calcule les statistiques globales"""
-        total = len(data)
-        
-        input_lengths = []
-        output_lengths = []
-        
-        for sample in data:
-            input_text = sample.get('input', '')
-            output_text = sample.get('output', '')
-            
-            input_lengths.append(len(input_text))
-            output_lengths.append(len(output_text))
-        
-        return {
-            'total_samples': total,
-            'input_stats': {
-                'min': min(input_lengths) if input_lengths else 0,
-                'max': max(input_lengths) if input_lengths else 0,
-                'avg': sum(input_lengths) / len(input_lengths) if input_lengths else 0,
-                'median': sorted(input_lengths)[len(input_lengths) // 2] if input_lengths else 0
-            },
-            'output_stats': {
-                'min': min(output_lengths) if output_lengths else 0,
-                'max': max(output_lengths) if output_lengths else 0,
-                'avg': sum(output_lengths) / len(output_lengths) if output_lengths else 0,
-                'median': sorted(output_lengths)[len(output_lengths) // 2] if output_lengths else 0
+        if file_path:
+            export_data = {
+                'results': self.current_results,
+                'feedbacks': self.feedbacks,
+                'export_date': datetime.now().isoformat()
             }
-        }
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2, ensure_ascii=False)
+            
+            QMessageBox.information(
+                self,
+                "Export Réussi",
+                f"Résultats exportés vers:\n{file_path}"
+            )
 
+
+# ============================================================================
+# PANEL PRINCIPAL DE VÉRIFICATION
+# ============================================================================
 
 class DatasetVerificationPanel(QWidget):
-    """Panel de vérification de datasets générés"""
+    """Panel de vérification AMÉLIORÉ avec API + Feedback"""
     
     def __init__(self, parent=None, database=None):
         super().__init__(parent)
@@ -320,50 +627,121 @@ class DatasetVerificationPanel(QWidget):
         self.database = database or DatasetDatabase()
         self.current_verification = None
         self.worker = None
-        self.dropdown_svg = get_dropdown_svg_path()
         
-        logger.info("🔍 Initialisation DatasetVerificationPanel")
+        logger.info("Initialisation DatasetVerificationPanel - Version API + Feedback")
         
         self._init_ui()
-        self._load_generations()
     
     def _init_ui(self):
-        """Initialise l'interface - 3 colonnes comme dataset_generation.py"""
-        main_layout = QHBoxLayout(self)
-        main_layout.setSpacing(0)
+        """Initialise l'interface"""
+        main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Colonne gauche - Sélection
-        left_column = self._create_left_column()
-        main_layout.addWidget(left_column, 23)
-
-        # Colonne centrale - Résultats (plus d'espace)
-        center_column = self._create_center_column()
-        main_layout.addWidget(center_column, 38)
-
-        # Colonne droite - Statistiques
-        right_column = self._create_right_column()
-        main_layout.addWidget(right_column, 39)
-
-    def _create_left_column(self):
-        """Crée la colonne gauche - Sélection du dataset"""
-        column = QWidget()
-        column.setStyleSheet("background: white; border-right: 2px solid #E0E0E0;")
-        layout = QVBoxLayout(column)
-        layout.setSpacing(15)
+        main_layout.setSpacing(0)
+        
+        # Onglets
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: none;
+                background: white;
+            }}
+            QTabBar::tab {{
+                background: #F5F5F5;
+                color: #666;
+                padding: 10px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                font-weight: bold;
+            }}
+            QTabBar::tab:selected {{
+                background: white;
+                color: {Theme.PRIMARY_COLOR};
+                border-bottom: 3px solid {Theme.PRIMARY_COLOR};
+            }}
+        """)
+        
+        # Onglet Configuration
+        config_tab = self._create_config_tab()
+        self.tabs.addTab(config_tab, "Configuration")
+        
+        # Onglet Résultats
+        self.results_widget = DetailedResultsWidget()
+        self.results_widget.feedback_submitted.connect(self._on_feedback_submitted)
+        self.tabs.addTab(self.results_widget, "Résultats Détaillés")
+        
+        # Onglet Visualisation
+        viz_tab = self._create_visualization_tab()
+        self.tabs.addTab(viz_tab, "Visualisations")
+        
+        main_layout.addWidget(self.tabs)
+    
+    def _create_config_tab(self):
+        """Crée l'onglet de configuration"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Colonne gauche - Configuration
+        left_col = self._create_config_column()
+        layout.addWidget(left_col, 40)
+        
+        # Colonne droite - Aperçu
+        right_col = self._create_preview_column()
+        layout.addWidget(right_col, 60)
+        
+        return widget
+    
+    def _create_config_column(self):
+        """Colonne de configuration"""
+        widget = QWidget()
+        widget.setStyleSheet("background: white; border-right: 2px solid #E0E0E0;")
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(20)
         layout.setContentsMargins(20, 20, 20, 20)
         
         # Titre
-        title = QLabel("Vérification de Dataset")
-        title.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; border: none;")
+        title = QLabel("Configuration de la Vérification")
+        title.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        title.setStyleSheet("color: #000000;")
         layout.addWidget(title)
         
-        # Section: Charger un fichier
-        file_section = self._create_file_section()
-        layout.addWidget(file_section)
+        # Source de données
+        source_group = self._create_data_source_section()
+        layout.addWidget(source_group)
+        
+        # Options de validation
+        options_group = self._create_validation_options()
+        layout.addWidget(options_group)
         
         layout.addStretch()
+        
+        # Bouton de lancement
+        self.verify_btn = QPushButton("Lancer la Vérification")
+        self.verify_btn.setMinimumHeight(50)
+        self.verify_btn.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        self.verify_btn.setEnabled(False)
+        self.verify_btn.clicked.connect(self._verify_dataset)
+        self.verify_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
+            }}
+            QPushButton:disabled {{
+                background: #CCCCCC;
+                color: #888888;
+            }}
+        """)
+        layout.addWidget(self.verify_btn)
         
         # Barre de progression
         self.progress_bar = QProgressBar()
@@ -384,973 +762,473 @@ class DatasetVerificationPanel(QWidget):
         """)
         layout.addWidget(self.progress_bar)
         
-        return column
+        return widget
     
-    def _create_file_section(self):
-        """Section de sélection unifiée - Historique en haut"""
-        group = QGroupBox("Sélection du Dataset")
+    def _create_data_source_section(self):
+        """Section de sélection de la source"""
+        group = QGroupBox("Source de Données")
         group.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        group.setStyleSheet(f"""
-            QGroupBox {{
-                border: 2px solid #E0E0E0;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 15px;
-                font-weight: bold;
-                color: {Theme.PRIMARY_COLOR};
-            }}
-        """)
+        group.setStyleSheet("QGroupBox { color: #000000; }")
         layout = QVBoxLayout(group)
-
-        # === HISTORIQUE EN HAUT ===
-        history_label = QLabel("Depuis l'historique:")
-        history_label.setStyleSheet("font-weight: bold; font-size: 9pt; border: none;")
-        layout.addWidget(history_label)
-
-        self.generation_combo = QComboBox()
-        self.generation_combo.setMinimumHeight(32)
-        self.generation_combo.currentIndexChanged.connect(self._on_generation_selected)
-        self._apply_combo_style(self.generation_combo)
-        layout.addWidget(self.generation_combo)
-
-        # Info génération - Améliorée
-        self.gen_info_label = QLabel("📂 Sélectionnez une génération dans la liste")
-        self.gen_info_label.setWordWrap(True)
-        self.gen_info_label.setMinimumHeight(40)
-        self.gen_info_label.setStyleSheet("""
-            color: #555;
-            font-size: 9pt;
-            padding: 8px 10px;
-            background: #F0F4F8;
-            border: 1px solid #D0E0F0;
-            border-radius: 6px;
-        """)
-        layout.addWidget(self.gen_info_label)
-
-        # Séparateur
-        separator = QLabel("─── ou ───")
-        separator.setAlignment(Qt.AlignCenter)
-        separator.setStyleSheet("color: #999; font-size: 9pt; border: none; padding: 8px;")
-        layout.addWidget(separator)
-
-        # === FICHIER LOCAL ===
-        file_label = QLabel("Charger un fichier:")
-        file_label.setStyleSheet("font-weight: bold; font-size: 9pt; border: none;")
-        layout.addWidget(file_label)
-
-        # Format sur une ligne
-        format_row = QHBoxLayout()
-        format_row.setSpacing(8)
-
-        format_sublabel = QLabel("Format:")
-        format_sublabel.setStyleSheet("font-size: 8pt; color: #666; border: none;")
-        format_sublabel.setFixedWidth(50)
-        format_row.addWidget(format_sublabel)
-
+        
+        # Format et Fichier en horizontal
+        format_file_layout = QHBoxLayout()
+        
+        # Format
         self.format_combo = QComboBox()
         self.format_combo.addItems(["JSON", "JSONL", "CSV", "Parquet"])
         self.format_combo.setMinimumHeight(32)
-        self._apply_combo_style(self.format_combo)
-        format_row.addWidget(self.format_combo, 1)
-
-        layout.addLayout(format_row)
-
-        # Fichier sélectionné + Bouton Parcourir côte à côte - Amélioré
-        browse_row = QHBoxLayout()
-        browse_row.setSpacing(8)
-
+        format_file_layout.addWidget(self.format_combo)
+        
+        # Fichier
         self.file_label = QLabel("Aucun fichier sélectionné")
-        self.file_label.setWordWrap(True)
-        self.file_label.setMinimumHeight(40)
-        self.file_label.setStyleSheet("""
-            color: #555;
-            font-size: 9pt;
-            padding: 8px 10px;
-            background: #F0F4F8;
-            border: 1px solid #D0E0F0;
-            border-radius: 6px;
-        """)
-        browse_row.addWidget(self.file_label, 1)
-
-        # Bouton parcourir
-        self.browse_btn = QPushButton("📁 Parcourir...")
-        self.browse_btn.setMinimumHeight(40)
-        self.browse_btn.setMaximumHeight(40)
-        self.browse_btn.setMinimumWidth(110)
-        self.browse_btn.setMaximumWidth(110)
-        self.browse_btn.setCursor(Qt.PointingHandCursor)
-        self.browse_btn.clicked.connect(self._browse_file)
-        self._apply_button_style(self.browse_btn)
-        browse_row.addWidget(self.browse_btn)
-
-        layout.addLayout(browse_row)
-
-        # === BOUTON VÉRIFIER UNIQUE - COMPACT À DROITE ===
-        layout.addSpacing(15)
-
-        verify_layout = QHBoxLayout()
-        verify_layout.addStretch()
-
-        self.verify_btn = QPushButton("Vérifier")
-        self.verify_btn.setMinimumHeight(38)
-        self.verify_btn.setMaximumHeight(38)
-        self.verify_btn.setMinimumWidth(130)
-        self.verify_btn.setMaximumWidth(160)
-        self.verify_btn.setCursor(Qt.PointingHandCursor)
-        self.verify_btn.setEnabled(False)
-        self.verify_btn.clicked.connect(self._verify_dataset)
-        self._apply_button_style(self.verify_btn)
-        verify_layout.addWidget(self.verify_btn)
-
-        layout.addLayout(verify_layout)
-
-        return group
-    
-    def _create_history_section(self):
-        """Section supprimée - tout est dans file_section maintenant"""
-        return None
-    
-    def _create_quality_widget(self):
-        """Widget d'affichage du score de qualité - VERSION COMPACTE LISIBLE"""
-        widget = QFrame()
-        widget.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #F8F9FA, stop:1 #FFFFFF);
-                border: 2px solid #E0E0E0;
-                border-radius: 6px;
-            }
-        """)
-        widget.setMinimumHeight(90)
-        widget.setMaximumHeight(110)
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(6)
-        layout.setContentsMargins(10, 12, 10, 12)
-
-        # Score principal
-        self.quality_score_label = QLabel("Score: --")
-        self.quality_score_label.setFont(QFont("Segoe UI", 13, QFont.Bold))
-        self.quality_score_label.setAlignment(Qt.AlignCenter)
-        self.quality_score_label.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; border: none;")
-        self.quality_score_label.setMinimumHeight(25)
-        layout.addWidget(self.quality_score_label)
-
-        # Détails
-        self.quality_details_label = QLabel("En attente de vérification")
-        self.quality_details_label.setAlignment(Qt.AlignCenter)
-        self.quality_details_label.setWordWrap(True)
-        self.quality_details_label.setMinimumHeight(30)
-        self.quality_details_label.setStyleSheet("""
-            color: #666; 
-            font-size: 9pt; 
-            border: none;
-        """)
-        layout.addWidget(self.quality_details_label)
-
-        return widget
-    
-    def _create_chart_group(self):
-        """Groupe contenant le graphique de distribution - DESIGN AMÉLIORÉ"""
-        group = QGroupBox("Distribution des Longueurs")
-        group.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        group.setStyleSheet(f"""
-            QGroupBox {{
-                border: 2px solid #E0E0E0;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 15px;
-                font-weight: bold;
-                color: {Theme.PRIMARY_COLOR};
-                background: white;
-            }}
-        """)
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(10, 20, 10, 10)
-
-        # Matplotlib figure avec meilleure résolution
-        self.figure = Figure(figsize=(7, 4.5), dpi=100)
-        self.canvas = FigureCanvas(self.figure)
-        self.canvas.setStyleSheet("background: white; border-radius: 6px;")
-        layout.addWidget(self.canvas)
-
-        return group
-    
-    def _create_right_column(self):
-        """Crée la colonne droite - Statistiques et visualisations"""
-        column = QWidget()
-        column.setStyleSheet("background: white; border: none;")
-        layout = QVBoxLayout(column)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
-
-        # Titre
-        title = QLabel("Statistiques")
-        title.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; border: none;")
-        layout.addWidget(title)
-
-        # Graphique de distribution
-        chart_group = self._create_chart_group()
-        layout.addWidget(chart_group, 1)
-
-        return column
-    
-    def _create_center_column(self):
-        """Crée la colonne centrale - Résultats de vérification"""
-        column = QWidget()
-        column.setStyleSheet("background: white; border: none;")
-        layout = QVBoxLayout(column)
-        layout.setSpacing(12)
-        layout.setContentsMargins(15, 15, 15, 15)
-
-        # Titre
-        title = QLabel("Résultats")
-        title.setFont(QFont("Segoe UI", 11, QFont.Bold))
-        title.setStyleSheet(f"color: {Theme.PRIMARY_COLOR}; border: none;")
-        layout.addWidget(title)
-
-        # Score de qualité
-        self.quality_widget = self._create_quality_widget()
-        layout.addWidget(self.quality_widget)
-
-        # Onglets de résultats
-        self.results_tabs = QtWidgets.QTabWidget()
-        self.results_tabs.setStyleSheet(f"""
-            QTabWidget::pane {{
-                border: 2px solid #E0E0E0;
-                border-radius: 6px;
-                background: white;
-                margin-top: 2px;
-            }}
-            QTabBar::tab {{
-                background: #F5F5F5;
-                color: #666;
-                padding: 10px 16px;
-                border: 1px solid #E0E0E0;
-                border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                font-size: 9pt;
-                min-width: 80px;
-                min-height: 28px;
-                margin-right: 2px;
-            }}
-            QTabBar::tab:selected {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
-                color: white;
-                font-weight: bold;
-                padding-bottom: 12px;
-            }}
-            QTabBar::tab:hover:!selected {{
-                background: #E8E8E8;
-            }}
-        """)
-
-        # Tab Structure
-        self.structure_tab = QTextEdit()
-        self.structure_tab.setReadOnly(True)
-        self._apply_textedit_style(self.structure_tab)
-        self.results_tabs.addTab(self.structure_tab, "Structure")
-
-        # Tab Qualité
-        self.quality_tab = QTextEdit()
-        self.quality_tab.setReadOnly(True)
-        self._apply_textedit_style(self.quality_tab)
-        self.results_tabs.addTab(self.quality_tab, "Qualité")
-
-        # Tab Doublons
-        self.duplicates_tab = QTextEdit()
-        self.duplicates_tab.setReadOnly(True)
-        self._apply_textedit_style(self.duplicates_tab)
-        self.results_tabs.addTab(self.duplicates_tab, "Doublons")
-
-        layout.addWidget(self.results_tabs, 1)
-
-        # Boutons d'action
-        actions = self._create_actions()
-        layout.addWidget(actions)
-
-        return column
-    
-    def _create_actions(self):
-        """Crée les boutons d'action - Version compacte"""
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.addStretch()
+        self.file_label.setStyleSheet("padding: 8px; background: #F0F4F8; border-radius: 4px;")
+        format_file_layout.addWidget(self.file_label, 1)
         
-        # Bouton Exporter rapport
-        self.export_report_btn = QPushButton("Exporter Rapport")
-        self.export_report_btn.setMinimumHeight(32)
-        self.export_report_btn.setMaximumHeight(32)
-        self.export_report_btn.setCursor(Qt.PointingHandCursor)
-        self.export_report_btn.setEnabled(False)
-        self.export_report_btn.clicked.connect(self._export_report)
-        self._apply_button_style(self.export_report_btn)
-        layout.addWidget(self.export_report_btn)
-        
-        # Bouton Corriger
-        self.fix_btn = QPushButton("Corriger les Problèmes")
-        self.fix_btn.setMinimumHeight(32)
-        self.fix_btn.setMaximumHeight(32)
-        self.fix_btn.setCursor(Qt.PointingHandCursor)
-        self.fix_btn.setEnabled(False)
-        self.fix_btn.clicked.connect(self._fix_issues)
-        self._apply_button_style(self.fix_btn)
-        layout.addWidget(self.fix_btn)
-        
-        return widget
-    
-    def _apply_combo_style(self, combo):
-        """Applique le style aux combobox"""
-        combo.setStyleSheet(f"""
-            QComboBox {{
-                border: 2px solid #E0E0E0;
-                border-radius: 6px;
-                padding: 8px 12px;
-                padding-right: 35px;
-                background: white;
-                font-size: 10pt;
-            }}
-            QComboBox:hover {{
-                border: 2px solid {Theme.PRIMARY_COLOR};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                border-left: 1px solid #E0E0E0;
-                width: 32px;
-                border-top-right-radius: 6px;
-                border-bottom-right-radius: 6px;
-                background: #FAFAFA;
-            }}
-            QComboBox::down-arrow {{
-                image: url({self.dropdown_svg});
-                width: 16px;
-                height: 16px;
-            }}
-        """)
-    
-    def _apply_button_style(self, button):
-        """Applique le style aux boutons - Version compacte"""
-        button.setStyleSheet(f"""
+        # Bouton Parcourir
+        browse_btn = QPushButton("Parcourir")
+        browse_btn.setMinimumHeight(32)
+        browse_btn.setStyleSheet(f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {Theme.PRIMARY_COLOR}, stop:1 {Theme.SECONDARY_COLOR});
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 6px 12px;
+                border-radius: 6px;
+                padding: 0 20px;
                 font-weight: bold;
-                font-size: 9pt;
             }}
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {Theme.SECONDARY_COLOR}, stop:1 {Theme.PRIMARY_COLOR});
             }}
-            QPushButton:disabled {{
-                background: #CCCCCC;
-                color: #888888;
-            }}
         """)
+        browse_btn.clicked.connect(self._browse_file)
+        format_file_layout.addWidget(browse_btn)
+        
+        layout.addLayout(format_file_layout)
+        
+        return group
     
-    def _apply_textedit_style(self, textedit):
-        """Applique le style aux QTextEdit - LISIBLE"""
-        textedit.setStyleSheet("""
+    def _create_validation_options(self):
+        """Options de validation"""
+        group = QGroupBox("Options de Validation")
+        group.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        group.setStyleSheet("QGroupBox { color: #000000; }")
+        layout = QVBoxLayout(group)
+        
+        # Niveau de validation
+        level_label = QLabel("Niveau de validation:")
+        layout.addWidget(level_label)
+        
+        self.level_combo = QComboBox()
+        self.level_combo.addItems([
+            "Quick - Rapide (RL uniquement)",
+            "Standard - Recommandé (RL + RLHF basique)",
+            "Strict - Complet (RL + RLHF avancé)"
+        ])
+        self.level_combo.setCurrentIndex(1)
+        self.level_combo.setMinimumHeight(32)
+        self.level_combo.currentIndexChanged.connect(self._on_level_changed)
+        layout.addWidget(self.level_combo)
+        
+        # RLHF
+        self.rlhf_check = QCheckBox("Activer la validation RLHF intelligente")
+        self.rlhf_check.setChecked(True)
+        self.rlhf_check.toggled.connect(self._on_rlhf_toggled)
+        layout.addWidget(self.rlhf_check)
+        
+        # Description
+        self.level_desc = QLabel()
+        self.level_desc.setWordWrap(True)
+        self.level_desc.setStyleSheet("padding: 10px; background: #E3F2FD; border-radius: 4px; color: #1976D2;")
+        self._update_level_description()
+        layout.addWidget(self.level_desc)
+        
+        return group
+    
+    def _create_preview_column(self):
+        """Colonne d'aperçu et résumé"""
+        widget = QWidget()
+        widget.setStyleSheet("background: white;")
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Titre
+        title = QLabel("Aperçu de la Vérification")
+        title.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        title.setStyleSheet("color: #000000;")
+        layout.addWidget(title)
+        
+        # Résumé
+        summary_group = QGroupBox("Résumé")
+        summary_group.setStyleSheet("QGroupBox { color: #000000; }")
+        summary_layout = QVBoxLayout(summary_group)
+        
+        self.summary_text = QTextEdit()
+        self.summary_text.setReadOnly(True)
+        self.summary_text.setMaximumHeight(150)
+        self.summary_text.setPlainText("En attente de vérification...")
+        self.summary_text.setStyleSheet("""
             QTextEdit {
                 border: none;
-                background: transparent;
-                font-family: 'Consolas', 'Courier New', monospace;
+                background: #FAFAFA;
+                font-family: 'Segoe UI';
                 font-size: 9pt;
                 padding: 10px;
-                line-height: 1.4;
             }
         """)
-    
-    def _load_generations(self):
-        """Charge les générations depuis la base"""
-        self.generation_combo.clear()
-        self.generation_combo.addItem("Sélectionner une génération", None)
+        summary_layout.addWidget(self.summary_text)
         
-        try:
-            generations = self.database.get_all_generations(limit=50)
-            
-            for gen in generations:
-                if gen.get('status') == 'completed' and gen.get('output_file_path'):
-                    project = gen.get('project_name', 'N/A')
-                    batch = gen.get('batch_name', f"Batch {gen.get('batch_number', '?')}")
-                    date = gen.get('started_at', '')
-                    
-                    if date:
-                        try:
-                            date_obj = datetime.fromisoformat(date)
-                            date_str = date_obj.strftime("%d/%m/%Y")
-                        except:
-                            date_str = date[:10]
-                    else:
-                        date_str = "N/A"
-                    
-                    display = f"{project} - {batch} - {date_str}"
-                    self.generation_combo.addItem(display, gen)
-            
-            logger.info(f"✅ {len(generations)} génération(s) chargée(s)")
-            
-        except Exception as e:
-            logger.error(f"❌ Erreur chargement générations: {e}")
+        layout.addWidget(summary_group)
+        
+        # Graphique de distribution
+        chart_group = QGroupBox("Distribution des Scores")
+        chart_group.setStyleSheet("QGroupBox { color: #000000; }")
+        chart_layout = QVBoxLayout(chart_group)
+        
+        self.figure = Figure(figsize=(6, 4), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.setStyleSheet("background: white;")
+        chart_layout.addWidget(self.canvas)
+        
+        layout.addWidget(chart_group, 1)
+        
+        return widget
+    
+    def _create_visualization_tab(self):
+        """Onglet de visualisation"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Graphiques multiples
+        charts_layout = QHBoxLayout()
+        
+        # Distribution par statut
+        status_group = QGroupBox("Distribution par Statut")
+        status_group.setStyleSheet("QGroupBox { color: #000000; }")
+        status_layout = QVBoxLayout(status_group)
+        
+        self.status_figure = Figure(figsize=(4, 4), dpi=100)
+        self.status_canvas = FigureCanvas(self.status_figure)
+        status_layout.addWidget(self.status_canvas)
+        
+        charts_layout.addWidget(status_group)
+        
+        # Distribution des scores
+        score_group = QGroupBox("Distribution des Scores")
+        score_group.setStyleSheet("QGroupBox { color: #000000; }")
+        score_layout = QVBoxLayout(score_group)
+        
+        self.score_figure = Figure(figsize=(4, 4), dpi=100)
+        self.score_canvas = FigureCanvas(self.score_figure)
+        score_layout.addWidget(self.score_canvas)
+        
+        charts_layout.addWidget(score_group)
+        
+        layout.addLayout(charts_layout)
+        
+        # Statistiques
+        stats_group = QGroupBox("Statistiques Détaillées")
+        stats_group.setStyleSheet("QGroupBox { color: #000000; }")
+        stats_layout = QVBoxLayout(stats_group)
+        
+        self.stats_text = QTextEdit()
+        self.stats_text.setReadOnly(True)
+        self.stats_text.setPlainText("Aucune statistique disponible")
+        stats_layout.addWidget(self.stats_text)
+        
+        layout.addWidget(stats_group)
+        
+        return widget
     
     def _browse_file(self):
-        """Ouvre le dialogue de sélection de fichier"""
-        file_format = self.format_combo.currentText()
-        
-        extensions = {
-            'JSON': 'JSON (*.json)',
-            'JSONL': 'JSONL (*.jsonl)',
-            'CSV': 'CSV (*.csv)',
-            'Parquet': 'Parquet (*.parquet)'
-        }
-        
+        """Parcourir un fichier"""
+        file_filter = "All Files (*.json *.jsonl *.csv *.parquet);;JSON (*.json);;JSONL (*.jsonl);;CSV (*.csv);;Parquet (*.parquet)"
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Sélectionner un Dataset",
+            "Sélectionner un fichier de dataset",
             "",
-            extensions.get(file_format, "Tous les fichiers (*.*)")
+            file_filter
         )
         
         if file_path:
             self.file_label.setText(os.path.basename(file_path))
-            self.current_file_path = file_path
+            self.file_label.setProperty('file_path', file_path)
             
-            # Réinitialiser la sélection historique
-            self.generation_combo.setCurrentIndex(0)
-            self.current_history_path = None
+            # Détecter automatiquement le format basé sur l'extension
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext == '.json':
+                self.format_combo.setCurrentText('JSON')
+            elif ext == '.jsonl':
+                self.format_combo.setCurrentText('JSONL')
+            elif ext == '.csv':
+                self.format_combo.setCurrentText('CSV')
+            elif ext == '.parquet':
+                self.format_combo.setCurrentText('Parquet')
             
-            self._check_verify_button_state()
-            logger.info(f"Fichier sélectionné: {file_path}")
+            self.verify_btn.setEnabled(True)
     
-    def _on_generation_selected(self, index):
-        """Gère la sélection d'une génération"""
-        gen_data = self.generation_combo.currentData()
-        
-        if not gen_data:
-            self.gen_info_label.setText("Sélectionnez une génération")
-            self._check_verify_button_state()
-            return
-        
-        # Afficher les infos
-        samples = gen_data.get('total_samples', 0)
-        format_type = gen_data.get('output_format', 'N/A')
-        file_path = gen_data.get('output_file_path', '')
-        
-        info = f"{samples} samples • {format_type}"
-        
-        if file_path and os.path.exists(file_path):
-            info += " • Disponible"
-            self.current_history_path = file_path
-            self.current_history_format = format_type
-        else:
-            info += " • Fichier introuvable"
-            self.current_history_path = None
-            self.current_history_format = None
-        
-        self.gen_info_label.setText(info)
-        self._check_verify_button_state()
+    def _on_level_changed(self):
+        """Changement de niveau"""
+        self._update_level_description()
     
-    def _check_verify_button_state(self):
-        """Vérifie si le bouton Vérifier doit être activé"""
-        has_file = hasattr(self, 'current_file_path') and bool(self.current_file_path)
-        has_history = hasattr(self, 'current_history_path') and bool(self.current_history_path)
+    def _on_rlhf_toggled(self):
+        """Toggle RLHF"""
+        self._update_level_description()
+    
+    def _update_level_description(self):
+        """Met à jour la description du niveau"""
+        level_idx = self.level_combo.currentIndex()
+        rlhf = self.rlhf_check.isChecked()
         
-        self.verify_btn.setEnabled(bool(has_file or has_history))
+        descriptions = [
+            "Vérification rapide des règles de base (format, longueur, etc.)",
+            "Vérification standard avec analyse de qualité basique",
+            "Vérification complète avec analyse approfondie de qualité"
+        ]
+        
+        desc = descriptions[level_idx]
+        if rlhf:
+            desc += "\n\nValidation RLHF activée pour une analyse intelligente."
+        
+        self.level_desc.setText(desc)
     
     def _verify_dataset(self):
-        """Lance la vérification (fichier ou historique)"""
-        # Priorité au fichier local si les deux sont sélectionnés
-        if hasattr(self, 'current_file_path') and self.current_file_path:
-            file_path = self.current_file_path
-            file_format = self.format_combo.currentText()
-        elif hasattr(self, 'current_history_path') and self.current_history_path:
-            file_path = self.current_history_path
-            file_format = self.current_history_format
-        else:
-            QMessageBox.warning(self, "Attention", "Aucun dataset sélectionné")
+        """Lance la vérification"""
+        # Récupérer le fichier sélectionné
+        file_path = self.file_label.property('file_path')
+        
+        if not file_path:
+            QMessageBox.warning(
+                self,
+                "Attention",
+                "Veuillez sélectionner un fichier de dataset"
+            )
             return
         
-        self._start_verification(file_path, file_format)
+        # Format du fichier
+        file_format = self.format_combo.currentText()
+        
+        # Niveau de validation
+        level_map = {
+            0: ValidationLevel.QUICK,
+            1: ValidationLevel.STANDARD,
+            2: ValidationLevel.STRICT
+        }
+        validation_level = level_map[self.level_combo.currentIndex()]
+        
+        # RLHF
+        rlhf_enabled = self.rlhf_check.isChecked()
+        
+        self._start_verification(file_path, file_format, validation_level, rlhf_enabled)
     
-    def _start_verification(self, file_path, file_format):
-        """Démarre le worker de vérification"""
-        logger.info(f"\n{'='*80}")
-        logger.info(f"🔍 DÉMARRAGE VÉRIFICATION")
-        logger.info(f"{'='*80}")
-        logger.info(f"  Fichier: {file_path}")
-        logger.info(f"  Format: {file_format}")
+    def _start_verification(self, file_path, file_format, validation_level, rlhf_enabled):
+        """Démarre la vérification"""
+        logger.info(f"Début vérification: {file_path}")
         
-        # Désactiver les contrôles
-        self.browse_btn.setEnabled(False)
         self.verify_btn.setEnabled(False)
-        self.generation_combo.setEnabled(False)
-        
-        # Afficher la progress bar
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.progress_bar.setMaximum(5)
+        self.progress_bar.setMaximum(4)
         
-        # Créer et démarrer le worker
-        self.worker = DatasetVerificationWorker(file_path, file_format)
+        self.worker = APIVerificationWorker(file_path, file_format, validation_level, rlhf_enabled)
         self.worker.progress_updated.connect(self._on_progress_updated)
         self.worker.verification_completed.connect(self._on_verification_completed)
         self.worker.verification_failed.connect(self._on_verification_failed)
         self.worker.start()
     
     def _on_progress_updated(self, current, total, message):
-        """Met à jour la progression"""
+        """Mise à jour progression"""
         self.progress_bar.setValue(current)
         self.progress_bar.setFormat(f"{message} ({current}/{total})")
     
     def _on_verification_completed(self, result):
-        """Gère la fin de vérification"""
-        logger.info("✅ Vérification terminée")
+        """Fin de vérification"""
+        logger.info("Vérification terminée")
         
         self.current_verification = result
         
-        # Réactiver les contrôles
-        self.browse_btn.setEnabled(True)
         self.verify_btn.setEnabled(True)
-        self.generation_combo.setEnabled(True)
         self.progress_bar.setVisible(False)
         
-        # Afficher les résultats
         self._display_results(result)
         
-        # Activer les boutons d'export
-        self.export_report_btn.setEnabled(True)
+        # Passer à l'onglet résultats
+        self.tabs.setCurrentIndex(1)
         
-        # Activer le bouton de correction si nécessaire
-        quality = result.get('quality', {})
-        duplicates = result.get('duplicates', {})
-        
-        has_issues = (
-            quality.get('total_issues', 0) > 0 or
-            duplicates.get('exact_duplicates', 0) > 0
-        )
-        
-        self.fix_btn.setEnabled(has_issues)
+        api_result = result.get('api_result', {})
+        valid = api_result.get('valid_samples', 0)
+        total = api_result.get('total_samples', 0)
+        score = api_result.get('overall_quality_score', 0)
         
         QMessageBox.information(
             self,
             "Vérification Terminée",
-            f"Le dataset a été vérifié avec succès.\n\n"
-            f"Score de qualité: {quality.get('quality_score', 0):.1f}/100"
+            f"Vérification effectuée avec succès!\n\n"
+            f"Valides: {valid}/{total}\n"
+            f"Score global: {score:.1f}/100"
         )
     
     def _on_verification_failed(self, error):
-        """Gère l'échec de vérification"""
-        logger.error(f"❌ Vérification échouée: {error}")
+        """Échec de vérification"""
+        logger.error(f"Vérification échouée: {error}")
         
-        # Réactiver les contrôles
-        self.browse_btn.setEnabled(True)
         self.verify_btn.setEnabled(True)
-        self.generation_combo.setEnabled(True)
         self.progress_bar.setVisible(False)
         
-        QMessageBox.critical(
-            self,
-            "Erreur de Vérification",
-            f"La vérification a échoué:\n\n{error}"
-        )
+        QMessageBox.critical(self, "Erreur", f"La vérification a échoué:\n\n{error}")
     
     def _display_results(self, result):
-        """Affiche les résultats de vérification"""
-        # Score de qualité
-        quality = result.get('quality', {})
-        score = quality.get('quality_score', 0)
-
-        self.quality_score_label.setText(f"Score: {score:.1f}/100")
-
-        # Couleur selon le score
-        if score >= 90:
-            color = "#4CAF50"  # Vert
-            status = "Excellent ✓"
-        elif score >= 75:
-            color = "#8BC34A"  # Vert clair
-            status = "Bon"
-        elif score >= 50:
-            color = "#FFC107"  # Orange
-            status = "Moyen"
-        else:
-            color = "#F44336"  # Rouge
-            status = "Faible"
-
-        self.quality_score_label.setStyleSheet(f"""
-            color: {color}; 
-            border: none; 
-            font-size: 14pt; 
-            font-weight: bold;
-        """)
-
-        # Détails plus compacts
-        total_issues = quality.get('total_issues', 0)
-        if total_issues == 0:
-            detail_text = f"{status} • Aucun problème"
-        elif total_issues == 1:
-            detail_text = f"{status} • 1 problème"
-        else:
-            detail_text = f"{status} • {total_issues} problèmes"
-
-        self.quality_details_label.setText(detail_text)
-
-        # Tab Structure
-        self._display_structure_tab(result.get('structure', {}))
-
-        # Tab Qualité
-        self._display_quality_tab(quality)
-
-        # Tab Doublons
-        self._display_duplicates_tab(result.get('duplicates', {}))
-
-        # Graphique
-        self._display_chart(result.get('statistics', {}))
+        """Affiche les résultats"""
+        api_result = result.get('api_result', {})
+        
+        # Charger dans le widget de résultats
+        results_list = api_result.get('results', [])
+        self.results_widget.load_results(results_list)
+        
+        # Mise à jour du résumé
+        self._update_summary(api_result)
+        
+        # Mise à jour des graphiques
+        self._update_charts(api_result)
+        
+        # Statistiques
+        self._update_statistics(api_result)
     
-    def _display_structure_tab(self, structure):
-        """Affiche l'onglet structure"""
-        text = "=== STRUCTURE DU DATASET ===\n\n"
+    def _update_summary(self, api_result):
+        """Met à jour le résumé"""
+        total = api_result.get('total_samples', 0)
+        valid = api_result.get('valid_samples', 0)
+        warning = api_result.get('warning_samples', 0)
+        invalid = api_result.get('invalid_samples', 0)
+        score = api_result.get('overall_quality_score', 0)
         
-        if structure.get('valid'):
-            text += "✅ Structure valide\n\n"
-        else:
-            text += "❌ Structure invalide\n\n"
-        
-        text += f"Total samples: {structure.get('total_samples', 0)}\n\n"
-        
-        text += "Champs présents:\n"
-        for field in structure.get('fields', []):
-            text += f"  • {field}\n"
-        
-        text += "\nChamps requis:\n"
-        for field in structure.get('required_fields', []):
-            text += f"  • {field}\n"
-        
-        if structure.get('missing_fields'):
-            text += "\n⚠️ Champs manquants:\n"
-            for field in structure['missing_fields']:
-                text += f"  ❌ {field}\n"
-        
-        if structure.get('extra_fields'):
-            text += "\nℹ️ Champs supplémentaires:\n"
-            for field in structure['extra_fields']:
-                text += f"  • {field}\n"
-        
-        if structure.get('inconsistent_samples'):
-            text += f"\n⚠️ {len(structure['inconsistent_samples'])} sample(s) avec structure incohérente\n"
-            text += "Exemples:\n"
-            for idx in structure['inconsistent_samples'][:5]:
-                text += f"  • Sample #{idx}\n"
-        
-        self.structure_tab.setPlainText(text)
-    
-    def _display_quality_tab(self, quality):
-        """Affiche l'onglet qualité"""
-        text = "=== ANALYSE DE QUALITÉ ===\n\n"
-        
-        score = quality.get('quality_score', 0)
-        text += f"Score global: {score:.1f}/100\n\n"
-        
-        text += "Problèmes détectés:\n"
-        text += f"  • Inputs vides: {quality.get('empty_inputs', 0)}\n"
-        text += f"  • Outputs vides: {quality.get('empty_outputs', 0)}\n"
-        text += f"  • Inputs courts (<10 car): {quality.get('short_inputs', 0)}\n"
-        text += f"  • Outputs courts (<10 car): {quality.get('short_outputs', 0)}\n"
-        
-        issues = quality.get('issues', [])
-        if issues:
-            text += f"\n📋 Détails des problèmes (max 50):\n\n"
-            
-            for issue in issues[:50]:
-                text += f"Sample: {issue['sample_id']}\n"
-                text += f"  Type: {issue['type']}\n"
-                text += f"  Message: {issue['message']}\n\n"
-        
-        total = quality.get('total_issues', 0)
-        if total > 50:
-            text += f"\n... et {total - 50} autre(s) problème(s)\n"
-        
-        self.quality_tab.setPlainText(text)
-    
-    def _display_duplicates_tab(self, duplicates):
-        """Affiche l'onglet doublons"""
-        text = "=== DÉTECTION DES DOUBLONS ===\n\n"
-        
-        exact = duplicates.get('exact_duplicates', 0)
-        similar = duplicates.get('similar_inputs', 0)
-        
-        text += f"🔄 Doublons exacts (input + output): {exact}\n"
-        text += f"🔄 Inputs similaires: {similar}\n\n"
-        
-        if exact > 0:
-            text += "Exemples de doublons exacts:\n\n"
-            for dup in duplicates.get('duplicate_examples', [])[:20]:
-                text += f"  • {dup['sample_1']} ↔ {dup['sample_2']}\n"
-        
-        if similar > 0:
-            text += "\nExemples d'inputs similaires:\n\n"
-            for sim in duplicates.get('similar_examples', [])[:20]:
-                text += f"Sample: {sim['sample_id']}\n"
-                text += f"  Doublon de: {sim['duplicate_of']}\n"
-                text += f"  Texte: {sim['text']}\n\n"
-        
-        if exact == 0 and similar == 0:
-            text += "✅ Aucun doublon détecté"
-        
-        self.duplicates_tab.setPlainText(text)
+        summary = f"""=== RÉSUMÉ DE LA VÉRIFICATION ===
 
-    def _display_chart(self, stats):
-        """Affiche le graphique de distribution - DESIGN MODERNE"""
+Total de samples: {total}
+
+Valides: {valid} ({valid/total*100:.1f}%)
+Warnings: {warning} ({warning/total*100:.1f}%)
+Invalides: {invalid} ({invalid/total*100:.1f}%)
+
+Score global: {score:.1f}/100
+
+{self._get_verdict(score)}
+"""
+        
+        self.summary_text.setPlainText(summary)
+    
+    def _get_verdict(self, score):
+        """Verdict selon le score"""
+        if score >= 80:
+            return "Excellent - Dataset de haute qualité"
+        elif score >= 60:
+            return "Bon - Quelques améliorations possibles"
+        elif score >= 40:
+            return "Moyen - Nécessite des corrections"
+        else:
+            return "Faible - Révision majeure requise"
+    
+    def _update_charts(self, api_result):
+        """Met à jour les graphiques"""
+        results = api_result.get('results', [])
+        if not results:
+            return
+        
+        # Distribution des scores (aperçu)
+        scores = [r.get('quality_score', 0) for r in results]
+        
         self.figure.clear()
-
-        input_stats = stats.get('input_stats', {})
-        output_stats = stats.get('output_stats', {})
-
-        # Créer le subplot avec fond transparent
         ax = self.figure.add_subplot(111)
-        ax.set_facecolor('#FAFAFA')
-        self.figure.patch.set_facecolor('white')
-
-        categories = ['Min', 'Médiane', 'Moyenne', 'Max']
-        input_values = [
-            input_stats.get('min', 0),
-            input_stats.get('median', 0),
-            input_stats.get('avg', 0),
-            input_stats.get('max', 0)
-        ]
-        output_values = [
-            output_stats.get('min', 0),
-            output_stats.get('median', 0),
-            output_stats.get('avg', 0),
-            output_stats.get('max', 0)
-        ]
-
-        x = range(len(categories))
-        width = 0.38
-
-        # Barres avec dégradé et bordures
-        bars1 = ax.bar([i - width/2 for i in x], input_values, width, 
-                        label='Input', 
-                        color=Theme.PRIMARY_COLOR,
-                        edgecolor='white',
-                        linewidth=1.5,
-                        alpha=0.9)
-
-        bars2 = ax.bar([i + width/2 for i in x], output_values, width, 
-                        label='Output', 
-                        color=Theme.SECONDARY_COLOR,
-                        edgecolor='white',
-                        linewidth=1.5,
-                        alpha=0.9)
-
-        # Ajouter les valeurs sur les barres
-        for bars in [bars1, bars2]:
-            for bar in bars:
-                height = bar.get_height()
-                if height > 0:
-                    ax.text(bar.get_x() + bar.get_width()/2., height,
-                           f'{int(height)}',
-                           ha='center', va='bottom',
-                           fontsize=8, fontweight='bold',
-                           color='#333333')
-
-        # Style des axes
-        ax.set_xlabel('Statistique', fontsize=10, fontweight='bold', color='#555555')
-        ax.set_ylabel('Longueur (caractères)', fontsize=10, fontweight='bold', color='#555555')
-        ax.set_title('Distribution des Longueurs Input/Output', 
-                     fontsize=11, fontweight='bold', 
-                     color=Theme.PRIMARY_COLOR, pad=15)
-
-        ax.set_xticks(x)
-        ax.set_xticklabels(categories, fontsize=9, color='#555555')
-        ax.tick_params(axis='y', labelsize=9, colors='#555555')
-
-        # Légende stylée
-        legend = ax.legend(loc='upper left', frameon=True, fontsize=9)
-        legend.get_frame().set_facecolor('white')
-        legend.get_frame().set_edgecolor('#E0E0E0')
-        legend.get_frame().set_linewidth(1.5)
-        legend.get_frame().set_alpha(0.95)
-
-        # Grille améliorée
-        ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.8, color='#CCCCCC')
-        ax.set_axisbelow(True)
-
-        # Bordure du graphique
-        for spine in ax.spines.values():
-            spine.set_edgecolor('#D0D0D0')
-            spine.set_linewidth(1.2)
-
-        self.figure.tight_layout(pad=1.5)
+        ax.hist(scores, bins=20, color=Theme.PRIMARY_COLOR, alpha=0.7, edgecolor='white')
+        ax.set_xlabel('Score de qualité')
+        ax.set_ylabel('Nombre de samples')
+        ax.set_title('Distribution des Scores')
+        ax.grid(axis='y', alpha=0.3)
+        self.figure.tight_layout()
         self.canvas.draw()
-    
-    def _export_report(self):
-        """Exporte le rapport de vérification"""
-        if not self.current_verification:
-            return
         
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Exporter le Rapport",
-            f"rapport_verification_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            "JSON (*.json);;Texte (*.txt)"
+        # Distribution par statut (viz tab)
+        statuses = [r.get('status', 'unknown') for r in results]
+        status_counts = {
+            'valid': statuses.count('valid'),
+            'warning': statuses.count('warning'),
+            'invalid': statuses.count('invalid')
+        }
+        
+        self.status_figure.clear()
+        ax2 = self.status_figure.add_subplot(111)
+        colors = ['#4CAF50', '#FFC107', '#F44336']
+        ax2.pie(
+            status_counts.values(),
+            labels=[f"{k}\n({v})" for k, v in status_counts.items()],
+            colors=colors,
+            autopct='%1.1f%%',
+            startangle=90
         )
+        ax2.set_title('Distribution par Statut')
+        self.status_figure.tight_layout()
+        self.status_canvas.draw()
         
-        if not file_path:
-            return
-        
-        try:
-            if file_path.endswith('.json'):
-                # Export JSON
-                export_data = {
-                    'verification_date': self.current_verification['timestamp'],
-                    'file': self.current_verification['file_path'],
-                    'format': self.current_verification['file_format'],
-                    'results': {
-                        'structure': self.current_verification['structure'],
-                        'quality': self.current_verification['quality'],
-                        'duplicates': self.current_verification['duplicates'],
-                        'statistics': self.current_verification['statistics']
-                    }
-                }
-                
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(export_data, f, ensure_ascii=False, indent=2)
-            
-            else:
-                # Export TXT
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write("="*80 + "\n")
-                    f.write("RAPPORT DE VÉRIFICATION DE DATASET\n")
-                    f.write("="*80 + "\n\n")
-                    
-                    f.write(f"Date: {self.current_verification['timestamp']}\n")
-                    f.write(f"Fichier: {self.current_verification['file_path']}\n")
-                    f.write(f"Format: {self.current_verification['file_format']}\n\n")
-                    
-                    f.write(self.structure_tab.toPlainText() + "\n\n")
-                    f.write(self.quality_tab.toPlainText() + "\n\n")
-                    f.write(self.duplicates_tab.toPlainText() + "\n\n")
-            
-            QMessageBox.information(
-                self,
-                "✅ Export Réussi",
-                f"Rapport exporté vers:\n{file_path}"
-            )
-            
-            logger.info(f"✅ Rapport exporté: {file_path}")
-            
-        except Exception as e:
-            logger.error(f"❌ Erreur export: {e}")
-            QMessageBox.critical(
-                self,
-                "❌ Erreur d'Export",
-                f"Impossible d'exporter le rapport:\n\n{str(e)}"
-            )
+        # Distribution scores (viz tab)
+        self.score_figure.clear()
+        ax3 = self.score_figure.add_subplot(111)
+        ax3.hist(scores, bins=20, color=Theme.SECONDARY_COLOR, alpha=0.7, edgecolor='white')
+        ax3.set_xlabel('Score')
+        ax3.set_ylabel('Fréquence')
+        ax3.set_title('Distribution Détaillée des Scores')
+        ax3.grid(axis='y', alpha=0.3)
+        self.score_figure.tight_layout()
+        self.score_canvas.draw()
     
-    def _fix_issues(self):
-        """Ouvre le dialogue de correction des problèmes"""
-        if not self.current_verification:
-            return
+    def _update_statistics(self, api_result):
+        """Met à jour les statistiques"""
+        summary = api_result.get('summary', {})
+        results = api_result.get('results', [])
         
-        quality = self.current_verification.get('quality', {})
-        duplicates = self.current_verification.get('duplicates', {})
+        # Analyser les issues
+        all_issues = []
+        for r in results:
+            all_issues.extend(r.get('issues', []))
         
-        msg = "Problèmes détectés:\n\n"
+        issue_types = {}
+        for issue in all_issues:
+            issue_type = issue.get('type', 'unknown')
+            issue_types[issue_type] = issue_types.get(issue_type, 0) + 1
         
-        if quality.get('empty_inputs', 0) > 0:
-            msg += f"• {quality['empty_inputs']} input(s) vide(s)\n"
-        if quality.get('empty_outputs', 0) > 0:
-            msg += f"• {quality['empty_outputs']} output(s) vide(s)\n"
-        if duplicates.get('exact_duplicates', 0) > 0:
-            msg += f"• {duplicates['exact_duplicates']} doublon(s) exact(s)\n"
+        # Top erreurs
+        top_errors = sorted(issue_types.items(), key=lambda x: x[1], reverse=True)[:10]
         
-        msg += "\nActions possibles:\n"
-        msg += "• Supprimer les samples avec problèmes\n"
-        msg += "• Supprimer les doublons\n"
-        msg += "• Exporter un dataset nettoyé\n\n"
-        msg += "Souhaitez-vous nettoyer le dataset ?"
+        stats_text = "=== STATISTIQUES DÉTAILLÉES ===\n\n"
         
-        reply = QMessageBox.question(
-            self,
-            "🔧 Corriger les Problèmes",
-            msg,
-            QMessageBox.Yes | QMessageBox.No
-        )
+        stats_text += f"Niveau de validation: {summary.get('validation_level', 'N/A')}\n\n"
         
-        if reply == QMessageBox.Yes:
-            self._clean_dataset()
+        stats_text += "Top 10 des erreurs:\n"
+        for error_type, count in top_errors:
+            stats_text += f"  {error_type}: {count}\n"
+        
+        stats_text += f"\n\nRecommandations:\n"
+        for rec in summary.get('recommendations', []):
+            stats_text += f"  {rec}\n"
+        
+        self.stats_text.setPlainText(stats_text)
     
-    def _clean_dataset(self):
-        """Nettoie le dataset en supprimant les problèmes"""
+    def _on_feedback_submitted(self, feedback):
+        """Feedback soumis"""
+        logger.info(f"Feedback reçu pour sample {feedback.get('sample_id')}")
+        
+        # Ici on pourrait envoyer le feedback à l'API
+        # pour l'enregistrement et l'amélioration future
         try:
-            data = self.current_verification.get('data', [])
-            original_count = len(data)
-            
-            # Supprimer les samples avec inputs/outputs vides
-            cleaned_data = []
-            seen = set()
-            
-            for sample in data:
-                input_text = sample.get('input', '').strip()
-                output_text = sample.get('output', '').strip()
-                
-                # Ignorer les vides
-                if not input_text or not output_text:
-                    continue
-                
-                # Ignorer les doublons exacts
-                key = (input_text.lower(), output_text.lower())
-                if key in seen:
-                    continue
-                
-                seen.add(key)
-                cleaned_data.append(sample)
-            
-            removed_count = original_count - len(cleaned_data)
-            
-            # Demander où sauvegarder
-            file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Enregistrer le Dataset Nettoyé",
-                f"dataset_cleaned_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                "JSON (*.json);;JSONL (*.jsonl)"
-            )
-            
-            if not file_path:
-                return
-            
-            # Sauvegarder
-            if file_path.endswith('.jsonl'):
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    for sample in cleaned_data:
-                        f.write(json.dumps(sample, ensure_ascii=False) + '\n')
-            else:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(cleaned_data, f, ensure_ascii=False, indent=2)
-            
-            QMessageBox.information(
-                self,
-                "✅ Nettoyage Terminé",
-                f"Dataset nettoyé avec succès!\n\n"
-                f"Original: {original_count} samples\n"
-                f"Nettoyé: {len(cleaned_data)} samples\n"
-                f"Supprimés: {removed_count} samples\n\n"
-                f"Sauvegardé vers:\n{file_path}"
-            )
-            
-            logger.info(f"✅ Dataset nettoyé: {removed_count} samples supprimés")
-            
+            logger.info("Feedback enregistré localement")
         except Exception as e:
-            logger.error(f"❌ Erreur nettoyage: {e}")
-            QMessageBox.critical(
-                self,
-                "❌ Erreur",
-                f"Impossible de nettoyer le dataset:\n\n{str(e)}"
-            )
+            logger.error(f"Erreur enregistrement feedback: {e}")
+    
+    def _load_generations(self):
+        """Charge les générations disponibles (méthode conservée pour compatibilité API)"""
+        pass
     
     def set_database(self, database):
         """Définit la base de données"""

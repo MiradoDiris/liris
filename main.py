@@ -6,8 +6,45 @@ Liris/main.py
 Point d'entrée de l'application avec dialogue de langue au démarrage
 """
 
+from pathlib import Path
 import sys
 import os
+os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+os.environ['CHROMA_TELEMETRY'] = 'False'
+os.environ['POSTHOG_DISABLED'] = '1'
+
+# ================================================================================
+# ÉTAPE 2 : INITIALISER CHROMADB AVANT PYQT5
+# ================================================================================
+print("\n" + "=" * 80)
+print("🔧 PRÉ-INITIALISATION CHROMADB (avant PyQt5)")
+print("=" * 80)
+
+try:
+    from context_weaver.data.vector_store_chroma import VectorStore
+    
+    chroma_path = Path("./data/indexes/chroma")
+    print(f"📂 Chemin ChromaDB: {chroma_path}")
+    
+    # Créer et initialiser le VectorStore AVANT PyQt5
+    global_vector_store = VectorStore(persist_path=chroma_path)
+    global_vector_store.initialize()
+    
+    doc_count = global_vector_store.get_document_count()
+    print(f"✅ ChromaDB pré-initialisé: {doc_count} documents")
+    print("=" * 80 + "\n")
+    
+except Exception as e:
+    print(f"❌ ERREUR lors de la pré-initialisation ChromaDB:")
+    print(f"   {str(e)}")
+    print("\n⚠️  L'application va continuer mais Context Weaver pourrait ne pas fonctionner.")
+    print("=" * 80 + "\n")
+    
+    import traceback
+    traceback.print_exc()
+    
+    global_vector_store = None
+
 import traceback
 import platform
 import subprocess
@@ -436,6 +473,11 @@ def main():
         print("\n8. Démarrage de la boucle d'événements...")
         print("=== APPLICATION EN COURS D'EXÉCUTION ===")
         print("=== Appuyez sur Ctrl+C pour arrêter ===\n")
+        if global_vector_store:
+            print("✅ Injection du VectorStore dans l'application...")
+            window.set_global_vector_store(global_vector_store)
+        else:
+            print("⚠️  VectorStore non disponible - Context Weaver désactivé")
         
         sys.exit(app.exec_())
 

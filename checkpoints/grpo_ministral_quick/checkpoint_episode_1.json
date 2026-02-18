@@ -1,0 +1,30 @@
+{
+  "episode": 1,
+  "total_groups": 2,
+  "total_samples": 4,
+  "config": {
+    "model_name": "mistralai/Ministral-3-14B-Instruct-2512",
+    "vllm_url": "http://localhost:8002/v1",
+    "reward_api_url": "http://localhost:8085",
+    "group_size": 2,
+    "num_episodes": 1,
+    "batch_size": 2,
+    "learning_rate": 0.0003,
+    "temperature": 0.8,
+    "kl_coef": 0.1,
+    "clip_range": 0.2,
+    "domain": "comptabilité"
+  },
+  "metrics": {
+    "mean_reward": 55.0,
+    "std_reward": 0.0,
+    "min_reward": 55.0,
+    "max_reward": 55.0,
+    "mean_advantage": 0.0,
+    "std_advantage": 0.0,
+    "num_groups": 2,
+    "num_episodes": 1,
+    "total_samples": 4
+  },
+  "timestamp": "2026-01-25T02:15:34.405542"
+}

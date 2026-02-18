@@ -1,15 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Pipeline Context Weaver - Version Refactorisée (Sans ContextWeaver)
-✅ CORRIGÉ: PipelineOutput sans context_weaver obligatoire
-✅ FIX: Stockage taxonomy_output dans metadata
+Pipeline Context Weaver - Version CORRIGÉE
+✅ Utilise le PROMPT COMPLET (pas de patterns restrictifs)
+✅ SmartQueryExtractor amélioré
+✅ Logging détaillé pour debug
 """
 
 import time
 import logging
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+import re
 
 from context_weaver.models.schemas import (
     PipelineOutput,
@@ -20,9 +22,7 @@ from context_weaver.models.schemas import (
 )
 
 from context_weaver.taxonomy.taxonomy_models import (
-    ConversationState,
-    PrereqSnapshot,
-    TaxonomyPipelineOutput
+    TaxonCandidate
 )
 from context_weaver.pipeline.taxonomy_pipeline import (
     TaxonomyPipeline,
@@ -31,21 +31,101 @@ from context_weaver.pipeline.taxonomy_pipeline import (
 from context_weaver.taxonomy.taxonomy_retriever import RetrievalConfig
 
 from context_weaver.services.oss_classifier import OSSClassifierClient
-from context_weaver.data.vector_store import VectorStore
-from context_weaver.learner.graph_structure_learner import GraphStructureLearner
+from context_weaver.data.vector_store_chroma import VectorStore
 
 logger = logging.getLogger(__name__)
 
 
+class SmartQueryExtractorV2:
+    """
+    ✅ CORRIGÉ: Extrait les paramètres SANS limiter la query
+    
+    Principe:
+    - Utilise le PROMPT COMPLET comme query principale
+    - Extrait des paramètres uniquement pour contexte additionnel
+    """
+    
+    # Patterns pour contexte additionnel (optionnel)
+    CONTEXT_PATTERNS = {
+        'formes_juridiques': r'\b(SARL|SAS|SASU|EURL|SCI|SA|EI|EIRL|Micro[- ]entreprise|Auto[- ]entrepreneur|Association|Société|Entreprise Individuelle)\b',
+        'regimes_fiscaux': r'\b(Impôt sur les sociétés?|IS|Impôt sur le revenu|IR|BIC|BNC|BA|Bénéfices? Industriels? et Commerciaux|Bénéfices? Non Commerciaux|Bénéfices? Agricoles?|Micro[- ]fiscal|Réel simplifié|Réel normal)\b',
+        'domaines_activite': r'\b(Commerce|Prestataire de services?|Prestation de services?|Artisan|Commerçant|Profession libérale|Activité agricole|Commerce de détail|Commerce de gros|Location|Restaurant|Laverie|Centre équestre|Biens d\'occasion|Secrétariat|Assistance administrative)\b',
+        'plans': r'\b(Plan standard|Plan simplifié|Plan spécifique|Plan comptable)\b',
+        'comptabilite': r'\b(Comptabilité de trésorerie|Créances?|Dettes?|Comptabilité d\'engagement|Comptabilité simplifiée|Comptabilité complète)\b',
+        'tva': r'\b(TVA|TVA sur marge|Franchise TVA)\b',
+        'exercice': r'\b(Exercice comptable|Date d\'exercice|1er janvier|31 décembre|Clôture|Exercice décalé|janvier\s*[-–]\s*décembre)\b',
+        'contexte': r'\b(Onboarding|Facturation|Déclaration|TPE|Association|Entrepreneur|Multi[- ]utilisateurs)\b'
+    }
+    
+    def extract_context_params(self, prompt: str) -> Dict[str, List[str]]:
+        """
+        Extrait des paramètres contextuels (OPTIONNEL)
+        """
+        extracted = {}
+        
+        for category, pattern in self.CONTEXT_PATTERNS.items():
+            matches = re.findall(pattern, prompt, re.IGNORECASE)
+            unique_matches = list(set(m.strip() for m in matches if m.strip()))
+            if unique_matches:
+                extracted[category] = unique_matches
+        
+        return extracted
+    
+    def build_enhanced_query(
+        self, 
+        prompt: str,
+        strategy: str = "full_prompt"
+    ) -> tuple[str, Dict[str, List[str]]]:
+        """
+        ✅ NOUVELLE APPROCHE: Garde le prompt COMPLET
+        
+        Args:
+            prompt: Prompt utilisateur
+            strategy: 
+                - "full_prompt" (défaut): Garde le prompt complet
+                - "with_boost": Ajoute les mots-clés comme boost
+        
+        Returns:
+            (enhanced_query, extracted_params)
+        """
+        # Extraire les paramètres contextuels
+        context_params = self.extract_context_params(prompt)
+        
+        if strategy == "full_prompt":
+            # ✅ STRATÉGIE 1: Prompt complet tel quel
+            enhanced_query = prompt
+            
+            # Limiter si trop long
+            if len(enhanced_query) > 800:
+                enhanced_query = enhanced_query[:800]
+        
+        elif strategy == "with_boost":
+            # ✅ STRATÉGIE 2: Prompt + boost avec mots-clés
+            query_parts = [prompt]
+            
+            # Ajouter les paramètres extraits comme contexte
+            if context_params:
+                for category, values in context_params.items():
+                    category_label = category.replace('_', ' ').title()
+                    values_text = ', '.join(values[:3])
+                    query_parts.append(f"{category_label}: {values_text}")
+            
+            enhanced_query = '. '.join(query_parts)
+            
+            # Limiter si trop long
+            if len(enhanced_query) > 1000:
+                enhanced_query = enhanced_query[:1000]
+        
+        else:
+            raise ValueError(f"Unknown strategy: {strategy}")
+        
+        return enhanced_query, context_params
+
+
 class ContextWeaverPipeline:
     """
-    ✅ Pipeline Unifié REFACTORISÉ (Sans ContextWeaver)
-    
-    Changements:
-    - ❌ SUPPRIMÉ: ContextWeaver (entièrement)
-    - ✅ GraphStructureLearner: Responsable du filtrage des résultats
-    - ✅ Output simplifié: PipelineOutput avec filtered_candidates du learner
-    - ✅ FIX: context_weaver optionnel dans PipelineOutput
+    Pipeline générique CORRIGÉ
+    ✅ Utilise le prompt complet pour le matching
     """
     
     def __init__(
@@ -56,251 +136,253 @@ class ContextWeaverPipeline:
         project_name: str = None,
         dgraph_url: str = "localhost:9080",
         auto_init: bool = True,
-        prereq_snapshot_path: Path = None,
-        graph_learner_model_path: Path = None,
-        enable_taxonomy_validation: bool = True
+        use_domain_filter: bool = True,
+        default_domain: str = "Macompta.fr",
+        query_strategy: str = "full_prompt"
     ):
         logger.info("=" * 80)
-        logger.info("🗂️ CONTEXT WEAVER PIPELINE - INITIALIZATION (Sans ContextWeaver)")
+        logger.info("🗂️ CONTEXT WEAVER PIPELINE - INITIALIZATION (Fixed Version)")
         logger.info("=" * 80)
-        
+
+        self.use_domain_filter = use_domain_filter
+        self.default_domain = default_domain
+        self.query_strategy = query_strategy
+
         step_start = time.time()
-        
+
         # === COMPOSANTS DE BASE ===
-        logger.info("\n📦 Step 1/5: Initializing Core Components")
-        if auto_init and self._needs_init(dgraph_connector, oss_client):
+        logger.info("\n📦 Step 1/3: Initializing Core Components")
+
+        # ✅ VÉRIFIER SI TOUS LES COMPOSANTS SONT FOURNIS
+        all_provided = (
+            vector_store is not None and 
+            oss_client is not None
+        )
+
+        if all_provided:
+            # ✅ UTILISER LES COMPOSANTS PRÉ-INITIALISÉS
+            logger.info("   ✅ Using pre-initialized components:")
+            logger.info(f"      • VectorStore: {vector_store.get_document_count() if vector_store else 0} docs")
+            logger.info(f"      • OSS Client: {'✅' if oss_client else '❌'}")
+            logger.info(f"      • Dgraph: {'✅' if dgraph_connector else '❌'}")
+
+            self.vector_store = vector_store
+            self.oss_client = oss_client
+            self.dgraph = dgraph_connector
+            self.project_name = project_name or "default_project"
+
+        elif auto_init:
+            # ✅ AUTO-INITIALISATION SI NÉCESSAIRE
+            logger.info("   🔄 Auto-initializing missing components...")
             self._auto_init(dgraph_url, project_name)
+
         else:
+            # ✅ UTILISER CE QUI EST FOURNI
             self.dgraph = dgraph_connector
             self.vector_store = vector_store
             self.oss_client = oss_client
             self.project_name = project_name or "default_project"
-        
-        logger.info(f"   ✅ Core components initialized in {(time.time() - step_start)*1000:.2f}ms")
-        
-        # === SERVICES CLASSIQUES ===
-        step_start = time.time()
-        logger.info("\n🔧 Step 2/5: Initializing Services")
-        self._init_services()
-        logger.info(f"   ✅ Services initialized in {(time.time() - step_start)*1000:.2f}ms")
-        
-        # === CONVERSATION STATE MANAGER ===
-        logger.info("\n💬 Step 3/5: Setting up Conversation Manager")
-        self.conversation_states: Dict[str, ConversationState] = {}
-        logger.info("   ✅ Conversation manager ready")
-        
-        # === TAXONOMY PIPELINE + GRAPH LEARNER ===
-        step_start = time.time()
-        logger.info("\n📚 Step 4/5: Initializing Taxonomy Pipeline + Graph Learner")
-        self.enable_taxonomy_validation = enable_taxonomy_validation
-        
-        if enable_taxonomy_validation:
-            # Embedder
-            logger.info("   • Loading embedder wrapper...")
-            from context_weaver.services.embedder_wrapper import EmbedderWrapper
-            self.embedder = EmbedderWrapper(oss_client=self.oss_client)
-            
-            # PrereqSnapshot
-            logger.info("   • Loading prereq snapshot...")
-            prereq_path = prereq_snapshot_path or Path("./data/prereq_snapshot_v1.json")
-            if prereq_path.exists():
-                self.prereq_snapshot = PrereqSnapshot.load_from_json(str(prereq_path))
-                logger.info(f"     ✓ PrereqSnapshot loaded: {len(self.prereq_snapshot.prereq_hard)} hard prereqs")
-            else:
-                logger.warning(f"     ⚠️ PrereqSnapshot not found: {prereq_path}")
-                self.prereq_snapshot = PrereqSnapshot()
-            
-            # Graph Structure Learner (responsable du filtrage)
-            logger.info("   • Initializing graph structure learner...")
-            learner_path = graph_learner_model_path or Path("./data/graph_structure_model.json")
-            self.graph_learner = GraphStructureLearner(model_path=learner_path)
-            logger.info("     ✓ Graph learner ready (filtrage activé)")
-            
-            # TaxonomyPipeline
-            logger.info("   • Building taxonomy pipeline...")
-            retrieval_config = RetrievalConfig(
-                dense_top_k=100,
-                bm25_top_k=100,
-                rrf_k=60,
-                final_top_n=30,
-                boost_by_depth=True
-            )
-            
-            self.taxonomy_pipeline = TaxonomyPipeline(
-                vector_store=self.vector_store,
-                embedder=self.embedder,
-                retrieval_config=retrieval_config,
-                taxonomy_metadata=self._build_taxonomy_metadata()
-            )
-            
-            logger.info(f"   ✅ Taxonomy pipeline + Graph Learner initialized in {(time.time() - step_start)*1000:.2f}ms")
-        else:
-            self.taxonomy_pipeline = None
-            self.prereq_snapshot = None
-            self.graph_learner = None
-            self.embedder = None
-            logger.info("   ⚠️ Taxonomy validation disabled")
-        
-        logger.info("\n✅ Step 5/5: Pipeline Ready (Learner gère le filtrage)")
-        logger.info("=" * 80 + "\n")
 
-    def _get_status_string(self, taxonomy_output):
-        """Helper pour extraire status en string (gère enum et string)"""
-        if not taxonomy_output:
-            return 'NO_TAXONOMY'
-        
-        from context_weaver.taxonomy.taxonomy_models import ValidationStatus
-        
-        status = taxonomy_output.status
-        
-        if isinstance(status, ValidationStatus):
-            return status.value
-        elif isinstance(status, str):
-            return status
-        else:
-            logger.warning(f"⚠️ Unknown status type: {type(status)}")
-            return 'UNKNOWN'
-    
-    def _normalize_domain(self, oss_domain: str) -> str:
-        """
-        Normalise le domaine OSS vers le domaine des indexes
-        
-        Args:
-            oss_domain: Domaine retourné par OSS Classifier
-            
-        Returns:
-            Domaine normalisé pour les indexes
-        """
-        DOMAIN_MAPPING = {
-            'compliance': 'Macompta.fr',
-            'accounting': 'Macompta.fr',
-            'finance': 'Macompta.fr',
-            'comptabilité': 'Macompta.fr',
-            'gestion': 'Macompta.fr',
-        }
-        
-        normalized = DOMAIN_MAPPING.get(oss_domain.lower(), oss_domain)
-        
-        if normalized != oss_domain:
-            logger.info(f"🔄 Domain mapping: '{oss_domain}' → '{normalized}'")
-        
-        return normalized
+        logger.info(f"   ✅ Core components initialized in {(time.time() - step_start)*1000:.2f}ms")
+
+        # === EMBEDDER ===
+        step_start = time.time()
+        logger.info("\n🔧 Step 2/3: Initializing Embedder")
+        from context_weaver.services.embedder_wrapper import EmbedderWrapper
+        self.embedder = EmbedderWrapper(oss_client=self.oss_client)
+        logger.info(f"   ✅ Embedder initialized in {(time.time() - step_start)*1000:.2f}ms")
+
+        # === TAXONOMY PIPELINE ===
+        step_start = time.time()
+        logger.info("\n📚 Step 3/3: Initializing Taxonomy Pipeline")
+
+        retrieval_config = RetrievalConfig(
+            dense_top_k=150,
+            bm25_top_k=30,
+            union_score_strategy="max",  # ✅ CHANGÉ: rrf_k → union_score_strategy
+            final_top_n=30,
+            boost_by_depth=True,
+            enable_bm25_exact_boost=False
+        )
+
+        self.taxonomy_pipeline = TaxonomyPipeline(
+            vector_store=self.vector_store,
+            embedder=self.embedder,
+            dgraph_connector=self.dgraph,
+            retrieval_config=retrieval_config
+        )
+
+        logger.info(f"   ✅ Taxonomy pipeline initialized in {(time.time() - step_start)*1000:.2f}ms")
+
+        logger.info("\n✅ Pipeline Ready")
+        logger.info(f"   • Query strategy: {query_strategy}")
+        logger.info(f"   • Domain filter: {'ENABLED' if use_domain_filter else 'DISABLED'}")
+        if use_domain_filter:
+            logger.info(f"   • Default domain: {default_domain}")
+        logger.info("=" * 80 + "\n")
     
     
     def run(
         self,
         user_context: str,
         conversation_id: str = "default",
-        session_state: Optional[Dict[str, Any]] = None
+        session_state: Optional[Dict[str, Any]] = None,
+        domain: Optional[str] = None,
+        top_k: int = 10
     ) -> PipelineOutput:
         """
-        ✅ Pipeline principal REFACTORISÉ (Sans ContextWeaver)
+        ✅ Pipeline CORRIGÉ
         
-        Changements:
-        - Délègue TOUTE la recherche à taxonomy_pipeline
-        - GraphLearner filtre les résultats (sans toucher au scoring)
-        - context_weaver optionnel dans PipelineOutput
+        Utilise le PROMPT COMPLET pour le matching
         """
         pipeline_start = time.time()
         
         logger.info("\n" + "=" * 80)
-        logger.info("🚀 CONTEXT WEAVER PIPELINE - EXECUTION START (Learner Filtrage)")
+        logger.info("🚀 CONTEXT WEAVER PIPELINE - EXECUTION (Fixed Version)")
         logger.info("=" * 80)
         logger.info(f"🔍 Query: {user_context[:100]}{'...' if len(user_context) > 100 else ''}")
-        logger.info(f"🔑 Conversation ID: {conversation_id}")
         logger.info(f"📊 Query length: {len(user_context)} chars")
-        if session_state:
-            logger.info(f"💾 Session state keys: {list(session_state.keys())}")
         
         try:
-            # === ÉTAPE 1: OSS CLASSIFICATION ===
-            step_start = time.time()
+            # ================================================================
+            # EXTRACTION INTELLIGENTE (OPTIONNELLE)
+            # ================================================================
             logger.info("\n" + "─" * 80)
-            logger.info("📊 STEP 1/2: OSS Classification")
+            logger.info("🔍 SMART PARAMETER EXTRACTION")
             logger.info("─" * 80)
             
-            classification = self.oss_client.classify(user_context)
+            extractor = SmartQueryExtractorV2()
+            enhanced_query, extracted_params = extractor.build_enhanced_query(
+                prompt=user_context,
+                strategy=self.query_strategy
+            )
             
-            # Normaliser le domaine
-            original_domain = classification.domain
-            normalized_domain = self._normalize_domain(original_domain)
-            classification.domain = normalized_domain
+            # ✅ LOG DÉTAILLÉ pour debug
+            logger.info(f"📋 Stratégie utilisée: {self.query_strategy}")
             
-            normalized = self._normalize(classification)
+            if extracted_params:
+                logger.info(f"✅ Paramètres contextuels extraits:")
+                for category, values in extracted_params.items():
+                    logger.info(f"   • {category}: {', '.join(values[:3])}")
+            else:
+                logger.info("ℹ️  Aucun paramètre contextuel trouvé (normal si query libre)")
             
-            step_time = (time.time() - step_start) * 1000
-            logger.info(f"✅ Classification completed in {step_time:.2f}ms")
-            logger.info(f"   • Domain (original): {original_domain}")
-            logger.info(f"   • Domain (normalized): {normalized_domain}")
-            logger.info(f"   • Task: {classification.task}")
-            logger.info(f"   • Variables count: {len(classification.variables)}")
+            logger.info(f"\n🎯 Query pour embedding:")
+            logger.info(f"   Original: {user_context[:100]}...")
+            logger.info(f"   Enhanced: {enhanced_query[:100]}...")
+            logger.info(f"   • Longueur originale: {len(user_context)} chars")
+            logger.info(f"   • Longueur enhanced: {len(enhanced_query)} chars")
             
-            # === ÉTAPE 2: TAXONOMY PIPELINE + FILTRAGE LEARNER ===
-            step_start = time.time()
+            # ✅ VÉRIFICATION CRITIQUE
+            if not enhanced_query or len(enhanced_query.strip()) < 3:
+                logger.error("❌ ERREUR: Query enrichie est VIDE ou trop courte!")
+                logger.error(f"   Original: '{user_context}'")
+                logger.error(f"   Enhanced: '{enhanced_query}'")
+                logger.error("   → Utilisation du prompt original comme fallback")
+                enhanced_query = user_context
+            
+            # ================================================================
+            # RECHERCHE AVEC QUERY ENRICHIE
+            # ================================================================
             logger.info("\n" + "─" * 80)
-            logger.info("🔍 STEP 2/2: Taxonomy Pipeline + Learner Filtrage")
+            logger.info("🎯 TAXONOMY SEARCH")
             logger.info("─" * 80)
             
-            # ✅ TOUJOURS utiliser taxonomy_pipeline
-            exec_time = time.time() - pipeline_start
-            taxonomy_output = self._run_taxonomy_pipeline(
-                user_context,
-                classification,
-                normalized,
-                conversation_id,
-                session_state,
-                exec_time
-            )
+            # Préparer le contexte
+            context = {
+                'task': 'smart_search',
+                'query': user_context,
+                'extracted_params': extracted_params,
+                'domain': domain if domain else self.default_domain
+            }
             
-            # ✅ NOUVEAU: Filtrage par Graph Learner (sans toucher au scoring)
-            filtered_results = self._filter_with_graph_learner(
-                taxonomy_output,
-                classification,
-                normalized
+            logger.info(f"🔒 Domain filter: {context['domain']}")
+            # Décider du filtre domain
+            if domain:
+                context['domain'] = domain
+                logger.info(f"🔒 Domain filter: ENABLED (explicit: '{domain}')")
+            elif self.use_domain_filter:
+                context['domain'] = self.default_domain
+                logger.info(f"🔒 Domain filter: ENABLED (default: '{self.default_domain}')")
+            else:
+                logger.info(f"🔓 Domain filter: DISABLED")
+            
+            # ================================================================
+            # EXÉCUTION DU TAXONOMY PIPELINE
+            # ================================================================
+            step_start = time.time()
+            logger.info("\n🚀 Executing taxonomy search...")
+            
+            taxonomy_output = self.taxonomy_pipeline.process(
+                query=enhanced_query,  # ✅ Query enrichie (ou prompt complet)
+                top_k=top_k,
+                context=context
             )
             
             step_time = (time.time() - step_start) * 1000
-            logger.info(f"✅ Taxonomy + Learner filtrage completed in {step_time:.2f}ms")
+            logger.info(f"✅ Search completed in {step_time:.2f}ms")
             
-            # ✅ CORRIGÉ: PipelineOutput avec context_weaver optionnel
+            # ================================================================
+            # BUILD RESULTS
+            # ================================================================
+            search_results = self._build_search_results_from_taxonomy(taxonomy_output)
+            
+            # ================================================================
+            # ANALYSE DE PERTINENCE (debug)
+            # ================================================================
+            self._analyze_result_relevance(taxonomy_output, enhanced_query)
+            
+            # ================================================================
+            # BUILD OUTPUT
+            # ================================================================
+            total_time = (time.time() - pipeline_start) * 1000
+            
+            minimal_classification = OSSClassification(
+                domain=context.get('domain', 'Unknown'),
+                task='smart_search',
+                decision_type='smart_extraction_v2',
+                variables=list(extracted_params.keys()),
+                confidence=1.0
+            )
+            
+            minimal_normalized = NormalizedVariables(
+                variables={},
+                domain_taxonomy=[]
+            )
+            
             output = PipelineOutput(
-                classification=classification,
-                normalized=normalized,
-                search_results=filtered_results,
-                execution_time_ms=(time.time() - pipeline_start) * 1000,
+                classification=minimal_classification,
+                normalized=minimal_normalized,
+                search_results=search_results,
+                execution_time_ms=total_time,
                 context_weaver=None,
                 metadata={
+                    'method': 'smart_search_v2',
+                    'query_strategy': self.query_strategy,
+                    'filter_applied': 'domain' in context,
+                    'filtered_domain': context.get('domain'),
+                    'original_query': user_context,
+                    'enhanced_query': enhanced_query,
+                    'query_length_original': len(user_context),
+                    'query_length_enhanced': len(enhanced_query),
+                    'extracted_params': extracted_params,
+                    'params_count': sum(len(v) for v in extracted_params.values()) if extracted_params else 0,
                     'taxonomy_output': {
-                        'status': self._get_status_string(taxonomy_output),
-                        'can_access_graph': taxonomy_output.can_access_graph if taxonomy_output else False,
-                        'validated_taxon_id': taxonomy_output.validated_taxon_id if taxonomy_output else None,
-                        'validated_taxon_name': taxonomy_output.validated_taxon_name if taxonomy_output else None,
-                        'clarification_question': taxonomy_output.clarification_question if taxonomy_output else None,
-                        
-                        # ✅ FIX: missing_requirements est dans details, pas un attribut direct
-                        'missing_requirements': (
-                            taxonomy_output.details.get('missing_requirements', []) 
-                            if taxonomy_output and taxonomy_output.details 
-                            else []
-                        ),
-                        
-                        # ✅ FIX: suggested_candidates aussi dans details
-                        'suggested_candidates': (
-                            taxonomy_output.details.get('suggested_candidates', []) 
-                            if taxonomy_output and taxonomy_output.details 
-                            else []
-                        ),
-                        
-                        'confidence': (
-                            taxonomy_output.details.get('confidence', 0.0) 
-                            if taxonomy_output and taxonomy_output.details 
-                            else 0.0
-                        ),
-                        
-                        'details': taxonomy_output.details if taxonomy_output else {}
+                        'total_candidates': taxonomy_output.total_candidates,
+                        'top_candidate': {
+                            'taxon_id': taxonomy_output.top_candidate.taxon_id,
+                            'name': taxonomy_output.top_candidate.name,
+                            'final_score': taxonomy_output.top_candidate.final_score,
+                            'breadcrumb': taxonomy_output.top_candidate.breadcrumb
+                        } if taxonomy_output.top_candidate else None,
+                        'retrieval_time_ms': taxonomy_output.retrieval_time_ms,
+                        'reranking_time_ms': taxonomy_output.reranking_time_ms,
+                        'total_time_ms': taxonomy_output.total_time_ms
                     }
                 }
             )
+            
+            self._log_final_summary(output, total_time)
             
             return output
             
@@ -315,299 +397,71 @@ class ContextWeaverPipeline:
             raise
     
     
-    def _run_taxonomy_pipeline(
-        self,
-        user_context: str,
-        classification: OSSClassification,
-        normalized: NormalizedVariables,
-        conversation_id: str,
-        session_state: Optional[Dict[str, Any]],
-        pipeline_start: float
-    ) -> TaxonomyPipelineOutput:
-        """
-        ✅ REFACTORISÉ: Exécute taxonomy_pipeline (validation ON ou OFF)
-        
-        Mode validation=True: Gate prereqs + validation
-        Mode validation=False: Retrieval seul (pas de gate)
-        """
-        
-        if not self.taxonomy_pipeline:
-            # Cas où taxonomy_pipeline n'existe pas (erreur config)
-            logger.error("❌ Taxonomy pipeline not initialized")
-            raise ValueError("Taxonomy pipeline required")
-        
-        # Préparer contexte enrichi pour taxonomy_pipeline
-        enriched_context = {
-            'domain': classification.domain,
-            'task': classification.task,
-            'variables': classification.variables,
-            'key_variables': list(normalized.variables.values())[:10]
-        }
-        
-        # Ajouter structure hint du learner (sans modifier scoring)
-        if self.graph_learner:
-            try:
-                structure_hypothesis = self.graph_learner.predict_structure(
-                    context={
-                        'domain': classification.domain,
-                        'variables': enriched_context['key_variables'],
-                        'task': classification.task
-                    },
-                    candidates=[],  # Pas de candidats initiaux
-                    prereq_cache=self.prereq_snapshot
-                )
-                
-                enriched_context['structure_hint'] = {
-                    'primary_label_id': getattr(structure_hypothesis, 'primary_label_id', None),
-                    'expected_prereqs': getattr(structure_hypothesis, 'expected_prereq_hard_ids', []),
-                    'confidence': getattr(structure_hypothesis, 'confidence', 0.0)
-                }
-                
-                logger.info(f"   • Structure hint: {enriched_context['structure_hint']}")
-                
-            except Exception as e:
-                logger.warning(f"   ⚠️ Learner prediction failed: {e}")
-        
-        from context_weaver.taxonomy.taxonomy_models import ConversationState
-        
-        conv_state = ConversationState(conversation_id=conversation_id)
-        if session_state:
-            if 'confirmed_taxons' in session_state:
-                conv_state.confirmed_taxons = session_state['confirmed_taxons']
-            if 'filled_slots' in session_state:
-                conv_state.filled_slots = session_state['filled_slots']
-        
-        taxonomy_output = self.taxonomy_pipeline.process(
-            user_query=user_context,
-            user_context=enriched_context,
-            conversation_state=conv_state
-        )
-        
-        logger.info(f"   • Status: {taxonomy_output.status}")
-        logger.info(f"   • Can access graph: {taxonomy_output.can_access_graph}")
-        
-        # Mise à jour de l'état de conversation
-        self._update_conversation_state(conversation_id, taxonomy_output)
-        
-        return taxonomy_output
-    
-    
-    def _filter_with_graph_learner(
-        self,
+    def _analyze_result_relevance(
+        self, 
         taxonomy_output: TaxonomyPipelineOutput,
-        classification: OSSClassification,
-        normalized: NormalizedVariables
-    ) -> HybridSearchResults:
+        enhanced_query: str
+    ):
         """
-        ✅ NOUVEAU: Filtrage par GraphStructureLearner (sans toucher au scoring)
-        
-        - Utilise validate_structure pour filtrer (basé sur quality_category)
-        - Conserve les scores originaux (RRR du retrieval)
-        - Retourne HybridSearchResults avec résultats filtrés
+        ✅ AMÉLIORÉ: Analyse avec plus de détails
         """
-        if not self.graph_learner or not taxonomy_output.retrieval_result:
-            # Fallback: Retourner résultats originaux sans filtrage
-            return self._build_search_results_from_taxonomy(taxonomy_output)
-        
-        logger.info(f"   🔍 Filtrage Learner: {len(taxonomy_output.retrieval_result.candidates)} candidats")
-        
-        context = {
-            'domain': classification.domain,
-            'variables': list(normalized.variables.values()),
-            'task': classification.task
-        }
-        
-        filtered_candidates = []
-        for candidate in taxonomy_output.retrieval_result.candidates:
-            # Convertir en structure pour validation (sans modifier scoring)
-            structure = {
-                'id': candidate.taxon_id,
-                'name': candidate.name,
-                'domain': candidate.metadata.get('domain', ''),
-                'type': 'taxon',
-                'dgraph.type': 'TaxonomyNode',
-                'definition': candidate.definition,
-                'breadcrumb': candidate.breadcrumb,
-                'depth': candidate.depth
-            }
-            
-            # Valider (ne touche pas au scoring interne du learner)
-            try:
-                validation = self.graph_learner.validate_structure(structure, context)
-                
-                # Filtrer basé sur quality_category (ex: garder HIGH/MEDIUM)
-                if validation['quality_category'] in ['HIGH', 'MEDIUM']:
-                    # Enrichir metadata sans altérer score original
-                    if not candidate.metadata:
-                        candidate.metadata = {}
-                    candidate.metadata['graph_validation'] = {
-                        'score': validation['quality_score'],
-                        'confidence': validation['confidence'],
-                        'category': validation['quality_category'],
-                        'issues': validation.get('issues', [])
-                    }
-                    filtered_candidates.append(candidate)
-                    
-            except Exception as e:
-                logger.warning(f"   ⚠️ Filtrage failed for {candidate.name}: {e}")
-                # En cas d'erreur, garder le candidat (conservatif)
-                filtered_candidates.append(candidate)
-        
-        logger.info(f"   ✅ Filtré: {len(filtered_candidates)} / {len(taxonomy_output.retrieval_result.candidates)} gardés")
-        
-        # Construire HybridSearchResults avec candidats filtrés
-        search_results_list = []
-        for candidate in filtered_candidates[:10]:  # Limiter top 10
-            result = SearchResult(
-                id=candidate.taxon_id,
-                name=candidate.name,
-                domain=candidate.metadata.get('domain', ''),
-                type="taxon",
-                score=candidate.final_score,  # Score original préservé
-                method="taxonomy_rrf_learner_filtered",
-                content={
-                    'definition': candidate.definition,
-                    'breadcrumb': candidate.breadcrumb,
-                    'depth': candidate.depth
-                },
-                metadata=candidate.metadata
-            )
-            search_results_list.append(result)
-        
-        retrieval = taxonomy_output.retrieval_result
-        return HybridSearchResults(
-            results=search_results_list,
-            bm25_count=getattr(retrieval, 'bm25_count', 0),
-            embedding_count=getattr(retrieval, 'dense_count', 0),
-            final_count=len(search_results_list),
-            fusion_method="taxonomy_rrf_learner_filtered"
-        )
-       
-    def _update_conversation_state(self, conversation_id: str, taxonomy_output: TaxonomyPipelineOutput):
-        """Mise à jour de l'état de conversation (FIX: status handling)"""
-
-        # ✅ FIX: Gérer ValidationStatus enum ET string
-        from context_weaver.taxonomy.taxonomy_models import ValidationStatus
-
-        if isinstance(taxonomy_output.status, ValidationStatus):
-            status_str = taxonomy_output.status.value
-        elif isinstance(taxonomy_output.status, str):
-            status_str = taxonomy_output.status
-        else:
-            logger.warning(f"⚠️ Unknown status type: {type(taxonomy_output.status)}")
+        if not taxonomy_output.top_candidate:
+            logger.warning("⚠️  No results found")
             return
-
-        if status_str == 'PASS' and taxonomy_output.validated_taxon_id:
-            logger.info(f"💾 Updating conversation state...")
-            if conversation_id not in self.conversation_states:
-                self.conversation_states[conversation_id] = ConversationState(conversation_id=conversation_id)
-
-            state = self.conversation_states[conversation_id]
-
-            # ✅ FIX: confirmed_taxons est une list → append + check duplicate
-            if taxonomy_output.validated_taxon_id not in state.confirmed_taxons:
-                state.confirmed_taxons.append(taxonomy_output.validated_taxon_id)
-                logger.info(f"   ✔ Added confirmed taxon: {taxonomy_output.validated_taxon_id}")
-            else:
-                logger.info(f"   ℹ️ Taxon {taxonomy_output.validated_taxon_id} already confirmed")
-    
-    
-    def _log_final_summary(self, output: PipelineOutput, total_time: float):
-        """Log le résumé final"""
         
-        logger.info("\n" + "=" * 80)
-        logger.info("🎯 PIPELINE EXECUTION SUMMARY (Learner Filtrage)")
-        logger.info("=" * 80)
-        logger.info(f"⏱️  Total execution time: {total_time:.2f}ms")
-        logger.info(f"📊 Classification: {output.classification.domain} / {output.classification.task}")
-        logger.info(f"🔍 Search results: {output.search_results.final_count} items (filtrés)")
-        logger.info(f"🔗 Fusion method: {output.search_results.fusion_method}")
+        top_score = taxonomy_output.top_candidate.final_score
+        top_name = taxonomy_output.top_candidate.name
         
-        # Log top 3 filtrés
-        if output.search_results.results:
-            logger.info("\n🏆 Top 3 filtrés:")
-            for i, result in enumerate(output.search_results.results[:3], 1):
-                logger.info(f"   {i}. {result.name} (score: {result.score:.4f})")
-                if 'graph_validation' in result.metadata:
-                    val = result.metadata['graph_validation']
-                    logger.info(f"      • Validation: {val['category']} (learner score: {val['score']:.3f})")
+        # Seuils adaptés à RRF
+        HIGH_CONFIDENCE = 0.20
+        MEDIUM_CONFIDENCE = 0.15
+        LOW_CONFIDENCE = 0.10
         
-        logger.info("=" * 80 + "\n")
-    
-    
-    # ========================================================================
-    # HELPERS (conservés, pas de redondance)
-    # ========================================================================
-    
-    def _needs_init(self, dgraph, oss) -> bool:
-        return dgraph is None or oss is None
-    
-    def _auto_init(self, dgraph_url: str, project_name: Optional[str]):
-        logger.info("   🔄 Auto-initializing components...")
+        logger.info(f"\n📊 RELEVANCE ANALYSIS:")
+        logger.info(f"   Query: '{enhanced_query[:60]}...'")
+        logger.info(f"   Top result: '{top_name}' (score: {top_score:.3f})")
         
-        try:
-            logger.debug("   • Creating OSS client...")
-            self.oss_client = OSSClassifierClient()
-            
-            try:
-                logger.debug("   • Connecting to Dgraph...")
-                from utils.dataset_dgraph_connector import TaxonomyDgraphConnector
-                self.dgraph = TaxonomyDgraphConnector()
-                logger.debug("   ✓ Dgraph connected")
-            except Exception as e:
-                logger.warning(f"   ⚠️ Dgraph unavailable: {e}")
-                self.dgraph = None
-            
-            logger.debug("   • Initializing vector store...")
-            self.vector_store = VectorStore()
-            self.vector_store.initialize()
-            
-            self.project_name = project_name or "default_project"
-            
-        except Exception as e:
-            logger.error(f"   ❌ Auto-init error: {e}")
-            raise
+        if top_score >= HIGH_CONFIDENCE:
+            logger.info(f"   ✅ HIGH confidence - Excellent match!")
+        elif top_score >= MEDIUM_CONFIDENCE:
+            logger.info(f"   ✅ MEDIUM confidence - Good match")
+        elif top_score >= LOW_CONFIDENCE:
+            logger.warning(f"   ⚠️  LOW confidence - Partial match")
+        else:
+            logger.error(f"   ❌ VERY LOW confidence - Poor match")
+        
+        # Top 5 pour comparaison
+        if len(taxonomy_output.all_candidates) > 1:
+            logger.info(f"\n   Top 5 scores:")
+            for i, c in enumerate(taxonomy_output.all_candidates[:5], 1):
+                logger.info(f"      {i}. {c.name}: {c.final_score:.3f}")
     
-    def _init_services(self):
-        # Plus de ContextWeaver
-        logger.debug("   ✓ Services initialized (sans ContextWeaver)")
-    
-    def _normalize(self, classification: OSSClassification) -> NormalizedVariables:
-        mapping = {v: v for v in classification.variables}
-        return NormalizedVariables(
-            variables=mapping,
-            domain_taxonomy=classification.variables
-        )
-    
-    def _build_taxonomy_metadata(self) -> Dict[str, Any]:
-        return {}
     
     def _build_search_results_from_taxonomy(
         self,
         taxonomy_output: TaxonomyPipelineOutput
     ) -> HybridSearchResults:
-        """✅ Construit HybridSearchResults depuis TaxonomyPipelineOutput (fallback)"""
+        """Construit HybridSearchResults depuis TaxonomyPipelineOutput"""
         
-        if not taxonomy_output.retrieval_result:
+        if not taxonomy_output.all_candidates:
             return HybridSearchResults(
                 results=[],
                 bm25_count=0,
                 embedding_count=0,
                 final_count=0,
-                fusion_method="taxonomy"
+                fusion_method="direct_rrf_reranked"
             )
         
-        retrieval = taxonomy_output.retrieval_result
         results = []
         
-        for candidate in retrieval.candidates[:10]:
+        for candidate in taxonomy_output.all_candidates:
             result = SearchResult(
                 id=candidate.taxon_id,
                 name=candidate.name,
                 domain=candidate.metadata.get('domain', ''),
                 type="taxon",
                 score=candidate.final_score,
-                method="taxonomy_rrf",
+                method="direct_rrf_reranked",
                 content={
                     'definition': candidate.definition,
                     'breadcrumb': candidate.breadcrumb,
@@ -617,13 +471,109 @@ class ContextWeaverPipeline:
             )
             results.append(result)
         
+        retrieval_stats = taxonomy_output.retrieval_stats
+        
         return HybridSearchResults(
             results=results,
-            bm25_count=retrieval.bm25_count,
-            embedding_count=retrieval.dense_count,
+            bm25_count=retrieval_stats.get('bm25_count', 0),
+            embedding_count=retrieval_stats.get('dense_count', 0),
             final_count=len(results),
-            fusion_method="taxonomy_rrf"
+            fusion_method="direct_rrf_reranked"
         )
+    
+    
+    def _log_final_summary(self, output: PipelineOutput, total_time: float):
+        """Log le résumé final"""
+        
+        logger.info("\n" + "=" * 80)
+        logger.info("🎯 PIPELINE EXECUTION SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"⏱️  Total execution time: {total_time:.2f}ms")
+        logger.info(f"🔍 Search method: Smart Extraction V2")
+        logger.info(f"🎯 Query strategy: {output.metadata.get('query_strategy', 'unknown')}")
+        logger.info(f"📊 Results: {output.search_results.final_count} items")
+        
+        # Info sur les paramètres extraits
+        params_count = output.metadata.get('params_count', 0)
+        if params_count > 0:
+            logger.info(f"🎯 Paramètres extraits: {params_count}")
+            extracted = output.metadata.get('extracted_params', {})
+            if extracted:
+                logger.info(f"   • Catégories: {', '.join(extracted.keys())}")
+        
+        filter_applied = output.metadata.get('filter_applied', False)
+        if filter_applied:
+            filtered_domain = output.metadata.get('filtered_domain')
+            logger.info(f"🔒 Domain filter: {filtered_domain}")
+        else:
+            logger.info(f"🔓 Domain filter: DISABLED")
+        
+        # Log top 5
+        if output.search_results.results:
+            logger.info("\n🏆 Top 5 results:")
+            for i, result in enumerate(output.search_results.results[:5], 1):
+                logger.info(f"   {i}. {result.name}")
+                logger.info(f"      • Score: {result.score:.4f}")
+                logger.info(f"      • Domain: {result.domain}")
+                
+                if result.content.get('breadcrumb'):
+                    breadcrumb = result.content['breadcrumb']
+                    levels = breadcrumb.split(' > ')
+                    if len(levels) > 3:
+                        short = ' > '.join(levels[-3:])
+                        logger.info(f"      • Path: ...{short}")
+        
+        logger.info("\n💡 Tip:")
+        logger.info("   Focus on relative ranking, not absolute scores!")
+        logger.info("=" * 80 + "\n")
+    
+    
+    # ========================================================================
+    # HELPERS
+    # ========================================================================
+    
+    def _needs_init(self, dgraph, oss) -> bool:
+        return dgraph is None or oss is None
+    
+    def _auto_init(self, dgraph_url: str, project_name: Optional[str]):
+        """Auto-initialise les composants manquants"""
+        logger.info("   🔄 Auto-initializing components...")
+
+        try:
+            # ✅ OSS CLIENT (seulement si pas déjà fourni)
+            if not self.oss_client:
+                logger.debug("   • Creating OSS client...")
+                self.oss_client = OSSClassifierClient()
+            else:
+                logger.debug("   • Using provided OSS client")
+
+            # ✅ DGRAPH (seulement si pas déjà fourni)
+            if not self.dgraph:
+                try:
+                    logger.debug("   • Connecting to Dgraph...")
+                    from utils.dataset_dgraph_connector import TaxonomyDgraphConnector
+                    self.dgraph = TaxonomyDgraphConnector()
+                    logger.debug("   ✓ Dgraph connected")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Dgraph unavailable: {e}")
+                    self.dgraph = None
+            else:
+                logger.debug("   • Using provided Dgraph connector")
+
+            # ✅ VECTOR STORE (seulement si pas déjà fourni)
+            if not self.vector_store:
+                logger.debug("   • Initializing vector store...")
+                self.vector_store = VectorStore()
+                self.vector_store.initialize()
+                logger.debug("   ✓ VectorStore initialized")
+            else:
+                logger.debug("   • Using provided VectorStore")
+
+            self.project_name = project_name or "default_project"
+
+        except Exception as e:
+            logger.error(f"   ❌ Auto-init error: {e}")
+            raise
     
     def close(self):
         """Ferme proprement les ressources"""
@@ -639,14 +589,94 @@ class ContextWeaverPipeline:
             logger.warning(f"⚠️ Close warning: {e}")
 
 
+# ============================================================================
+# FACTORY FUNCTIONS
+# ============================================================================
+
 def create_pipeline(
     project_name: str = None,
     dgraph_url: str = "localhost:9080",
-    enable_taxonomy_validation: bool = True
+    vector_store=None,  # ✅ AJOUT DU PARAMÈTRE
+    oss_client=None,    # ✅ AJOUT DU PARAMÈTRE
+    dgraph_connector=None,  # ✅ AJOUT DU PARAMÈTRE
+    use_domain_filter: bool = True,
+    default_domain: str = "Macompta.fr",
+    query_strategy: str = "full_prompt"
 ) -> ContextWeaverPipeline:
-    """Factory function pour créer un pipeline"""
+    """
+    Factory pour créer un pipeline corrigé
+    
+    Args:
+        project_name: Nom du projet
+        dgraph_url: URL Dgraph
+        vector_store: VectorStore pré-initialisé (optionnel)
+        oss_client: Client OSS pré-initialisé (optionnel)
+        dgraph_connector: Connecteur Dgraph pré-initialisé (optionnel)
+        use_domain_filter: Activer le filtre domain
+        default_domain: Domain par défaut
+        query_strategy: Stratégie de query
+            - "full_prompt": Garde le prompt complet (défaut)
+            - "with_boost": Ajoute les mots-clés comme boost
+    """
     return ContextWeaverPipeline(
         project_name=project_name,
         dgraph_url=dgraph_url,
-        enable_taxonomy_validation=enable_taxonomy_validation
+        dgraph_connector=dgraph_connector,  # ✅ PASSER AU PIPELINE
+        vector_store=vector_store,          # ✅ PASSER AU PIPELINE
+        oss_client=oss_client,              # ✅ PASSER AU PIPELINE
+        auto_init=(vector_store is None),   # ✅ AUTO-INIT SEULEMENT SI PAS FOURNI
+        use_domain_filter=use_domain_filter,
+        default_domain=default_domain,
+        query_strategy=query_strategy
     )
+
+
+# ============================================================================
+# EXEMPLE D'UTILISATION
+# ============================================================================
+
+if __name__ == "__main__":
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    
+    print("\n" + "=" * 80)
+    print("EXEMPLE: Pipeline CORRIGÉ")
+    print("=" * 80)
+    print("""
+✅ CORRECTIONS APPLIQUÉES:
+1. Utilise le prompt COMPLET (pas de patterns restrictifs)
+2. Extraction de paramètres optionnelle (pour contexte seulement)
+3. Logging détaillé pour debug
+4. Vérification que la query n'est jamais vide
+
+# UTILISATION:
+
+from context_weaver.pipeline.main_pipeline import create_pipeline
+
+# Option 1: Prompt complet (recommandé)
+pipeline = create_pipeline(
+    query_strategy="full_prompt",  # Défaut
+    use_domain_filter=True
+)
+
+# Option 2: Avec boost contextuel
+pipeline = create_pipeline(
+    query_strategy="with_boost",
+    use_domain_filter=True
+)
+
+# Test
+result = pipeline.run(
+    user_context="Comment configurer mon plan comptable pour une petite entreprise ?",
+    top_k=10
+)
+
+# Voir les résultats
+for i, taxon in enumerate(result.search_results.results[:5], 1):
+    print(f"{i}. {taxon.name} (score: {taxon.score:.3f})")
+
+pipeline.close()
+""")

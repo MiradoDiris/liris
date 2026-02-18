@@ -4,7 +4,7 @@
 Script pour analyser les domaines présents dans les métadonnées
 """
 
-from context_weaver.data.vector_store import VectorStore
+from context_weaver.data.vector_store_chroma import VectorStore
 
 def check_domains():
     print("=" * 80)

@@ -5,6 +5,7 @@ VectorStore - VERSION COMPLÈTE avec BM25 optionnel
 ✅ Retourne (distances, metadata_list)
 ✅ Support BM25 via rank_bm25
 ✅ Gestion robuste des types
+✅ Méthode get_document_count() ajoutée
 """
 
 import faiss
@@ -82,6 +83,18 @@ class VectorStore:
             logger.info("ℹ️ rank-bm25 non installé (BM25 désactivé)")
         except Exception as e:
             logger.warning(f"⚠️ Erreur chargement BM25: {e}")
+    
+    
+    def get_document_count(self) -> int:
+        """
+        ✅ NOUVEAU: Retourne le nombre de documents dans le VectorStore
+        
+        Returns:
+            int: Nombre de vecteurs/documents
+        """
+        if self.index is None:
+            return 0
+        return self.index.ntotal
     
     
     def search(

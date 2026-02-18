@@ -1,9 +1,6 @@
-import logging
+from typing import Dict, List, Any
 from PyQt5.QtWidgets import QMessageBox
-import traceback
-
-from ui.localization.translator import tr
-
+from utils.dataset_dgraph_manager import DgraphDatasetManager
 from utils.logger import logger
 
 
@@ -12,6 +9,7 @@ class DatasetProjectManager:
     def __init__(self, database):
         self.database = database
         self.db = database
+        self.dgraph_manager = DgraphDatasetManager
         self.current_project_name = None
         self.current_project_data = None
         
@@ -105,7 +103,264 @@ class DatasetProjectManager:
             logger.error(f"❌ PROJECT_MANAGER: Échec de la sauvegarde pour '{project_name}'")
         
         return success
+    
+    def sync_project_to_dgraph(self, create_if_missing=True) -> bool:
+        if not self.dgraph_manager:
+            logger.warning("⚠️ Dgraph non configuré")
+            return False
 
+        if not self.current_project_data:
+            logger.error("❌ Aucun projet chargé")
+            return False
+
+        try:
+            logger.info(f"🔄 Début sync '{self.current_project_name}' → Dgraph")
+
+            # 1️⃣ Vérifier si le projet existe dans Dgraph
+            dgraph_project = self.dgraph_manager.get_project_by_name(self.current_project_name)
+
+            if not dgraph_project and create_if_missing:
+                # Créer le projet dans Dgraph
+                project_uid = self.dgraph_manager.create_project(
+                    self.current_project_name,
+                    self.current_project_data.get('description', '')
+                )
+
+                if not project_uid:
+                    logger.error("❌ Échec création projet Dgraph")
+                    return False
+
+                logger.info(f"✅ Projet créé dans Dgraph: {project_uid}")
+
+            elif not dgraph_project:
+                logger.error("❌ Projet n'existe pas dans Dgraph")
+                return False
+
+            # 2️⃣ Synchroniser la structure hiérarchique
+            success = self._sync_hierarchy_to_dgraph()
+
+            # 3️⃣ Synchroniser les prérequis
+            if success:
+                prereq_stats = self.dgraph_manager.sync_all_prerequisites_from_sqlite_to_dgraph(
+                    self.current_project_name
+                )
+                logger.info(f"📊 Prérequis synchronisés: {prereq_stats}")
+
+            logger.info(f"✅ Synchronisation terminée")
+            return success
+
+        except Exception as e:
+            logger.error(f"❌ Erreur sync vers Dgraph: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+        
+    def sync_project_from_dgraph(self) -> bool:
+        if not self.dgraph_manager:
+            logger.warning("⚠️ Dgraph non configuré")
+            return False
+
+        if not self.current_project_name:
+            logger.error("❌ Aucun projet actuel")
+            return False
+
+        try:
+            logger.info(f"🔄 Début sync Dgraph → '{self.current_project_name}'")
+
+            # 1️⃣ Récupérer le projet depuis Dgraph
+            dgraph_project = self.dgraph_manager.get_project_by_name(self.current_project_name)
+
+            if not dgraph_project:
+                logger.error(f"❌ Projet '{self.current_project_name}' non trouvé dans Dgraph")
+                return False
+
+            # 2️⃣ Convertir la structure Dgraph en structure SQLite
+            self.current_project_data = self._convert_dgraph_to_sqlite_structure(dgraph_project)
+
+            # 3️⃣ Sauvegarder dans SQLite
+            success = self.save_project()
+
+            # 4️⃣ Synchroniser les prérequis
+            if success:
+                prereq_stats = self.dgraph_manager.sync_all_prerequisites_from_dgraph_to_sqlite(
+                    self.current_project_name
+                )
+                logger.info(f"📊 Prérequis synchronisés: {prereq_stats}")
+
+            logger.info(f"✅ Synchronisation depuis Dgraph terminée")
+            return success
+
+        except Exception as e:
+            logger.error(f"❌ Erreur sync depuis Dgraph: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+        
+    def verify_sync_status(self) -> Dict[str, Any]:
+        if not self.dgraph_manager:
+            return {'status': 'error', 'message': 'Dgraph non configuré'}
+
+        if not self.current_project_name:
+            return {'status': 'error', 'message': 'Aucun projet actuel'}
+
+        try:
+            report = self.dgraph_manager.verify_sync_integrity(self.current_project_name)
+
+            # Ajouter des statistiques SQLite
+            sqlite_stats = self.database.get_sync_statistics()
+            report['sqlite_stats'] = sqlite_stats
+
+            logger.info(f"📊 Vérification sync: {report['status']}")
+            return report
+
+        except Exception as e:
+            logger.error(f"❌ Erreur vérification: {e}")
+            return {'status': 'error', 'message': str(e)}
+        
+    def add_prerequisite_to_label(self, level: str, source_name: str,
+                              target_names: List[str], mandatory: bool = True,
+                              explanation: str = "") -> bool:
+        if not self.dgraph_manager:
+            logger.warning("⚠️ Dgraph non configuré, prérequis SQLite seulement")
+            return self._add_prerequisite_sqlite_only(level, source_name, target_names, mandatory, explanation)
+        
+        try:
+            # 1️⃣ Récupérer les UIDs Dgraph
+            source_uid = self._get_dgraph_uid_for_label(level, source_name)
+            if not source_uid:
+                logger.error(f"❌ UID source non trouvé pour '{source_name}'")
+                return False
+            
+            target_uids = []
+            for target_name in target_names:
+                target_uid = self._get_dgraph_uid_for_label(level, target_name)
+                if target_uid:
+                    target_uids.append(target_uid)
+                else:
+                    logger.warning(f"⚠️ UID cible non trouvé pour '{target_name}'")
+            
+            if not target_uids:
+                logger.error("❌ Aucun UID cible trouvé")
+                return False
+            
+            # 2️⃣ Récupérer les IDs SQLite
+            source_id = self._get_sqlite_id_for_label(level, source_name)
+            target_ids = [self._get_sqlite_id_for_label(level, name) for name in target_names]
+            
+            # 3️⃣ Créer les prérequis avec sync automatique
+            success = self.dgraph_manager.create_prerequisites_with_sync(
+                source_uid=source_uid,
+                target_uids=target_uids,
+                mandatory=mandatory,
+                explanation=explanation,
+                source_type=level,
+                source_id=source_id,
+                target_type=level,
+                target_ids=target_ids
+            )
+            
+            if success:
+                logger.info(f"✅ Prérequis ajouté: {source_name} → {target_names}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur ajout prérequis: {e}")
+            return False
+    
+    
+    def remove_prerequisite_from_label(self, level: str, source_name: str,
+                                       target_name: str) -> bool:
+        """
+        ✅ NOUVEAU: Supprime un prérequis (synchronisé SQLite + Dgraph)
+        
+        Args:
+            level: 'root', 'parent', ou 'child'
+            source_name: Nom du label source
+            target_name: Nom du label cible
+        
+        Returns:
+            True si succès
+        """
+        if not self.dgraph_manager:
+            logger.warning("⚠️ Dgraph non configuré")
+            return False
+        
+        try:
+            # Récupérer les UIDs et IDs
+            source_uid = self._get_dgraph_uid_for_label(level, source_name)
+            target_uid = self._get_dgraph_uid_for_label(level, target_name)
+            
+            source_id = self._get_sqlite_id_for_label(level, source_name)
+            target_id = self._get_sqlite_id_for_label(level, target_name)
+            
+            if not all([source_uid, target_uid, source_id, target_id]):
+                logger.error("❌ UIDs/IDs manquants")
+                return False
+            
+            # Supprimer avec sync
+            success = self.dgraph_manager.remove_prerequisite_with_sync(
+                source_uid, target_uid,
+                level, source_id,
+                level, target_id
+            )
+            
+            # Suppression SQLite explicite
+            if success and self.database:
+                self.database.delete_single_prerequisite(level, source_id, level, target_id)
+            
+            if success:
+                logger.info(f"✅ Prérequis supprimé: {source_name} -/-> {target_name}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur suppression prérequis: {e}")
+            return False
+    
+    
+    def get_prerequisites_for_label(self, level: str, label_name: str) -> List[Dict]:
+        """
+        ✅ NOUVEAU: Récupère les prérequis d'un label
+        
+        Args:
+            level: 'root', 'parent', ou 'child'
+            label_name: Nom du label
+        
+        Returns:
+            Liste des prérequis
+        """
+        if not self.dgraph_manager:
+            # Fallback SQLite
+            label_id = self._get_sqlite_id_for_label(level, label_name)
+            if label_id:
+                return self.database.get_prerequisites(level, label_id)
+            return []
+        
+        try:
+            # Récupérer depuis Dgraph
+            label_uid = self._get_dgraph_uid_for_label(level, label_name)
+            if not label_uid:
+                return []
+            
+            prereqs = self.dgraph_manager.get_node_prerequisites(label_uid)
+            
+            # Enrichir avec les noms
+            enriched = []
+            for prereq in prereqs:
+                enriched.append({
+                    'uid': prereq.get('uid'),
+                    'name': prereq.get('name'),
+                    'type': prereq.get('dgraph.type'),
+                    'mandatory': prereq.get('prerequisite|mandatory', True)
+                })
+            
+            return enriched
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération prérequis: {e}")
+            return []
+    
     def delete_project(self, project_name):
         """Supprime un projet"""
         success = self.database.delete_dataset_projet(project_name)

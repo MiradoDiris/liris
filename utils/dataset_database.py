@@ -1,3 +1,4 @@
+from ast import List
 import json
 import logging
 import os
@@ -5,6 +6,7 @@ import sqlite3
 from datetime import datetime
 import sys
 import traceback
+from typing import List, Dict, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,8 @@ class DatasetDatabase:
     
     Structure hiérarchique supportée:
     Project → Typologies → Taxonomy Clusters → Root Labels → Parent Labels → Children (infini)
+    
+    ✅ AJOUT: Support des informations Dgraph (configuration, UIDs, prérequis)
     """
 
     def __init__(self, db_path="data/liris.db"):
@@ -243,34 +247,6 @@ class DatasetDatabase:
             logger.warning(f"⚠️  Impossible de créer un backup: {e}")
 
     def _drop_all_tables(self):
-        """Supprime toutes les tables"""
-        try:
-            cursor = self.connection.cursor()
-            
-            tables = [
-                'child_labels',
-                'parent_labels',
-                'root_labels',
-                'taxonomy_clusters',
-                'typologies',
-                'batches',
-                'projects',
-                'platforms'
-            ]
-            
-            for table in tables:
-                try:
-                    cursor.execute(f"DROP TABLE IF EXISTS {table}")
-                except:
-                    pass
-                
-            self.connection.commit()
-            logger.info("✅ Toutes les tables supprimées")
-            
-        except Exception as e:
-            logger.error(f"Erreur suppression: {e}")
-
-    def _drop_all_tables(self):
         """Supprime toutes les tables avec logging détaillé"""
         try:
             cursor = self.connection.cursor()
@@ -283,7 +259,10 @@ class DatasetDatabase:
                 'typologies',
                 'batches',
                 'projects',
-                'platforms'
+                'platforms',
+                'dgraph_config',
+                'dgraph_uids',
+                'dgraph_prerequisites'
             ]
             
             dropped_count = 0
@@ -455,6 +434,53 @@ class DatasetDatabase:
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
                 )
             ''')
+
+            # ============================================
+            # ✅ NOUVELLES TABLES POUR DGRAPH
+            # ============================================
+
+            # Table de configuration Dgraph globale
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS dgraph_config (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    grpc_host TEXT DEFAULT 'localhost',
+                    grpc_port INTEGER DEFAULT 9082,
+                    http_port INTEGER DEFAULT 8082,
+                    ratel_port INTEGER DEFAULT 8092,
+                    is_enabled BOOLEAN DEFAULT 0,
+                    last_connection_test TIMESTAMP,
+                    connection_status TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Table pour stocker les UIDs Dgraph de tous les éléments
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS dgraph_uids (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity_type TEXT NOT NULL,
+                    entity_id INTEGER NOT NULL,
+                    dgraph_uid TEXT NOT NULL,
+                    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(entity_type, entity_id)
+                )
+            ''')
+
+            # Table pour les relations de prérequis
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS dgraph_prerequisites (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_type TEXT NOT NULL,
+                    source_id INTEGER NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id INTEGER NOT NULL,
+                    is_mandatory BOOLEAN DEFAULT 1,
+                    explanation TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source_type, source_id, target_type, target_id)
+                )
+            ''')
             
             # Index pour optimiser les requêtes
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_batches_project ON batches(project_id)')
@@ -472,12 +498,203 @@ class DatasetDatabase:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_child_parent_child ON child_labels(parent_child_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_child_depth ON child_labels(depth)')
 
+            # ✅ Index pour les tables Dgraph
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_dgraph_uids_entity ON dgraph_uids(entity_type, entity_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_dgraph_uids_uid ON dgraph_uids(dgraph_uid)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_prerequisites_source ON dgraph_prerequisites(source_type, source_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_prerequisites_target ON dgraph_prerequisites(target_type, target_id)')
+
             self.connection.commit()
-            logger.info("Tables créées avec succès")
+            logger.info("✅ Tables créées avec succès (incluant tables Dgraph)")
 
         except Exception as e:
             logger.error(f"Erreur lors de la création des tables : {str(e)}")
             raise e
+
+    # ============================================
+    # ✅ NOUVELLES MÉTHODES POUR DGRAPH
+    # ============================================
+
+    def save_dgraph_config(self, config):
+        """Sauvegarde la configuration Dgraph"""
+        try:
+            cursor = self.connection.cursor()
+            
+            cursor.execute("""
+                INSERT INTO dgraph_config (grpc_host, grpc_port, http_port, ratel_port, is_enabled)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    grpc_host = excluded.grpc_host,
+                    grpc_port = excluded.grpc_port,
+                    http_port = excluded.http_port,
+                    ratel_port = excluded.ratel_port,
+                    is_enabled = excluded.is_enabled,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (
+                config.get('grpc_host', 'localhost'),
+                config.get('grpc_port', 9082),
+                config.get('http_port', 8082),
+                config.get('ratel_port', 8092),
+                config.get('is_enabled', 0)
+            ))
+            
+            self.connection.commit()
+            logger.info("✅ Configuration Dgraph sauvegardée")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur sauvegarde config Dgraph: {e}")
+            return False
+
+    def get_dgraph_config(self):
+        """Récupère la configuration Dgraph"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT * FROM dgraph_config ORDER BY id DESC LIMIT 1")
+            row = cursor.fetchone()
+            
+            if row:
+                return {
+                    'grpc_host': row['grpc_host'],
+                    'grpc_port': row['grpc_port'],
+                    'http_port': row['http_port'],
+                    'ratel_port': row['ratel_port'],
+                    'is_enabled': bool(row['is_enabled']),
+                    'connection_status': row['connection_status']
+                }
+            
+            # Configuration par défaut
+            return {
+                'grpc_host': 'localhost',
+                'grpc_port': 9082,
+                'http_port': 8082,
+                'ratel_port': 8092,
+                'is_enabled': False,
+                'connection_status': None
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération config Dgraph: {e}")
+            return None
+
+    def save_dgraph_uid(self, entity_type, entity_id, dgraph_uid):
+        """
+        Sauvegarde l'UID Dgraph d'une entité
+        
+        Args:
+            entity_type: 'project', 'typologie', 'cluster', 'root', 'parent', 'child'
+            entity_id: ID SQLite de l'entité
+            dgraph_uid: UID Dgraph de l'entité
+        """
+        try:
+            cursor = self.connection.cursor()
+            
+            cursor.execute("""
+                INSERT INTO dgraph_uids (entity_type, entity_id, dgraph_uid)
+                VALUES (?, ?, ?)
+                ON CONFLICT(entity_type, entity_id) DO UPDATE SET
+                    dgraph_uid = excluded.dgraph_uid,
+                    synced_at = CURRENT_TIMESTAMP
+            """, (entity_type, entity_id, dgraph_uid))
+            
+            self.connection.commit()
+            logger.debug(f"✅ UID Dgraph sauvegardé: {entity_type}#{entity_id} → {dgraph_uid}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur sauvegarde UID Dgraph: {e}")
+            return False
+
+    def get_dgraph_uid(self, entity_type, entity_id):
+        """Récupère l'UID Dgraph d'une entité"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT dgraph_uid FROM dgraph_uids 
+                WHERE entity_type = ? AND entity_id = ?
+            """, (entity_type, entity_id))
+            
+            row = cursor.fetchone()
+            return row['dgraph_uid'] if row else None
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération UID Dgraph: {e}")
+            return None
+
+    def save_prerequisite(self, source_type, source_id, target_type, target_id, 
+                         is_mandatory=True, explanation=""):
+        """
+        Sauvegarde une relation de prérequis
+        
+        Args:
+            source_type: Type de l'entité source
+            source_id: ID SQLite de l'entité source
+            target_type: Type de l'entité cible
+            target_id: ID SQLite de l'entité cible
+            is_mandatory: Si le prérequis est obligatoire
+            explanation: Explication du prérequis
+        """
+        try:
+            cursor = self.connection.cursor()
+            
+            cursor.execute("""
+                INSERT INTO dgraph_prerequisites 
+                (source_type, source_id, target_type, target_id, is_mandatory, explanation)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_type, source_id, target_type, target_id) DO UPDATE SET
+                    is_mandatory = excluded.is_mandatory,
+                    explanation = excluded.explanation
+            """, (source_type, source_id, target_type, target_id, is_mandatory, explanation))
+            
+            self.connection.commit()
+            logger.debug(f"✅ Prérequis sauvegardé: {source_type}#{source_id} → {target_type}#{target_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur sauvegarde prérequis: {e}")
+            return False
+
+    def get_prerequisites(self, source_type, source_id):
+        """Récupère tous les prérequis d'une entité"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT * FROM dgraph_prerequisites 
+                WHERE source_type = ? AND source_id = ?
+            """, (source_type, source_id))
+            
+            rows = cursor.fetchall()
+            return [{
+                'target_type': row['target_type'],
+                'target_id': row['target_id'],
+                'is_mandatory': bool(row['is_mandatory']),
+                'explanation': row['explanation']
+            } for row in rows]
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération prérequis: {e}")
+            return []
+
+    def delete_prerequisites(self, source_type, source_id):
+        """Supprime tous les prérequis d'une entité"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                DELETE FROM dgraph_prerequisites 
+                WHERE source_type = ? AND source_id = ?
+            """, (source_type, source_id))
+            
+            self.connection.commit()
+            logger.debug(f"✅ Prérequis supprimés pour {source_type}#{source_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur suppression prérequis: {e}")
+            return False
+
+    # ============================================
+    # MÉTHODES EXISTANTES (non modifiées)
+    # ============================================
         
     def save_batch(self, project_name, batch_number, total_batches, batch_data):
         """Sauvegarde un batch de données"""
@@ -598,7 +815,7 @@ class DatasetDatabase:
                 metadata.get('num_batches_to_process', 1),
                 metadata.get('total_samples_all_batches', 0),
                 metadata.get('total_samples_per_batch', 0),
-                len(generation_config.get('combinations', [])),
+                metadata.get('total_combinations', 0),
                 metadata.get('output_format', 'JSON'),
                 master.get('name'),
                 prompts.get('global_context'),
@@ -607,18 +824,15 @@ class DatasetDatabase:
                 metadata_json
             ))
 
-            self.connection.commit()
             generation_id = cursor.lastrowid
+            self.connection.commit()
 
-            logger.info(f"✅ Génération #{generation_id} enregistrée pour '{project_name}'")
-            logger.info(f"   • Batch: {metadata.get('batch_number')}")
-            logger.info(f"   • Samples: {metadata.get('total_samples_all_batches', 0)}")
-            logger.info(f"   • Combinaisons: {len(generation_config.get('combinations', []))}")
-
+            logger.info(f"✅ Génération #{generation_id} démarrée pour '{project_name}'")
             return generation_id
 
         except Exception as e:
-            logger.error(f"❌ Erreur lors de l'enregistrement du démarrage: {str(e)}")
+            logger.error(f"❌ Erreur save_generation_start: {e}")
+            import traceback
             logger.error(traceback.format_exc())
             return None
         
@@ -943,35 +1157,6 @@ class DatasetDatabase:
             logger.error(f"Erreur lors de la récupération: {str(e)}")
             return None
         
-    def get_all_batches(self, project_name):
-        """Récupère tous les batches d'un projet"""
-        try:
-            cursor = self.connection.cursor()
-            cursor.execute("""
-                SELECT b.* FROM batches b
-                JOIN projects p ON b.project_id = p.id
-                WHERE p.name = ?
-                ORDER BY b.batch_number
-            """, (project_name,))
-
-            batches = []
-            for row in cursor.fetchall():
-                batches.append({
-                    'id': row['id'],
-                    'batch_number': row['batch_number'],
-                    'total_batches': row['total_batches'],
-                    'status': row['status'],
-                    'data': json.loads(row['data']),
-                    'created_at': row['created_at'],
-                    'processed_at': row['processed_at']
-                })
-
-            return batches
-
-        except Exception as e:
-            logger.error(f"Erreur lors de la récupération des batches: {str(e)}")
-            return []
-        
     def update_generation_output_path(self, generation_id, output_file_path):
         """
         Met à jour uniquement le chemin du fichier de sortie
@@ -1030,7 +1215,7 @@ class DatasetDatabase:
         except Exception as e:
             logger.error(f"Erreur lors de la suppression du batch: {str(e)}")
             return False
-        
+
     def delete_all_batches(self, project_name):
         """Supprime tous les batches d'un projet (définitif et irréversible)"""
         try:
@@ -1054,6 +1239,75 @@ class DatasetDatabase:
         except Exception as e:
             logger.error(f"Erreur lors de la suppression définitive des batches: {str(e)}")
             return False
+
+    def get_generations_history(self, project_name=None, limit=50):
+        """Récupère l'historique des générations"""
+        try:
+            cursor = self.connection.cursor()
+
+            if project_name:
+                query = """
+                    SELECT * FROM dataset_generations 
+                    WHERE project_name = ?
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                """
+                cursor.execute(query, (project_name, limit))
+            else:
+                query = """
+                    SELECT * FROM dataset_generations 
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                """
+                cursor.execute(query, (limit,))
+
+            rows = cursor.fetchall()
+
+            generations = []
+            for row in rows:
+                gen = dict(row)
+                # Désérialiser metadata si présent
+                if gen.get('metadata'):
+                    try:
+                        gen['metadata'] = json.loads(gen['metadata'])
+                    except:
+                        gen['metadata'] = {}
+                generations.append(gen)
+
+            return generations
+
+        except Exception as e:
+            logger.error(f"❌ Erreur get_generations_history: {e}")
+            return []
+
+    def get_all_batches(self, project_name):
+        """Récupère tous les batches d'un projet"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT b.* FROM batches b
+                JOIN projects p ON b.project_id = p.id
+                WHERE p.name = ?
+                ORDER BY b.batch_number
+            """, (project_name,))
+
+            batches = []
+            for row in cursor.fetchall():
+                batches.append({
+                    'id': row['id'],
+                    'batch_number': row['batch_number'],
+                    'total_batches': row['total_batches'],
+                    'status': row['status'],
+                    'data': json.loads(row['data']),
+                    'created_at': row['created_at'],
+                    'processed_at': row['processed_at']
+                })
+
+            return batches
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des batches: {str(e)}")
+            return []
     
     def get_dataset_projet(self, project_name):
         """Récupère un projet complet avec toute sa hiérarchie"""
@@ -1198,209 +1452,169 @@ class DatasetDatabase:
             children.append(child)
         
         return children
-
+    
     def save_dataset_projet(self, project_name, project_data):
         """
-        ✅ CORRECTION: Sauvegarde avec meilleure gestion d'erreur
+        Sauvegarde un projet complet avec toute sa hiérarchie
         """
+        logger.info("=" * 80)
+        logger.info("💾 SAUVEGARDE PROJET DANS LA BASE DE DONNÉES")
+        logger.info("=" * 80)
+        logger.info(f"  Projet: {project_name}")
+
         try:
             if not self.connection:
-                error_msg = "❌ DATABASE: Aucune connexion à la base de données"
-                logger.error(error_msg)
-                raise ConnectionError(error_msg)
-    
-            logger.info("╔" + "═" * 78 + "╗")
-            logger.info("║ DATABASE: save_dataset_projet()                                             ║")
-            logger.info("╠" + "═" * 78 + "╣")
-            logger.info(f"║ Projet: {project_name:<66} ║")
-            logger.info("╚" + "═" * 78 + "╝")
-    
+                logger.error("Aucune connexion à la base de données")
+                return False
+
             cursor = self.connection.cursor()
-            
+
             # Vérifier si le projet existe
-            logger.info(f"🔍 DATABASE: Vérification de l'existence du projet '{project_name}'")
             cursor.execute("SELECT id FROM projects WHERE name = ?", (project_name,))
-            existing = cursor.fetchone()
-    
-            if existing:
-                project_id = existing['id']
-                logger.info(f"🔄 DATABASE: Projet existant trouvé (ID: {project_id})")
+            existing_project = cursor.fetchone()
+
+            if existing_project:
+                project_id = existing_project['id']
+                logger.info(f"  ✅ Projet existant (ID: {project_id})")
                 
+                # Mettre à jour la description
                 cursor.execute("""
-                    UPDATE projects
-                    SET description = ?, updated_at = CURRENT_TIMESTAMP
+                    UPDATE projects 
+                    SET description = ?, updated_at = CURRENT_TIMESTAMP 
                     WHERE id = ?
                 """, (project_data.get('description', ''), project_id))
-                logger.info(f"✅ DATABASE: Projet mis à jour")
-                
-                logger.info(f"🗑️  DATABASE: Suppression de l'ancienne hiérarchie...")
+
+                # Supprimer l'ancienne hiérarchie (CASCADE supprimera tout)
+                logger.info("  🗑️  Suppression de l'ancienne hiérarchie...")
                 cursor.execute("DELETE FROM typologies WHERE project_id = ?", (project_id,))
-                deleted_count = cursor.rowcount
-                logger.info(f"✅ DATABASE: {deleted_count} typologie(s) supprimée(s) (CASCADE)")
             else:
-                logger.info(f"🆕 DATABASE: Création d'un nouveau projet")
+                # Créer un nouveau projet
+                logger.info("  ➕ Nouveau projet")
                 cursor.execute("""
-                    INSERT INTO projects (name, description)
+                    INSERT INTO projects (name, description) 
                     VALUES (?, ?)
                 """, (project_name, project_data.get('description', '')))
                 project_id = cursor.lastrowid
-                logger.info(f"✅ DATABASE: Nouveau projet créé (ID: {project_id})")
-    
+                logger.info(f"  ✅ Projet créé (ID: {project_id})")
+
             # Sauvegarder la hiérarchie complète
-            typologies = project_data.get('typologies', [])
-            logger.info(f"\n📊 DATABASE: Sauvegarde de {len(typologies)} typologie(s)")
-            
-            self._save_typologies(cursor, project_id, typologies)
-    
-            # ✅ CORRECTION: Vérifier avant de commiter
-            logger.info("\n🔍 DATABASE: Vérification pré-commit")
-            cursor.execute("SELECT COUNT(*) as count FROM typologies WHERE project_id = ?", (project_id,))
-            count_before_commit = cursor.fetchone()['count']
-            logger.info(f"  Typologies à commiter: {count_before_commit}")
-    
+            self._save_hierarchy(cursor, project_id, project_data)
+
+            # Commit final
             self.connection.commit()
-            logger.info("\n✅ DATABASE: Transaction COMMIT réussie")
-            
-            # Vérification post-sauvegarde
-            logger.info("\n🔍 DATABASE: Vérification post-sauvegarde")
-            self._verify_saved_data(cursor, project_id, project_name)
-            
-            logger.info("\n╔" + "═" * 78 + "╗")
-            logger.info(f"║ ✅ SAUVEGARDE RÉUSSIE: {project_name:<58} ║")
-            logger.info("╚" + "═" * 78 + "╝\n")
-            
+            logger.info(f"✅ Projet '{project_name}' sauvegardé avec succès")
+            logger.info("=" * 80)
             return True
-    
-        except sqlite3.Error as e:
-            error_msg = f"❌ Erreur SQLite: {e}"
-            logger.error(error_msg)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la sauvegarde: {str(e)}")
             logger.error(traceback.format_exc())
-            
             if self.connection:
                 self.connection.rollback()
-                logger.warning("⚠️  DATABASE: Transaction ROLLBACK effectué")
-            
-            # ✅ CORRECTION: Remonter l'exception pour que l'UI puisse l'afficher
-            raise RuntimeError(f"Erreur de sauvegarde: {e}")
-            
-        except Exception as e:
-            logger.error("\n╔" + "═" * 78 + "╗")
-            logger.error(f"║ ❌ ERREUR DATABASE: {str(e):<61} ║")
-            logger.error("╚" + "═" * 78 + "╝")
-            logger.error(f"\n🔥 Exception complète:\n{traceback.format_exc()}")
-            
-            if self.connection:
-                self.connection.rollback()
-                logger.warning("⚠️  DATABASE: Transaction ROLLBACK effectué")
-            
-            raise
-    
-        except Exception as e:
-            logger.error("\n╔" + "═" * 78 + "╗")
-            logger.error(f"║ ❌ ERREUR DATABASE: {str(e):<61} ║")
-            logger.error("╚" + "═" * 78 + "╝")
-            logger.error(f"\n🔥 Exception complète:\n{traceback.format_exc()}")
-            
-            if self.connection:
-                self.connection.rollback()
-                logger.warning("⚠️  DATABASE: Transaction ROLLBACK effectué")
+            logger.info("=" * 80)
             return False
 
-    def _save_typologies(self, cursor, project_id, typologies):
-        """Sauvegarde toutes les typologies avec logs détaillés"""
-        logger.info(f"\n  ┌─ Sauvegarde des typologies")
+    def _save_hierarchy(self, cursor, project_id, project_data):
+        """Sauvegarde toute la hiérarchie du projet"""
+        typologies = project_data.get('typologies', [])
+        
+        logger.info(f"  ┌─ Sauvegarde de {len(typologies)} typologie(s)")
 
-        for position, typologie in enumerate(typologies):
-            typ_name = typologie['name']
+        for typ_pos, typologie in enumerate(typologies):
+            typ_name = typologie.get('nom', typologie.get('name', f'Typologie {typ_pos+1}'))
             typ_desc = typologie.get('description', '')
 
             logger.info(f"  │")
-            logger.info(f"  ├─ [{position+1}/{len(typologies)}] Typologie: '{typ_name}'")
+            logger.info(f"  ├─ [{typ_pos+1}/{len(typologies)}] Typologie: '{typ_name}'")
 
+            # Insérer la typologie
             cursor.execute("""
                 INSERT INTO typologies (project_id, name, description, position)
                 VALUES (?, ?, ?, ?)
-            """, (project_id, typ_name, typ_desc, position))
+            """, (project_id, typ_name, typ_desc, typ_pos))
             typologie_id = cursor.lastrowid
 
-            logger.info(f"  │    ✅ Inséré (ID: {typologie_id}, pos: {position})")
+            logger.info(f"  │    ✅ Inséré (ID: {typologie_id})")
 
-            # Sauvegarder les clusters de taxonomie
-            taxonomy_clusters = typologie.get('taxonomy_clusters', [])
-            logger.info(f"  │    📊 {len(taxonomy_clusters)} cluster(s) de taxonomie")
+            # Sauvegarder les clusters
+            self._save_clusters(cursor, typologie_id, typologie, typ_pos, len(typologies))
 
-            self._save_taxonomy_clusters(cursor, typologie_id, taxonomy_clusters, position+1, len(typologies))
+    def _save_clusters(self, cursor, typologie_id, typologie, typ_pos, total_typs):
+        """Sauvegarde les clusters de taxonomie"""
+        clusters = typologie.get('taxonomy_clusters', [])
+        
+        logger.info(f"  │    ┌─ {len(clusters)} cluster(s) de taxonomie")
 
-        logger.info(f"  └─ ✅ Toutes les typologies sauvegardées\n")
-
-    def _save_taxonomy_clusters(self, cursor, typologie_id, clusters, typ_num, typ_total):
-        """Sauvegarde tous les clusters de taxonomie avec logs détaillés"""
-        for position, cluster in enumerate(clusters):
-            cluster_name = cluster['name']
+        for cluster_pos, cluster in enumerate(clusters):
+            cluster_name = cluster.get('nom', cluster.get('name', f'Cluster {cluster_pos+1}'))
             cluster_desc = cluster.get('description', '')
 
-            logger.info(f"  │    │")
-            logger.info(f"  │    ├─ [{position+1}/{len(clusters)}] Cluster: '{cluster_name}'")
+            prefix = "  │    │" if typ_pos < total_typs - 1 else "       │"
+            logger.info(f"{prefix}")
+            logger.info(f"{prefix}  ├─ [{cluster_pos+1}/{len(clusters)}] Cluster: '{cluster_name}'")
 
             cursor.execute("""
                 INSERT INTO taxonomy_clusters (typologie_id, name, description, position)
                 VALUES (?, ?, ?, ?)
-            """, (typologie_id, cluster_name, cluster_desc, position))
-            taxonomy_id = cursor.lastrowid
+            """, (typologie_id, cluster_name, cluster_desc, cluster_pos))
+            cluster_id = cursor.lastrowid
 
-            logger.info(f"  │    │    ✅ Inséré (ID: {taxonomy_id}, pos: {position})")
+            logger.info(f"{prefix}  │    ✅ Inséré (ID: {cluster_id})")
 
             # Sauvegarder les root labels
-            root_labels = cluster.get('root_labels', [])
-            logger.info(f"  │    │    🏷️  {len(root_labels)} root label(s)")
+            self._save_roots(cursor, cluster_id, cluster, cluster_pos, len(clusters))
 
-            self._save_root_labels(cursor, taxonomy_id, root_labels)
+    def _save_roots(self, cursor, cluster_id, cluster, cluster_pos, total_clusters):
+        """Sauvegarde les root labels"""
+        roots = cluster.get('root_labels', [])
+        
+        logger.info(f"  │    │    ┌─ {len(roots)} root label(s)")
 
-    def _save_root_labels(self, cursor, taxonomy_id, roots):
-        """Sauvegarde tous les root labels avec logs détaillés"""
-        for position, root in enumerate(roots):
-            root_name = root['name']
+        for root_pos, root in enumerate(roots):
+            root_name = root.get('nom', root.get('name', f'Root {root_pos+1}'))
             root_desc = root.get('description', '')
             root_cat = root.get('category', 'default')
 
             logger.info(f"  │    │    │")
-            logger.info(f"  │    │    ├─ [{position+1}/{len(roots)}] Root: '{root_name}' (cat: {root_cat})")
+            logger.info(f"  │    │    ├─ [{root_pos+1}/{len(roots)}] Root: '{root_name}'")
 
             cursor.execute("""
                 INSERT INTO root_labels (taxonomy_id, name, description, category, position)
                 VALUES (?, ?, ?, ?, ?)
-            """, (taxonomy_id, root_name, root_desc, root_cat, position))
+            """, (cluster_id, root_name, root_desc, root_cat, root_pos))
             root_id = cursor.lastrowid
 
-            logger.info(f"  │    │    │    ✅ Inséré (ID: {root_id}, pos: {position})")
+            logger.info(f"  │    │    │    ✅ Inséré (ID: {root_id})")
 
             # Sauvegarder les parent labels
-            parent_labels = root.get('parent_labels', [])
-            logger.info(f"  │    │    │    👨 {len(parent_labels)} parent label(s)")
+            self._save_parents(cursor, root_id, root)
 
-            self._save_parent_labels(cursor, root_id, parent_labels)
+    def _save_parents(self, cursor, root_id, root):
+        """Sauvegarde les parent labels"""
+        parents = root.get('parent_labels', [])
+        
+        logger.info(f"  │    │    │    ┌─ {len(parents)} parent label(s)")
 
-    def _save_parent_labels(self, cursor, root_id, parents):
-        """Sauvegarde tous les parent labels avec logs détaillés"""
-        for position, parent in enumerate(parents):
-            parent_name = parent['name']
+        for parent_pos, parent in enumerate(parents):
+            parent_name = parent.get('nom', parent.get('name', f'Parent {parent_pos+1}'))
             parent_desc = parent.get('description', '')
             parent_cat = parent.get('category', 'default')
 
             logger.info(f"  │    │    │    │")
-            logger.info(f"  │    │    │    ├─ [{position+1}/{len(parents)}] Parent: '{parent_name}' (cat: {parent_cat})")
+            logger.info(f"  │    │    │    ├─ [{parent_pos+1}/{len(parents)}] Parent: '{parent_name}'")
 
             cursor.execute("""
                 INSERT INTO parent_labels (root_id, name, description, category, position)
                 VALUES (?, ?, ?, ?, ?)
-            """, (root_id, parent_name, parent_desc, parent_cat, position))
+            """, (root_id, parent_name, parent_desc, parent_cat, parent_pos))
             parent_id = cursor.lastrowid
 
-            logger.info(f"  │    │    │    │    ✅ Inséré (ID: {parent_id}, pos: {position})")
+            logger.info(f"  │    │    │    │    ✅ Inséré (ID: {parent_id})")
 
-            # Sauvegarder les enfants récursivement
+            # Sauvegarder les children
             children = parent.get('children', [])
-            logger.info(f"  │    │    │    │    👶 {len(children)} enfant(s) direct(s)")
+            if children:
+                logger.info(f"  │    │    │    │    👶 {len(children)} enfant(s)")
 
             self._save_children_recursive(cursor, children, parent_label_id=parent_id, depth=0)
 
@@ -1410,7 +1624,7 @@ class DatasetDatabase:
         indent = "  │    │    │    │    │" + ("    │" * depth)
 
         for position, child in enumerate(children):
-            child_name = child['name']
+            child_name = child.get('nom', child.get('name', f'Child {position+1}'))
             child_desc = child.get('description', '')
             child_cat = child.get('category', 'default')
 
@@ -1590,6 +1804,327 @@ class DatasetDatabase:
         except Exception as e:
             logger.error(f"Erreur lors de la recréation de la base de données: {str(e)}")
             return False
+        
+    def delete_single_prerequisite(self, source_type: str, source_id: int,
+                               target_type: str, target_id: int) -> bool:
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                DELETE FROM dgraph_prerequisites 
+                WHERE source_type = ? AND source_id = ?
+                AND target_type = ? AND target_id = ?
+            """, (source_type, source_id, target_type, target_id))
+
+            self.connection.commit()
+
+            if cursor.rowcount > 0:
+                logger.debug(f"✅ Prérequis supprimé: {source_type}#{source_id} → {target_type}#{target_id}")
+                return True
+            else:
+                logger.warning(f"⚠️ Aucun prérequis trouvé à supprimer")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Erreur suppression prérequis: {e}")
+            return False
+        
+    def get_all_prerequisites_for_project(self, project_name: str) -> List[Dict]:
+        try:
+            cursor = self.connection.cursor()
+            
+            # Récupérer l'ID du projet
+            cursor.execute("SELECT id FROM projects WHERE name = ?", (project_name,))
+            project_row = cursor.fetchone()
+            
+            if not project_row:
+                logger.warning(f"Projet '{project_name}' non trouvé")
+                return []
+            
+            project_id = project_row['id']
+            
+            # Récupérer tous les prérequis liés au projet
+            # NOTE: Cette requête suppose que les entités ont un lien avec le projet
+            # Vous devrez l'adapter selon votre structure exacte
+            
+            cursor.execute("""
+                SELECT 
+                    p.source_type,
+                    p.source_id,
+                    p.target_type,
+                    p.target_id,
+                    p.is_mandatory,
+                    p.explanation,
+                    p.created_at
+                FROM dgraph_prerequisites p
+                -- TODO: Ajouter des jointures pour filtrer par projet
+                -- WHERE ...
+                ORDER BY p.created_at DESC
+            """)
+            
+            prerequisites = []
+            for row in cursor.fetchall():
+                prerequisites.append({
+                    'source_type': row['source_type'],
+                    'source_id': row['source_id'],
+                    'target_type': row['target_type'],
+                    'target_id': row['target_id'],
+                    'is_mandatory': bool(row['is_mandatory']),
+                    'explanation': row['explanation'],
+                    'created_at': row['created_at']
+                })
+            
+            logger.info(f"📊 {len(prerequisites)} prérequis trouvés pour '{project_name}'")
+            return prerequisites
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération prérequis: {e}")
+            return []
+        
+    def export_dgraph_mappings_to_json(self, output_file: str) -> bool: 
+        try:
+            cursor = self.connection.cursor()
+
+            # Récupérer tous les UIDs
+            cursor.execute("SELECT * FROM dgraph_uids ORDER BY entity_type, entity_id")
+
+            mappings = []
+            for row in cursor.fetchall():
+                mappings.append({
+                    'entity_type': row['entity_type'],
+                    'entity_id': row['entity_id'],
+                    'dgraph_uid': row['dgraph_uid'],
+                    'synced_at': row['synced_at']
+                })
+
+            # Récupérer tous les prérequis
+            cursor.execute("SELECT * FROM dgraph_prerequisites ORDER BY created_at")
+
+            prerequisites = []
+            for row in cursor.fetchall():
+                prerequisites.append({
+                    'source_type': row['source_type'],
+                    'source_id': row['source_id'],
+                    'target_type': row['target_type'],
+                    'target_id': row['target_id'],
+                    'is_mandatory': bool(row['is_mandatory']),
+                    'explanation': row['explanation'],
+                    'created_at': row['created_at']
+                })
+
+            export_data = {
+                'export_date': datetime.now().isoformat(),
+                'total_mappings': len(mappings),
+                'total_prerequisites': len(prerequisites),
+                'mappings': mappings,
+                'prerequisites': prerequisites
+            }
+
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"✅ Mappings exportés vers {output_file}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Erreur export JSON: {e}")
+            return False
+
+
+    def import_dgraph_mappings_from_json(self, input_file: str) -> Dict[str, int]:
+
+        try:
+            with open(input_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            mappings = data.get('mappings', [])
+            prerequisites = data.get('prerequisites', [])
+
+            # Import en batch
+            uids_count = self.bulk_save_dgraph_uids(mappings)
+            prereqs_count = self.bulk_save_prerequisites(prerequisites)
+
+            logger.info(f"✅ Import terminé: {uids_count} UIDs, {prereqs_count} prérequis")
+
+            return {
+                'uids_imported': uids_count,
+                'prerequisites_imported': prereqs_count
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Erreur import JSON: {e}")
+            return {'uids_imported': 0, 'prerequisites_imported': 0}
+        
+    def get_entity_id_by_uid(self, dgraph_uid: str) -> Optional[Tuple[str, int]]:
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT entity_type, entity_id
+                FROM dgraph_uids
+                WHERE dgraph_uid = ?
+            """, (dgraph_uid,))
+
+            row = cursor.fetchone()
+
+            if row:
+                return (row['entity_type'], row['entity_id'])
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération entity depuis UID: {e}")
+            return None
+        
+    def bulk_save_dgraph_uids(self, uid_mappings: List[Dict]) -> int:
+
+        try:
+            cursor = self.connection.cursor()
+            saved_count = 0
+
+            for mapping in uid_mappings:
+                entity_type = mapping.get('entity_type')
+                entity_id = mapping.get('entity_id')
+                dgraph_uid = mapping.get('dgraph_uid')
+
+                if not all([entity_type, entity_id, dgraph_uid]):
+                    logger.warning(f"⚠️ Mapping incomplet ignoré: {mapping}")
+                    continue
+                
+                cursor.execute("""
+                    INSERT INTO dgraph_uids (entity_type, entity_id, dgraph_uid)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(entity_type, entity_id) DO UPDATE SET
+                        dgraph_uid = excluded.dgraph_uid,
+                        synced_at = CURRENT_TIMESTAMP
+                """, (entity_type, entity_id, dgraph_uid))
+
+                saved_count += 1
+
+            self.connection.commit()
+            logger.info(f"✅ {saved_count} UIDs sauvegardés en batch")
+            return saved_count
+
+        except Exception as e:
+            logger.error(f"❌ Erreur sauvegarde batch UIDs: {e}")
+            self.connection.rollback()
+            return 0
+
+
+    def bulk_save_prerequisites(self, prerequisites: List[Dict]) -> int:
+
+        try:
+            cursor = self.connection.cursor()
+            saved_count = 0
+
+            for prereq in prerequisites:
+                source_type = prereq.get('source_type')
+                source_id = prereq.get('source_id')
+                target_type = prereq.get('target_type')
+                target_id = prereq.get('target_id')
+                is_mandatory = prereq.get('is_mandatory', True)
+                explanation = prereq.get('explanation', '')
+
+                if not all([source_type, source_id, target_type, target_id]):
+                    logger.warning(f"⚠️ Prérequis incomplet ignoré: {prereq}")
+                    continue
+                
+                cursor.execute("""
+                    INSERT INTO dgraph_prerequisites 
+                    (source_type, source_id, target_type, target_id, is_mandatory, explanation)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source_type, source_id, target_type, target_id) DO UPDATE SET
+                        is_mandatory = excluded.is_mandatory,
+                        explanation = excluded.explanation
+                """, (source_type, source_id, target_type, target_id, is_mandatory, explanation))
+
+                saved_count += 1
+
+            self.connection.commit()
+            logger.info(f"✅ {saved_count} prérequis sauvegardés en batch")
+            return saved_count
+
+        except Exception as e:
+            logger.error(f"❌ Erreur sauvegarde batch prérequis: {e}")
+            self.connection.rollback()
+            return 0
+
+
+    def get_sync_statistics(self) -> Dict[str, int]:
+        try:
+            cursor = self.connection.cursor()
+
+            stats = {}
+
+            # Compter les UIDs par type
+            cursor.execute("""
+                SELECT entity_type, COUNT(*) as count
+                FROM dgraph_uids
+                GROUP BY entity_type
+            """)
+
+            stats['uids_by_type'] = {}
+            total_uids = 0
+            for row in cursor.fetchall():
+                entity_type = row['entity_type']
+                count = row['count']
+                stats['uids_by_type'][entity_type] = count
+                total_uids += count
+
+            stats['total_uids'] = total_uids
+
+            # Compter les prérequis
+            cursor.execute("SELECT COUNT(*) as count FROM dgraph_prerequisites")
+            stats['total_prerequisites'] = cursor.fetchone()['count']
+
+            # Compter les prérequis obligatoires
+            cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM dgraph_prerequisites 
+                WHERE is_mandatory = 1
+            """)
+            stats['mandatory_prerequisites'] = cursor.fetchone()['count']
+
+            # Dernière synchronisation
+            cursor.execute("""
+                SELECT MAX(synced_at) as last_sync
+                FROM dgraph_uids
+            """)
+            last_sync_row = cursor.fetchone()
+            stats['last_sync'] = last_sync_row['last_sync'] if last_sync_row else None
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération statistiques: {e}")
+            return {}
+
+
+    def clear_all_dgraph_data(self) -> bool:
+        try:
+            cursor = self.connection.cursor()
+
+            # Compter avant suppression
+            cursor.execute("SELECT COUNT(*) as count FROM dgraph_uids")
+            uid_count = cursor.fetchone()['count']
+
+            cursor.execute("SELECT COUNT(*) as count FROM dgraph_prerequisites")
+            prereq_count = cursor.fetchone()['count']
+
+            logger.warning(f"⚠️ Suppression de {uid_count} UIDs et {prereq_count} prérequis")
+
+            # Suppression
+            cursor.execute("DELETE FROM dgraph_prerequisites")
+            cursor.execute("DELETE FROM dgraph_uids")
+            cursor.execute("DELETE FROM dgraph_config")
+
+            self.connection.commit()
+
+            logger.info(f"✅ Toutes les données Dgraph supprimées")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Erreur suppression données Dgraph: {e}")
+            self.connection.rollback()
+            return False
+
 
     def close(self):
         """Ferme la connexion à la base de données"""

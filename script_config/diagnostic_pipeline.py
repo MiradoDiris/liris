@@ -126,7 +126,7 @@ def check_context_weaver_modules() -> bool:
 def check_vector_store() -> bool:
     """Vérifie le vector store en détail"""
     try:
-        from context_weaver.data.vector_store import VectorStore
+        from context_weaver.data.vector_store_chroma import VectorStore
         
         vs = VectorStore()
         vs.initialize()

@@ -13,7 +13,6 @@ from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
 
 from PyQt5.QtCore import QRectF, QPropertyAnimation, pyqtProperty
 from PyQt5.QtGui import QPainter, QColor, QFont, QLinearGradient
-from self import self
 
 from ui.widgets.brainstorming_panel import BrainstormingPanel
 from ui.widgets.coding_panel import CodingPanel
@@ -26,6 +25,7 @@ from ui.widgets.audit_panel import AuditPanel
 from ui.widgets.platform_config_widget import PlatformConfigWidget
 from ui.widgets.dataset_generator import DatasetGenerator, integrate_generation_button
 from ui.widgets.dashboard_panel import DashboardPanel
+from ui.widgets.rl_panel import RLPanel
 
 from ui.widgets.dataset_verification import DatasetVerificationPanel
 from ui.widgets.dataset_generation import DatasetGenerationPanel
@@ -245,6 +245,7 @@ class MainWindow(QMainWindow):
 
         self.project_config_dialog_instance = None
         self.dashboard_dialog_instance = None
+        self.global_vector_store = None
 
         QTimer.singleShot(100, self._init_system)
 
@@ -252,6 +253,28 @@ class MainWindow(QMainWindow):
         print("=== FIN - Initialisation de MainWindow ===")
 
         self.current_mode = "dev"
+
+    def set_global_vector_store(self, vector_store):
+        """
+        ✅ REÇOIT LE VECTORSTORE PRÉ-INITIALISÉ
+        Appelé depuis main.py AVANT l'ouverture de l'app
+        """
+        from utils.logger import logger
+
+        self.global_vector_store = vector_store
+
+        if vector_store:
+            doc_count = vector_store.get_document_count()
+            logger.info(f"✅ Global VectorStore set: {doc_count} documents")
+            print(f"✅ VectorStore injecté dans MainWindow: {doc_count} documents")
+        else:
+            logger.warning("⚠️  VectorStore is None - Context Weaver désactivé")
+            print("⚠️  VectorStore non disponible dans MainWindow")
+
+        # ✅ PASSER AU DATASET GENERATION TAB
+        if hasattr(self, 'dataset_generation_tab') and self.dataset_generation_tab:
+            self.dataset_generation_tab.set_global_vector_store(vector_store)
+            logger.info("✅ VectorStore passé au DatasetGenerationPanel")
 
     def _init_components(self):
         """Initialise les composants principaux"""
@@ -269,6 +292,7 @@ class MainWindow(QMainWindow):
 
         # IDE et Dashboard
         self.ide_panel = IDEPanel()
+        self.rl_panel = RLPanel()
         self.ide_dialog_instance = None
         self.dashboard_panel = None
 
@@ -459,6 +483,7 @@ class MainWindow(QMainWindow):
             # ✅ CORRECTION: Utiliser l'instance correcte pour l'onglet
             self.tab_widget.addTab(self.dataset_generation_tab, tr("generation_tab"))
             self.tab_widget.addTab(self.dataset_strategy, tr("strategy_tab"))
+            self.tab_widget.addTab(self.rl_panel, "RL")
             self.tab_widget.addTab(self.prompt_list, tr("history_tab"))
             self.tab_widget.setCurrentIndex(0)
     
@@ -1058,6 +1083,9 @@ class MainWindow(QMainWindow):
     
         if self.dashboard_panel and hasattr(self.dashboard_panel, "update_language"):
             self.dashboard_panel.update_language()
+
+        if self.rl_panel and hasattr(self.rl_panel, "update_language"):
+            self.rl_panel.update_language()
     
         if self.project_config_dialog_instance and isinstance(
                 self.project_config_dialog_instance, QtWidgets.QDialog
@@ -1164,6 +1192,9 @@ class MainWindow(QMainWindow):
         self.dataset_table.set_exporter(self.exporter)
 
         self.prompt_list.set_database(self.database)
+
+        self.rl_panel.set_conductor(self.conductor)
+        self.rl_panel.set_database(self.database)
 
         if not self.dashboard_panel:
             self.dashboard_panel = DashboardPanel(
@@ -1316,6 +1347,10 @@ class MainWindow(QMainWindow):
         if current_tab == self.dataset_strategy:
             if hasattr(self.dataset_strategy, '_load_existing_projects'):
                 self.dataset_strategy._load_existing_projects()
+
+        if current_tab == self.rl_panel:
+            if hasattr(self.rl_panel, 'refresh'):
+                self.rl_panel.refresh()
 
         if self.project_config_dialog_instance and isinstance(
                 self.project_config_dialog_instance, QtWidgets.QDialog
@@ -1527,7 +1562,8 @@ class MainWindow(QMainWindow):
                 self.brainstorming_panel,
                 self.audit_panel,
                 self.prompt_list,
-                self.dataset_table
+                self.dataset_table,
+                self.rl_panel
             ]
 
             progress_step = 40 / len(widgets_to_refresh)

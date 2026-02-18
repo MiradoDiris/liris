@@ -296,7 +296,7 @@ class GeminiDatasetWorker(QThread):
     
     def _validate_sample(self, sample: Dict[str, Any]) -> bool:
         """
-        ✅ VALIDATION ASSOUPLIE
+        ✅ VALIDATION ASSOUPLIE + VÉRIFICATION FORMAT NATUREL
         Focus sur l'essentiel : format valide et contenu présent
         """
         try:
@@ -340,6 +340,22 @@ class GeminiDatasetWorker(QThread):
                 if term in combined_text:
                     self._log("debug", f"      ❌ Terme technique détecté : {term}")
                     return False
+            
+            # 6. ✅ NOUVEAU : VÉRIFICATION FORMAT NATUREL (pas de symboles télégraphiques)
+            forbidden_symbols = ['>', '→', '->', '|']
+            
+            for symbol in forbidden_symbols:
+                if symbol in output_text:
+                    self._log("debug", f"      ❌ Symbole télégraphique détecté dans output : '{symbol}'")
+                    self._log("debug", f"      Output rejeté : {output_text[:100]}...")
+                    return False
+            
+            # Vérification guillemets excessifs (plus de 4 guillemets = suspect)
+            quote_count = output_text.count('"') + output_text.count('«') + output_text.count('»')
+            if quote_count > 4:
+                self._log("debug", f"      ❌ Trop de guillemets dans output ({quote_count} détectés)")
+                self._log("debug", f"      Output rejeté : {output_text[:100]}...")
+                return False
             
             # ✅ VALIDATION RÉUSSIE
             return True
@@ -705,6 +721,41 @@ class GeminiDatasetWorker(QThread):
 
     5. **Aucune mention de la taxonomie** : Ne JAMAIS révéler les noms techniques (clusters, labels, typologies, etc.)
 
+    ## ✅ MOTS DE LIAISON OBLIGATOIRES POUR LA NAVIGATION
+
+    **RÈGLE ABSOLUE : Pour décrire un chemin dans l'interface, vous DEVEZ utiliser ces mots de liaison :**
+
+    ### 📝 Mots de liaison AUTORISÉS et OBLIGATOIRES :
+    - ✅ **puis** → "allez dans Menu, puis Sous-menu, puis Action"
+    - ✅ **ensuite** → "ouvrez Menu, ensuite Sous-menu, ensuite Action"
+    - ✅ **et** → "allez dans Menu et Sous-menu et cliquez sur Action"
+    - ✅ **dans** → "dans le menu Menu, dans la section Sous-menu"
+    - ✅ **sous** → "dans Menu, sous Sous-menu"
+    - ✅ **à** → "allez à Menu, à la section Sous-menu"
+    - ✅ **vers** → "dirigez-vous vers Menu, vers Sous-menu"
+
+    ### 🎯 EXEMPLES AVEC MOTS DE LIAISON :
+    
+    **Exemple 1 - Chemin court (2-3 niveaux) :**
+    ✅ "Allez dans Comptabilité, puis Rapports, puis cliquez sur Trésorerie"
+    ✅ "Ouvrez Ventes, ensuite Factures et cliquez sur Nouveau"
+    ✅ "Dans le menu Compte, sous Paramètres, cliquez sur Préférences"
+
+    **Exemple 2 - Chemin long (4+ niveaux) - UTILISEZ DES FORMULATIONS CONDENSÉES :**
+    ✅ "Pour accéder à cette fonction, allez dans Compte, puis Catégorie fiscale, ensuite Société, puis Impôts et sélectionnez Prestataire de services"
+    ✅ "Vous trouverez cette option dans Macompta.fr, section Comptabilité, sous-section Comptabilité simplifiée, option Saisie classique"
+    ✅ "Rendez-vous dans Abo/Sales, puis Comptabilité, ensuite Comptabilité simplifiée et choisissez le mode de saisie"
+
+    **Exemple 3 - Alternative descriptive (pour chemins très longs) :**
+    ✅ "Cette fonction se trouve dans le menu Abo/Sales, sous la section Comptabilité simplifiée"
+    ✅ "Accédez aux paramètres via le menu Compte, dans la catégorie Impôts sur les sociétés"
+
+    ### ⚠️ CE QU'IL NE FAUT JAMAIS FAIRE :
+    ❌ "Dans Macompta.fr > Abo/Sales > Comptabilité > Saisie"
+    ❌ "Menu \"Compte\" > \"Paramètres\" > \"Préférences\""
+    ❌ "Comptabilité / Rapports / Trésorerie"
+    ❌ "Ventes : Factures : Nouveau"
+
     ## ❌ INTERDICTIONS ABSOLUES
 
     **Ces règles sont NON-NÉGOCIABLES :**
@@ -735,14 +786,25 @@ class GeminiDatasetWorker(QThread):
     [
       {{
         "input": "Comment je peux ajouter un nouveau client dans le système ?",
-        "output": "Pour ajouter un client, cliquez sur Clients dans le menu principal puis sur le bouton Nouveau client."
+        "output": "Pour ajouter un client, allez dans Clients, puis cliquez sur Nouveau client."
       }},
       {{
         "input": "J'aimerais savoir où voir mes factures impayées",
-        "output": "Vos factures impayées sont visibles dans l'onglet Factures en utilisant le filtre Impayées."
+        "output": "Vos factures impayées sont visibles dans Factures, sous la section Impayées."
+      }},
+      {{
+        "input": "Où puis-je consulter les rapports de trésorerie ?",
+        "output": "Pour consulter les rapports, allez dans Comptabilité, puis Rapports, ensuite cliquez sur Trésorerie."
+      }},
+      {{
+        "input": "Comment effectuer une saisie simplifiée pour mon entreprise ?",
+        "output": "Pour effectuer une saisie simplifiée, rendez-vous dans Comptabilité, puis Comptabilité simplifiée et sélectionnez Saisie simplifiée."
       }}
     ]
     ```
+
+    ⚠️ **RAPPEL : Utilisez TOUJOURS les mots puis, ensuite, et, dans, sous pour séparer les étapes de navigation.**
+    ❌ **N'UTILISEZ JAMAIS les symboles >, /, :, ->, ou des guillemets \" autour des noms de menus.**
 
     ## ✅ CHECKLIST FINALE AVANT GÉNÉRATION
 

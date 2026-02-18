@@ -55,7 +55,7 @@ def init_context_weaver_with_database(
         logger.info("📚 Chargement du Vector Store...")
         
         try:
-            from context_weaver.data.vector_store import VectorStore
+            from context_weaver.data.vector_store_chroma import VectorStore
             
             vector_store = VectorStore()
             vector_store.initialize()
@@ -170,7 +170,7 @@ def check_context_weaver_status(database: DatasetDatabase = None) -> dict:
         
         # ✅ REFACTORISÉ: Vérifier VectorStore au lieu de BM25/Embedding séparés
         try:
-            from context_weaver.data.vector_store import VectorStore
+            from context_weaver.data.vector_store_chroma import VectorStore
             
             vector_store = VectorStore()
             vector_store.initialize()

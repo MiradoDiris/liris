@@ -148,7 +148,7 @@ def rebuild_from_metadata_json():
         logger.info(f"\n🧪 Test avec VectorStore...")
         
         try:
-            from context_weaver.data.vector_store import VectorStore
+            from context_weaver.data.vector_store_chroma import VectorStore
             
             vs = VectorStore()
             vs.initialize()

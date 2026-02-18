@@ -12,6 +12,8 @@ Gère toutes les opérations de manipulation des données avec Dgraph:
 import json
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
+
+from self import self
 from utils.logger import logger
 from utils.dataset_dgraph_connector import TaxonomyDgraphConnector
 
@@ -22,9 +24,12 @@ class DgraphDatasetManager:
     Abstrait la complexité du connecteur et fournit une API simple
     """
     
-    def __init__(self):
-        """Initialise le gestionnaire avec connexion Dgraph"""
-        self.connector = TaxonomyDgraphConnector()
+    def __init__(self, database=None):
+        """
+        Initialise le gestionnaire avec connexion Dgraph
+        Lève une exception si la connexion échoue
+        """
+        self.database = database
         self.current_project_uid = None
         self.current_project_name = None
         
@@ -38,40 +43,52 @@ class DgraphDatasetManager:
             'children': {}
         }
         
-        logger.info("✅ DgraphDatasetManager initialisé")
+        # Tentative de connexion
+        try:
+            self.connector = TaxonomyDgraphConnector()
+            
+            # Vérifier que la connexion a réussi
+            if not self.connector.client:
+                raise ConnectionError("Dgraph client non initialisé")
+            
+            logger.info("✅ DgraphDatasetManager initialisé")
+            
+        except Exception as e:
+            logger.error(f"❌ Échec initialisation DgraphDatasetManager: {e}")
+            # Re-lever l'exception pour que le code appelant sache que ça a échoué
+            raise ConnectionError(f"Impossible de se connecter à Dgraph: {e}")
     
     # ============================================
     # GESTION DES PROJETS
     # ============================================
     
-    def create_project(self, name: str, description: str = "") -> Optional[str]:
-        """
-        Crée un nouveau projet
-        
-        Args:
-            name: Nom du projet
-            description: Description optionnelle
-            
-        Returns:
-            UID du projet créé ou None en cas d'erreur
-        """
+    def create_project(self, name: str, description: str = "", 
+                      sqlite_project_id: int = None) -> Optional[str]:
         try:
-            # Vérifier si le projet existe déjà
+            # Vérifier existence
             existing = self.get_project_by_name(name)
             if existing:
                 logger.warning(f"Le projet '{name}' existe déjà")
                 return None
-            
+
+            # Créer dans Dgraph
             project_uid = self.connector.create_project(name, description)
-            
-            if project_uid:
-                self.current_project_uid = project_uid
-                self.current_project_name = name
-                self._cache['projects'][name] = project_uid
-                logger.info(f"✅ Projet créé: {name} (UID: {project_uid})")
-            
+
+            if not project_uid:
+                return None
+
+            # Mettre à jour l'état
+            self.current_project_uid = project_uid
+            self.current_project_name = name
+            self._cache['projects'][name] = project_uid
+
+            # ✅ NOUVEAU: Synchroniser l'UID vers SQLite
+            if sqlite_project_id:
+                self.sync_uid_to_sqlite('project', sqlite_project_id, project_uid)
+
+            logger.info(f"✅ Projet créé: {name} (UID: {project_uid})")
             return project_uid
-            
+
         except Exception as e:
             logger.error(f"❌ Erreur création projet: {e}")
             return None
@@ -133,46 +150,370 @@ class DgraphDatasetManager:
         except Exception as e:
             logger.error(f"❌ Erreur récupération projet '{name}': {e}")
             return None
+        
+    def create_prerequisites(self, source_uid: str, target_uids: List[str], 
+                            mandatory: bool = True, explanation: str = "",
+                            relation_names: Dict[str, str] = None) -> bool:
+        """
+        Crée des relations de prérequis avec noms optionnels
+        
+        Args:
+            source_uid: UID du nœud source
+            target_uids: Liste des UIDs des nœuds targets
+            mandatory: True = obligatoires, False = recommandés
+            explanation: Explication générale (ajoutée à la description)
+            relation_names: Dict mapping target_uid -> nom de la relation
+                           Ex: {"0x123": "Connaissances de base", "0x456": "Prérequis technique"}
+        """
+        try:
+            relation_names = relation_names or {}
+            
+            # Créer les relations de prérequis avec leurs noms
+            success = self.connector.add_multiple_prerequisites(
+                source_uid=source_uid,
+                target_uids=target_uids,
+                mandatory=mandatory,
+                relation_names=relation_names  # NOUVEAU
+            )
     
+            if not success:
+                return False
+    
+            # Ajouter l'explication à la description si fournie
+            if explanation:
+                self._update_node_description_with_explanation(source_uid, explanation)
+    
+            prereq_type = "obligatoires" if mandatory else "recommandés"
+            logger.info(f"✅ {len(target_uids)} prérequis {prereq_type} créés pour {source_uid}")
+            
+            # Logger les noms de relations
+            for uid, name in relation_names.items():
+                if name:
+                    logger.info(f"   • Relation '{name}' vers {uid}")
+            
+            return True
+    
+        except Exception as e:
+            logger.error(f"❌ Erreur création prérequis: {e}")
+            return False
+        
+    def _update_node_description_with_explanation(self, node_uid: str, explanation: str) -> bool:
+        """
+        Ajoute une explication de prérequis à la description d'un nœud
+
+        Args:
+            node_uid: UID du nœud
+            explanation: Texte d'explication à ajouter
+
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            # Récupérer la description actuelle
+            query = f"""
+            {{
+              node(func: uid({node_uid})) {{
+                uid
+                description
+              }}
+            }}
+            """
+
+            txn = self.connector.client.txn(read_only=True)
+            resp = txn.query(query)
+            txn.discard()
+
+            data = json.loads(resp.json)
+
+            current_desc = ""
+            if data.get('node') and len(data['node']) > 0:
+                current_desc = data['node'][0].get('description', '')
+
+            # Construire la nouvelle description
+            if current_desc:
+                new_desc = f"{current_desc}\n\nPRÉREQUIS: {explanation}"
+            else:
+                new_desc = f"PRÉREQUIS: {explanation}"
+
+            # Mettre à jour le nœud
+            txn = self.connector.client.txn()
+
+            mutation = {
+                "uid": node_uid,
+                "description": new_desc,
+                "updatedAt": datetime.now().isoformat() + "Z"
+            }
+
+            txn.mutate(set_obj=mutation)
+            txn.commit()
+
+            logger.info(f"✅ Description mise à jour avec explication de prérequis")
+            return True
+
+        except Exception as e:
+            txn.discard()
+            logger.error(f"⚠️ Erreur mise à jour description: {e}")
+            return False
+        
+    def get_prerequisites_graph(self, node_uid: str, depth: int = 3) -> Dict:
+        try:
+            return self.connector.get_prerequisites_graph(node_uid, depth)
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération graphe prérequis: {e}")
+            return {}
+        
+    def get_dependent_nodes(self, node_uid: str) -> List[Dict]:
+
+        try:
+            return self.connector.get_dependent_nodes(node_uid)
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération nœuds dépendants: {e}")
+            return []
+        
+    def validate_prerequisite_integrity(self, node_uid: str) -> Dict[str, Any]:
+        try:
+            validation = {
+                'valid': True,
+                'errors': [],
+                'warnings': [],
+                'prerequisites_count': 0,
+                'mandatory_count': 0,
+                'circular_dependencies': []
+            }
+
+            # Récupérer les prérequis
+            prerequisites = self.get_node_prerequisites(node_uid)
+            validation['prerequisites_count'] = len(prerequisites)
+
+            # Compter les obligatoires
+            mandatory_prereqs = self.get_node_prerequisites(node_uid, mandatory_only=True)
+            validation['mandatory_count'] = len(mandatory_prereqs)
+
+            # Détecter les cycles (implémentation basique)
+            visited = set()
+            path = set()
+
+            def has_cycle(uid, current_path):
+                if uid in current_path:
+                    return True
+                if uid in visited:
+                    return False
+
+                visited.add(uid)
+                current_path.add(uid)
+
+                prereqs = self.get_node_prerequisites(uid)
+                for prereq in prereqs:
+                    prereq_uid = prereq.get('uid')
+                    if prereq_uid and has_cycle(prereq_uid, current_path):
+                        validation['circular_dependencies'].append(prereq_uid)
+                        return True
+
+                current_path.remove(uid)
+                return False
+
+            if has_cycle(node_uid, path):
+                validation['valid'] = False
+                validation['errors'].append("Dépendance circulaire détectée")
+
+            return validation
+
+        except Exception as e:
+            logger.error(f"❌ Erreur validation prérequis: {e}")
+            return {
+                'valid': False,
+                'errors': [str(e)],
+                'warnings': [],
+                'prerequisites_count': 0,
+                'mandatory_count': 0,
+                'circular_dependencies': []
+            }
+
+    def get_node_prerequisites(self, node_uid: str, mandatory_only: bool = False) -> List[Dict]:
+        try:
+            if mandatory_only:
+                return self.connector.get_mandatory_prerequisites(node_uid)
+            else:
+                result = self.connector.get_node_by_uid(
+                    node_uid, 
+                    load_children=False, 
+                    load_prerequisites=True
+                )
+
+                if result and len(result) > 0:
+                    return result[0].get('prerequisite', [])
+                return []
+
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération prérequis: {e}")
+            return []
+
+
+    def remove_prerequisite(self, source_uid: str, target_uid: str) -> bool:
+        """
+        Supprime une relation de prérequis
+
+        Args:
+            source_uid: UID du nœud source
+            target_uid: UID du nœud target
+
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            return self.connector.remove_prerequisite(source_uid, target_uid)
+        except Exception as e:
+            logger.error(f"❌ Erreur suppression prérequis: {e}")
+            return False
+
     def update_project(self, project_uid: str, name: str = None, 
                       description: str = None) -> bool:
         """
         Met à jour un projet
-        
         Args:
             project_uid: UID du projet
             name: Nouveau nom (optionnel)
             description: Nouvelle description (optionnel)
-            
         Returns:
             True si succès, False sinon
         """
         try:
             txn = self.connector.client.txn()
-            
             mutation = {"uid": project_uid}
-            
             if name is not None:
                 mutation["name"] = name
             if description is not None:
                 mutation["description"] = description
-            
             mutation["updatedAt"] = datetime.now().isoformat() + "Z"
-            
             txn.mutate(set_obj=mutation)
             txn.commit()
-            
             if name:
                 self.current_project_name = name
-            
             logger.info(f"✅ Projet mis à jour: {project_uid}")
             return True
-            
         except Exception as e:
             txn.discard()
             logger.error(f"❌ Erreur mise à jour projet: {e}")
             return False
-    
+          
+    def get_all_nodes_for_selection(self) -> List[Dict]:
+        """
+        Récupère tous les nœuds disponibles pour sélection de prérequis
+
+        Returns:
+            Liste de tous les nœuds avec uid, name, type
+        """
+        try:
+            return self.connector.get_all_nodes_for_indexing()
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération nœuds: {e}")
+            return []
+        
+    def get_node_uid_by_path(self, level: str, name: str, ui_context) -> Optional[str]:
+        """
+        Récupère l'UID d'un nœud à partir de son niveau et son nom
+        Utilise le contexte UI pour naviguer dans la hiérarchie
+
+        Args:
+            level: Niveau du nœud ('taxonomy', 'root', 'parent')
+            name: Nom du nœud
+            ui_context: Référence au widget UI pour accéder aux sélections
+
+        Returns:
+            UID du nœud ou None
+        """
+        try:
+            project_name = ui_context.project_manager.current_project_name
+
+            if level == "taxonomy":
+                # Récupérer la typologie sélectionnée
+                typologie_item = ui_context.typologie_list.currentItem()
+                if not typologie_item:
+                    return None
+
+                typ_name = typologie_item.text().split(" (")[0] if " (" in typologie_item.text() else typologie_item.text()
+
+                # Chercher la typologie dans Dgraph
+                typologie = self.get_typologie_by_name(project_name, typ_name)
+                if typologie:
+                    # Chercher le cluster
+                    cluster = self.get_cluster_by_name(typologie['uid'], name)
+                    return cluster['uid'] if cluster else None
+
+            elif level == "root":
+                # Obtenir le chemin via l'UI
+                path = ui_context._get_path_for_level(level)
+                if not path or len(path) < 2:
+                    return None
+
+                typ_name, cluster_name = path[:2]
+
+                # Naviguer: Typologie -> Cluster -> Root
+                typologie = self.get_typologie_by_name(project_name, typ_name)
+                if typologie:
+                    cluster = self.get_cluster_by_name(typologie['uid'], cluster_name)
+                    if cluster:
+                        root = self.get_root_label_by_name(cluster['uid'], name)
+                        return root['uid'] if root else None
+
+            elif level == "parent":
+                # Obtenir le chemin via l'UI
+                path = ui_context._get_path_for_level(level)
+                if not path or len(path) < 3:
+                    return None
+
+                typ_name, cluster_name, root_name = path[:3]
+
+                # Naviguer: Typologie -> Cluster -> Root -> Parent
+                typologie = self.get_typologie_by_name(project_name, typ_name)
+                if typologie:
+                    cluster = self.get_cluster_by_name(typologie['uid'], cluster_name)
+                    if cluster:
+                        root = self.get_root_label_by_name(cluster['uid'], root_name)
+                        if root:
+                            parent = self.get_label_node_by_name(root['uid'], name)
+                            return parent['uid'] if parent else None
+
+            elif level == "child":
+                # Pour les enfants, utiliser le chemin complet
+                path = ui_context._get_full_path()
+                if not path or len(path) < 4:
+                    return None
+
+                typ_name, cluster_name, root_name = path[:3]
+
+                # Naviguer jusqu'au parent
+                typologie = self.get_typologie_by_name(project_name, typ_name)
+                if not typologie:
+                    return None
+
+                cluster = self.get_cluster_by_name(typologie['uid'], cluster_name)
+                if not cluster:
+                    return None
+
+                root = self.get_root_label_by_name(cluster['uid'], root_name)
+                if not root:
+                    return None
+
+                # Naviguer dans les parents/enfants
+                current_uid = root['uid']
+                for i in range(3, len(path)):
+                    node_name = path[i]
+                    node = self.get_label_node_by_name(current_uid, node_name)
+                    if not node:
+                        return None
+                    current_uid = node['uid']
+
+                # Chercher l'enfant final
+                child = self.get_label_node_by_name(current_uid, name)
+                return child['uid'] if child else None
+
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération UID par chemin: {e}")
+            return None
+
     def delete_project(self, project_uid: str) -> bool:
         """
         Supprime un projet et toutes ses données
@@ -1398,7 +1739,104 @@ class DgraphDatasetManager:
             'children': {}
         }
         logger.debug("🗑️ Cache vidé")
-    
+
+    def get_learning_path(self, target_node_uid: str) -> List[Dict]:
+        try:
+            learning_path = []
+            visited = set()
+
+            def build_path(uid, depth=0):
+                if uid in visited or depth > 10:  # Limite de profondeur
+                    return
+
+                visited.add(uid)
+
+                # Récupérer les prérequis obligatoires
+                prereqs = self.get_node_prerequisites(uid, mandatory_only=True)
+
+                # Traiter les prérequis en premier (ordre topologique)
+                for prereq in prereqs:
+                    prereq_uid = prereq.get('uid')
+                    if prereq_uid:
+                        build_path(prereq_uid, depth + 1)
+
+                # Ajouter le nœud actuel
+                node_data = self.connector.get_node_by_uid(uid, load_children=False, load_prerequisites=False)
+                if node_data and len(node_data) > 0:
+                    learning_path.append({
+                        'uid': uid,
+                        'name': node_data[0].get('name'),
+                        'type': node_data[0].get('dgraph.type'),
+                        'depth': depth
+                    })
+
+            build_path(target_node_uid)
+
+            # Inverser pour avoir l'ordre d'apprentissage
+            learning_path.reverse()
+
+            logger.info(f"📚 Chemin d'apprentissage généré: {len(learning_path)} étapes")
+            return learning_path
+
+        except Exception as e:
+            logger.error(f"❌ Erreur génération chemin d'apprentissage: {e}")
+            return []
+
+
+    def export_prerequisites_to_json(self, node_uid: str, include_graph: bool = True) -> Dict:
+        """
+        Exporte les prérequis d'un nœud au format JSON
+
+        Args:
+            node_uid: UID du nœud
+            include_graph: Si True, inclut le graphe complet des dépendances
+
+        Returns:
+            Dictionnaire JSON des prérequis
+        """
+        try:
+            node_data = self.connector.get_node_by_uid(
+                node_uid, 
+                load_children=False, 
+                load_prerequisites=True
+            )
+
+            if not node_data or len(node_data) == 0:
+                return {}
+
+            node = node_data[0]
+
+            export = {
+                'node': {
+                    'uid': node.get('uid'),
+                    'name': node.get('name'),
+                    'type': node.get('dgraph.type'),
+                    'description': node.get('description')
+                },
+                'prerequisites': []
+            }
+
+            # Ajouter les prérequis
+            prereqs = node.get('prerequisite', [])
+            for prereq in prereqs:
+                prereq_data = {
+                    'uid': prereq.get('uid'),
+                    'name': prereq.get('name'),
+                    'type': prereq.get('dgraph.type'),
+                    'mandatory': prereq.get('prerequisite|mandatory', True)
+                }
+                export['prerequisites'].append(prereq_data)
+
+            # Ajouter le graphe si demandé
+            if include_graph:
+                export['graph'] = self.get_prerequisites_graph(node_uid)
+
+            return export
+
+        except Exception as e:
+            logger.error(f"❌ Erreur export prérequis: {e}")
+            return {}
+
     def get_cache_stats(self) -> Dict[str, int]:
         """Retourne les statistiques du cache"""
         return {

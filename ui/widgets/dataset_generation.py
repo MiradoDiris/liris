@@ -10,6 +10,7 @@ from email.mime import message
 import json
 from operator import index
 import os
+
 from datetime import datetime
 from typing import Dict
 from unittest import result
@@ -25,9 +26,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 from PyQt5.QtCore import QThread
+from self import self
 from utils.enhanced_logging import ResultTracer
-
-import self
 
 current_dir = Path(__file__).parent
 project_root = current_dir.parent.parent
@@ -38,7 +38,6 @@ from utils.dataset_database import DatasetDatabase
 from utils.dataset_project_manager import DatasetProjectManager
 import qtawesome as qta
 from PyQt5.QtGui import QPainter
-from context_weaver.pipeline.main_pipeline import ContextWeaverPipeline
 
 def get_dropdown_svg_path():
     """Retourne le chemin vers l'icône dropdown SVG"""
@@ -771,245 +770,626 @@ class AISelectionDialog(QDialog):
         """Retourne l'IA sélectionnée"""
         return self.selected_ai
 
-class ContextWeaverWorker(QThread):
-    """Worker pour exécuter Context Weaver avec données de la base"""
+class ContextWeaverComponents:
+    """
+    Initialise les composants Context Weaver AVANT PyQt5
+    ✅ FIXED: Configure ChromaDB pour éviter blocages Windows + PyQt5
+    ✅ VectorStore en mode LAZY (pas d'initialisation immédiate)
+    """
+    
+    _instance = None
+    
+    def __init__(self):
+        self.vector_store = None
+        self.oss_client = None
+        self.dgraph = None
+        self.initialized = False
+        self._chromadb_configured = False
+    
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+    
+    def _configure_chromadb(self):
+        """
+        ✅ BLOCAGE POSTHOG ULTRA-COMPLET
+        Crée un module Posthog factice qui ne fait RIEN
+        """
+        if self._chromadb_configured:
+            return
 
-    MAX_RESULTS_FOR_GROUPING = 30
-    MAX_CONTEXTS_PER_COMBINATION = 10
-    CREATE_MULTIPLE_COMBINATIONS = True
-    CONTEXTS_PER_COMBINATION = 5
+        logger.info("🔧 Configuration ChromaDB (blocage Posthog COMPLET)...")
+
+        # ================================================================
+        # ÉTAPE 1 : Variables d'environnement
+        # ================================================================
+        os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+        os.environ['CHROMA_TELEMETRY'] = 'False'
+        os.environ['POSTHOG_DISABLED'] = '1'
+
+        # ================================================================
+        # ÉTAPE 2 : CRÉER UN VRAI MODULE POSTHOG QUI NE FAIT RIEN
+        # ================================================================
+        import sys
+
+        if 'posthog' not in sys.modules:
+            # Créer une vraie classe Posthog
+            class PosthogClient:
+                """Client Posthog factice"""
+                def __init__(self, *args, **kwargs):
+                    self.disabled = True
+                    self.api_key = None
+                    self.host = None
+                    self.personal_api_key = None
+
+                def capture(self, *args, **kwargs):
+                    pass
+
+                def identify(self, *args, **kwargs):
+                    pass
+
+                def alias(self, *args, **kwargs):
+                    pass
+
+                def set(self, *args, **kwargs):
+                    pass
+
+                def set_once(self, *args, **kwargs):
+                    pass
+
+                def group_identify(self, *args, **kwargs):
+                    pass
+
+                def feature_enabled(self, *args, **kwargs):
+                    return False
+
+                def get_feature_flag(self, *args, **kwargs):
+                    return None
+
+                def get_all_flags(self, *args, **kwargs):
+                    return {}
+
+                def flush(self):
+                    pass
+
+                def shutdown(self):
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    pass
+                
+            # Créer le module complet
+            import types
+            posthog_module = types.ModuleType('posthog')
+
+            # Ajouter la classe
+            posthog_module.Posthog = PosthogClient
+
+            # Ajouter les fonctions globales
+            posthog_module.capture = lambda *args, **kwargs: None
+            posthog_module.identify = lambda *args, **kwargs: None
+            posthog_module.alias = lambda *args, **kwargs: None
+            posthog_module.set = lambda *args, **kwargs: None
+            posthog_module.flush = lambda *args, **kwargs: None
+            posthog_module.shutdown = lambda *args, **kwargs: None
+
+            # Ajouter les constantes
+            posthog_module.disabled = True
+            posthog_module.api_key = None
+            posthog_module.host = None
+
+            # Injecter dans sys.modules AVANT que ChromaDB l'importe
+            sys.modules['posthog'] = posthog_module
+
+            logger.info("   ✅ Module Posthog factice créé et injecté")
+
+        # ================================================================
+        # ÉTAPE 3 : Désactiver dans ChromaDB Settings
+        # ================================================================
+        try:
+            import chromadb.config
+            chromadb.config.Settings.anonymized_telemetry = False
+            logger.info("   ✅ Télémétrie ChromaDB désactivée")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Impossible de modifier Settings: {e}")
+
+        self._chromadb_configured = True
+        logger.info("   ✅ Configuration ChromaDB complète")
     
-    progress_updated = pyqtSignal(str)  # message
-    generation_completed = pyqtSignal(dict)  # résultats
-    generation_failed = pyqtSignal(str)  # erreur
+    def initialize(self):
+        """
+        ✅ NOUVEAU: VectorStore en mode LAZY
+        - Créé mais PAS initialisé
+        - Sera initialisé dans le Worker quand nécessaire
+        """
+        if self.initialized:
+            logger.info("✅ Composants déjà initialisés")
+            return True
+        
+        logger.info("=" * 80)
+        logger.info("🚀 INITIALISATION COMPOSANTS CONTEXT WEAVER (LAZY MODE)")
+        logger.info("=" * 80)
+        
+        try:
+            # ✅ ÉTAPE 0: Configurer ChromaDB
+            self._configure_chromadb()
+            
+            # ================================================================
+            # ÉTAPE 1: VectorStore (MODE LAZY - PAS DE CHARGEMENT IMMÉDIAT)
+            # ================================================================
+            logger.info("\n📦 1/3: Création VectorStore (lazy mode)...")
+            from context_weaver.data.vector_store_chroma import VectorStore
+            
+            chroma_path = Path("./data/indexes/chroma")
+            self.vector_store = VectorStore(persist_path=chroma_path)
+            
+            # ❌ NE PAS APPELER initialize() ICI
+            # L'initialisation sera faite dans le Worker
+            
+            logger.info("   ✅ VectorStore créé (non initialisé - sera fait dans le Worker)")
+            
+            # ================================================================
+            # ÉTAPE 2: OSS Client
+            # ================================================================
+            logger.info("\n📦 2/3: Initialisation OSS Client...")
+            from context_weaver.services.oss_classifier import OSSClassifierClient
+            
+            self.oss_client = OSSClassifierClient()
+            logger.info("   ✅ OSS Client prêt")
+            
+            # ================================================================
+            # ÉTAPE 3: Dgraph (optionnel)
+            # ================================================================
+            logger.info("\n📦 3/3: Connexion Dgraph...")
+            try:
+                from utils.dataset_dgraph_connector import TaxonomyDgraphConnector
+                self.dgraph = TaxonomyDgraphConnector()
+                
+                if self.dgraph.client:
+                    logger.info("   ✅ Dgraph connecté")
+                else:
+                    logger.warning("   ⚠️ Dgraph client None")
+                    self.dgraph = None
+            except Exception as e:
+                logger.warning(f"   ⚠️ Dgraph non disponible: {e}")
+                self.dgraph = None
+            
+            # ================================================================
+            # Finalisation
+            # ================================================================
+            self.initialized = True
+            
+            logger.info("\n" + "=" * 80)
+            logger.info("✅ COMPOSANTS CRÉÉS (ChromaDB sera initialisé à la demande)")
+            logger.info("=" * 80)
+            logger.info(f"   • VectorStore: ✅ (lazy - non initialisé)")
+            logger.info(f"   • OSS Client: ✅")
+            logger.info(f"   • Dgraph: {'✅' if self.dgraph else '❌'}")
+            logger.info("=" * 80 + "\n")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"\n❌ Erreur initialisation composants: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            self.initialized = False
+            self.vector_store = None
+            self.oss_client = None
+            self.dgraph = None
+            
+            raise
+
+
+import time
+import logging
+from typing import Dict, List, Any, Optional
+from PyQt5.QtCore import QThread, pyqtSignal
+
+logger = logging.getLogger(__name__)
+
+
+class ContextWeaverWorker(QThread):
+    """
+    ✅ Worker avec filtrage par SCORE UNIQUEMENT
+    VERSION ULTRA-SÉCURISÉE : Aucun crash possible
+    ✅ INITIALISE ChromaDB DANS LE THREAD
+    """
+
+    # Configuration
+    MIN_SCORE_THRESHOLD = 0.10      # ⬇️ Réduit (était 0.20)
+    ENABLE_QUALITY_TIERS = True
+    HIGH_QUALITY_THRESHOLD = 0.16   # ⬇️ Réduit (était 0.30)
+    MEDIUM_QUALITY_THRESHOLD = 0.12 # ⬇️ Réduit (était 0.20)
     
-    def __init__(self, user_context: str, database=None, project_name: str = None, parent=None):
+    # Signaux
+    progress_updated = pyqtSignal(str)
+    generation_completed = pyqtSignal(dict)
+    generation_failed = pyqtSignal(str)
+    
+    def __init__(self, user_context: str, database=None, project_name: str = None, 
+                 vector_store=None, oss_client=None, dgraph=None, parent=None):
         super().__init__(parent)
         self.user_context = user_context
         self.database = database
         self.project_name = project_name
         self.pipeline = None
+        
+        # ✅ Composants pré-initialisés (sauf VectorStore qui sera init ici)
+        self.vector_store = vector_store
+        self.oss_client = oss_client
+        self.dgraph = dgraph
+        
+        logger.info("=" * 80)
+        logger.info("🔧 ContextWeaverWorker INITIALISÉ")
+        logger.info("=" * 80)
+        logger.info(f"🔍 Context: {len(user_context)} chars")
+        logger.info(f"💾 Database: {'✅' if database else '❌'}")
+        logger.info(f"📁 Project: {project_name or 'N/A'}")
+        logger.info(f"🗄️ VectorStore: {'✅ Pré-créé (sera initialisé dans le thread)' if vector_store else '❌ Sera créé'}")
+        logger.info("=" * 80)
     
     def run(self):
-        """Exécute le pipeline Context Weaver avec données DB"""
+        """
+        ✅ Exécute le pipeline avec gestion d'erreurs TOTALE
+        ✅ UTILISE LE VECTORSTORE PRÉ-INITIALISÉ (pas d'init ici)
+        """
         try:
+            logger.info("\n" + "=" * 80)
+            logger.info("🚀 DÉMARRAGE CONTEXT WEAVER WORKER")
+            logger.info("=" * 80)
+
             self.progress_updated.emit("🔄 Initialisation du Context Weaver...")
-            
-            # ✅ CORRECTION: Utiliser la nouvelle architecture avec VectorStore
-            from context_weaver.pipeline.main_pipeline import ContextWeaverPipeline
-            from context_weaver.data.vector_store import VectorStore
-            
-            # ✅ Indexer les données du projet si nécessaire
-            if self.database and self.project_name:
-                self.progress_updated.emit(f"📚 Indexation du projet '{self.project_name}'...")
-                
-                try:
-                    # Importer l'indexeur
-                    import sys
-                    from pathlib import Path
-                    current_dir = Path(__file__).parent.parent
-                    sys.path.insert(0, str(current_dir))
-                    
-                    from context_weaver.data.database_indexer import DatabaseIndexer
-                    
-                    # Créer le VectorStore
-                    vector_store = VectorStore()
-                    vector_store.initialize()
-                    
-                    # Indexer le projet dans le VectorStore
-                    indexer = DatabaseIndexer(self.database)
-                    success = indexer.index_project_to_vector_store(
-                        self.project_name,
-                        vector_store
-                    )
-                    
-                    if success:
-                        doc_count = vector_store.get_document_count()
-                        logger.info(f"✅ Projet '{self.project_name}' indexé avec succès")
-                        logger.info(f"   • VectorStore: {doc_count} documents")
-                    else:
-                        logger.warning(f"⚠️ Indexation du projet échouée, utilisation de la base vide")
-                        vector_store = None
-                    
-                except ImportError as e:
-                    logger.warning(f"⚠️ Indexeur non disponible: {e}")
-                    logger.warning("   → Utilisation du pipeline sans données indexées")
-                    vector_store = None
-                except Exception as e:
-                    logger.error(f"❌ Erreur indexation: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-                    vector_store = None
-            else:
-                vector_store = None
-            
-            # ✅ Initialiser le pipeline avec le VectorStore
-            self.progress_updated.emit("🧠 Classification sémantique en cours...")
-            self.pipeline = ContextWeaverPipeline(
-                vector_store=vector_store,
-                project_name=self.project_name,
-                enable_taxonomy_validation=True  # Active la validation taxonomique
-            )
-            
-            # Exécuter le pipeline
-            result = self.pipeline.run(self.user_context)
-            
-            self.progress_updated.emit("✅ Génération terminée!")
-            
-            # Convertir le résultat en dict pour les combinaisons
-            combinations_data = self._convert_to_combinations(result)
-            self.generation_completed.emit(combinations_data)
-            
+
+            # ================================================================
+            # ÉTAPE 1 : VÉRIFIER QUE LE VECTORSTORE EST PRÉ-INITIALISÉ
+            # ================================================================
+            logger.info("\n📚 ÉTAPE 1/4 : VectorStore")
+
+            if self.vector_store is None:
+                error_msg = "❌ VectorStore non fourni au Worker"
+                logger.error(error_msg)
+                self.generation_failed.emit(error_msg)
+                return
+
+            # ✅ VÉRIFIER QUE LA COLLECTION EST ACCESSIBLE (pas d'initialisation)
+            try:
+                logger.info("   📊 Vérification du VectorStore...")
+                self.progress_updated.emit("📚 Vérification du VectorStore...")
+
+                doc_count = self.vector_store.get_document_count()
+                logger.info(f"   ✅ VectorStore prêt: {doc_count} documents")
+
+                if doc_count == 0:
+                    error_msg = "❌ VectorStore est vide (0 documents)"
+                    logger.error(error_msg)
+                    self.generation_failed.emit(error_msg)
+                    return
+
+            except Exception as e:
+                error_msg = f"❌ Erreur accès VectorStore: {str(e)}"
+                logger.error(error_msg)
+                import traceback
+                logger.error(traceback.format_exc())
+                self.generation_failed.emit(error_msg)
+                return
+
+            # ================================================================
+            # ÉTAPE 2 : CRÉER LE PIPELINE OPTIMISÉ
+            # ================================================================
+            logger.info("\n🧠 ÉTAPE 2/4 : Initialisation du pipeline optimisé")
+            self.progress_updated.emit("🧠 Initialisation du pipeline optimisé...")
+
+            try:
+                from context_weaver.pipeline.main_pipeline import create_pipeline
+
+                logger.info("🔧 Configuration du pipeline:")
+                logger.info(f"   • Project: {self.project_name}")
+                logger.info(f"   • VectorStore: PRÉ-INITIALISÉ ({doc_count} docs)")
+                logger.info(f"   • Domain filter: ACTIVÉ (Macompta.fr)")
+                logger.info(f"   • Query strategy: full_prompt")
+
+                # ✅ CRÉER LE PIPELINE AVEC LE VECTORSTORE PRÉ-INITIALISÉ
+                self.pipeline = create_pipeline(
+                    project_name=self.project_name,
+                    vector_store=self.vector_store,      # ✅ Maintenant accepté
+                    oss_client=self.oss_client,          # ✅ Maintenant accepté
+                    dgraph_connector=self.dgraph,        # ✅ Maintenant accepté
+                    use_domain_filter=True,
+                    default_domain="Macompta.fr",
+                    query_strategy="full_prompt"
+                )
+
+                # Optimisations supplémentaires
+                logger.info("🔧 Application des optimisations...")
+                self.pipeline.taxonomy_pipeline.retriever.config.enable_query_expansion = False
+                self.pipeline.taxonomy_pipeline.retriever.config.enable_bm25_exact_boost = True
+                self.pipeline.taxonomy_pipeline.retriever.config.bm25_exact_boost_factor = 2.0
+
+                logger.info("✅ Pipeline configuré avec succès")
+
+            except ImportError as e:
+                error_msg = f"❌ Module manquant: {str(e)}\n\nVérifiez que context_weaver est bien installé."
+                logger.error(error_msg)
+                self.generation_failed.emit(error_msg)
+                return
+
+            except Exception as e:
+                error_msg = f"❌ Erreur création pipeline: {str(e)}"
+                logger.error(error_msg)
+                import traceback
+                logger.error(traceback.format_exc())
+                self.generation_failed.emit(error_msg)
+                return
+
+            # ================================================================
+            # ÉTAPE 3 : EXÉCUTER LE PIPELINE
+            # ================================================================
+            logger.info("\n🔍 ÉTAPE 3/4 : Classification sémantique")
+            self.progress_updated.emit("🔍 Classification sémantique en cours...")
+
+            try:
+                logger.info(f"📝 Contexte utilisateur ({len(self.user_context)} chars):")
+                logger.info(f"   {self.user_context[:200]}...")
+
+                result = self.pipeline.run(
+                    user_context=self.user_context,
+                    top_k=100,
+                    domain="Macompta.fr"
+                )
+
+                logger.info("✅ Pipeline exécuté avec succès")
+
+            except Exception as e:
+                error_msg = f"❌ Erreur exécution pipeline: {str(e)}"
+                logger.error(error_msg)
+                import traceback
+                logger.error(traceback.format_exc())
+                self.generation_failed.emit(error_msg)
+                return
+
+            # ================================================================
+            # ÉTAPE 4 : VÉRIFIER LES RÉSULTATS
+            # ================================================================
+            logger.info("\n✅ ÉTAPE 4/4 : Vérification des résultats")
+            self.progress_updated.emit("✅ Traitement des résultats...")
+
+            try:
+                # ✅ VÉRIFICATIONS ROBUSTES
+                if not result:
+                    raise ValueError("Pipeline n'a retourné aucun résultat (result is None)")
+
+                if not hasattr(result, 'search_results'):
+                    raise ValueError("Pipeline result n'a pas d'attribut 'search_results'")
+
+                if not result.search_results:
+                    raise ValueError("search_results est None")
+
+                if not hasattr(result.search_results, 'results'):
+                    raise ValueError("search_results n'a pas d'attribut 'results'")
+
+                if not result.search_results.results:
+                    raise ValueError("Aucun taxon trouvé dans les résultats")
+
+                logger.info(f"✅ {len(result.search_results.results)} résultats trouvés")
+
+            except Exception as e:
+                error_msg = f"❌ Résultats pipeline invalides: {str(e)}"
+                logger.error(error_msg)
+                self.generation_failed.emit(error_msg)
+                return
+
+            # ================================================================
+            # ÉTAPE 5 : CONVERTIR EN COMBINAISONS
+            # ================================================================
+            logger.info("\n🔄 Conversion en combinaisons...")
+            self.progress_updated.emit("🔄 Génération des combinaisons...")
+
+            try:
+                combinations_data = self._convert_to_combinations(result)
+
+                # ✅ VÉRIFICATION FINALE
+                if not combinations_data:
+                    raise ValueError("Aucune combinaison générée (data is None)")
+
+                if 'error' in combinations_data.get('metadata', {}):
+                    error = combinations_data['metadata']['error']
+                    raise ValueError(f"Erreur dans conversion: {error}")
+
+                if 'combinations' not in combinations_data:
+                    raise ValueError("Format de données invalide (pas de clé 'combinations')")
+
+                if not combinations_data['combinations']:
+                    raise ValueError("Liste de combinaisons vide")
+
+                nb_combos = len(combinations_data['combinations'])
+                logger.info(f"✅ {nb_combos} combinaison(s) générée(s)")
+
+                # ✅ ÉMETTRE LE SIGNAL DE SUCCÈS
+                self.progress_updated.emit(f"✅ Génération terminée! {nb_combos} combinaisons créées")
+                self.generation_completed.emit(combinations_data)
+
+            except Exception as e:
+                error_msg = f"❌ Erreur conversion résultats: {str(e)}"
+                logger.error(error_msg)
+                import traceback
+                logger.error(traceback.format_exc())
+                self.generation_failed.emit(error_msg)
+                return
+
         except Exception as e:
-            logger.error(f"❌ Erreur Context Weaver: {str(e)}")
+            # ✅ CATCH GLOBAL : CAPTURE TOUT
+            error_msg = f"❌ Erreur globale Context Weaver: {str(e)}"
+            logger.error(error_msg)
             import traceback
             logger.error(traceback.format_exc())
-            self.generation_failed.emit(str(e))
-        
+            self.generation_failed.emit(error_msg)
+
         finally:
+            # ✅ TOUJOURS FERMER LE PIPELINE
+            logger.info("\n🔒 Fermeture du pipeline...")
             if self.pipeline:
                 try:
                     self.pipeline.close()
-                except:
-                    pass
+                    logger.info("✅ Pipeline fermé proprement")
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur fermeture pipeline: {e}")
+
+            logger.info("=" * 80)
+            logger.info("🏁 CONTEXT WEAVER WORKER TERMINÉ")
+            logger.info("=" * 80)
     
     def _convert_to_combinations(self, pipeline_output):
         """
-        ✅ VERSION AMÉLIORÉE avec chemins taxonomiques complets (breadcrumb)
+        ✅ ULTRA-SÉCURISÉ : Convertit avec filtrage par SCORE UNIQUEMENT
+        Ne lève JAMAIS d'exception, retourne toujours un dict valide
         """
         combinations = []
         master_typologie = None
 
         stats = {
             'pipeline_results': 0,
-            'used_for_grouping': 0,
-            'groups_created': 0,
+            'above_threshold': 0,
+            'below_threshold': 0,
+            'quality_breakdown': {
+                'high': 0,
+                'medium': 0,
+                'low': 0
+            },
             'combinations_generated': 0,
             'total_contexts': 0
         }
 
         try:
-            if hasattr(pipeline_output, 'search_results'):
-                search_results = pipeline_output.search_results.results
-                stats['pipeline_results'] = len(search_results)
+            # ✅ VÉRIFICATION : search_results existe
+            if not hasattr(pipeline_output, 'search_results'):
+                logger.error("❌ pipeline_output n'a pas d'attribut 'search_results'")
+                return self._empty_combinations_response("Aucun search_results dans le résultat")
+            
+            search_results = pipeline_output.search_results.results
+            
+            if not search_results:
+                logger.warning("⚠️ Aucun résultat dans search_results")
+                return self._empty_combinations_response("Aucun résultat trouvé")
+            
+            stats['pipeline_results'] = len(search_results)
 
-                logger.info(f"📊 {len(search_results)} résultat(s) de recherche trouvés")
+            logger.info(f"\n{'='*80}")
+            logger.info(f"📊 FILTRAGE PAR SCORE (pas de limite de nombre)")
+            logger.info(f"{'='*80}")
+            logger.info(f"Résultats bruts: {len(search_results)}")
 
-                # Limiter aux meilleurs résultats
-                limited_results = search_results[:self.MAX_RESULTS_FOR_GROUPING]
-                stats['used_for_grouping'] = len(limited_results)
-
-                logger.info(f"🔽 Limitation aux {len(limited_results)} meilleurs résultats")
-
-                # Grouper par domaine/type
-                grouped = {}
-                for result in limited_results:
-                    key = f"{result.domain}_{result.type}"
-                    if key not in grouped:
-                        grouped[key] = []
-                    grouped[key].append(result)
-
-                stats['groups_created'] = len(grouped)
-
-                logger.info(f"📦 Groupement créé : {len(grouped)} groupe(s)")
-
-                # ✅ CRÉATION DES COMBINAISONS AVEC BREADCRUMB
-                if self.CREATE_MULTIPLE_COMBINATIONS:
-                    logger.info(f"\n🔄 Mode : Combinaisons multiples ({self.CONTEXTS_PER_COMBINATION} contextes par combinaison)")
-
-                    for group_key, group_results in grouped.items():
-                        logger.info(f"\n🎯 Traitement du groupe '{group_key}':")
-                        logger.info(f"   • Résultats dans le groupe: {len(group_results)}")
-
-                        for i in range(0, len(group_results), self.CONTEXTS_PER_COMBINATION):
-                            batch = group_results[i:i+self.CONTEXTS_PER_COMBINATION]
-                            contexts = []
-
-                            logger.info(f"\n   📦 Batch {i//self.CONTEXTS_PER_COMBINATION + 1}:")
-                            logger.info(f"      • Contextes dans ce batch: {len(batch)}")
-
-                            for idx, result in enumerate(batch, 1):
-                                logger.info(f"         {idx}. {result.name} (score: {result.score:.3f})")
-
-                                # ✅ EXTRACTION DU BREADCRUMB (chemin complet)
-                                breadcrumb = result.content.get('breadcrumb', result.name)
-                                
-                                # ✅ CRÉER UN DISPLAY AVEC LE CHEMIN COMPLET
-                                # Format: "Domain → Cluster → Root → Parent → Name"
-                                if breadcrumb and breadcrumb != result.name:
-                                    display_text = breadcrumb
-                                else:
-                                    # Fallback: construire depuis metadata
-                                    display_text = self._build_display_path(result)
-                                
-                                context = {
-                                    'level': result.type,
-                                    'display': display_text,  # ✅ Chemin complet
-                                    'data': {
-                                        'name': result.name,
-                                        'domain': result.domain,
-                                        'type': result.type,
-                                        'description': result.content.get('description', ''),
-                                        'breadcrumb': breadcrumb,  # ✅ Conserver breadcrumb
-                                        'score': result.score,
-                                        'depth': result.content.get('depth', 0)
-                                    }
-                                }
-                                contexts.append(context)
-
-                            if contexts:
-                                combination = {
-                                    'contexts': contexts,
-                                    'nb_samples': 10
-                                }
-                                combinations.append(combination)
-                                logger.info(f"      ✅ Combinaison créée avec {len(contexts)} contextes")
-
-                else:
-                    # Mode combinaison unique (même logique)
-                    logger.info(f"\n🔄 Mode : Combinaison unique ({self.MAX_CONTEXTS_PER_COMBINATION} contextes max)")
-
-                    for group_key, group_results in grouped.items():
-                        logger.info(f"\n🎯 Traitement du groupe '{group_key}':")
-                        contexts = []
-
-                        selected_results = group_results[:self.MAX_CONTEXTS_PER_COMBINATION]
-
-                        for idx, result in enumerate(selected_results, 1):
-                            logger.info(f"      {idx}. {result.name} (score: {result.score:.3f})")
-
-                            # ✅ EXTRACTION DU BREADCRUMB
-                            breadcrumb = result.content.get('breadcrumb', result.name)
-                            
-                            if breadcrumb and breadcrumb != result.name:
-                                display_text = breadcrumb
+            # ✅ FILTRAGE PAR SCORE UNIQUEMENT
+            pertinent_results = []
+            
+            for result in search_results:
+                try:
+                    # ✅ VÉRIFICATION : result a un score
+                    if not hasattr(result, 'score'):
+                        logger.warning(f"⚠️ Résultat sans score: {result}")
+                        continue
+                    
+                    if result.score >= self.MIN_SCORE_THRESHOLD:
+                        pertinent_results.append(result)
+                        stats['above_threshold'] += 1
+                        
+                        # Classifier par qualité
+                        if self.ENABLE_QUALITY_TIERS:
+                            if result.score >= self.HIGH_QUALITY_THRESHOLD:
+                                stats['quality_breakdown']['high'] += 1
+                            elif result.score >= self.MEDIUM_QUALITY_THRESHOLD:
+                                stats['quality_breakdown']['medium'] += 1
                             else:
-                                display_text = self._build_display_path(result)
+                                stats['quality_breakdown']['low'] += 1
+                    else:
+                        stats['below_threshold'] += 1
+                
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur traitement résultat: {e}")
+                    continue
 
-                            context = {
-                                'level': result.type,
-                                'display': display_text,
-                                'data': {
-                                    'name': result.name,
-                                    'domain': result.domain,
-                                    'type': result.type,
-                                    'description': result.content.get('description', ''),
-                                    'breadcrumb': breadcrumb,
-                                    'score': result.score,
-                                    'depth': result.content.get('depth', 0)
-                                }
-                            }
-                            contexts.append(context)
+            logger.info(f"✅ Résultats au-dessus du seuil ({self.MIN_SCORE_THRESHOLD}): {len(pertinent_results)}")
+            logger.info(f"❌ Résultats en-dessous du seuil: {stats['below_threshold']}")
+            
+            if self.ENABLE_QUALITY_TIERS:
+                logger.info(f"\n📊 Répartition par qualité:")
+                logger.info(f"   • High (≥{self.HIGH_QUALITY_THRESHOLD}): {stats['quality_breakdown']['high']}")
+                logger.info(f"   • Medium (≥{self.MEDIUM_QUALITY_THRESHOLD}): {stats['quality_breakdown']['medium']}")
+                logger.info(f"   • Low (≥{self.MIN_SCORE_THRESHOLD}): {stats['quality_breakdown']['low']}")
 
+            # ✅ VÉRIFICATION : Il y a des résultats pertinents
+            if not pertinent_results:
+                logger.warning("⚠️ Aucun résultat au-dessus du seuil")
+                return self._empty_combinations_response(
+                    f"Aucun résultat avec score ≥ {self.MIN_SCORE_THRESHOLD}"
+                )
+
+            # Trier par score décroissant
+            pertinent_results.sort(key=lambda x: x.score, reverse=True)
+            
+            # ✅ OPTION 1 : UNE SEULE COMBINAISON AVEC TOUS LES RÉSULTATS
+            if not self.ENABLE_QUALITY_TIERS:
+                contexts = self._build_contexts_from_results(pertinent_results)
+                
+                if contexts:
+                    avg_score = sum(c['data']['score'] for c in contexts) / len(contexts)
+                    combination = {
+                        'contexts': contexts,
+                        'nb_samples': 10,
+                        'quality_tier': 'all',
+                        'avg_score': avg_score,
+                        'min_score': min(c['data']['score'] for c in contexts),
+                        'max_score': max(c['data']['score'] for c in contexts)
+                    }
+                    combinations.append(combination)
+                    stats['combinations_generated'] = 1
+                    stats['total_contexts'] = len(contexts)
+                    
+                    logger.info(f"\n✅ Combinaison unique créée:")
+                    logger.info(f"   • Contextes: {len(contexts)}")
+                    logger.info(f"   • Score moyen: {avg_score:.3f}")
+                    logger.info(f"   • Score min: {combination['min_score']:.3f}")
+                    logger.info(f"   • Score max: {combination['max_score']:.3f}")
+            
+            # ✅ OPTION 2 : GROUPER PAR QUALITÉ
+            else:
+                high_quality = [r for r in pertinent_results if r.score >= self.HIGH_QUALITY_THRESHOLD]
+                medium_quality = [r for r in pertinent_results if self.MEDIUM_QUALITY_THRESHOLD <= r.score < self.HIGH_QUALITY_THRESHOLD]
+                low_quality = [r for r in pertinent_results if self.MIN_SCORE_THRESHOLD <= r.score < self.MEDIUM_QUALITY_THRESHOLD]
+                
+                for tier_name, tier_results, samples in [
+                    ('high', high_quality, 15),
+                    ('medium', medium_quality, 10),
+                    ('low', low_quality, 5)
+                ]:
+                    if tier_results:
+                        contexts = self._build_contexts_from_results(tier_results)
+                        
                         if contexts:
+                            avg_score = sum(c['data']['score'] for c in contexts) / len(contexts)
                             combination = {
                                 'contexts': contexts,
-                                'nb_samples': 10
+                                'nb_samples': samples,
+                                'quality_tier': tier_name,
+                                'avg_score': avg_score,
+                                'min_score': min(c['data']['score'] for c in contexts),
+                                'max_score': max(c['data']['score'] for c in contexts)
                             }
                             combinations.append(combination)
-                            logger.info(f"   ✅ Combinaison créée avec {len(contexts)} contextes")
+                            
+                            logger.info(f"\n✅ Combinaison '{tier_name}' créée:")
+                            logger.info(f"   • Contextes: {len(contexts)}")
+                            logger.info(f"   • Samples: {samples}")
+                            logger.info(f"   • Score moyen: {avg_score:.3f}")
+                            logger.info(f"   • Score range: [{combination['min_score']:.3f}, {combination['max_score']:.3f}]")
 
-            # ✅ Créer la typologie master avec les bonnes données
+            # ✅ Créer la typologie master
             if hasattr(pipeline_output, 'classification'):
                 classification = pipeline_output.classification
                 master_typologie = {
@@ -1020,61 +1400,50 @@ class ContextWeaverWorker(QThread):
                     }]
                 }
 
-            # Fallback si aucune combinaison
-            if not combinations and hasattr(pipeline_output, 'classification'):
-                classification = pipeline_output.classification
-                logger.warning("⚠️ Aucun résultat de recherche, création de combinaisons par défaut")
-
-                for variable in classification.variables[:5]:
-                    combination = {
-                        'contexts': [{
-                            'level': 'variable',
-                            'display': f"Variable: {variable}",
-                            'data': {
-                                'name': variable,
-                                'domain': classification.domain,
-                                'type': 'variable',
-                                'description': f"Variable détectée: {variable}"
-                            }
-                        }],
-                        'nb_samples': 10
-                    }
-                    combinations.append(combination)
-
         except Exception as e:
-            logger.error(f"❌ Erreur conversion résultats: {e}")
+            logger.error(f"❌ Erreur conversion : {e}")
             import traceback
             logger.error(traceback.format_exc())
+            return self._empty_combinations_response(str(e))
 
-        # Assurer au moins une combinaison
+        # ✅ VÉRIFICATION FINALE : Au moins une combinaison
         if not combinations:
-            logger.warning("⚠️ Création d'une combinaison par défaut")
-            combinations = [{
-                'contexts': [{
-                    'level': 'default',
-                    'display': 'Contexte généré automatiquement',
-                    'data': {
-                        'name': 'Default Context',
-                        'domain': 'unknown',
-                        'type': 'default',
-                        'description': 'Contexte par défaut'
-                    }
-                }],
-                'nb_samples': 10
-            }]
+            logger.error("❌ Aucune combinaison créée après conversion")
+            return self._empty_combinations_response(
+                "Impossible de créer des combinaisons à partir des résultats"
+            )
 
-        # Stats finales
         stats['combinations_generated'] = len(combinations)
         stats['total_contexts'] = sum(len(c['contexts']) for c in combinations)
 
+        # ✅ RÉSUMÉ DÉTAILLÉ
         logger.info(f"\n{'='*80}")
-        logger.info(f"📊 RÉSUMÉ DE LA CONVERSION")
+        logger.info(f"📊 RÉSUMÉ DE LA CONVERSION (SCORE-BASED)")
         logger.info(f"{'='*80}")
-        logger.info(f"   • Résultats du pipeline: {stats['pipeline_results']}")
-        logger.info(f"   • Résultats utilisés: {stats['used_for_grouping']}")
-        logger.info(f"   • Groupes créés: {stats['groups_created']}")
-        logger.info(f"   • Combinaisons générées: {stats['combinations_generated']}")
+        logger.info(f"   • Résultats pipeline: {stats['pipeline_results']}")
+        logger.info(f"   • Au-dessus seuil ({self.MIN_SCORE_THRESHOLD}): {stats['above_threshold']}")
+        logger.info(f"   • En-dessous seuil: {stats['below_threshold']}")
+        logger.info(f"   • Combinaisons: {stats['combinations_generated']}")
         logger.info(f"   • Total contextes: {stats['total_contexts']}")
+        
+        if self.ENABLE_QUALITY_TIERS:
+            logger.info(f"\n   📊 Qualité:")
+            logger.info(f"      • High: {stats['quality_breakdown']['high']}")
+            logger.info(f"      • Medium: {stats['quality_breakdown']['medium']}")
+            logger.info(f"      • Low: {stats['quality_breakdown']['low']}")
+        
+        # Log détaillé par combinaison
+        for i, combo in enumerate(combinations, 1):
+            tier = combo.get('quality_tier', 'unknown')
+            avg = combo.get('avg_score', 0.0)
+            min_s = combo.get('min_score', 0.0)
+            max_s = combo.get('max_score', 0.0)
+            logger.info(f"\n   • Combo {i} ({tier}):")
+            logger.info(f"      - Contextes: {len(combo['contexts'])}")
+            logger.info(f"      - Samples: {combo['nb_samples']}")
+            logger.info(f"      - Avg score: {avg:.3f}")
+            logger.info(f"      - Range: [{min_s:.3f}, {max_s:.3f}]")
+        
         logger.info(f"{'='*80}\n")
 
         return {
@@ -1095,45 +1464,105 @@ class ContextWeaverWorker(QThread):
                 'indexed_from_database': self.database is not None and self.project_name is not None,
                 'conversion_stats': stats,
                 'configuration': {
-                    'max_results_for_grouping': self.MAX_RESULTS_FOR_GROUPING,
-                    'max_contexts_per_combination': self.MAX_CONTEXTS_PER_COMBINATION,
-                    'create_multiple_combinations': self.CREATE_MULTIPLE_COMBINATIONS,
-                    'contexts_per_combination': self.CONTEXTS_PER_COMBINATION
+                    'min_score_threshold': self.MIN_SCORE_THRESHOLD,
+                    'filtering_method': 'score_only',
+                    'enable_quality_tiers': self.ENABLE_QUALITY_TIERS,
+                    'high_quality_threshold': self.HIGH_QUALITY_THRESHOLD if self.ENABLE_QUALITY_TIERS else None,
+                    'medium_quality_threshold': self.MEDIUM_QUALITY_THRESHOLD if self.ENABLE_QUALITY_TIERS else None
                 }
             }
         }
     
-    def _build_display_path(self, result):
+    def _build_contexts_from_results(self, results: List) -> List[Dict]:
         """
-        ✅ NOUVELLE MÉTHODE: Construit un chemin d'affichage depuis les métadonnées
-        
-        Args:
-            result: SearchResult du pipeline
-            
-        Returns:
-            str: Chemin formaté "Domain → Type → Name"
+        ✅ ULTRA-SÉCURISÉ : Construit la liste des contextes
+        Ne lève jamais d'exception, skip les résultats invalides
         """
-        parts = []
+        contexts = []
         
-        # Ajouter le domaine
-        if result.domain:
-            parts.append(result.domain)
+        if not results:
+            logger.warning("⚠️ Aucun résultat à convertir")
+            return contexts
         
-        # Ajouter le type (traduit)
-        type_labels = {
-            'taxon': 'Taxon',
-            'root': 'Label root',
-            'parent': 'Label parent',
-            'child': 'Label enfant',
-            'variable': 'Variable'
+        for result in results:
+            try:
+                # ✅ VÉRIFICATIONS : Tous les attributs nécessaires existent
+                if not hasattr(result, 'name'):
+                    logger.warning(f"⚠️ Résultat sans 'name': {result}")
+                    continue
+                
+                if not hasattr(result, 'content'):
+                    logger.warning(f"⚠️ Résultat sans 'content': {result.name}")
+                    continue
+                
+                if not isinstance(result.content, dict):
+                    logger.warning(f"⚠️ content n'est pas un dict: {result.name}")
+                    continue
+                
+                if not hasattr(result, 'score'):
+                    logger.warning(f"⚠️ Résultat sans 'score': {result.name}")
+                    continue
+                
+                # ✅ EXTRACTION SÉCURISÉE
+                breadcrumb = result.content.get('breadcrumb', result.name)
+                display_text = breadcrumb if breadcrumb != result.name else result.name
+                
+                context = {
+                    'level': result.type if hasattr(result, 'type') else 'taxon',
+                    'display': display_text,
+                    'data': {
+                        'name': result.name,
+                        'domain': result.domain if hasattr(result, 'domain') else 'Macompta.fr',
+                        'type': result.type if hasattr(result, 'type') else 'taxon',
+                        'description': result.content.get('description', ''),
+                        'breadcrumb': breadcrumb,
+                        'score': result.score,
+                        'depth': result.content.get('depth', 0)
+                    }
+                }
+                contexts.append(context)
+                
+            except Exception as e:
+                logger.error(f"❌ Erreur conversion résultat '{getattr(result, 'name', 'Unknown')}': {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+                continue
+        
+        logger.info(f"✅ {len(contexts)} contextes construits sur {len(results)} résultats")
+        
+        return contexts
+    
+    def _empty_combinations_response(self, reason: str) -> Dict:
+        """
+        ✅ Retourne une réponse vide en cas d'erreur
+        Permet de retourner gracieusement au lieu de crasher
+        """
+        logger.warning(f"⚠️ Génération de réponse vide: {reason}")
+        
+        return {
+            'master_typologie': None,
+            'combinations': [],
+            'metadata': {
+                'error': reason,
+                'source': 'context_weaver_error',
+                'confidence': 0.0,
+                'execution_time_ms': 0.0,
+                'indexed_from_database': False,
+                'conversion_stats': {
+                    'pipeline_results': 0,
+                    'above_threshold': 0,
+                    'below_threshold': 0,
+                    'quality_breakdown': {'high': 0, 'medium': 0, 'low': 0},
+                    'combinations_generated': 0,
+                    'total_contexts': 0
+                },
+                'configuration': {
+                    'min_score_threshold': self.MIN_SCORE_THRESHOLD,
+                    'filtering_method': 'score_only',
+                    'enable_quality_tiers': self.ENABLE_QUALITY_TIERS
+                }
+            }
         }
-        parts.append(type_labels.get(result.type, result.type.capitalize()))
-        
-        # Ajouter le nom
-        parts.append(result.name)
-        
-        # Joindre avec flèches
-        return ' → '.join(parts)
     
 class DatasetGenerationPanel(QWidget):
     """Panel principal de génération de datasets - Layout 3 colonnes"""
@@ -1169,6 +1598,7 @@ class DatasetGenerationPanel(QWidget):
         self.current_master_typologie = None
         self.all_project_typologies = []  # ✅ Toutes les typologies du projet
         self.dropdown_svg = get_dropdown_svg_path()
+        self.global_vector_store = None
 
         self.is_browser_mode = True
         self.selected_ai_model = 'gemini'
@@ -1198,6 +1628,25 @@ class DatasetGenerationPanel(QWidget):
         # Charger les projets si la database est disponible
         if self.database:
             self._load_projects()
+        logger.info("🔧 Pré-initialisation des composants Context Weaver...")
+        try:
+            components = ContextWeaverComponents.get_instance()
+            components.initialize()
+            logger.info("✅ Composants Context Weaver prêts")
+        except Exception as e:
+            logger.error(f"❌ Erreur pré-initialisation: {e}")
+
+    def set_global_vector_store(self, vector_store):
+        """
+        ✅ REÇOIT LE VECTORSTORE PRÉ-INITIALISÉ
+        """
+        self.global_vector_store = vector_store
+        
+        if vector_store:
+            doc_count = vector_store.get_document_count()
+            logger.info(f"✅ DatasetGenerationPanel - VectorStore set: {doc_count} docs")
+        else:
+            logger.warning("⚠️  DatasetGenerationPanel - VectorStore is None")
         
     def _init_ui(self):
         """Initialise l'interface utilisateur - 3 colonnes RESPONSIVE + Panel Latéral"""
@@ -1831,6 +2280,39 @@ class DatasetGenerationPanel(QWidget):
             )
             return
 
+        # ✅ VÉRIFIER QUE LE VECTORSTORE EST DISPONIBLE
+        if not self.global_vector_store:
+            QMessageBox.critical(
+                self,
+                "❌ VectorStore non disponible",
+                "Le VectorStore n'a pas été initialisé.\n\n"
+                "Veuillez redémarrer l'application pour corriger ce problème."
+            )
+            return
+
+        # ✅ VÉRIFIER QUE LE VECTORSTORE EST ACCESSIBLE
+        try:
+            doc_count = self.global_vector_store.get_document_count()
+
+            if doc_count == 0:
+                QMessageBox.warning(
+                    self,
+                    "⚠️ VectorStore vide",
+                    "Le VectorStore ne contient aucun document.\n\n"
+                    "Veuillez charger des données avant de générer."
+                )
+                return
+
+            logger.info(f"✅ VectorStore prêt: {doc_count} documents")
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "❌ Erreur VectorStore",
+                f"Impossible d'accéder au VectorStore:\n\n{str(e)}"
+            )
+            return
+
         # ✅ DEMANDER CONFIRMATION SI DES COMBINAISONS EXISTENT
         if len(self.combinations) > 0:
             reply = QMessageBox.question(
@@ -1854,53 +2336,59 @@ class DatasetGenerationPanel(QWidget):
             # Récupérer le contexte combiné
             global_context = self.global_context_editor.toPlainText().strip()
             local_prompt = self.prompt_editor.toPlainText().strip()
-            
+
             # Combiner les contextes
             combined_context = ""
             if global_context:
                 combined_context += global_context + "\n\n"
             combined_context += local_prompt
-            
+
             logger.info("🚀 Lancement du Context Weaver Worker...")
             logger.info(f"📝 Contexte: {combined_context[:100]}...")
-            
+            logger.info(f"📊 VectorStore: {doc_count} documents disponibles")
+
             # Désactiver le bouton pendant le traitement
             self.generate_combinations_btn.setEnabled(False)
             self.generate_combinations_btn.setText("⏳ Génération en cours...")
-            
+
             # Afficher la barre de progression
             self.cw_progress_bar.setVisible(True)
             self.cw_progress_bar.setValue(0)
             self.cw_progress_bar.setFormat("🔄 Initialisation...")
-            
-            # Créer et lancer le worker
+
+            # ✅ CRÉER ET LANCER LE WORKER AVEC LE VECTORSTORE PRÉ-INITIALISÉ
+            components = ContextWeaverComponents.get_instance()
+
             self.cw_worker = ContextWeaverWorker(
                 user_context=combined_context,
                 database=self.database,
-                project_name=self.current_project_name
+                project_name=self.current_project_name,
+                vector_store=self.global_vector_store,  # ✅ PRÉ-INITIALISÉ
+                oss_client=components.oss_client,
+                dgraph=components.dgraph
             )
-            
+
             # Connecter les signaux
             self.cw_worker.progress_updated.connect(self._on_cw_progress)
             self.cw_worker.generation_completed.connect(self._on_cw_completed)
             self.cw_worker.generation_failed.connect(self._on_cw_failed)
-            
+
             # Démarrer
             self.cw_worker.start()
-            
+
             logger.info("✅ Context Weaver Worker démarré")
-            
+
         except Exception as e:
             logger.error(f"❌ Erreur lancement Context Weaver: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
-            
+
             QMessageBox.critical(
                 self,
                 "Erreur",
                 f"Impossible de lancer Context Weaver:\n\n{str(e)}"
             )
-            
+
             # Réactiver le bouton
             self.generate_combinations_btn.setEnabled(True)
             self.generate_combinations_btn.setText("🧠 Générer avec Context Weaver")
